@@ -44,6 +44,34 @@ This is the other thing. The differences are the whole point:
 | Console sign-in | no console at all | generated, shown once |
 | Credentials | a dev key | unique per box, 0600, never printed twice |
 
+## Reaching the console: this box issues your device its own tunnel
+
+The console is on loopback, so it is reached over a tunnel rather than exposed.
+This box runs the WireGuard side itself: sign in, open Remote, and it mints
+your laptop or phone a peer config as a QR. Scan, connect, and the console
+answers at `http://10.9.0.1:7420` and nowhere else.
+
+Issuing a device and revoking one both require a passkey, the same ceremony a
+kill does. A peer config is a road into the control plane, so a stolen console
+session must not be able to mint one quietly. Enrol a passkey on first sign-in.
+
+SSH is still how you get in before the first device exists:
+
+```bash
+ssh -L 17420:127.0.0.1:7420 root@<your box>
+```
+
+Two details worth knowing rather than discovering:
+
+- `51820/udp` is published, and it is the one port here that has to be. Unlike
+  an HTTP plane, WireGuard answers nothing at all without a valid key: no
+  banner, no handshake, nothing for a scanner to find.
+- The tunnel runs in its own `wg` container because it needs `NET_ADMIN` and a
+  tun device. The console holds neither: it manages peers through a
+  group-readable UAPI socket on a shared volume. That split is checked by the
+  installer from the console's side, because a tunnel that is up while the
+  console cannot reach its socket looks perfectly healthy from outside.
+
 ## What comes up
 
 Six containers on one Docker network, plus a one-shot `init-volumes` that

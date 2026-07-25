@@ -137,7 +137,7 @@ fi
 
 say "fetching the image definitions"
 mkdir -p "$SRC_DIR/dockerfiles"
-for f in go-service.Dockerfile tokenfuse.Dockerfile console.Dockerfile; do
+for f in go-service.Dockerfile tokenfuse.Dockerfile console.Dockerfile wg.Dockerfile; do
   curl -fsSL "$REPO_RAW/images/$f" -o "$SRC_DIR/dockerfiles/$f" || die "could not fetch $f"
 done
 
@@ -150,6 +150,9 @@ for pair in wardryx:wardryx idryx:idryx qryx:qryx mockryx:mockryx; do
     --build-arg SERVICE="$name" --build-arg SRC="./$repo" -t "stack/$name:dev" . >/dev/null \
     || die "image build failed: $name"
 done
+note "building wg (the operator's tunnel)"
+docker build -q -f dockerfiles/wg.Dockerfile -t stack/wg:dev . >/dev/null \
+  || die "image build failed: wg"
 note "building tokenfuse (gateway + cloud)"
 docker build -q -f dockerfiles/tokenfuse.Dockerfile -t stack/tokenfuse:dev ./tokenfuse >/dev/null \
   || die "image build failed: tokenfuse"
@@ -164,6 +167,12 @@ cd "$STACK_DIR"
 # ---- 3. secrets --------------------------------------------------------------
 # Generated here, once, and never printed except the console sign-in at the
 # end. 0600 and outside any git tree.
+# Needed BEFORE .env is written, because the client WireGuard configs this box
+# issues must name the address a phone dials from outside, and nothing on the
+# interface can report it. `ipify` first (correct behind NAT, where the local
+# address is not the reachable one), the primary local address otherwise.
+PUBLIC_IP="$(curl -fsS -m5 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')"
+
 say "credentials"
 # `tr </dev/urandom | head -c N` is the idiom everyone writes and it is a trap
 # under `set -o pipefail`: when head has its N bytes it closes the pipe, tr
@@ -211,10 +220,36 @@ WARDRYX_ADMIN=$WARDRYX_ADMIN_SECRET
 WARDRYX_GATEWAY=$WARDRYX_GATEWAY_SECRET
 
 GATEWAY_BIND=$GATEWAY_BIND
+
+# The operator's WireGuard road in. WG_ENDPOINT_HOST is what an issued device
+# config dials; get it wrong and the config looks perfect and never connects.
+# Detected once, here, and editable afterwards: a box behind NAT or with a
+# hostname you would rather hand out is a normal case, not a broken one.
+WG_ENDPOINT_HOST=$PUBLIC_IP
+WG_IFACE=wg-op
+WG_LISTEN_PORT=51820
+WG_BIND=0.0.0.0
 EOF
   chmod 600 .env
   note "generated .env (0600)"
 fi
+
+# Leaving .env alone is right for values that already exist, and wrong for
+# values a NEWER release introduced: an installed box would otherwise fail on
+# a variable compose now requires, with an error naming this script as the
+# thing that was supposed to set it. So the upgrade path is additive - never
+# overwrite, only fill in what is absent - which keeps credentials and the
+# operator's own edits untouched while letting the stack grow.
+add_env_default() {
+  local name="$1" value="$2"
+  grep -q "^${name}=" .env 2>/dev/null && return 0
+  printf '%s=%s\n' "$name" "$value" >>.env
+  note "added $name to .env (new in this release)"
+}
+add_env_default WG_ENDPOINT_HOST "$PUBLIC_IP"
+add_env_default WG_IFACE wg-op
+add_env_default WG_LISTEN_PORT 51820
+add_env_default WG_BIND 0.0.0.0
 
 # Read back what is actually on this box rather than what this run's defaults
 # would have written. On a re-run the block above left .env exactly as it was,
@@ -284,6 +319,9 @@ case "$GATEWAY_BIND" in
     note "published to the world: 4100 (gateway) only, bound $GATEWAY_BIND"
     note "loopback only: 7420 (console), reachable over your own tunnel" ;;
 esac
+note "the operator's tunnel: ${WG_LISTEN_PORT:-51820}/udp, open on purpose"
+note "  WireGuard answers nothing without a valid key: no banner, no handshake,"
+note "  nothing for a scanner to find. It is the road in, not an exposed plane."
 note "not published at all: cloud, wardryx, idryx, postgres"
 if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then
   ufw allow 22/tcp >/dev/null 2>&1 || true
@@ -356,11 +394,26 @@ check "wardryx is NOT on the host"   "! curl -fsS -m3 -o /dev/null http://127.0.
 # all, because the banner then tells you the box is closed while it is open.
 check "gateway published on $GATEWAY_BIND only" \
       "$DC port tokenfuse-gateway 4100 | grep -q '^${GATEWAY_BIND}:'"
+
+# The operator's tunnel. Checked from the CONSOLE's side rather than the wg
+# container's: what matters is not that a socket exists somewhere, it is that
+# the unprivileged console can actually manage peers through it. A tunnel that
+# is up while the console cannot reach its socket is the exact failure this
+# split was built to avoid, and it looks perfectly healthy from outside.
+check "wireguard interface is up" \
+      "$DC exec -T wg wg show ${WG_IFACE:-wg-op} public-key"
+# The RELAY, not the daemon's own socket: wireguard-go requires its socket to
+# stay 0700 and stops answering if that changes, so the console is given a
+# group-readable forwarder instead. Checked from the console's side, because a
+# tunnel that is up while the console cannot reach it looks healthy from
+# everywhere else.
+check "console can manage peers over UAPI" \
+      "$DC exec -T console test -r /var/run/wireguard/console.sock"
+check "tunnel accepts on ${WG_LISTEN_PORT:-51820}/udp" \
+      "$DC port wg ${WG_LISTEN_PORT:-51820}/udp | grep -q ':${WG_LISTEN_PORT:-51820}$'"
 if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx console; then
   check "console answers on loopback" "curl -fsS -m5 -o /dev/null http://127.0.0.1:7420/healthz"
 fi
-
-PUBLIC_IP="$(curl -fsS -m5 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')"
 
 # What to tell the operator depends on the boundary this box actually has, and
 # the closed case needs the longer answer: a re-run will NOT widen it, because
@@ -402,7 +455,18 @@ ${CONSOLE_PASSWORD:+  Console sign-in, shown once and stored nowhere:
       user      $CONSOLE_USER
       password  $CONSOLE_PASSWORD
 
-}  The console is on loopback by design. Reach it over your own tunnel:
+}  The console is on loopback by design, so it is reached over a tunnel. This
+  box runs the WireGuard side and issues your device its own peer config:
+  sign in, open Remote, and take the QR. The config is shown once.
+
+      console  http://10.9.0.1:7420   (once your tunnel is up)
+      tunnel   $WG_ENDPOINT_HOST:${WG_LISTEN_PORT:-51820}/udp
+
+  Issuing and revoking a device both need a passkey, like a kill does: a road
+  into the control plane is not something a stolen session should be able to
+  mint quietly. Enrol one on first sign-in.
+
+  SSH stays as the way in before the first device exists:
 
       ssh -L 17420:127.0.0.1:7420 root@$PUBLIC_IP
       open http://localhost:17420

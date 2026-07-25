@@ -195,6 +195,35 @@ services:
   # ---- the console ---------------------------------------------------------
   # Loopback only. It arrives over the operator's own tunnel, never off the
   # open internet, which is the same posture the cluster deployment takes.
+  # ---- the operator's road in ----------------------------------------------
+  # A WireGuard server for the humans who run this box. Deliberately its own
+  # container: it needs NET_ADMIN and a tun device, and the console must not.
+  # The console manages peers over the UAPI socket on the shared `wgapi`
+  # volume, holding no capability of its own.
+  wg:
+    <<: *restart
+    image: stack/wg:dev
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      WG_IFACE: ${WG_IFACE:-wg-op}
+      WG_LISTEN_PORT: "${WG_LISTEN_PORT:-51820}"
+      # The uid the console image runs as, so the socket is reachable by it
+      # and by nothing else on the volume.
+      WG_SOCKET_GID: "10001"
+    ports:
+      # Published on purpose, and the one port here that has to be: a tunnel
+      # nobody can dial is not a tunnel. Unlike the gateway, WireGuard answers
+      # nothing at all without a valid key - no banner, no handshake, no
+      # response to a scan - which is exactly why it is the road in rather
+      # than an exposed HTTP plane.
+      - "${WG_BIND:-0.0.0.0}:${WG_LISTEN_PORT:-51820}:${WG_LISTEN_PORT:-51820}/udp"
+    volumes:
+      - wgstate:/var/lib/wireguard
+      - wgapi:/var/run/wireguard
+
   console:
     <<: *restart
     image: stack/genaryx-console:dev
@@ -207,12 +236,21 @@ services:
       TOKENFUSE_CLOUD_KEY: ${CLOUD_ADMIN:?set by install.sh}
       WARDRYX_URL: http://wardryx:8090
       WARDRYX_ADMIN_KEY: ${WARDRYX_ADMIN:?set by install.sh}
+      GENARYX_WG_IFACE: ${WG_IFACE:-wg-op}
+      # The RELAY socket, not the daemon's own: wireguard-go requires its socket
+      # to stay 0700 and stops answering if that changes, so the wg container
+      # forwards a group-readable one to it.
+      GENARYX_WG_UAPI_SOCKET: /var/run/wireguard/console.sock
+      # The address a phone dials from outside. Nothing on the interface can
+      # report it, so the installer writes it and the console refuses to guess.
+      GENARYX_WG_ENDPOINT_HOST: ${WG_ENDPOINT_HOST:?set by install.sh}
     ports:
       - "127.0.0.1:7420:7420"
     volumes:
       - consolestate:/var/lib/stack
       - events:/var/lib/stack/events
       - ./environments:/etc/genaryx/taipan/environments:ro
+      - wgapi:/var/run/wireguard
     depends_on:
       init-volumes:
         condition: service_completed_successfully
@@ -232,3 +270,10 @@ volumes:
   cloudstate:
   consolestate:
   pgdata:
+  # The WireGuard server's own key. On a volume because regenerating it would
+  # invalidate every device config ever issued, silently.
+  wgstate:
+  # The UAPI socket the console manages peers through. This volume IS the
+  # privilege boundary: the tunnel and NET_ADMIN live in the `wg` container,
+  # and the console reaches them through one group-readable unix socket.
+  wgapi:
