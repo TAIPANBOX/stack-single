@@ -1,0 +1,7 @@
+# Generated on the box, never in the repository. .env holds every secret this
+# deployment has, and the two files below are seeded from the installer and
+# then edited in place by whoever runs it.
+.env
+policy.yaml
+environments/
+src/

@@ -1,0 +1,87 @@
+# The agent stack on one machine
+
+One command puts the whole governed stack on a box you own, ready for agents
+that live somewhere else entirely.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/TAIPANBOX/stack-single/main/install.sh | bash
+```
+
+Then point an agent at the gateway. Wherever that agent runs, in EKS, in a CI
+job, on a laptop, its calls are now metered, budgeted and policy-checked:
+
+```bash
+ANTHROPIC_BASE_URL=http://<your box>:4100
+```
+
+## This is not the sandbox
+
+[`stack-up`](https://github.com/TAIPANBOX/stack-up) is the local try: it binds
+`127.0.0.1` on purpose, needs Rust, Go and Node on your machine, and stops when
+you press Ctrl-C. It says as much about itself, and it is right to.
+
+This is the other thing. The differences are the whole point:
+
+| | `stack-up` | here |
+|---|---|---|
+| Reachable by an agent elsewhere | no, loopback by design | yes, the gateway is published |
+| Toolchains on your host | Rust, Go, Node, Python | docker and git |
+| Survives a reboot | no | yes |
+| Console sign-in | no console at all | generated, shown once |
+| Credentials | a dev key | unique per box, 0600, never printed twice |
+
+## What comes up
+
+Six containers on one Docker network, wired exactly as the Kubernetes
+deployment wires them, because service names resolve the same way in both:
+
+| Service | Port | Published |
+|---|---|---|
+| `tokenfuse-gateway` | 4100 | **yes**, this is the one agents call |
+| `tokenfuse-cloud` | 8080 | no |
+| `wardryx` | 8090 | no |
+| `idryx` | 8081 | no |
+| `policy-db` (postgres) | 5432 | no |
+| `console` | 7420 | loopback only |
+
+"Not published" is not a firewall rule that might be misread: those services
+have no host port at all, so nothing outside this machine can address them.
+The console is on loopback because it arrives over your own tunnel:
+
+```bash
+ssh -L 17420:127.0.0.1:7420 root@<your box>
+open http://localhost:17420
+```
+
+## What the installer will not do quietly
+
+It verifies itself and tells you what it found, including three checks that
+have to FAIL to pass: the money plane, the policy plane and the store must not
+be reachable from the host. A green install with an open plane is the outcome
+worth designing against.
+
+If the console source is not present it says so and installs the governed
+stack without it, which is a real deployment: the planes enforce with or
+without a UI in front of them.
+
+## The console is the one closed piece
+
+Everything else here is Apache-2.0 and public. The Genaryx console is the paid,
+closed part of the product, so the installer builds it only if its source is
+available to you: either place it at `src/genaryx-a360`, or pass
+`CONSOLE_TOKEN=<a GitHub token with access>`. Placing the source is preferred,
+because it keeps a credential off the server entirely.
+
+## Traps, already fixed here
+
+The Kubernetes sibling of this repo,
+[`stack-k8s`](https://github.com/TAIPANBOX/stack-k8s), keeps a `GOTCHAS.md`
+with every trap that deployment hit. Several apply to any deployment and are
+already handled here rather than left for you: the money plane binds loopback
+by default and would be unreachable inside a container, the distro's `docker.io`
+package does not include buildx, and the Go builder image is older than some of
+the repos it compiles.
+
+## Licence
+
+Apache 2.0. See [LICENSE](LICENSE).

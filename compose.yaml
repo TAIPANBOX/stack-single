@@ -1,0 +1,165 @@
+# The agent stack on one machine, for real use rather than a local try.
+#
+# This is the same wiring `stack-k8s` proved on a five-node cluster, minus
+# Kubernetes: same images, same environment variables, same ports, same
+# failure modes. Docker's own DNS resolves service names exactly the way
+# Kubernetes Services did, so `http://wardryx:8090` means the same thing in
+# both, and nothing had to be rewritten to move between them.
+#
+# What is deliberately NOT published to the host:
+#   cloud (8080), wardryx (8090), idryx (8081) and postgres (5432) have no
+#   `ports:` at all. They are reachable only from inside this compose network,
+#   which is the single-box equivalent of the cluster's default-deny
+#   NetworkPolicy. The gateway is the one service agents elsewhere must reach,
+#   and the console is bound to loopback so it arrives over the operator's own
+#   tunnel rather than off the open internet.
+#
+# Secrets come from `.env`, which `install.sh` generates with 0600 and never
+# commits. Nothing here has a default credential.
+
+name: agent-stack
+
+x-restart: &restart
+  restart: unless-stopped
+
+services:
+  # ---- the policy plane's durable store ------------------------------------
+  # Every console-block policy and the whole approval trail lives here, so a
+  # restart must not forget what the fleet is forbidden to do.
+  policy-db:
+    <<: *restart
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: wardryx
+      POSTGRES_USER: wardryx
+      POSTGRES_PASSWORD: ${POLICY_DB_PASSWORD:?set by install.sh}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wardryx -d wardryx"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # ---- policy --------------------------------------------------------------
+  wardryx:
+    <<: *restart
+    image: stack/wardryx:dev
+    command:
+      - serve
+      - -addr
+      - 0.0.0.0:8090
+      - -events
+      - /var/lib/stack/events/wardryx.ndjson
+      - -policy
+      - /etc/wardryx/policy.yaml
+    environment:
+      WARDRYX_KEYS: ${WARDRYX_KEYS:?set by install.sh}
+      WARDRYX_DSN: ${POLICY_DB_DSN:?set by install.sh}
+      WARDRYX_APPROVAL_SECRET: ${APPROVAL_SECRET:?set by install.sh}
+    volumes:
+      - events:/var/lib/stack/events
+      - ./policy.yaml:/etc/wardryx/policy.yaml:ro
+    depends_on:
+      policy-db:
+        condition: service_healthy
+
+  # ---- identity ------------------------------------------------------------
+  # Read-only on the event log: idryx builds its graph FROM it and never
+  # writes, and the mount says so.
+  idryx:
+    <<: *restart
+    image: stack/idryx:dev
+    command:
+      - serve
+      - --addr
+      - 0.0.0.0:8081
+      - --load
+      - tokenfuse:/var/lib/stack/events/tokenfuse.ndjson
+    volumes:
+      - events:/var/lib/stack/events:ro
+
+  # ---- money: the control API ----------------------------------------------
+  tokenfuse-cloud:
+    <<: *restart
+    image: stack/tokenfuse:dev
+    command: ["/usr/local/bin/tokenfuse-cloud"]
+    environment:
+      PORT: "8080"
+      # The binary binds loopback by default, which inside a container means
+      # nothing else can reach it. Bind the container's own address instead.
+      TOKENFUSE_CLOUD_HOST: 0.0.0.0
+      TOKENFUSE_CLOUD_KEYS: ${CLOUD_KEYS:?set by install.sh}
+      TOKENFUSE_CLOUD_DATA: /var/lib/stack/cloud/state.json
+    volumes:
+      - events:/var/lib/stack/events
+      - cloudstate:/var/lib/stack/cloud
+
+  # ---- money: the enforcing proxy ------------------------------------------
+  # The one service published to the world, because it is the one agents
+  # elsewhere call. Everything it does is metered, and an over-budget or
+  # policy-denied call gets a hard refusal rather than a log line.
+  tokenfuse-gateway:
+    <<: *restart
+    image: stack/tokenfuse:dev
+    command: ["/usr/local/bin/tokenfuse-gateway"]
+    environment:
+      TOKENFUSE_ADDR: 0.0.0.0:4100
+      TOKENFUSE_MODE: enforce
+      TOKENFUSE_DATA_DIR: /var/lib/stack/traces/gateway
+      TOKENFUSE_UPSTREAM: https://api.anthropic.com/v1/messages
+      TOKENFUSE_CLOUD_URL: http://tokenfuse-cloud:8080
+      TOKENFUSE_CLOUD_KEY: ${CLOUD_ADMIN:?set by install.sh}
+      TOKENFUSE_WARDRYX_MODE: enforce
+      TOKENFUSE_WARDRYX_URL: http://wardryx:8090
+      TOKENFUSE_WARDRYX_KEY: ${WARDRYX_GATEWAY:?set by install.sh}
+      # closed, not open: if the policy plane cannot answer, the call is
+      # refused. An enforcement point that fails open is a log with extra steps.
+      TOKENFUSE_WARDRYX_FAILMODE: closed
+      TOKENFUSE_WARDRYX_TIMEOUT_MS: "250"
+      TOKENFUSE_WARDRYX_CACHE_TTL_MS: "3000"
+    ports:
+      - "${GATEWAY_BIND:-0.0.0.0}:4100:4100"
+    volumes:
+      - events:/var/lib/stack/events
+      - traces:/var/lib/stack/traces
+    depends_on:
+      - tokenfuse-cloud
+      - wardryx
+
+  # ---- the console ---------------------------------------------------------
+  # Loopback only. It arrives over the operator's own tunnel, never off the
+  # open internet, which is the same posture the cluster deployment takes.
+  console:
+    <<: *restart
+    image: stack/genaryx-console:dev
+    environment:
+      HOME: /var/lib/stack
+      TAIPAN_HOME: /etc/genaryx/taipan
+      GENARYX_SCAN_TARGET: /srv/ui
+      GENARYX_COPILOT_PROVIDER: ollama
+      TOKENFUSE_CLOUD_URL: http://tokenfuse-cloud:8080
+      TOKENFUSE_CLOUD_KEY: ${CLOUD_ADMIN:?set by install.sh}
+      WARDRYX_URL: http://wardryx:8090
+      WARDRYX_ADMIN_KEY: ${WARDRYX_ADMIN:?set by install.sh}
+    ports:
+      - "127.0.0.1:7420:7420"
+    volumes:
+      - consolestate:/var/lib/stack
+      - events:/var/lib/stack/events
+      - ./environments:/etc/genaryx/taipan/environments:ro
+    depends_on:
+      - tokenfuse-cloud
+      - wardryx
+      - idryx
+
+volumes:
+  # The shared event log the planes couple through. One machine, so this is
+  # simply a volume: the cluster needed a ReadWriteMany class and a storage
+  # provider to get the same thing.
+  events:
+  traces:
+  cloudstate:
+  consolestate:
+  pgdata:
