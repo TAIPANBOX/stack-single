@@ -23,6 +23,46 @@ x-restart: &restart
   restart: unless-stopped
 
 services:
+  # ---- one-shot: make the shared volumes writable --------------------------
+  # Kubernetes has `fsGroup` for exactly this and Compose has no equivalent, so
+  # this is the equivalent, written out. A fresh Docker named volume is created
+  # root:root 0755 unless the image already contains that path, and every
+  # service here runs as a non-root user, so without this the policy plane
+  # crash-loops on "permission denied" writing its own event file and the
+  # gateway drops every trace with a WARN nobody reads. The cluster never
+  # showed this because its RWX volume came from a provisioner that hands out
+  # a permissive share; a local volume does not.
+  #
+  # Two UID families share the event log: the Go planes are 65532 (distroless
+  # nonroot) and the Rust and Python ones are 10001. So the directory is owned
+  # by GROUP 10001 with the setgid bit, both families run with that GID, and
+  # every file created inside inherits it. No writer ever needs write access to
+  # another's file: each plane appends only to its own.
+  init-volumes:
+    image: busybox:1.36
+    user: "0:0"
+    command:
+      - sh
+      - -euc
+      - |
+        mkdir -p /vol/events /vol/traces /vol/cloud
+        chown 0:10001 /vol/events && chmod 2775 /vol/events
+        chown 10001:10001 /vol/traces /vol/cloud && chmod 0775 /vol/traces /vol/cloud
+        # idryx is told to load the gateway's log at startup and exits if the
+        # file is absent, which on a box that has served no traffic yet it
+        # always is. An empty file is a valid empty log, and pre-creating it is
+        # the difference between "no events yet" and a crash loop.
+        for f in tokenfuse.ndjson wardryx.ndjson; do
+          [ -e "/vol/events/$$f" ] || : > "/vol/events/$$f"
+          chown 10001:10001 "/vol/events/$$f" && chmod 0664 "/vol/events/$$f"
+        done
+        echo "volumes ready"
+    volumes:
+      - events:/vol/events
+      - traces:/vol/traces
+      - cloudstate:/vol/cloud
+    restart: "no"
+
   # ---- the policy plane's durable store ------------------------------------
   # Every console-block policy and the whole approval trail lives here, so a
   # restart must not forget what the fleet is forbidden to do.
@@ -46,6 +86,10 @@ services:
   wardryx:
     <<: *restart
     image: stack/wardryx:dev
+    # The image's own 65532:65532, with the GID moved to the one that owns the
+    # shared event directory. The binary is a static Go binary and reads no
+    # /etc/passwd, so a numeric pair it was not built with is fine.
+    user: "65532:10001"
     command:
       - serve
       - -addr
@@ -64,6 +108,8 @@ services:
     depends_on:
       policy-db:
         condition: service_healthy
+      init-volumes:
+        condition: service_completed_successfully
 
   # ---- identity ------------------------------------------------------------
   # Read-only on the event log: idryx builds its graph FROM it and never
@@ -71,6 +117,7 @@ services:
   idryx:
     <<: *restart
     image: stack/idryx:dev
+    user: "65532:10001"
     command:
       - serve
       - --addr
@@ -79,6 +126,9 @@ services:
       - tokenfuse:/var/lib/stack/events/tokenfuse.ndjson
     volumes:
       - events:/var/lib/stack/events:ro
+    depends_on:
+      init-volumes:
+        condition: service_completed_successfully
 
   # ---- money: the control API ----------------------------------------------
   tokenfuse-cloud:
@@ -95,6 +145,9 @@ services:
     volumes:
       - events:/var/lib/stack/events
       - cloudstate:/var/lib/stack/cloud
+    depends_on:
+      init-volumes:
+        condition: service_completed_successfully
 
   # ---- money: the enforcing proxy ------------------------------------------
   # The one service published to the world, because it is the one agents
@@ -125,8 +178,12 @@ services:
       - events:/var/lib/stack/events
       - traces:/var/lib/stack/traces
     depends_on:
-      - tokenfuse-cloud
-      - wardryx
+      init-volumes:
+        condition: service_completed_successfully
+      tokenfuse-cloud:
+        condition: service_started
+      wardryx:
+        condition: service_started
 
   # ---- the console ---------------------------------------------------------
   # Loopback only. It arrives over the operator's own tunnel, never off the
@@ -150,9 +207,14 @@ services:
       - events:/var/lib/stack/events
       - ./environments:/etc/genaryx/taipan/environments:ro
     depends_on:
-      - tokenfuse-cloud
-      - wardryx
-      - idryx
+      init-volumes:
+        condition: service_completed_successfully
+      tokenfuse-cloud:
+        condition: service_started
+      wardryx:
+        condition: service_started
+      idryx:
+        condition: service_started
 
 volumes:
   # The shared event log the planes couple through. One machine, so this is
