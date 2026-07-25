@@ -150,9 +150,11 @@ services:
         condition: service_completed_successfully
 
   # ---- money: the enforcing proxy ------------------------------------------
-  # The one service published to the world, because it is the one agents
-  # elsewhere call. Everything it does is metered, and an over-budget or
-  # policy-denied call gets a hard refusal rather than a log line.
+  # The one service published to a host port at all, because it is the one
+  # agents elsewhere call. WHICH host address it lands on is the operator's
+  # decision: `GATEWAY_BIND` in .env, loopback unless they said otherwise.
+  # Everything it does is metered, and an over-budget or policy-denied call
+  # gets a hard refusal rather than a log line.
   tokenfuse-gateway:
     <<: *restart
     image: stack/tokenfuse:dev
@@ -173,7 +175,12 @@ services:
       TOKENFUSE_WARDRYX_TIMEOUT_MS: "250"
       TOKENFUSE_WARDRYX_CACHE_TTL_MS: "3000"
     ports:
-      - "${GATEWAY_BIND:-0.0.0.0}:4100:4100"
+      # Loopback if the variable is absent, matching install.sh. The fallback
+      # matters on its own: someone running `docker compose up` by hand
+      # without an .env would otherwise publish an enforcement plane to every
+      # interface because a variable was unset, which is the wrong direction
+      # for a default to fail in.
+      - "${GATEWAY_BIND:-127.0.0.1}:4100:4100"
     volumes:
       - events:/var/lib/stack/events
       - traces:/var/lib/stack/traces

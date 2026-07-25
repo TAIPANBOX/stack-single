@@ -7,12 +7,26 @@ that live somewhere else entirely.
 curl -fsSL https://raw.githubusercontent.com/TAIPANBOX/stack-single/main/install.sh | bash
 ```
 
+It comes up closed. The gateway is published to the host's **loopback**, so a
+box that just ran an install script does not acquire an internet-facing
+enforcement plane because nobody typed anything. Opening it to the agents you
+actually have is one word:
+
+```bash
+GATEWAY_BIND=0.0.0.0 ./install.sh
+```
+
 Then point an agent at the gateway. Wherever that agent runs, in EKS, in a CI
-job, on a laptop, its calls are now metered, budgeted and policy-checked:
+job, on a laptop, its calls are metered, budgeted and policy-checked:
 
 ```bash
 ANTHROPIC_BASE_URL=http://<your box>:4100
 ```
+
+On a box that is already installed, edit `GATEWAY_BIND` in
+`/opt/agent-stack/.env` and `docker compose up -d`. Re-running the installer
+will NOT widen it: `.env` is left alone once it exists, which is the same
+property that stops a re-run rotating your credentials.
 
 ## This is not the sandbox
 
@@ -24,7 +38,7 @@ This is the other thing. The differences are the whole point:
 
 | | `stack-up` | here |
 |---|---|---|
-| Reachable by an agent elsewhere | no, loopback by design | yes, the gateway is published |
+| Reachable by an agent elsewhere | no, and it cannot be | yes, one variable away |
 | Toolchains on your host | Rust, Go, Node, Python | docker and git |
 | Survives a reboot | no | yes |
 | Console sign-in | no console at all | generated, shown once |
@@ -32,12 +46,13 @@ This is the other thing. The differences are the whole point:
 
 ## What comes up
 
-Six containers on one Docker network, wired exactly as the Kubernetes
-deployment wires them, because service names resolve the same way in both:
+Six containers on one Docker network, plus a one-shot `init-volumes` that
+exits, wired exactly as the Kubernetes deployment wires them, because service
+names resolve the same way in both:
 
-| Service | Port | Published |
+| Service | Port | Published to a host port |
 |---|---|---|
-| `tokenfuse-gateway` | 4100 | **yes**, this is the one agents call |
+| `tokenfuse-gateway` | 4100 | **yes**, `GATEWAY_BIND` decides where: loopback by default |
 | `tokenfuse-cloud` | 8080 | no |
 | `wardryx` | 8090 | no |
 | `idryx` | 8081 | no |
@@ -55,9 +70,14 @@ open http://localhost:17420
 
 ## What the installer will not do quietly
 
-It verifies itself and tells you what it found, including three checks that
-have to FAIL to pass: the money plane, the policy plane and the store must not
-be reachable from the host. A green install with an open plane is the outcome
+It verifies itself and tells you what it found. Three of its checks have to
+FAIL to pass: the money plane, the policy plane and the store must not be
+reachable from the host. Three more test the CREDENTIAL rather than the port,
+because a plane with a malformed key spec starts cleanly, stays reachable and
+authenticates nobody: the admin key must get 200, an unknown key 401, and the
+gateway's own key 403 when it tries to read policy. And one reads back the
+rule Docker actually wrote for port 4100, rather than trusting the variable
+that was supposed to produce it. A green install with an open plane is the outcome
 worth designing against.
 
 If the console source is not present it says so and installs the governed

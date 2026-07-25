@@ -7,11 +7,20 @@
 #
 #   ./install.sh
 #
-# What this is NOT: `stack-up`, which is the local sandbox. That one binds
-# 127.0.0.1 on purpose and needs Rust, Go and Node on your machine to build
-# from source. This one is for a box you will point real agents at: the
-# toolchains live inside the images, the gateway is published, the services
-# come back after a reboot, and the console has a sign-in that exists.
+# What this is NOT: `stack-up`, which is the local sandbox. That one needs
+# Rust, Go and Node on your machine to build from source and stops when you
+# press Ctrl-C. This one is for a box you will point real agents at: the
+# toolchains live inside the images, the services come back after a reboot,
+# and the console has a sign-in that exists.
+#
+# The gateway is published to the host's loopback only, until you say
+# otherwise. Publishing an enforcement plane to the internet is a decision, not
+# a default, so it is one word you type rather than one you inherit:
+#
+#   GATEWAY_BIND=0.0.0.0 ./install.sh     # first run: agents elsewhere can call it
+#
+# Re-running never changes an existing box: the value lives in .env from the
+# first run, and .env is left alone.
 #
 # Requires: a Debian or Ubuntu host, root, and outbound internet. Everything
 # else it installs. Roughly 3GB of disk for the images and ten minutes for the
@@ -23,7 +32,14 @@ STACK_DIR="${STACK_DIR:-/opt/agent-stack}"
 SRC_DIR="${SRC_DIR:-$STACK_DIR/src}"
 CONSOLE_TOKEN="${CONSOLE_TOKEN:-}"   # a GitHub token with access to the closed console repo
 CONSOLE_USER="${CONSOLE_USER:-ops}"
-GATEWAY_BIND="${GATEWAY_BIND:-0.0.0.0}"
+# The host interface Docker publishes the gateway on. Loopback by default: a
+# box that just ran an install script should not acquire an internet-facing
+# enforcement plane because nobody typed anything. Set 0.0.0.0 (or a specific
+# address) to let agents on other machines reach it. This is NOT the address
+# the gateway process listens on inside its container: that one is 0.0.0.0 in
+# compose.yaml and has to be, because loopback inside a container is
+# unreachable even from the container beside it.
+GATEWAY_BIND="${GATEWAY_BIND:-127.0.0.1}"
 
 say()  { printf '\n\033[1m>> %s\033[0m\n' "$*"; }
 note() { printf '   %s\n' "$*"; }
@@ -200,6 +216,13 @@ EOF
   note "generated .env (0600)"
 fi
 
+# Read back what is actually on this box rather than what this run's defaults
+# would have written. On a re-run the block above left .env exactly as it was,
+# so an existing deployment keeps its own binding and its own credentials, and
+# every section below then reports and verifies the real values instead of
+# announcing a boundary this run merely intended.
+. ./.env
+
 # ---- 4. the files the services read -----------------------------------------
 if [ ! -f policy.yaml ]; then
   cat > policy.yaml <<'EOF'
@@ -252,8 +275,15 @@ sleep 8
 # only the gateway is published at all, everything else has no host port, and
 # the console is bound to loopback.
 say "network boundary"
-note "published to the world: 4100 (gateway) only"
-note "loopback only: 7420 (console), reachable over your own tunnel"
+case "$GATEWAY_BIND" in
+  127.0.0.1|localhost|::1)
+    note "loopback only: 4100 (gateway), 7420 (console)"
+    note "no machine other than this one can reach any plane. That is the default."
+    note "to let agents elsewhere call the gateway, see the end of this run" ;;
+  *)
+    note "published to the world: 4100 (gateway) only, bound $GATEWAY_BIND"
+    note "loopback only: 7420 (console), reachable over your own tunnel" ;;
+esac
 note "not published at all: cloud, wardryx, idryx, postgres"
 if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then
   ufw allow 22/tcp >/dev/null 2>&1 || true
@@ -316,26 +346,56 @@ check "policy store is up"           "$DC exec -T policy-db pg_isready -U wardry
 # The three below are about the KEYS, and they exist because a plane with a
 # malformed key spec starts cleanly, authenticates nobody, and answers 401 to
 # its own console. Reachability alone would have called that deployment green.
-. ./.env
 check "policy plane accepts its admin key"   "[ \"\$(code http://wardryx:8090/v1/policies '$WARDRYX_ADMIN')\" = 200 ]"
 check "policy plane rejects an unknown key"  "[ \"\$(code http://wardryx:8090/v1/policies nonsense-not-a-key)\" = 401 ]"
 check "gateway's key cannot write policy"    "[ \"\$(code http://wardryx:8090/v1/policies '$WARDRYX_GATEWAY')\" = 403 ]"
 check "cloud is NOT on the host"     "! curl -fsS -m3 -o /dev/null http://127.0.0.1:8080/healthz"
 check "wardryx is NOT on the host"   "! curl -fsS -m3 -o /dev/null http://127.0.0.1:8090/healthz"
+# Not the variable, the rule Docker actually wrote. A default that says
+# loopback while the published port says otherwise is worse than no default at
+# all, because the banner then tells you the box is closed while it is open.
+check "gateway published on $GATEWAY_BIND only" \
+      "$DC port tokenfuse-gateway 4100 | grep -q '^${GATEWAY_BIND}:'"
 if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx console; then
   check "console answers on loopback" "curl -fsS -m5 -o /dev/null http://127.0.0.1:7420/healthz"
 fi
 
 PUBLIC_IP="$(curl -fsS -m5 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')"
 
+# What to tell the operator depends on the boundary this box actually has, and
+# the closed case needs the longer answer: a re-run will NOT widen it, because
+# .env is deliberately left alone once it exists. Saying "re-run with
+# GATEWAY_BIND=0.0.0.0" would be advice that quietly does nothing.
+case "$GATEWAY_BIND" in
+  127.0.0.1|localhost|::1)
+    REACH="  The gateway answers on this box only. Nothing here is reachable from another
+  machine, which is the default on purpose. On the box itself:
+
+      ANTHROPIC_BASE_URL=http://127.0.0.1:4100
+
+  When you want agents elsewhere to call it, publish it deliberately. Editing
+  .env is the way; re-running this script will not do it for you:
+
+      cd $STACK_DIR
+      sed -i 's/^GATEWAY_BIND=.*/GATEWAY_BIND=0.0.0.0/' .env
+      ${COMPOSE[*]} up -d
+      # then, from anywhere: ANTHROPIC_BASE_URL=http://$PUBLIC_IP:4100
+
+  Port 4100 is then open to the internet. Put a cloud security group in front
+  of it: ufw will not do it, because Docker's own iptables rules bypass ufw's
+  INPUT chain and a published container port stays reachable through a 'deny'." ;;
+  *)
+    REACH="  Point an agent at the gateway. Its calls are then metered, budgeted and
+  policy-checked wherever that agent runs:
+
+      ANTHROPIC_BASE_URL=http://$PUBLIC_IP:4100" ;;
+esac
+
 cat <<EOF
 
 $(printf '\033[1m')$([ "$fail" -eq 0 ] && echo "Up, and every check passed." || echo "Up, with $fail failed check(s) above.")$(printf '\033[0m')
 
-  Point an agent at the gateway. Its calls are then metered, budgeted and
-  policy-checked wherever that agent runs:
-
-      ANTHROPIC_BASE_URL=http://$PUBLIC_IP:4100
+$REACH
 
 ${CONSOLE_PASSWORD:+  Console sign-in, shown once and stored nowhere:
 
