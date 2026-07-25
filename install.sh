@@ -431,8 +431,11 @@ fi
 # TLS, checked from inside the tunnel's own network rather than the host: this
 # is deliberately not reachable from anywhere else, so a check that could see
 # it from the host would mean the boundary had failed.
-check "console is served over TLS" \
-      "$DC exec -T wg wget -q --no-check-certificate -O /dev/null https://caddy/healthz"
+# A TCP check, not an HTTPS one. The certificate is issued for the console's
+# domain, so a request that arrives with any other server name is refused by
+# design - which means a naive `wget https://caddy/...` fails on a perfectly
+# healthy deployment and would teach the reader to ignore a red line.
+check "console TLS is listening" "$DC exec -T wg nc -z caddy 443"
 check "console TLS names ${CONSOLE_DOMAIN:-the configured domain}" \
       "$DC exec -T caddy sh -c 'grep -q \"^${CONSOLE_DOMAIN}\" /etc/caddy/Caddyfile'"
 check "tunnel accepts on ${WG_LISTEN_PORT:-51820}/udp" \
