@@ -409,8 +409,11 @@ check "wireguard interface is up" \
 # everywhere else.
 check "console can manage peers over UAPI" \
       "$DC exec -T console test -r /var/run/wireguard/console.sock"
+# `--protocol udp <port>`, not `<port>/udp`: compose parses the argument as a
+# bare integer and fails with "strconv.ParseUint: invalid syntax" on the form
+# `docker port` accepts, so the check reported a healthy tunnel as broken.
 check "tunnel accepts on ${WG_LISTEN_PORT:-51820}/udp" \
-      "$DC port wg ${WG_LISTEN_PORT:-51820}/udp | grep -q ':${WG_LISTEN_PORT:-51820}$'"
+      "$DC port --protocol udp wg ${WG_LISTEN_PORT:-51820} | grep -q ':${WG_LISTEN_PORT:-51820}$'"
 if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx console; then
   check "console answers on loopback" "curl -fsS -m5 -o /dev/null http://127.0.0.1:7420/healthz"
 fi
