@@ -72,6 +72,50 @@ Two details worth knowing rather than discovering:
   installer from the console's side, because a tunnel that is up while the
   console cannot reach its socket looks perfectly healthy from outside.
 
+## Giving the console a real name, so passkeys work
+
+The tunnel is enough to reach the console, and not enough to secure it. A
+passkey ceremony cannot run at `https://10.9.0.1` no matter how it is
+configured: WebAuthn requires a secure context AND refuses a bare IP as the
+party it binds credentials to. So the console needs a name and a certificate,
+even though nothing outside your tunnel can reach it.
+
+Out of the box you get a working TLS console on a private name with Caddy's own
+CA. That is fine for one operator who does not mind trusting that CA on each
+device, and wrong for anything else, because such a CA can issue a certificate
+for ANY name to a device that trusts it.
+
+A real name costs two values in `.env` and nothing else:
+
+```bash
+CONSOLE_DOMAIN=something-unguessable.box.example.com
+CLOUDFLARE_API_TOKEN=<a token scoped to Zone:DNS:Edit on that one zone>
+```
+
+Then `docker compose up -d caddy console`. Caddy switches from its internal CA
+to Let's Encrypt on its own, and the console's WebAuthn identity follows the
+same name, so the relying party, the origin and the address you type are one
+value instead of three kept in agreement by hand.
+
+Four things worth knowing before you do it:
+
+- **The A record points at `10.9.0.1`**, the tunnel address, and must be **DNS
+  only** (grey cloud). A proxied record cannot reach a private address. Public
+  DNS pointing at a private IP is normal and is how every "reach my private
+  thing by name" product works.
+- **DNS-01, not HTTP-01.** The box publishes nothing on 80/443 and should not,
+  so there is nothing for an HTTP challenge to answer. DNS-01 proves ownership
+  with a TXT record, which works for a machine the internet cannot reach.
+- **Pick an unguessable name.** The record is public, so anyone can learn that
+  the name exists. `console.example.com` is an invitation to scan;
+  `e02-k7m2.box.example.com` is a string with no value to anyone.
+- **A passkey is bound to the name.** Changing the domain later invalidates
+  every passkey enrolled at the old one; they must be enrolled again. Nothing
+  is lost, but do not discover it during an incident.
+
+Remove the token later and Caddy quietly falls back to its internal CA, which
+breaks passkeys again. If you set it, leave it.
+
 ## What comes up
 
 Six containers on one Docker network, plus a one-shot `init-volumes` that
