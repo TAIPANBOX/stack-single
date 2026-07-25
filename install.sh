@@ -402,13 +402,19 @@ check "gateway published on $GATEWAY_BIND only" \
 # split was built to avoid, and it looks perfectly healthy from outside.
 check "wireguard interface is up" \
       "$DC exec -T wg wg show ${WG_IFACE:-wg-op} public-key"
+# Only when a console is actually installed. The stack runs perfectly well
+# without one (the planes enforce with or without a UI), and an unconditional
+# check here would fail on a deployment that is entirely correct.
+#
 # The RELAY, not the daemon's own socket: wireguard-go requires its socket to
 # stay 0700 and stops answering if that changes, so the console is given a
 # group-readable forwarder instead. Checked from the console's side, because a
 # tunnel that is up while the console cannot reach it looks healthy from
 # everywhere else.
-check "console can manage peers over UAPI" \
-      "$DC exec -T console test -r /var/run/wireguard/console.sock"
+if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx console; then
+  check "console can manage peers over UAPI" \
+        "$DC exec -T console test -r /var/run/wireguard/console.sock"
+fi
 # `--protocol udp <port>`, not `<port>/udp`: compose parses the argument as a
 # bare integer and fails with "strconv.ParseUint: invalid syntax" on the form
 # `docker port` accepts, so the check reported a healthy tunnel as broken.
