@@ -76,11 +76,26 @@ because it keeps a credential off the server entirely.
 
 The Kubernetes sibling of this repo,
 [`stack-k8s`](https://github.com/TAIPANBOX/stack-k8s), keeps a `GOTCHAS.md`
-with every trap that deployment hit. Several apply to any deployment and are
-already handled here rather than left for you: the money plane binds loopback
-by default and would be unreachable inside a container, the distro's `docker.io`
-package does not include buildx, and the Go builder image is older than some of
-the repos it compiles.
+with every trap both deployments hit. These are the ones a first install would
+have walked straight into, closed here rather than left for you:
+
+- Both planes take a bearer-key spec of the form `key:org[:role]`, and an entry
+  without the `:org` half parses to **zero** valid keys. The plane then starts
+  cleanly, stays reachable, and authenticates nobody. Every health check passes
+  while the money plane is deaf.
+- The client side of each plane takes the bare key, not the spec, and the
+  gateway's key on the policy plane is a `viewer` on purpose: `/v1/decide`
+  needs no more, and an enforcement point that can rewrite the policy it
+  enforces is not one.
+- Kubernetes has `fsGroup` for volume ownership and Compose has nothing. A
+  fresh named volume is `root:root`, so the policy plane cannot write its own
+  event file and the gateway drops every trace behind a single WARN. A one-shot
+  init service does what `fsGroup` would.
+- The identity plane loads the gateway's event log at startup and treats an
+  absent file as fatal, which on a box that has served no traffic it always is.
+- The money plane binds loopback by default, which inside a container means
+  unreachable; the distro's `docker.io` package ships without buildx; and the
+  Go builder image is older than some of the repos it compiles.
 
 ## Licence
 
