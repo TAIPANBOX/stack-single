@@ -49,7 +49,9 @@ This is the other thing. The differences are the whole point:
 The console is on loopback, so it is reached over a tunnel rather than exposed.
 This box runs the WireGuard side itself: sign in, open Remote, and it mints
 your laptop or phone a peer config as a QR. Scan, connect, and the console
-answers at `http://10.9.0.1:7420` and nowhere else.
+answers over HTTPS on the name it was configured with, inside that tunnel and
+nowhere else - see the next section, because that name is not optional if you
+want passkeys to work at all.
 
 Issuing a device and revoking one both require a passkey, the same ceremony a
 kill does. A peer config is a road into the control plane, so a stolen console
