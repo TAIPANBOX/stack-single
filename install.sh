@@ -452,6 +452,31 @@ if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx console; then
         "$DC exec -T console printenv WARDRYX_ADMIN_KEY"
 fi
 
+# The console is HTTPS on a name now, which needs two things the operator has
+# to do on their own device when that name is the private default. Printing the
+# URL alone would send them to a page their browser refuses to load, with an
+# error about the certificate rather than about the missing steps.
+if [ -n "${CLOUDFLARE_API_TOKEN:-}" ]; then
+  CONSOLE_ACCESS_NOTE="
+  The certificate is publicly trusted, so nothing has to be installed on your
+  devices. Point $CONSOLE_DOMAIN at 10.9.0.1 in DNS and open it inside the
+  tunnel."
+else
+  CONSOLE_ACCESS_NOTE="
+  That name is private and its certificate is self-issued, so each device you
+  use needs two one-time steps:
+
+      echo \"10.9.0.1 $CONSOLE_DOMAIN\" | sudo tee -a /etc/hosts
+      # then trust this box's own CA:
+      #   docker compose exec caddy cat /data/caddy/pki/authorities/local/root.crt
+
+  Both disappear once you set a real domain and CLOUDFLARE_API_TOKEN in .env:
+  the certificate becomes publicly trusted and nothing needs installing.
+  A passkey cannot be enrolled until one of these is done - WebAuthn refuses a
+  bare IP and refuses an untrusted certificate, so http://10.9.0.1 is not a
+  place the ceremony can run."
+fi
+
 # What to tell the operator depends on the boundary this box actually has, and
 # the closed case needs the longer answer: a re-run will NOT widen it, because
 # .env is deliberately left alone once it exists. Saying "re-run with
@@ -498,6 +523,7 @@ ${CONSOLE_PASSWORD:+  Console sign-in, shown once and stored nowhere:
 
       console  https://$CONSOLE_DOMAIN   (once your tunnel is up)
       tunnel   $WG_ENDPOINT_HOST:${WG_LISTEN_PORT:-51820}/udp
+$CONSOLE_ACCESS_NOTE
 
   Issuing and revoking a device both need a passkey, like a kill does: a road
   into the control plane is not something a stolen session should be able to
