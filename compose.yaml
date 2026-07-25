@@ -213,6 +213,12 @@ services:
       # The uid the console image runs as, so the socket is reachable by it
       # and by nothing else on the volume.
       WG_SOCKET_GID: "10001"
+      # The tunnel leads to TLS, not to the console directly. The console is
+      # still plain HTTP on its own port, reachable only from inside this
+      # compose network - Caddy is what a device in the tunnel talks to, and
+      # what makes the passkey ceremony possible at all.
+      WG_CONSOLE_HOST: caddy
+      WG_CONSOLE_PORT: "443"
     ports:
       # Published on purpose, and the one port here that has to be: a tunnel
       # nobody can dial is not a tunnel. Unlike the gateway, WireGuard answers
@@ -223,6 +229,28 @@ services:
     volumes:
       - wgstate:/var/lib/wireguard
       - wgapi:/var/run/wireguard
+
+  # ---- TLS for the console, inside the tunnel ------------------------------
+  # Not a way in from the internet: this listens on the TUNNEL address only,
+  # and exists because WebAuthn refuses to run without a secure context and
+  # refuses a bare IP as the relying party. Without it the passkey ceremony
+  # simply cannot happen over WireGuard, on any device.
+  caddy:
+    <<: *restart
+    image: stack/caddy:dev
+    environment:
+      CONSOLE_DOMAIN: ${CONSOLE_DOMAIN:?set by install.sh}
+      CONSOLE_UPSTREAM: console:7420
+      # Present -> a real Let's Encrypt certificate over DNS-01. Absent ->
+      # Caddy's internal CA, which works only on devices told to trust it.
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    volumes:
+      - caddydata:/data
+      - caddyconfig:/config
+    depends_on:
+      console:
+        condition: service_started
 
   console:
     <<: *restart
@@ -250,6 +278,11 @@ services:
       # The address a phone dials from outside. Nothing on the interface can
       # report it, so the installer writes it and the console refuses to guess.
       GENARYX_WG_ENDPOINT_HOST: ${WG_ENDPOINT_HOST:?set by install.sh}
+      # WebAuthn binds credentials to this exact pair. It must match what the
+      # browser addresses through Caddy, or every assertion is refused with a
+      # mismatch that reads like a broken passkey rather than a wrong origin.
+      GENARYX_WEB_RP_ID: ${CONSOLE_DOMAIN:?set by install.sh}
+      GENARYX_WEB_ORIGIN: https://${CONSOLE_DOMAIN:?set by install.sh}
     ports:
       - "127.0.0.1:7420:7420"
     volumes:
@@ -279,6 +312,10 @@ volumes:
   # The WireGuard server's own key. On a volume because regenerating it would
   # invalidate every device config ever issued, silently.
   wgstate:
+  # Caddy's certificates and its ACME account key. On a volume because losing
+  # them means re-issuing on every restart, and Let's Encrypt rate-limits that.
+  caddydata:
+  caddyconfig:
   # The UAPI socket the console manages peers through. This volume IS the
   # privilege boundary: the tunnel and NET_ADMIN live in the `wg` container,
   # and the console reaches them through one group-readable unix socket.

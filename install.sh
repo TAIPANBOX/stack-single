@@ -137,7 +137,7 @@ fi
 
 say "fetching the image definitions"
 mkdir -p "$SRC_DIR/dockerfiles"
-for f in go-service.Dockerfile tokenfuse.Dockerfile console.Dockerfile wg.Dockerfile; do
+for f in go-service.Dockerfile tokenfuse.Dockerfile console.Dockerfile wg.Dockerfile caddy.Dockerfile; do
   curl -fsSL "$REPO_RAW/images/$f" -o "$SRC_DIR/dockerfiles/$f" || die "could not fetch $f"
 done
 
@@ -150,6 +150,9 @@ for pair in wardryx:wardryx idryx:idryx qryx:qryx mockryx:mockryx; do
     --build-arg SERVICE="$name" --build-arg SRC="./$repo" -t "stack/$name:dev" . >/dev/null \
     || die "image build failed: $name"
 done
+note "building caddy (TLS for the console)"
+docker build -q -f dockerfiles/caddy.Dockerfile -t stack/caddy:dev . >/dev/null \
+  || die "image build failed: caddy"
 note "building wg (the operator's tunnel)"
 docker build -q -f dockerfiles/wg.Dockerfile -t stack/wg:dev . >/dev/null \
   || die "image build failed: wg"
@@ -250,6 +253,13 @@ add_env_default WG_ENDPOINT_HOST "$PUBLIC_IP"
 add_env_default WG_IFACE wg-op
 add_env_default WG_LISTEN_PORT 51820
 add_env_default WG_BIND 0.0.0.0
+# The console's name inside the tunnel. WebAuthn scopes credentials to a domain
+# and refuses a bare IP, so the passkey ceremony needs one even here. The
+# default is a private-use name that resolves nowhere: it gets a working TLS
+# console immediately (Caddy's internal CA, trusted per device), and swapping
+# in a real name plus CLOUDFLARE_API_TOKEN upgrades it to a publicly-trusted
+# certificate with no other change.
+add_env_default CONSOLE_DOMAIN console.genaryx.internal
 
 # Read back what is actually on this box rather than what this run's defaults
 # would have written. On a re-run the block above left .env exactly as it was,
@@ -418,6 +428,13 @@ fi
 # `--protocol udp <port>`, not `<port>/udp`: compose parses the argument as a
 # bare integer and fails with "strconv.ParseUint: invalid syntax" on the form
 # `docker port` accepts, so the check reported a healthy tunnel as broken.
+# TLS, checked from inside the tunnel's own network rather than the host: this
+# is deliberately not reachable from anywhere else, so a check that could see
+# it from the host would mean the boundary had failed.
+check "console is served over TLS" \
+      "$DC exec -T wg wget -q --no-check-certificate -O /dev/null https://caddy/healthz"
+check "console TLS names ${CONSOLE_DOMAIN:-the configured domain}" \
+      "$DC exec -T caddy sh -c 'grep -q \"^${CONSOLE_DOMAIN}\" /etc/caddy/Caddyfile'"
 check "tunnel accepts on ${WG_LISTEN_PORT:-51820}/udp" \
       "$DC port --protocol udp wg ${WG_LISTEN_PORT:-51820} | grep -q ':${WG_LISTEN_PORT:-51820}$'"
 if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx console; then
@@ -476,7 +493,7 @@ ${CONSOLE_PASSWORD:+  Console sign-in, shown once and stored nowhere:
   box runs the WireGuard side and issues your device its own peer config:
   sign in, open Remote, and take the QR. The config is shown once.
 
-      console  http://10.9.0.1:7420   (once your tunnel is up)
+      console  https://$CONSOLE_DOMAIN   (once your tunnel is up)
       tunnel   $WG_ENDPOINT_HOST:${WG_LISTEN_PORT:-51820}/udp
 
   Issuing and revoking a device both need a passkey, like a kill does: a road
