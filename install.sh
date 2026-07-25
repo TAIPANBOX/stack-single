@@ -422,6 +422,14 @@ check "tunnel accepts on ${WG_LISTEN_PORT:-51820}/udp" \
       "$DC port --protocol udp wg ${WG_LISTEN_PORT:-51820} | grep -q ':${WG_LISTEN_PORT:-51820}$'"
 if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx console; then
   check "console answers on loopback" "curl -fsS -m5 -o /dev/null http://127.0.0.1:7420/healthz"
+  # Reachability is not usefulness. The console comes up perfectly whether or
+  # not it can resolve the planes behind it, and the difference is only visible
+  # as an Overview that says "No environment found" after you sign in - which
+  # is exactly the moment it is most expensive to discover.
+  check "console resolves the money plane" \
+        "$DC exec -T console printenv TOKENFUSE_CLOUD_ADMIN_KEY"
+  check "console resolves the policy plane" \
+        "$DC exec -T console printenv WARDRYX_ADMIN_KEY"
 fi
 
 # What to tell the operator depends on the boundary this box actually has, and

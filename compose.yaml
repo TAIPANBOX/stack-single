@@ -233,7 +233,13 @@ services:
       GENARYX_SCAN_TARGET: /srv/ui
       GENARYX_COPILOT_PROVIDER: ollama
       TOKENFUSE_CLOUD_URL: http://tokenfuse-cloud:8080
-      TOKENFUSE_CLOUD_KEY: ${CLOUD_ADMIN:?set by install.sh}
+      # ADMIN_KEY, not CLOUD_KEY. `TOKENFUSE_CLOUD_KEY` is the name the GATEWAY
+      # reads; the console's money plane looks for `TOKENFUSE_CLOUD_ADMIN_KEY`
+      # and finds nothing under the other spelling, so every install came up
+      # with an Overview that said "No environment found" while a perfectly
+      # healthy Cloud sat one container away. The policy plane below was right
+      # all along, which is what made the difference easy to miss.
+      TOKENFUSE_CLOUD_ADMIN_KEY: ${CLOUD_ADMIN:?set by install.sh}
       WARDRYX_URL: http://wardryx:8090
       WARDRYX_ADMIN_KEY: ${WARDRYX_ADMIN:?set by install.sh}
       GENARYX_WG_IFACE: ${WG_IFACE:-wg-op}
