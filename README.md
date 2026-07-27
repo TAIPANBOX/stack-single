@@ -158,13 +158,16 @@ If the console source is not present it says so and installs the governed
 stack without it, which is a real deployment: the planes enforce with or
 without a UI in front of them.
 
-## The console is the one closed piece
+## The console
 
-Everything else here is Apache-2.0 and public. The Genaryx console is the paid,
-closed part of the product, so the installer builds it only if its source is
-available to you: either place it at `src/genaryx-a360`, or pass
-`CONSOLE_TOKEN=<a GitHub token with access>`. Placing the source is preferred,
-because it keeps a credential off the server entirely.
+All of it is Apache-2.0 and public, the console included: Genaryx went open on
+2026-07-27 and there is no longer a closed piece here. The installer clones
+[`genaryx`](https://github.com/TAIPANBOX/genaryx) like anything else, and needs
+no token.
+
+`CONSOLE_TOKEN` and the `src/genaryx-a360` drop-in still work and are still
+useful, but for a different reason now: they let you install a build of your
+own rather than reach GitHub at all.
 
 ## Traps, already fixed here
 

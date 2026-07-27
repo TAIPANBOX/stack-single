@@ -30,7 +30,7 @@ set -euo pipefail
 REPO_RAW="${REPO_RAW:-https://raw.githubusercontent.com/TAIPANBOX/stack-k8s/main}"
 STACK_DIR="${STACK_DIR:-/opt/agent-stack}"
 SRC_DIR="${SRC_DIR:-$STACK_DIR/src}"
-CONSOLE_TOKEN="${CONSOLE_TOKEN:-}"   # a GitHub token with access to the closed console repo
+CONSOLE_TOKEN="${CONSOLE_TOKEN:-}"   # optional: only for a private fork of the console
 CONSOLE_USER="${CONSOLE_USER:-ops}"
 # The host interface Docker publishes the gateway on. Loopback by default: a
 # box that just ran an install script should not acquire an internet-facing
@@ -123,16 +123,19 @@ for r in tokenfuse wardryx idryx qryx mockryx verdryx engram; do
   if [ -d "$r/.git" ]; then (cd "$r" && git pull -q --ff-only 2>/dev/null || true)
   else git clone --depth 1 -q "https://github.com/TAIPANBOX/$r.git" "$r" || die "could not clone $r"; fi
 done
-if [ -n "$CONSOLE_TOKEN" ]; then
+# The console is Apache-2.0 and public since 2026-07-27, so it clones like
+# everything else and needs no token. CONSOLE_TOKEN still works, for the one
+# case it is now good for: a private fork of your own.
+if [ -d "$SRC_DIR/genaryx-a360" ]; then
+  note "console source already present (placed here directly), not cloning"
+elif [ -n "$CONSOLE_TOKEN" ]; then
   if [ -d genaryx/.git ]; then (cd genaryx && git pull -q --ff-only 2>/dev/null || true)
   else git clone --depth 1 -q "https://x-access-token:${CONSOLE_TOKEN}@github.com/TAIPANBOX/genaryx.git" genaryx \
-      || die "could not clone the console; is the token valid for TAIPANBOX/genaryx?"; fi
-elif [ -d "$SRC_DIR/genaryx-a360" ]; then
-  note "console source already present (placed here directly), no token needed"
+      || die "could not clone the console with the token given; is it valid for your fork?"; fi
 else
-  note "no CONSOLE_TOKEN and no genaryx-a360 source: installing the governed"
-  note "stack WITHOUT the console. The planes enforce with or without a UI."
-  note "To add it later, copy the console source to $SRC_DIR/genaryx-a360 and re-run."
+  if [ -d genaryx/.git ]; then (cd genaryx && git pull -q --ff-only 2>/dev/null || true)
+  else git clone --depth 1 -q "https://github.com/TAIPANBOX/genaryx.git" genaryx \
+      || die "could not clone the console"; fi
 fi
 
 say "fetching the image definitions"
