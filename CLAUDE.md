@@ -101,41 +101,35 @@ Invariant 2 is the one that matters and the one that has actually broken. It
 needs a disposable VM and a two-run script, which costs money, so it stays a
 discipline until someone funds the box.
 
-**And it is broken right now, in `install.sh`, measured 2026-08-01.** The
-console is staged with:
+**It was broken, and my first account of HOW was wrong. Both are worth keeping.**
+
+`scripts/shell-lint.sh` was made able to fail, shellcheck raised SC2015 on
 
 ```sh
 [ -d genaryx ] && mv genaryx genaryx-a360 2>/dev/null || true
 ```
 
-On a first run this is fine. On a re-run `genaryx-a360` already exists, so `mv`
-moves the freshly cloned `genaryx` INSIDE it, as `genaryx-a360/genaryx`. The
-command succeeds, `|| true` would have swallowed a failure anyway, and the
-`docker build` two lines down reads the stale top level. **The second run builds
-the console from the previous run's source and says nothing.** Reproduced in a
-scratch directory: after run two, the marker file still reads run one's content.
+and I reported that a re-run moves the fresh clone inside the old directory as
+`genaryx-a360/genaryx` and builds the stale top level. **That does not happen.**
+I proved the `mv` semantics in a scratch directory and never checked whether
+`install.sh` reaches that state. It does not: the clone is guarded by
+`[ -d "$SRC_DIR/genaryx-a360" ]`, so on a re-run nothing is cloned and `genaryx`
+never exists. Proving a mechanism is not proving reachability.
 
-The fix is to clone into `genaryx-a360` directly and delete the `mv`, which adds
-no destructive operation. It is NOT applied yet: it changes what a root
-installer does on somebody else's machine, and that is the user's call.
+**The real defect was next to it, and simulating the actual branches found it.**
+That same guard could not tell "the operator dropped their own source here" from
+"we put it here on the last run". After run one it always took the first
+reading, so the console was never refreshed again while the other seven
+repositories were pulled every time. `stack-single` updated everything except
+its own console, silently. Three simulated runs built run one's source every
+time.
 
-Found by shellcheck (SC2015) after `scripts/shell-lint.sh` was made capable of
-failing. The previous lint step ran `shellcheck ... || bash -n ...`, so every
-finding fell through to a syntax check and the step was green for its whole
-life. Note that this defect needs no VM to see: it is two `mkdir`s and an `mv`.
-
-**Invariant 4 was mis-stated, and the check this section used to ask for would
-have been theatre.** The old note wanted a grep for `df -T`, `readlink -f` and
-`sed -i` without a portable fallback. Reading `install.sh` first shows why that
-is the wrong check twice over. The file contains exactly one of those, a
-`sed -i` at line 498, and it is inside a message telling the operator how to
-widen the bind, not a command this script runs: the grep would have failed on
-prose. And the reason it can afford GNU at all is the preflight at line 64,
-which refuses any host that is not Debian or Ubuntu before touching the machine.
-So what needs holding is the fence, not the userland behind it, and that is what
-the gate now does. The unheld half is real: nothing stops portability-dependent
-code being added outside the fence, and nothing notices if the fence is widened
-to a distro where these differ.
+Fixed by cloning straight into `genaryx-a360` and deciding on `.git`, exactly as
+the loop above already does per repository. The `mv` is gone, so the nesting
+hazard goes with it. Verified across three cases: repeated runs now refresh,
+operator-supplied source that is not a checkout is left alone, and an upgrade
+from the old layout is picked up as a checkout because the old flow left
+`genaryx-a360/.git` in place.
 
 Invariant 5's gate is a ratchet, not a repair. Both properties it checks were
 already true when it was written.

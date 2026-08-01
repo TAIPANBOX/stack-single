@@ -133,20 +133,26 @@ done
 # The console is Apache-2.0 and public since 2026-07-27, so it clones like
 # everything else and needs no token. CONSOLE_TOKEN still works, for the one
 # case it is now good for: a private fork of your own.
-if [ -d "$SRC_DIR/genaryx-a360" ]; then
-  note "console source already present (placed here directly), not cloning"
+# The console is cloned straight into its build directory name, like every
+# other source above. It used to land in `genaryx` and be renamed afterwards,
+# and the guard on the renamed directory could not tell "the operator dropped
+# their own source here" from "we put it here on the last run". So from the
+# second run onward the console was never refreshed while the other seven
+# repositories were: `stack-single` updated everything except its own console,
+# silently. `.git` is what distinguishes the two cases, exactly as the loop
+# above already does per repository.
+if [ -d "$SRC_DIR/genaryx-a360/.git" ]; then
+  # A && B || C here is deliberate: the refresh is best-effort and C is `true`.
+  # shellcheck disable=SC2015
+  (cd genaryx-a360 && git pull -q --ff-only 2>/dev/null || true)
+elif [ -d "$SRC_DIR/genaryx-a360" ]; then
+  note "console source already present and not a checkout, leaving it alone"
 elif [ -n "$CONSOLE_TOKEN" ]; then
-  # A && B || C here is deliberate: the refresh is best-effort and C is `true`.
-  # shellcheck disable=SC2015
-  if [ -d genaryx/.git ]; then (cd genaryx && git pull -q --ff-only 2>/dev/null || true)
-  else git clone --depth 1 -q "https://x-access-token:${CONSOLE_TOKEN}@github.com/TAIPANBOX/genaryx.git" genaryx \
-      || die "could not clone the console with the token given; is it valid for your fork?"; fi
+  git clone --depth 1 -q "https://x-access-token:${CONSOLE_TOKEN}@github.com/TAIPANBOX/genaryx.git" genaryx-a360 \
+    || die "could not clone the console with the token given; is it valid for your fork?"
 else
-  # A && B || C here is deliberate: the refresh is best-effort and C is `true`.
-  # shellcheck disable=SC2015
-  if [ -d genaryx/.git ]; then (cd genaryx && git pull -q --ff-only 2>/dev/null || true)
-  else git clone --depth 1 -q "https://github.com/TAIPANBOX/genaryx.git" genaryx \
-      || die "could not clone the console"; fi
+  git clone --depth 1 -q "https://github.com/TAIPANBOX/genaryx.git" genaryx-a360 \
+    || die "could not clone the console"
 fi
 
 say "fetching the image definitions"
@@ -173,17 +179,8 @@ docker build -q -f dockerfiles/wg.Dockerfile -t stack/wg:dev . >/dev/null \
 note "building tokenfuse (gateway + cloud)"
 docker build -q -f dockerfiles/tokenfuse.Dockerfile -t stack/tokenfuse:dev ./tokenfuse >/dev/null \
   || die "image build failed: tokenfuse"
-if [ -d genaryx ] || [ -d genaryx-a360 ]; then
+if [ -d genaryx-a360 ]; then
   note "building the console (four languages, it hosts the tools it runs)"
-  # KNOWN SECOND-RUN DEFECT, measured 2026-08-01, see CLAUDE.md invariant 2.
-  # On a re-run genaryx-a360 already exists, so `mv genaryx genaryx-a360` moves
-  # the FRESH clone inside it as genaryx-a360/genaryx instead of replacing it,
-  # succeeds, and the build below reads the stale top level. The console is then
-  # built from the previous run's source with nothing said. The fix is to clone
-  # into genaryx-a360 directly and drop this mv; it is not applied here because
-  # it changes what a root installer does on somebody else's machine.
-  # shellcheck disable=SC2015
-  [ -d genaryx ] && mv genaryx genaryx-a360 2>/dev/null || true
   docker build -q -f dockerfiles/console.Dockerfile -t stack/genaryx-console:dev . >/dev/null \
     || die "image build failed: console"
 fi
