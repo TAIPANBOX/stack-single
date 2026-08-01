@@ -53,6 +53,8 @@ EXPLAINED=0   # set by die(), so a diagnosed failure is not narrated twice
 # with what, every time, including the signals that `set -e` turns into
 # invisible exits (141 is SIGPIPE, and it is a real hazard in a pipeline that
 # ends in `head`).
+# rc is assigned in this same trap string, which shellcheck does not look inside.
+# shellcheck disable=SC2154
 trap 'rc=$?; { [ $rc -eq 0 ] || [ "${EXPLAINED:-0}" = 1 ]; } && exit $rc
       printf "\n\033[1;31m!! install.sh stopped at line %s (exit %s)\033[0m\n" "$LINENO" "$rc" >&2
       [ $rc -eq 141 ] && printf "   exit 141 is SIGPIPE: a pipeline ended early. This is a bug in the installer, please report it.\n" >&2
@@ -62,6 +64,7 @@ trap 'rc=$?; { [ $rc -eq 0 ] || [ "${EXPLAINED:-0}" = 1 ]; } && exit $rc
 # ---- 0. preflight -----------------------------------------------------------
 [ "$(id -u)" = "0" ] || die "run as root: this installs packages and a firewall rule."
 [ -r /etc/os-release ] || die "no /etc/os-release: this expects Debian or Ubuntu."
+# shellcheck disable=SC1091  # lives on the target machine, not in this repo
 . /etc/os-release
 case "${ID:-}${ID_LIKE:-}" in
   *debian*|*ubuntu*) ;;
@@ -269,6 +272,7 @@ add_env_default CONSOLE_DOMAIN console.genaryx.internal
 # so an existing deployment keeps its own binding and its own credentials, and
 # every section below then reports and verifies the real values instead of
 # announcing a boundary this run merely intended.
+# shellcheck disable=SC1091  # generated at install time, not in this repo
 . ./.env
 
 # ---- 4. the files the services read -----------------------------------------
@@ -382,8 +386,10 @@ DC="${COMPOSE[*]}"
 # container sees and therefore what the check should be asking about.
 NET="agent-stack_default"
 docker network inspect "$NET" >/dev/null 2>&1 || die "network $NET is missing: the stack did not start."
+# shellcheck disable=SC2329  # invoked indirectly: passed as a string to `check`
 probe() { docker run --rm --network "$NET" busybox:1.36 wget -q -T5 -O /dev/null "$1"; }
 # Prints the HTTP status only, so a check can assert 401 and 403 as PASSES.
+# shellcheck disable=SC2329  # invoked indirectly: passed as a string to `check`
 code() { docker run --rm --network "$NET" busybox:1.36 \
            wget -S -q -T5 -O /dev/null --header="Authorization: Bearer $2" "$1" 2>&1 \
          | awk '/^  HTTP\//{c=$2} END{print c+0}'; }

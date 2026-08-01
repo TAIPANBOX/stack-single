@@ -34,26 +34,29 @@ change here is a change to something with root on somebody else's box.
    trailer.
 5. Open a PR with `gh`. **Ask the user before merging.**
 
-There is no CI in this repo, so the local gate is the only gate.
-
 ## Gates
 
 ```sh
-shellcheck install.sh
-bash -n install.sh
+./scripts/shell-lint.sh
 ./scripts/closed-by-default.sh
+./scripts/fail-before-half-the-job.sh
 ```
 
-## Running the gates
+## Where the gates run
+
+Two callers, one copy of each check: `.github/workflows/gates.yml` and
+`.githooks/pre-push`. Never inline a check into either.
 
 ```sh
-git config core.hooksPath .githooks   # once, per clone
+git config core.hooksPath .githooks   # once, per clone, for the local half
 ```
 
-There is no CI in this repository, so `.githooks/pre-push` is the ONLY thing
-that runs the gates above. Without that one line they are scripts nobody calls,
-which is a comment with an exit code. `git push --no-verify` skips them, and
-should be rare enough to be worth explaining.
+**Until 2026-08-01 the hook was the only caller, and that was a hole.**
+`core.hooksPath` is local configuration: it is not committed and does not travel
+with a clone, so these gates enforced nothing for anybody who cloned this repo.
+CI is what makes them travel. This repo is public, so standard runners cost
+nothing. `git push --no-verify` still skips the local half, and should be rare
+enough to be worth explaining.
 
 ## Hard invariants
 
