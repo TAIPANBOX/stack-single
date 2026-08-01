@@ -105,6 +105,8 @@ fi
 note "docker $(docker --version | awk '{print $3}' | tr -d ,), compose present"
 
 # ---- 1. this repo, whether cloned or piped ----------------------------------
+# C here is `true`, so the fallback is an empty HERE, which the next line handles.
+# shellcheck disable=SC2015
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
 mkdir -p "$STACK_DIR"
 if [ -n "$HERE" ] && [ -f "$HERE/compose.yaml" ]; then
@@ -123,6 +125,8 @@ cd "$STACK_DIR"
 say "fetching sources"
 mkdir -p "$SRC_DIR" && cd "$SRC_DIR"
 for r in tokenfuse wardryx idryx qryx mockryx verdryx engram; do
+  # A && B || C here is deliberate: the refresh is best-effort and C is `true`.
+  # shellcheck disable=SC2015
   if [ -d "$r/.git" ]; then (cd "$r" && git pull -q --ff-only 2>/dev/null || true)
   else git clone --depth 1 -q "https://github.com/TAIPANBOX/$r.git" "$r" || die "could not clone $r"; fi
 done
@@ -527,6 +531,11 @@ case "$GATEWAY_BIND" in
       ANTHROPIC_BASE_URL=http://$PUBLIC_IP:4100" ;;
 esac
 
+# The report below uses A && echo X || echo Y inside a substitution. C is `echo`,
+# which does not fail, so it is a plain ternary rather than the trap SC2015 warns
+# about. It cannot be silenced inside the heredoc: text in there is printed, not
+# parsed as comments.
+# shellcheck disable=SC2015
 cat <<EOF
 
 $(printf '\033[1m')$([ "$fail" -eq 0 ] && echo "Up, and every check passed." || echo "Up, with $fail failed check(s) above.")$(printf '\033[0m')
@@ -565,4 +574,6 @@ EOF
 # The banner above already said what failed, so the trap must not narrate a
 # non-zero exit here as if the script had crashed: it ran to the end.
 EXPLAINED=1
+# C here is `echo`, which does not fail, so the branch is a plain ternary.
+# shellcheck disable=SC2015
 exit "$([ "$fail" -eq 0 ] && echo 0 || echo 1)"

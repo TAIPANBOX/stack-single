@@ -69,5 +69,9 @@ if ! shellcheck install.sh; then
   exit 1
 fi
 
+# The count is computed, not typed. A hardcoded number here would be one more
+# published figure drifting away from what it describes, which is the disease
+# this whole repo's gates exist to treat.
+n=$(grep -c 'shellcheck disable=' install.sh)
 echo "OK: shellcheck passes on install.sh with no codes disabled globally."
-echo "    Four findings are silenced at their own lines, each with its reason."
+echo "    $n findings are silenced at their own lines, each with its reason above it."
