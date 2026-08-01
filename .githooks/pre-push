@@ -31,6 +31,7 @@ step() {
 echo "pre-push gate"
 step "shellcheck install.sh" "sh -c 'command -v shellcheck >/dev/null && shellcheck install.sh || bash -n install.sh'"
 step "gateway binds loopback by default" "./scripts/closed-by-default.sh"
+step "fails before doing half the job" "./scripts/fail-before-half-the-job.sh"
 
 echo
 if [ "$fail" -ne 0 ]; then

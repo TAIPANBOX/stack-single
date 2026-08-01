@@ -74,25 +74,45 @@ an absent invariant.
 3. **A verification check must be able to fail.** The installer's own checks
    have to be shown catching a broken stack, otherwise a green install reports
    silence rather than health. *(not enforced)*
-4. **Never assume GNU.** This installer meets whatever userland the host has.
-   `df -T`, `mount` output, `sed -i` and `readlink -f` all differ, and a helper
-   that misreports rather than failing is worse than one that errors.
-   *(not enforced)*
+4. **Never assume GNU beyond what the preflight has already guaranteed.** The
+   premise here is narrower than it reads: `install.sh` refuses anything that is
+   not Debian or Ubuntu, at line 64, before it touches the machine. Inside that
+   fence GNU coreutils are a fact, not an assumption. The rule binds anything
+   that runs OUTSIDE the fence, and it binds the day the fence is widened.
+   *(partly gated: `scripts/fail-before-half-the-job.sh` holds the fence itself,
+   failing if the distro refusal is removed. Nothing checks the portability of
+   code added outside it.)*
 5. **Fail before doing half the job.** Check preconditions up front and refuse,
    rather than starting and leaving the machine in a state neither installed nor
-   clean. *(not enforced)*
+   clean. *(gate: `scripts/fail-before-half-the-job.sh`, which requires every
+   refusal to precede the first side effect, and every fetch, clone and service
+   start to carry `|| die`)*
 
 ## Decisions that have no gate yet
 
 This list is debt, and it is here to stay visible rather than to be tidy.
 
-**Held by this file alone: invariants 2, 3, 4 and 5.**
+**Held by this file alone: invariants 2 and 3.** Invariant 4 is half held.
 
 Invariant 2 is the one that matters and the one that has actually broken. It
 needs a disposable VM and a two-run script, which costs money, so it stays a
-discipline until someone funds the box. Invariant 4 is partly checkable: fail
-if the script calls `df -T`, `readlink -f` or `sed -i` without a portable
-fallback beside it.
+discipline until someone funds the box.
+
+**Invariant 4 was mis-stated, and the check this section used to ask for would
+have been theatre.** The old note wanted a grep for `df -T`, `readlink -f` and
+`sed -i` without a portable fallback. Reading `install.sh` first shows why that
+is the wrong check twice over. The file contains exactly one of those, a
+`sed -i` at line 498, and it is inside a message telling the operator how to
+widen the bind, not a command this script runs: the grep would have failed on
+prose. And the reason it can afford GNU at all is the preflight at line 64,
+which refuses any host that is not Debian or Ubuntu before touching the machine.
+So what needs holding is the fence, not the userland behind it, and that is what
+the gate now does. The unheld half is real: nothing stops portability-dependent
+code being added outside the fence, and nothing notices if the fence is widened
+to a distro where these differ.
+
+Invariant 5's gate is a ratchet, not a repair. Both properties it checks were
+already true when it was written.
 
 ## Standing rule
 
