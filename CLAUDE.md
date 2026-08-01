@@ -101,6 +101,29 @@ Invariant 2 is the one that matters and the one that has actually broken. It
 needs a disposable VM and a two-run script, which costs money, so it stays a
 discipline until someone funds the box.
 
+**And it is broken right now, in `install.sh`, measured 2026-08-01.** The
+console is staged with:
+
+```sh
+[ -d genaryx ] && mv genaryx genaryx-a360 2>/dev/null || true
+```
+
+On a first run this is fine. On a re-run `genaryx-a360` already exists, so `mv`
+moves the freshly cloned `genaryx` INSIDE it, as `genaryx-a360/genaryx`. The
+command succeeds, `|| true` would have swallowed a failure anyway, and the
+`docker build` two lines down reads the stale top level. **The second run builds
+the console from the previous run's source and says nothing.** Reproduced in a
+scratch directory: after run two, the marker file still reads run one's content.
+
+The fix is to clone into `genaryx-a360` directly and delete the `mv`, which adds
+no destructive operation. It is NOT applied yet: it changes what a root
+installer does on somebody else's machine, and that is the user's call.
+
+Found by shellcheck (SC2015) after `scripts/shell-lint.sh` was made capable of
+failing. The previous lint step ran `shellcheck ... || bash -n ...`, so every
+finding fell through to a syntax check and the step was green for its whole
+life. Note that this defect needs no VM to see: it is two `mkdir`s and an `mv`.
+
 **Invariant 4 was mis-stated, and the check this section used to ask for would
 have been theatre.** The old note wanted a grep for `df -T`, `readlink -f` and
 `sed -i` without a portable fallback. Reading `install.sh` first shows why that

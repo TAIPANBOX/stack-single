@@ -31,6 +31,18 @@
 #
 # So: never add a code to a flag here. Silence it at the line, with the reason.
 #
+# SHELLCHECK VERSIONS DISAGREE, so the directives name every code that applies.
+# 0.11 on this machine reports the unreachable-function case as SC2329; the
+# older build on ubuntu-latest reports the same thing as SC2317. The first CI
+# run went red on exactly that, and on two SC2015 findings that 0.11 does not
+# raise at all. Anything that lints has to be told what it may see, not what one
+# machine happened to show.
+#
+# ONE OF THOSE CI-ONLY FINDINGS WAS REAL. SC2015 on the `mv genaryx
+# genaryx-a360` line is a genuine second-run defect, measured and written up at
+# its own line and in CLAUDE.md invariant 2. A lint step that could not fail had
+# been sitting on top of it.
+#
 # shellcheck is present on ubuntu-latest and on this machine. If it is genuinely
 # absent this FAILS rather than falling back, because the fallback is what hid
 # the findings in the first place.
