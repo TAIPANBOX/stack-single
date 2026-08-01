@@ -1,0 +1,28 @@
+# The gates in scripts/ used to run only through .githooks/pre-push. That is a
+# LOCAL configuration: `core.hooksPath` is not committed and does not travel
+# with a clone, so those checks enforced nothing for anybody who cloned this
+# repo. A gate that runs on one machine is a comment with an exit code.
+#
+# This workflow calls the same scripts the hook calls. One copy of each check,
+# two callers. Public repo, so standard runners cost nothing.
+name: gates
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install.sh lints clean
+        run: ./scripts/shell-lint.sh
+
+      - name: the stack comes up closed
+        run: ./scripts/closed-by-default.sh
+
+      - name: it fails before doing half the job
+        run: ./scripts/fail-before-half-the-job.sh

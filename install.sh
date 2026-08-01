@@ -53,6 +53,8 @@ EXPLAINED=0   # set by die(), so a diagnosed failure is not narrated twice
 # with what, every time, including the signals that `set -e` turns into
 # invisible exits (141 is SIGPIPE, and it is a real hazard in a pipeline that
 # ends in `head`).
+# rc is assigned in this same trap string, which shellcheck does not look inside.
+# shellcheck disable=SC2154
 trap 'rc=$?; { [ $rc -eq 0 ] || [ "${EXPLAINED:-0}" = 1 ]; } && exit $rc
       printf "\n\033[1;31m!! install.sh stopped at line %s (exit %s)\033[0m\n" "$LINENO" "$rc" >&2
       [ $rc -eq 141 ] && printf "   exit 141 is SIGPIPE: a pipeline ended early. This is a bug in the installer, please report it.\n" >&2
@@ -62,6 +64,7 @@ trap 'rc=$?; { [ $rc -eq 0 ] || [ "${EXPLAINED:-0}" = 1 ]; } && exit $rc
 # ---- 0. preflight -----------------------------------------------------------
 [ "$(id -u)" = "0" ] || die "run as root: this installs packages and a firewall rule."
 [ -r /etc/os-release ] || die "no /etc/os-release: this expects Debian or Ubuntu."
+# shellcheck disable=SC1091  # lives on the target machine, not in this repo
 . /etc/os-release
 case "${ID:-}${ID_LIKE:-}" in
   *debian*|*ubuntu*) ;;
@@ -102,6 +105,8 @@ fi
 note "docker $(docker --version | awk '{print $3}' | tr -d ,), compose present"
 
 # ---- 1. this repo, whether cloned or piped ----------------------------------
+# C here is `true`, so the fallback is an empty HERE, which the next line handles.
+# shellcheck disable=SC2015
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
 mkdir -p "$STACK_DIR"
 if [ -n "$HERE" ] && [ -f "$HERE/compose.yaml" ]; then
@@ -120,6 +125,8 @@ cd "$STACK_DIR"
 say "fetching sources"
 mkdir -p "$SRC_DIR" && cd "$SRC_DIR"
 for r in tokenfuse wardryx idryx qryx mockryx verdryx engram; do
+  # A && B || C here is deliberate: the refresh is best-effort and C is `true`.
+  # shellcheck disable=SC2015
   if [ -d "$r/.git" ]; then (cd "$r" && git pull -q --ff-only 2>/dev/null || true)
   else git clone --depth 1 -q "https://github.com/TAIPANBOX/$r.git" "$r" || die "could not clone $r"; fi
 done
@@ -129,10 +136,14 @@ done
 if [ -d "$SRC_DIR/genaryx-a360" ]; then
   note "console source already present (placed here directly), not cloning"
 elif [ -n "$CONSOLE_TOKEN" ]; then
+  # A && B || C here is deliberate: the refresh is best-effort and C is `true`.
+  # shellcheck disable=SC2015
   if [ -d genaryx/.git ]; then (cd genaryx && git pull -q --ff-only 2>/dev/null || true)
   else git clone --depth 1 -q "https://x-access-token:${CONSOLE_TOKEN}@github.com/TAIPANBOX/genaryx.git" genaryx \
       || die "could not clone the console with the token given; is it valid for your fork?"; fi
 else
+  # A && B || C here is deliberate: the refresh is best-effort and C is `true`.
+  # shellcheck disable=SC2015
   if [ -d genaryx/.git ]; then (cd genaryx && git pull -q --ff-only 2>/dev/null || true)
   else git clone --depth 1 -q "https://github.com/TAIPANBOX/genaryx.git" genaryx \
       || die "could not clone the console"; fi
@@ -164,6 +175,14 @@ docker build -q -f dockerfiles/tokenfuse.Dockerfile -t stack/tokenfuse:dev ./tok
   || die "image build failed: tokenfuse"
 if [ -d genaryx ] || [ -d genaryx-a360 ]; then
   note "building the console (four languages, it hosts the tools it runs)"
+  # KNOWN SECOND-RUN DEFECT, measured 2026-08-01, see CLAUDE.md invariant 2.
+  # On a re-run genaryx-a360 already exists, so `mv genaryx genaryx-a360` moves
+  # the FRESH clone inside it as genaryx-a360/genaryx instead of replacing it,
+  # succeeds, and the build below reads the stale top level. The console is then
+  # built from the previous run's source with nothing said. The fix is to clone
+  # into genaryx-a360 directly and drop this mv; it is not applied here because
+  # it changes what a root installer does on somebody else's machine.
+  # shellcheck disable=SC2015
   [ -d genaryx ] && mv genaryx genaryx-a360 2>/dev/null || true
   docker build -q -f dockerfiles/console.Dockerfile -t stack/genaryx-console:dev . >/dev/null \
     || die "image build failed: console"
@@ -269,6 +288,7 @@ add_env_default CONSOLE_DOMAIN console.genaryx.internal
 # so an existing deployment keeps its own binding and its own credentials, and
 # every section below then reports and verifies the real values instead of
 # announcing a boundary this run merely intended.
+# shellcheck disable=SC1091  # generated at install time, not in this repo
 . ./.env
 
 # ---- 4. the files the services read -----------------------------------------
@@ -382,8 +402,10 @@ DC="${COMPOSE[*]}"
 # container sees and therefore what the check should be asking about.
 NET="agent-stack_default"
 docker network inspect "$NET" >/dev/null 2>&1 || die "network $NET is missing: the stack did not start."
+# shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
 probe() { docker run --rm --network "$NET" busybox:1.36 wget -q -T5 -O /dev/null "$1"; }
 # Prints the HTTP status only, so a check can assert 401 and 403 as PASSES.
+# shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
 code() { docker run --rm --network "$NET" busybox:1.36 \
            wget -S -q -T5 -O /dev/null --header="Authorization: Bearer $2" "$1" 2>&1 \
          | awk '/^  HTTP\//{c=$2} END{print c+0}'; }
@@ -509,6 +531,11 @@ case "$GATEWAY_BIND" in
       ANTHROPIC_BASE_URL=http://$PUBLIC_IP:4100" ;;
 esac
 
+# The report below uses A && echo X || echo Y inside a substitution. C is `echo`,
+# which does not fail, so it is a plain ternary rather than the trap SC2015 warns
+# about. It cannot be silenced inside the heredoc: text in there is printed, not
+# parsed as comments.
+# shellcheck disable=SC2015
 cat <<EOF
 
 $(printf '\033[1m')$([ "$fail" -eq 0 ] && echo "Up, and every check passed." || echo "Up, with $fail failed check(s) above.")$(printf '\033[0m')
@@ -547,4 +574,6 @@ EOF
 # The banner above already said what failed, so the trap must not narrate a
 # non-zero exit here as if the script had crashed: it ran to the end.
 EXPLAINED=1
+# C here is `echo`, which does not fail, so the branch is a plain ternary.
+# shellcheck disable=SC2015
 exit "$([ "$fail" -eq 0 ] && echo 0 || echo 1)"
