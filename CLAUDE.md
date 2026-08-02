@@ -40,7 +40,11 @@ change here is a change to something with root on somebody else's box.
 ./scripts/shell-lint.sh
 ./scripts/closed-by-default.sh
 ./scripts/fail-before-half-the-job.sh
+./scripts/build-context-complete.sh
 ```
+
+The last one reaches the network, because what it checks lives in another
+repository.
 
 ## Where the gates run
 
@@ -85,7 +89,20 @@ an absent invariant.
    *(partly gated: `scripts/fail-before-half-the-job.sh` holds the fence itself,
    failing if the distro refusal is removed. Nothing checks the portability of
    code added outside it.)*
-5. **Fail before doing half the job.** Check preconditions up front and refuse,
+5. **Every file an image copies is a file this installer fetched.** The
+   Dockerfiles come from `TAIPANBOX/stack-k8s`, which does not know this
+   consumer exists, so a change there breaks an install here with nothing in
+   this repository having changed and neither side's CI seeing it. That is not
+   hypothetical: `wg.Dockerfile` grew a `COPY images/uapi-proxy`, a directory,
+   and a clean `curl | bash` died ten minutes in on a cache-key error. The
+   fetch is a whole tarball now rather than five raw URLs, because a tarball
+   cannot drift file by file.
+   *(gate: `scripts/build-context-complete.sh`, verified by hiding
+   `images/uapi-proxy` and watching it name that exact file. It judges paths
+   under `images/` only: build ARGs, globs and the sibling repositories this
+   installer clones are things it cannot judge, and its first draft reported
+   eleven failures on a tree that builds perfectly.)*
+6. **Fail before doing half the job.** Check preconditions up front and refuse,
    rather than starting and leaving the machine in a state neither installed nor
    clean. *(gate: `scripts/fail-before-half-the-job.sh`, which requires every
    refusal to precede the first side effect, and every fetch, clone and service
@@ -131,7 +148,15 @@ operator-supplied source that is not a checkout is left alone, and an upgrade
 from the old layout is picked up as a checkout because the old flow left
 `genaryx-a360/.git` in place.
 
-Invariant 5's gate is a ratchet, not a repair. Both properties it checks were
+Invariant 5's gate was written the day the thing it checks broke a live
+install, so unlike the others it is a repair with a ratchet on top rather than
+a ratchet alone. Its own first draft is the lesson worth keeping: checking
+every `COPY` source reported eleven failures on a tree that builds perfectly,
+because build ARGs, glob patterns and sibling repositories are not paths it can
+resolve. It now judges `images/` only. A check that cries wolf is switched off,
+and then the real thing it would have caught goes through.
+
+Invariant 6's gate is a ratchet, not a repair. Both properties it checks were
 already true when it was written.
 
 ## Standing rule

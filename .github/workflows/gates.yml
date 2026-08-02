@@ -26,3 +26,5 @@ jobs:
 
       - name: it fails before doing half the job
         run: ./scripts/fail-before-half-the-job.sh
+      - name: every image has the files it copies
+        run: ./scripts/build-context-complete.sh
