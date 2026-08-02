@@ -63,6 +63,21 @@ SSH is still how you get in before the first device exists:
 ssh -L 17420:127.0.0.1:7420 root@<your box>
 ```
 
+**Alerts do not need any of this.** The notifier dials outward to your mail
+server; the tunnel exists to let you IN. A box with no tunnel and no device
+still writes to you when one of your agents crosses a line. What the tunnel
+decides is only whether the one link in that mail can be opened.
+
+So the link is settable, in `.env`:
+
+```
+ALERT_CONSOLE_URL=''                        # use CONSOLE_DOMAIN, i.e. the tunnel
+ALERT_CONSOLE_URL='http://localhost:17420'  # you reach the console over ssh -L
+```
+
+Leave it empty with no tunnel either, and the mail says it carries no link
+rather than carrying a dead name.
+
 Two details worth knowing rather than discovering:
 
 - `51820/udp` is published, and it is the one port here that has to be. Unlike

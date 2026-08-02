@@ -166,7 +166,19 @@ services:
       HERALDYX_SMTP_FROM: ${SMTP_FROM:-}
       HERALDYX_SMTP_USER: ${SMTP_USER:-}
       HERALDYX_SMTP_PASS: ${SMTP_PASS:-}
-      HERALDYX_CONSOLE_URL: https://${CONSOLE_DOMAIN:-console.genaryx.internal}
+      # Where the ONE link in an alert points. Sending mail needs none of this:
+      # the notifier dials outward and the tunnel exists to let an operator in,
+      # so alerts arrive on a box with no tunnel at all. What the tunnel decides
+      # is whether the link in them can be opened.
+      #
+      # So it is settable. `CONSOLE_DOMAIN` is right for an operator who reaches
+      # the console through the WireGuard tunnel, and it is the default because
+      # that is the documented way in. An operator who uses `ssh -L` instead
+      # (which install.sh offers, and which needs nothing) sets
+      # ALERT_CONSOLE_URL=http://localhost:17420 in .env and their links work.
+      # Empty in both is also an answer: the mail then says it carries no link
+      # rather than carrying a dead one.
+      HERALDYX_CONSOLE_URL: ${ALERT_CONSOLE_URL:-https://${CONSOLE_DOMAIN:-console.genaryx.internal}}
       HERALDYX_BOX: ${CONSOLE_DOMAIN:-agent stack}
     volumes:
       - events:/var/lib/stack/events:ro
