@@ -32,6 +32,9 @@ echo "pre-push gate"
 step "shellcheck install.sh" "./scripts/shell-lint.sh"
 step "gateway binds loopback by default" "./scripts/closed-by-default.sh"
 step "fails before doing half the job" "./scripts/fail-before-half-the-job.sh"
+# Reaches the network (a tarball from the sibling repo), which is why it is
+# last: everything that can be judged offline has already spoken by here.
+step "every image has the files it copies" "./scripts/build-context-complete.sh"
 
 echo
 if [ "$fail" -ne 0 ]; then

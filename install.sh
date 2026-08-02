@@ -28,6 +28,9 @@
 set -euo pipefail
 
 REPO_RAW="${REPO_RAW:-https://raw.githubusercontent.com/TAIPANBOX/stack-k8s/main}"
+# The image definitions come from stack-k8s as a whole, because some of them
+# need files beside the Dockerfile (see the fetch below).
+REPO_TARBALL="${REPO_TARBALL:-https://api.github.com/repos/TAIPANBOX/stack-k8s/tarball/main}"
 STACK_DIR="${STACK_DIR:-/opt/agent-stack}"
 SRC_DIR="${SRC_DIR:-$STACK_DIR/src}"
 CONSOLE_TOKEN="${CONSOLE_TOKEN:-}"   # optional: only for a private fork of the console
@@ -220,32 +223,46 @@ else
 fi
 
 say "fetching the image definitions"
-mkdir -p "$SRC_DIR/dockerfiles"
-for f in go-service.Dockerfile tokenfuse.Dockerfile console.Dockerfile wg.Dockerfile caddy.Dockerfile; do
-  curl -fsSL "$REPO_RAW/images/$f" -o "$SRC_DIR/dockerfiles/$f" || die "could not fetch $f"
-done
+# The whole of stack-k8s, not five URLs.
+#
+# This used to fetch exactly five `.Dockerfile` files by raw URL. It worked
+# until `wg.Dockerfile` in that repository grew a `COPY images/uapi-proxy`,
+# which is a DIRECTORY in its build context, and nothing here fetched it. A
+# clean install then died ten minutes in with "failed to compute cache key:
+# /images/uapi-proxy: not found", and neither repository's CI could have seen
+# it: the break is in the seam between them, and this side had not changed.
+#
+# One tarball cannot drift file by file. It is also what `stack-k8s`'s own
+# `deploy.sh` does, so the two installers now build from the same shape and
+# with the same contexts.
+rm -rf "$SRC_DIR/stack-k8s"
+mkdir -p "$SRC_DIR/stack-k8s"
+curl -fsSL "$REPO_TARBALL" | tar -xz -C "$SRC_DIR/stack-k8s" --strip-components=1 \
+  || die "could not fetch the image definitions from stack-k8s"
+[ -f "$SRC_DIR/stack-k8s/images/wg.Dockerfile" ] \
+  || die "the stack-k8s tarball has no images/wg.Dockerfile; the layout changed"
 
 say "building images (first run is slow: Rust)"
 cd "$SRC_DIR"
 for pair in wardryx:wardryx idryx:idryx qryx:qryx mockryx:mockryx heraldyx:heraldyx; do
   name="${pair%%:*}"; repo="${pair##*:}"
   note "building $name"
-  docker build -q -f dockerfiles/go-service.Dockerfile \
+  docker build -q -f stack-k8s/images/go-service.Dockerfile \
     --build-arg SERVICE="$name" --build-arg SRC="./$repo" -t "stack/$name:dev" . >/dev/null \
     || die "image build failed: $name"
 done
 note "building caddy (TLS for the console)"
-docker build -q -f dockerfiles/caddy.Dockerfile -t stack/caddy:dev . >/dev/null \
+docker build -q -f stack-k8s/images/caddy.Dockerfile -t stack/caddy:dev stack-k8s >/dev/null \
   || die "image build failed: caddy"
 note "building wg (the operator's tunnel)"
-docker build -q -f dockerfiles/wg.Dockerfile -t stack/wg:dev . >/dev/null \
+docker build -q -f stack-k8s/images/wg.Dockerfile -t stack/wg:dev stack-k8s >/dev/null \
   || die "image build failed: wg"
 note "building tokenfuse (gateway + cloud)"
-docker build -q -f dockerfiles/tokenfuse.Dockerfile -t stack/tokenfuse:dev ./tokenfuse >/dev/null \
+docker build -q -f stack-k8s/images/tokenfuse.Dockerfile -t stack/tokenfuse:dev ./tokenfuse >/dev/null \
   || die "image build failed: tokenfuse"
 if [ -d genaryx-a360 ]; then
   note "building the console (four languages, it hosts the tools it runs)"
-  docker build -q -f dockerfiles/console.Dockerfile -t stack/genaryx-console:dev . >/dev/null \
+  docker build -q -f stack-k8s/images/console.Dockerfile -t stack/genaryx-console:dev . >/dev/null \
     || die "image build failed: console"
 fi
 cd "$STACK_DIR"
