@@ -45,9 +45,15 @@ services:
       - sh
       - -euc
       - |
-        mkdir -p /vol/events /vol/traces /vol/cloud
+        mkdir -p /vol/events /vol/traces /vol/cloud /vol/heraldyx
         chown 0:10001 /vol/events && chmod 2775 /vol/events
         chown 10001:10001 /vol/traces /vol/cloud && chmod 0775 /vol/traces /vol/cloud
+        # The notifier runs 65532:10001 like the Go planes, and writes exactly
+        # one file here. Same trap as the others: a fresh named volume is
+        # root:root 0755, and without this line the process starts, reads the
+        # log, decides correctly and then cannot save what it decided, so
+        # every restart re-sends what it already sent.
+        chown 65532:10001 /vol/heraldyx && chmod 0775 /vol/heraldyx
         # idryx is told to load the gateway's log at startup and exits if the
         # file is absent, which on a box that has served no traffic yet it
         # always is. An empty file is a valid empty log, and pre-creating it is
@@ -61,6 +67,7 @@ services:
       - events:/vol/events
       - traces:/vol/traces
       - cloudstate:/vol/cloud
+      - heraldyxstate:/vol/heraldyx
     restart: "no"
 
   # ---- the policy plane's durable store ------------------------------------
@@ -126,6 +133,44 @@ services:
       - tokenfuse:/var/lib/stack/events/tokenfuse.ndjson
     volumes:
       - events:/var/lib/stack/events:ro
+    depends_on:
+      init-volumes:
+        condition: service_completed_successfully
+
+  # ---- the notifier: the part that writes to you ---------------------------
+  # Reads the shared event log and mails the operator when one of their agents
+  # crosses a line. It runs on every box, and on a box where nobody filled in
+  # ALERT_TO it watches the log, stays healthy and sends nothing: not having
+  # mail is a choice an operator makes, not a broken deployment.
+  #
+  # `:ro` on the event volume, like idryx above and for the same reason: this
+  # process reads the log and can do nothing else to it. Every limit it applies
+  # is a limit on messages, never on evidence.
+  #
+  # Unlike the cluster, a compose box cannot express "this container may reach
+  # the mail ports and nothing else": Docker gives every container outbound
+  # access and there is no NetworkPolicy here to narrow it. That difference is
+  # real and is not hidden: on one machine the boundary is the machine.
+  heraldyx:
+    <<: *restart
+    image: stack/heraldyx:dev
+    user: "65532:10001"
+    environment:
+      HERALDYX_EVENTS: /var/lib/stack/events
+      HERALDYX_STATE: /var/lib/stack/heraldyx/state.json
+      HERALDYX_MIN_SEVERITY: ${ALERT_MIN_SEVERITY:-high}
+      # Empty is the default and means "send nothing". `:-` rather than `:?`
+      # deliberately: a box that never configured mail must still come up.
+      HERALDYX_TO: ${ALERT_TO:-}
+      HERALDYX_SMTP_HOST: ${SMTP_HOST:-}
+      HERALDYX_SMTP_FROM: ${SMTP_FROM:-}
+      HERALDYX_SMTP_USER: ${SMTP_USER:-}
+      HERALDYX_SMTP_PASS: ${SMTP_PASS:-}
+      HERALDYX_CONSOLE_URL: https://${CONSOLE_DOMAIN:-console.genaryx.internal}
+      HERALDYX_BOX: ${CONSOLE_DOMAIN:-agent stack}
+    volumes:
+      - events:/var/lib/stack/events:ro
+      - heraldyxstate:/var/lib/stack/heraldyx
     depends_on:
       init-volumes:
         condition: service_completed_successfully
@@ -309,6 +354,11 @@ volumes:
   cloudstate:
   consolestate:
   pgdata:
+  # How far the notifier has read, and what it has already said. On a volume
+  # because losing either means re-reading the log and re-sending alerts that
+  # already went out, which on a restart loop is a mailbox full of one
+  # incident.
+  heraldyxstate:
   # The WireGuard server's own key. On a volume because regenerating it would
   # invalidate every device config ever issued, silently.
   wgstate:

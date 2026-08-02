@@ -118,13 +118,77 @@ else
 fi
 cd "$STACK_DIR"
 
+# ---- 1b. notifications, asked BEFORE the ten minutes of building ------------
+# Asked here for the same reason the cluster installer asks its questions at the
+# top: an operator should answer everything they have to answer before a long
+# build, not after it. Blank is a real answer and the default one.
+#
+# On a re-run this asks nothing. `.env` already holds the answer, and invariant
+# 2 (works twice, untouched) means a second run must not re-interrogate an
+# operator or quietly change what the first run set up.
+ALERT_TO="${ALERT_TO:-}"
+SMTP_HOST="${SMTP_HOST:-}"
+SMTP_FROM="${SMTP_FROM:-}"
+SMTP_USER="${SMTP_USER:-}"
+SMTP_PASS="${SMTP_PASS:-}"
+ALERT_CONFIGURED_NOW=0
+if grep -q '^ALERT_TO=' .env 2>/dev/null; then
+  note "notifications already configured in .env, left as is"
+elif [ -n "$ALERT_TO" ]; then
+  note "notifications configured from the environment"
+  ALERT_CONFIGURED_NOW=1
+elif { exec 4<>/dev/tty; } 2>/dev/null; then
+  cat >&4 <<'TXT'
+
+   Notifications. This box can write to you when one of your own agents
+   crosses a line: a budget gone, a policy denial, a run killed, an agent
+   behaving unlike itself. The mail comes from this box, it carries a link
+   into this box's console, and it never carries a button that acts.
+
+   Leave the address blank for no notifications. The notifier still runs and
+   still watches, it simply has nobody to write to.
+
+TXT
+  printf '   address for alerts (blank = none): ' >&4
+  IFS= read -r ans <&4 || ans=""
+  ALERT_TO="$(printf '%s' "$ans" | tr -d '[:space:]')"
+  if [ -n "$ALERT_TO" ]; then
+    while [ -z "$SMTP_HOST" ]; do
+      printf '   mail server as host:port (e.g. smtp.example.com:587): ' >&4
+      IFS= read -r ans <&4 || ans=""
+      ans="$(printf '%s' "$ans" | tr -d '[:space:]')"
+      case "$ans" in
+        "")  printf '   without one, this box has nothing to hand the mail to.\n' >&4 ;;
+        *:*) SMTP_HOST="$ans" ;;
+        *)   printf '   needs a port too: %s:587 for submission, :465 for implicit TLS.\n' "$ans" >&4 ;;
+      esac
+    done
+    printf '   sender address [%s]: ' "$ALERT_TO" >&4
+    IFS= read -r ans <&4 || ans=""
+    ans="$(printf '%s' "$ans" | tr -d '[:space:]')"
+    SMTP_FROM="${ans:-$ALERT_TO}"
+    printf '   username (blank = server wants no authentication): ' >&4
+    IFS= read -r ans <&4 || ans=""
+    SMTP_USER="$(printf '%s' "$ans" | tr -d '[:space:]')"
+    if [ -n "$SMTP_USER" ]; then
+      printf '   password: ' >&4
+      IFS= read -rs SMTP_PASS <&4 || SMTP_PASS=""; printf '\n' >&4
+    fi
+    ALERT_CONFIGURED_NOW=1
+  fi
+  exec 4>&-
+else
+  note "no terminal to ask on: no notifications. Set ALERT_TO and SMTP_HOST in the"
+  note "environment and re-run, or edit .env afterwards, to add them."
+fi
+
 # ---- 2. sources and images --------------------------------------------------
 # Built here rather than pulled: there is no public registry for these, and a
 # private one is another component to secure and another bill. The build
 # happens once; `restart: unless-stopped` means it is not repeated on reboot.
 say "fetching sources"
 mkdir -p "$SRC_DIR" && cd "$SRC_DIR"
-for r in tokenfuse wardryx idryx qryx mockryx verdryx engram; do
+for r in tokenfuse wardryx idryx qryx mockryx heraldyx verdryx engram; do
   # A && B || C here is deliberate: the refresh is best-effort and C is `true`.
   # shellcheck disable=SC2015
   if [ -d "$r/.git" ]; then (cd "$r" && git pull -q --ff-only 2>/dev/null || true)
@@ -163,7 +227,7 @@ done
 
 say "building images (first run is slow: Rust)"
 cd "$SRC_DIR"
-for pair in wardryx:wardryx idryx:idryx qryx:qryx mockryx:mockryx; do
+for pair in wardryx:wardryx idryx:idryx qryx:qryx mockryx:mockryx heraldyx:heraldyx; do
   name="${pair%%:*}"; repo="${pair##*:}"
   note "building $name"
   docker build -q -f dockerfiles/go-service.Dockerfile \
@@ -279,6 +343,32 @@ add_env_default WG_BIND 0.0.0.0
 # in a real name plus CLOUDFLARE_API_TOKEN upgrades it to a publicly-trusted
 # certificate with no other change.
 add_env_default CONSOLE_DOMAIN console.genaryx.internal
+
+# Notifications, from the answers given before the build.
+#
+# Single-quoted, and this is not fussiness. `.env` has TWO readers: compose
+# interpolates it, and line "` . ./.env`" below sources it into THIS shell as
+# root. Every other value in this file is a generated alphanumeric or an IP, so
+# neither reader has ever met a character it minds. A mail password is the
+# first value here an operator types, and it can hold a space, a dollar, a
+# quote or a backtick. Unquoted, `SMTP_PASS=a b` makes the shell try to run
+# `b`, and a backtick would make it run whatever is between them, as root, on
+# the operator's own machine. Single quotes are the one form both readers treat
+# literally: compose does not interpolate inside them, and the shell does not
+# either. An embedded quote is closed, escaped and reopened, the standard way.
+#
+# An EMPTY ALERT_TO is written on purpose. It records that the question was
+# asked and answered, so the next run does not ask again (invariant 2: a second
+# run changes nothing).
+sq_() { printf "'%s'" "$(printf '%s' "${1:-}" | sed "s/'/'\\\\''/g")"; }
+add_env_default ALERT_TO   "$(sq_ "$ALERT_TO")"
+add_env_default SMTP_HOST  "$(sq_ "$SMTP_HOST")"
+add_env_default SMTP_FROM  "$(sq_ "$SMTP_FROM")"
+add_env_default SMTP_USER  "$(sq_ "$SMTP_USER")"
+add_env_default SMTP_PASS  "$(sq_ "$SMTP_PASS")"
+add_env_default ALERT_MIN_SEVERITY high
+# Out of this shell's memory now that it is on disk at 0600.
+SMTP_PASS=""
 
 # Read back what is actually on this box rather than what this run's defaults
 # would have written. On a re-run the block above left .env exactly as it was,
@@ -472,6 +562,27 @@ if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx console; then
         "$DC exec -T console printenv TOKENFUSE_CLOUD_ADMIN_KEY"
   check "console resolves the policy plane" \
         "$DC exec -T console printenv WARDRYX_ADMIN_KEY"
+fi
+
+# The test message, but only on the run that CONFIGURED mail. A re-run must not
+# post a message every time somebody upgrades the box, and a re-run is also the
+# one case where the settings were already proven once.
+#
+# Sent from inside the container, which is the point: it proves that container's
+# own network path and those credentials, not this shell's. A wrong setting
+# caught here costs a minute. Caught the way it is otherwise caught, through an
+# alert that never arrived, it costs whatever the alert was about.
+if [ "$ALERT_CONFIGURED_NOW" = 1 ]; then
+  say "notifications"
+  if "${COMPOSE[@]}" exec -T heraldyx /usr/local/bin/service --test-mail 2>&1 | sed 's/^/  /'; then
+    note "if that message does not arrive, the address or the server is wrong."
+    note "Nothing else on this box depends on it."
+  else
+    note "the test message did NOT go out. The stack is fine and unaffected."
+    note "Check ALERT_TO, SMTP_HOST and the credentials in $STACK_DIR/.env, then:"
+    note "  cd $STACK_DIR && ${COMPOSE[*]} logs heraldyx"
+    note "  cd $STACK_DIR && ${COMPOSE[*]} exec heraldyx /usr/local/bin/service --test-mail"
+  fi
 fi
 
 # The console is HTTPS on a name now, which needs two things the operator has
