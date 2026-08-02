@@ -384,6 +384,12 @@ add_env_default SMTP_FROM  "$(sq_ "$SMTP_FROM")"
 add_env_default SMTP_USER  "$(sq_ "$SMTP_USER")"
 add_env_default SMTP_PASS  "$(sq_ "$SMTP_PASS")"
 add_env_default ALERT_MIN_SEVERITY high
+# Where an alert's one link points, when the console domain is not how you
+# reach this box. Empty means "use CONSOLE_DOMAIN", which is the tunnel. Set it
+# to http://localhost:17420 if you reach the console over `ssh -L` instead, and
+# the links in your mail will open. Mail itself needs neither: the notifier
+# dials outward, and the tunnel is how you get IN.
+add_env_default ALERT_CONSOLE_URL "$(sq_ "")"
 # Out of this shell's memory now that it is on disk at 0600.
 SMTP_PASS=""
 
