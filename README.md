@@ -7,6 +7,12 @@ that live somewhere else entirely.
 curl -fsSL https://raw.githubusercontent.com/TAIPANBOX/stack-single/main/install.sh | bash
 ```
 
+<div align="center">
+
+<img src="assets/diagram.svg" alt="The whole stack as compose services on one box, with the gateway published to loopback so opening it is a deliberate act. Two directions cross the boundary and they are not the same: an operator comes in through a tunnel the box issues their device, and the notifier dials out to a mail server on its own, needing none of the tunnel" width="960">
+
+</div>
+
 It comes up closed. The gateway is published to the host's **loopback**, so a
 box that just ran an install script does not acquire an internet-facing
 enforcement plane because nobody typed anything. Opening it to the agents you
