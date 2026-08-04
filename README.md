@@ -141,7 +141,7 @@ breaks passkeys again. If you set it, leave it.
 
 ## What comes up
 
-Six containers on one Docker network, plus a one-shot `init-volumes` that
+Nine containers on one Docker network, plus a one-shot `init-volumes` that
 exits, wired exactly as the Kubernetes deployment wires them, because service
 names resolve the same way in both:
 
@@ -153,6 +153,9 @@ names resolve the same way in both:
 | `idryx` | 8081 | no |
 | `policy-db` (postgres) | 5432 | no |
 | `console` | 7420 | loopback only |
+| `caddy` | 443 | no, it is reached over the tunnel, on the name in `CONSOLE_DOMAIN` |
+| `wg` | 51820/udp | **yes**, and it is the one port here that has to be |
+| `heraldyx` | none | it has none. It reads the event volume read-only and dials your mail server, so nothing ever calls it |
 
 "Not published" is not a firewall rule that might be misread: those services
 have no host port at all, so nothing outside this machine can address them.
