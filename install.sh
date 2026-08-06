@@ -13,6 +13,15 @@
 # toolchains live inside the images, the services come back after a reboot,
 # and the console has a sign-in that exists.
 #
+# What this box does NOT run, so you can compare before installing rather
+# than after: none of stack-up's five governance routines (a FinOps export, a
+# crypto-inventory trend, a quality-drift check, an identity-anomaly sweep,
+# and an opt-in fire drill) run here on any schedule; stack-k8s runs three of
+# the four safe ones as CronJobs, stack-up runs all five as OS timers, and
+# this compose file runs none of them. See the README's "What this box does
+# not run" section for the rest of the comparison, including the memory
+# plane.
+#
 # The gateway is published to the host's loopback only, until you say
 # otherwise. Publishing an enforcement plane to the internet is a decision, not
 # a default, so it is one word you type rather than one you inherit:
@@ -406,11 +415,18 @@ if [ ! -f policy.yaml ]; then
   cat > policy.yaml <<'EOF'
 # Seeded scoped to fire-drill identities only, so a fresh box denies something
 # real without touching a live fleet. Replace with your own.
+#
+# agent://mockryx.local/*, not agent://drill.local/*: this file and
+# stack-k8s's equivalent had drifted onto "drill.local" while stack-up and
+# taipan both seed "mockryx.local" for the identical rehearsal identity.
+# Aligned here on mockryx.local because it names the actual tool that
+# generates this traffic (mockryx), matching the convention every other
+# agent://<component>.local/* identity in this stack already follows.
 - name: starter-require-human-approval
-  target: agent://drill.local/*
+  target: agent://mockryx.local/*
   require_human_above_usd: 1
 - name: starter-deny-shell-exec
-  target: agent://drill.local/*
+  target: agent://mockryx.local/*
   deny_tool:
     - shell_exec
 EOF
@@ -700,6 +716,10 @@ $CONSOLE_ACCESS_NOTE
       cd $STACK_DIR && ${COMPOSE[*]} ps
       cd $STACK_DIR && ${COMPOSE[*]} logs -f tokenfuse-gateway
       cd $STACK_DIR && ${COMPOSE[*]} down     # stop, keeping every volume
+
+  Nothing on this box runs the governance routines (FinOps export, crypto
+  trend, quality drift, identity sweep) on a schedule. Run one by hand with
+  ${COMPOSE[*]} exec, or see the README for how stack-up and stack-k8s do it.
 
 EOF
 # The banner above already said what failed, so the trap must not narrate a

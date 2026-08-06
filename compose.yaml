@@ -158,6 +158,15 @@ services:
     environment:
       HERALDYX_EVENTS: /var/lib/stack/events
       HERALDYX_STATE: /var/lib/stack/heraldyx/state.json
+      # "high", not stack-up's "medium": deliberately different, and
+      # previously unstated anywhere. This is a real deployment governing
+      # whatever fleet the operator actually points at it; stack-up is the
+      # local sandbox meant to show a newcomer what an alert looks like
+      # within a few minutes of ./up.sh. A "high" default here keeps a real
+      # operator's inbox quiet until something serious happens; stack-up's
+      # lower default gives its short demo something to show. Same
+      # variable, opposite correct default, for two different audiences.
+      # Overridable per box via ALERT_MIN_SEVERITY in .env.
       HERALDYX_MIN_SEVERITY: ${ALERT_MIN_SEVERITY:-high}
       # Empty is the default and means "send nothing". `:-` rather than `:?`
       # deliberately: a box that never configured mail must still come up.
