@@ -49,6 +49,59 @@ This is the other thing. The differences are the whole point:
 | Survives a reboot | no | yes |
 | Console sign-in | no console at all | generated, shown once |
 | Credentials | a dev key | unique per box, 0600, never printed twice |
+| Governance routines on a schedule | all five, as OS timers | none, see below |
+
+## What this box does not run
+
+Two things a look at `compose.yaml` alone will not tell you, both about
+absence rather than presence. An operator choosing between the three
+deployment shapes (`stack-up`, this one, `stack-k8s`) should be able to see
+both before installing, not after.
+
+**No governance routines run on a schedule.** `stack-up`'s `routines.sh`
+installs five OS-native timers for the stack's own recurring governance work:
+a FinOps export, a crypto-inventory trend, a quality-drift check, an
+identity-anomaly sweep, and an opt-in fire drill. `stack-k8s` runs three of
+those as CronJobs (`crypto-trend`, `quality-drift`, `identity-sweep`; its own
+docs explain why the fourth, the FinOps export, cannot run as a CronJob
+there). Neither `install.sh` nor `compose.yaml` installs anything of the
+kind: this box runs **none of the five, ever, on its own.** Run one by hand
+inside the console container when you want it:
+
+```bash
+docker compose exec console verdryx drift --baseline <id>   # or qryx, idryx, ...
+```
+
+or add your own cron entry on the host calling `docker compose exec`. This
+was not a documented choice before now; it is simply what the installer and
+the compose file do, and it is worth knowing before you pick this shape over
+the other two.
+
+**The memory plane, `engram`, is not a separate service here**, the same way
+`verdryx`, `qryx` and `mockryx` are not: `compose.yaml` names no `engram`,
+`verdryx`, `qryx` or `mockryx` container, because none of the four is meant
+to be one. `stack-k8s`'s own README explains why (its "Fact 2"): the console
+reaches each of them by EXECUTING it, or, for `engram-mcp` specifically, by
+speaking MCP over stdio to a child process, and "a sidecar container cannot
+be another container's stdin." So all four have to live inside the console's
+own image or not run at all.
+
+They do live there. `install.sh` clones `verdryx` and `engram` as sources
+(the same `for r in ... verdryx engram` loop that clones every other plane,
+above) and builds the console from the identical
+`stack-k8s/images/console.Dockerfile` that bakes both into `stack-k8s`'s
+console image, the same `pip install` step and all. Based on reading that
+build, not on having run it: the underlying binaries appear to be present
+here exactly the way they are in `stack-k8s`'s console, which is a different
+claim from "the memory plane works here", and both stacks share the same
+further gate regardless of deployment shape: `genaryx`'s own discovery code
+(`memory/env.rs`) refuses to show a Memory panel until its store already has
+a file with real data in it, so a console that has never actually run an
+Engram session reports "no memory plane" on `stack-up`, here, and on
+`stack-k8s` alike, until an operator does something once. If there is a
+concrete reason this box's memory plane cannot work that a closer look would
+find, it is not in `install.sh`, `compose.yaml`, or the Dockerfile it builds
+from.
 
 ## Reaching the console: this box issues your device its own tunnel
 
