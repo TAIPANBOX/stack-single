@@ -111,4 +111,22 @@ if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 
+# Zero paths checked is not a clean bill of health, it is a check that found
+# nothing to check. Until 2026-08-09 this printed "OK: 0 build-context path(s)
+# across 5 Dockerfiles, every one present" and exited 0, a sentence asserting
+# the opposite of what had happened.
+#
+# It is one Dockerfile refactor away, and the count is already only 1: every
+# COPY here is matched by the `images/` prefix, so rewriting those paths to any
+# other prefix in stack-k8s empties this check without touching this repo. That
+# seam, between two repositories neither of which knows the other exists, is
+# the exact thing this gate was written for.
+if [ "$checked" -eq 0 ]; then
+  echo "FAIL: no build-context path was checked, so this measured nothing."
+  echo "      Every COPY/ADD source under images/ is what this reads;"
+  echo "      if the Dockerfiles stopped using that prefix, this check has to"
+  echo "      move with them. Silence here is not health."
+  exit 1
+fi
+
 echo "OK: $checked build-context path(s) across 5 Dockerfiles, every one present."
