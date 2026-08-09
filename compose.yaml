@@ -196,6 +196,68 @@ services:
       init-volumes:
         condition: service_completed_successfully
 
+  # ---- egress: the web enforcement point ------------------------------------
+  #
+  # OPT-IN, and the only service here that is. `docker compose up` does not
+  # start it; `docker compose --profile egress up -d` does.
+  #
+  # heraldyx opens three mail ports. This one, once running, lets agents reach
+  # the public web on 80 and 443, which is the widest grant on this box. An
+  # installer that switched it on unasked would decide the one thing an operator
+  # most needs to have chosen. The credential and the cap are already in .env,
+  # so turning it on is one flag and no configuration.
+  #
+  # It refuses to start without SCOPYX_KEYS, which install.sh generates: a wide
+  # bind with no credential is an unauthenticated fetch proxy on this box, and
+  # anything reaching the port could fetch under the operator's allowance and
+  # with their name on the record.
+  scopyx:
+    <<: *restart
+    profiles: ["egress"]
+    image: stack/scopyx:dev
+    user: "65532:65532"
+    environment:
+      # Inside the compose network, not on the host. Nothing publishes a port
+      # for this: the gateway and the console reach it by service name, and an
+      # operator who wants to drive it by hand does so through them or with
+      # `docker compose exec`.
+      SCOPYX_ADDR: 0.0.0.0:4300
+      SCOPYX_WARDRYX: http://wardryx:8090
+      # `:-` and NOT `:?`, and this is not a relaxation.
+      #
+      # Compose interpolates every service in the file, INCLUDING ones whose
+      # profile is off. With `:?` here, a box that updated compose.yaml without
+      # re-running install.sh would fail to start ANYTHING, with an error naming
+      # a service the operator never enabled. Measured 2026-08-09 by removing
+      # both variables from a .env and running `docker compose config` with the
+      # profile off: it refuses the whole file.
+      #
+      # Empty is safe because scopyx itself refuses to start without
+      # SCOPYX_KEYS: a wide bind with no credential is an unauthenticated fetch
+      # proxy, and it says so and exits. The failure stays inside the service
+      # that was opted into, with a message that explains itself, instead of
+      # taking the box down.
+      SCOPYX_WARDRYX_KEY: ${SCOPYX_WARDRYX_KEY:-}
+      SCOPYX_KEYS: ${SCOPYX_KEYS:-}
+      # Its OWN journal, on its own volume, never the shared events volume. A
+      # component that can write the shared log can, once compromised, corrupt
+      # the trail it was adding to, and this is the only service here that
+      # reaches the public internet on purpose.
+      SCOPYX_EVENTS: /var/lib/scopyx/events.ndjson
+      # No vendor, no account, no token. An operator who already runs a fetching
+      # service sets SCOPYX_BACKEND=external and SCOPYX_EXTERNAL_ENDPOINT
+      # instead, and gains a decision, a bound and a record over the tool they
+      # already own.
+      SCOPYX_BACKEND: ${SCOPYX_BACKEND:-passthrough}
+      SCOPYX_EXTERNAL_ENDPOINT: ${SCOPYX_EXTERNAL_ENDPOINT:-}
+      SCOPYX_EXTERNAL_KEY: ${SCOPYX_EXTERNAL_KEY:-}
+      SCOPYX_MAX_FETCHES_PER_HOUR: ${SCOPYX_MAX_FETCHES_PER_HOUR:-200}
+    volumes:
+      - scopyxevents:/var/lib/scopyx
+    depends_on:
+      init-volumes:
+        condition: service_completed_successfully
+
   # ---- money: the control API ----------------------------------------------
   tokenfuse-cloud:
     <<: *restart
@@ -379,6 +441,8 @@ volumes:
   # because losing either means re-reading the log and re-sending alerts that
   # already went out, which on a restart loop is a mailbox full of one
   # incident.
+  # scopyx's own journal, deliberately NOT the shared `events` volume above.
+  scopyxevents:
   heraldyxstate:
   # The WireGuard server's own key. On a volume because regenerating it would
   # invalidate every device config ever issued, silently.
