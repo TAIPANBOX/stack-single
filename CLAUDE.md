@@ -41,6 +41,7 @@ change here is a change to something with root on somebody else's box.
 ./scripts/closed-by-default.sh
 ./scripts/fail-before-half-the-job.sh
 ./scripts/build-context-complete.sh
+./scripts/gates-have-teeth.sh   # invariant 8; needs a clean tree
 ```
 
 The last one reaches the network, because what it checks lives in another
@@ -107,6 +108,35 @@ an absent invariant.
    clean. *(gate: `scripts/fail-before-half-the-job.sh`, which requires every
    refusal to precede the first side effect, and every fetch, clone and service
    start to carry `|| die`)*
+
+8. **A check must be able to tell "did not fail" from "did not run", and every
+   gate here has been made to fail on purpose to prove it can.** This
+   repository is one of the two where writing the harness found a real hole
+   rather than confirming a sound gate.
+
+   `build-context-complete.sh` printed "OK: 0 build-context path(s) across 5
+   Dockerfiles, every one present" and exited 0 when no COPY or ADD source
+   matched the `images/` prefix. The count is already only 1, so ONE Dockerfile
+   refactor in stack-k8s empties this check without touching this repository at
+   all. That seam, between two repositories neither of which knows the other
+   exists, is the exact thing the gate was written for, and it would have gone
+   on reporting every path present while checking none.
+
+   None of the four gates here said anything about measuring nothing before
+   2026-08-09, which is why all four were checked by hand for that property
+   rather than trusted.
+   *(gate: `scripts/gates-have-teeth.sh`, 6 cases: three real faults, one
+   non-fault, and two subjects taken away. Two cases mutate the stack-k8s TREE
+   rather than this repo, because that is what the gate reads; the tree is
+   resolved once per run, the same three ways the gate resolves it, so a run
+   costs at most one fetch. Verified on both paths: with a sibling checkout,
+   and in a worktree with no sibling, which is what CI does.)*
+
+   **What it does not cover.** It cannot test itself. It proves each gate
+   catches the faults named in it, not every fault of that kind.
+   `shell-lint.sh` has only a non-fault case: its subject is `install.sh` by
+   name, and a missing `install.sh` makes shellcheck itself fail, which is not
+   a property of the gate.
 
 ## Decisions that have no gate yet
 

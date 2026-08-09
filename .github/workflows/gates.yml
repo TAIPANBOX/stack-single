@@ -28,3 +28,11 @@ jobs:
         run: ./scripts/fail-before-half-the-job.sh
       - name: every image has the files it copies
         run: ./scripts/build-context-complete.sh
+
+      # Last, because it mutates tracked files and restores them. It needs a
+      # clean tree and says so plainly, so it also reports any earlier step
+      # that starts writing into the checkout. Two of its cases mutate a copy
+      # of the stack-k8s tree, which it fetches the same way the gate above
+      # does when there is no sibling checkout.
+      - name: the gates above can still fail
+        run: ./scripts/gates-have-teeth.sh
