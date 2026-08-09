@@ -209,9 +209,35 @@ names resolve the same way in both:
 | `caddy` | 443 | no, it is reached over the tunnel, on the name in `CONSOLE_DOMAIN` |
 | `wg` | 51820/udp | **yes**, and it is the one port here that has to be |
 | `heraldyx` | none | it has none. It reads the event volume read-only and dials your mail server, so nothing ever calls it |
+| `scopyx` | none | **opt-in, off unless you ask for it.** Inside the compose network only. See below |
 
 "Not published" is not a firewall rule that might be misread: those services
 have no host port at all, so nothing outside this machine can address them.
+
+### The one service that does not start
+
+`scopyx`, the web-egress enforcement point, is behind a compose profile:
+
+```bash
+docker compose --profile egress up -d scopyx
+```
+
+Everything else here governs what your agents do to your own planes. This one
+governs what they do to the **outside**, which means that once it runs, agents
+on this box can reach the public web on 80 and 443 through it. That is the
+widest grant this stack has, and an installer that switched it on without asking
+would have made the one decision an operator most needs to have made themselves.
+
+`install.sh` has already put a credential and a per-hour cap in `.env`, so
+turning it on is the flag above and nothing else. Every fetch through it is
+decided by `wardryx` before anything leaves, every redirect hop is decided
+again, and both the fetch and any refusal are written to a chained journal on
+its **own** volume, never the shared event log.
+
+Without the credential it refuses to start rather than running open, and that is
+deliberate: a wide bind with no credential is an unauthenticated fetch proxy,
+and anything that reached it could fetch under your egress allowance and with
+your name on the record.
 The console is on loopback because it arrives over your own tunnel:
 
 ```bash

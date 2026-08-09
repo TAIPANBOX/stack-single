@@ -200,7 +200,7 @@ fi
 # happens once; `restart: unless-stopped` means it is not repeated on reboot.
 say "fetching sources"
 mkdir -p "$SRC_DIR" && cd "$SRC_DIR"
-for r in tokenfuse wardryx idryx qryx mockryx heraldyx verdryx engram; do
+for r in tokenfuse wardryx idryx qryx mockryx heraldyx scopyx verdryx engram; do
   # A && B || C here is deliberate: the refresh is best-effort and C is `true`.
   # shellcheck disable=SC2015
   if [ -d "$r/.git" ]; then (cd "$r" && git pull -q --ff-only 2>/dev/null || true)
@@ -253,7 +253,7 @@ curl -fsSL "$REPO_TARBALL" | tar -xz -C "$SRC_DIR/stack-k8s" --strip-components=
 
 say "building images (first run is slow: Rust)"
 cd "$SRC_DIR"
-for pair in wardryx:wardryx idryx:idryx qryx:qryx mockryx:mockryx heraldyx:heraldyx; do
+for pair in wardryx:wardryx idryx:idryx qryx:qryx mockryx:mockryx heraldyx:heraldyx scopyx:scopyx; do
   name="${pair%%:*}"; repo="${pair##*:}"
   note "building $name"
   docker build -q -f stack-k8s/images/go-service.Dockerfile \
@@ -399,6 +399,40 @@ add_env_default ALERT_MIN_SEVERITY high
 # the links in your mail will open. Mail itself needs neither: the notifier
 # dials outward, and the tunnel is how you get IN.
 add_env_default ALERT_CONSOLE_URL "$(sq_ "")"
+# The egress enforcement point, new in this release.
+#
+# The credential carries the agent identity, and that is not decoration: the
+# only authenticated fact scopyx has is which credential was presented, so it is
+# the only thing an agent identity may be derived from. A header naming the
+# agent would be the caller telling us who it is, and a policy carrying
+# `deny_if_unattested` would then be satisfied by a string the caller wrote for
+# itself.
+#
+# `agent://local.invalid/...` on purpose. `.invalid` is reserved by RFC 2606 and
+# resolves nowhere, so a trust domain nobody configured cannot collide with a
+# real one an operator later uses, and cannot be mistaken for one in a trail.
+# Change it to your own domain when you have one.
+add_env_default SCOPYX_KEYS "$(gen 40)=agent://local.invalid/default-agent"
+# Its own viewer key for the policy plane, for the reason the gateway has one:
+# an enforcement point that can rewrite the policy it enforces is not an
+# enforcement point.
+#
+# Read back from .env when it is not in this shell's memory, which is the case
+# on EVERY re-run: WARDRYX_GATEWAY_SECRET is generated inside the block that
+# writes .env for the first time, and that block is skipped once .env exists.
+# Without this line an upgraded box would get SCOPYX_WARDRYX_KEY= empty, scopyx
+# would fail every decision as unauthenticated, and it would fail CLOSED, so the
+# symptom would be "nothing can fetch" with a reason pointing at the policy
+# plane. Invariant 2 of this repo, works twice untouched, is exactly this.
+WARDRYX_GATEWAY_SECRET="${WARDRYX_GATEWAY_SECRET:-$(sed -n 's/^WARDRYX_GATEWAY=//p' .env 2>/dev/null | head -1)}"
+[ -n "$WARDRYX_GATEWAY_SECRET" ] || die "could not find WARDRYX_GATEWAY in .env, so scopyx would be given an empty credential for the policy plane"
+add_env_default SCOPYX_WARDRYX_KEY "$(sq_ "$WARDRYX_GATEWAY_SECRET")"
+# Finite, and lower than scopyx's own default of 500. This is a real box
+# governing whatever fleet the operator points at it: an agent loop that
+# discovers it can fetch will do so as fast as it is allowed, and the first
+# anybody hears of it is a bill or a rate-limit from the site being fetched.
+add_env_default SCOPYX_MAX_FETCHES_PER_HOUR 200
+
 # Out of this shell's memory now that it is on disk at 0600.
 SMTP_PASS=""
 
