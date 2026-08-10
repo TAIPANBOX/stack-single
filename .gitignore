@@ -5,3 +5,8 @@
 policy.yaml
 environments/
 src/
+
+# macOS writes these into any directory Finder has opened, and `git add -A`
+# picks them up. Three repositories in this estate got one on 2026-08-10 from
+# exactly that, two of them hours after a commit message about the habit.
+.DS_Store
