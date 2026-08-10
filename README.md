@@ -254,10 +254,14 @@ the compose network, and running both would give the gateway two services
 called `scopyx` and no way to say which one it reached.
 
 It costs about **1 GB** of disk against **15 MB**, which is why it is a
-separate profile rather than a variable. Everything else is identical: the same
+separate profile rather than a variable. On a box that pulls rather than
+builds, the transfer is 267 MB against 3.5 MB. Everything else is identical: the same
 policy plane, the same journal on the same volume, the same cap.
 
-It is also the only backend that decides the forty other requests a page makes.
+It is also the only backend that decides the other requests a page makes, and
+there are more of them than the phrase suggests: measured on a real node on
+2026-08-10, a Wikipedia article made 40, `bbc.com/news` 113, a GitHub
+repository page 144 and `nytimes.com` 343, every one of them decided.
 The browser is launched with no route to the network except a proxy scopyx
 owns, and that proxy refuses any destination your policy did not allow.
 
