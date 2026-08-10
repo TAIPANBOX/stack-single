@@ -28,6 +28,13 @@
 #
 #   GATEWAY_BIND=0.0.0.0 ./install.sh     # first run: agents elsewhere can call it
 #
+# A browser for the egress plane is the other opt-in, and it is opt-in for a
+# size rather than for a risk: about 1 GB against 15 MB. Without it the fetcher
+# runs no JavaScript, which is right for most boxes and wrong for agents that
+# read pages assembled in the browser.
+#
+#   WITH_BROWSER=1 ./install.sh           # also builds stack/scopyx-browser:dev
+#
 # Re-running never changes an existing box: the value lives in .env from the
 # first run, and .env is left alone.
 #
@@ -260,6 +267,18 @@ for pair in wardryx:wardryx idryx:idryx qryx:qryx mockryx:mockryx heraldyx:heral
     --build-arg SERVICE="$name" --build-arg SRC="./$repo" -t "stack/$name:dev" . >/dev/null \
     || die "image build failed: $name"
 done
+# The browser image, only when asked. It is the slowest build here and the
+# largest artifact by a factor of sixty-seven, so it is not built on the chance
+# that somebody might later want it.
+if [ -n "${WITH_BROWSER:-}" ]; then
+  [ -f "$SRC_DIR/stack-k8s/images/scopyx-browser.Dockerfile" ] \
+    || die "WITH_BROWSER is set but the stack-k8s tarball has no images/scopyx-browser.Dockerfile"
+  note "building scopyx-browser (about 1GB, and slow: it installs chromium)"
+  docker build -q -f stack-k8s/images/scopyx-browser.Dockerfile \
+    --build-arg SRC=./scopyx -t stack/scopyx-browser:dev . >/dev/null \
+    || die "image build failed: scopyx-browser"
+fi
+
 note "building caddy (TLS for the console)"
 docker build -q -f stack-k8s/images/caddy.Dockerfile -t stack/caddy:dev stack-k8s >/dev/null \
   || die "image build failed: caddy"

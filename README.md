@@ -238,6 +238,38 @@ Without the credential it refuses to start rather than running open, and that is
 deliberate: a wide bind with no credential is an unauthenticated fetch proxy,
 and anything that reached it could fetch under your egress allowance and with
 your name on the record.
+
+#### If your agents need pages that assemble themselves
+
+The default fetcher runs no JavaScript, so a page built in the browser arrives
+as the shell that builds it. There is a second profile with a real browser:
+
+```bash
+WITH_BROWSER=1 ./install.sh        # builds the image, once, and it is slow
+docker compose --profile egress-browser up -d scopyx-browser
+```
+
+**Use one profile or the other, never both.** They answer to the same name on
+the compose network, and running both would give the gateway two services
+called `scopyx` and no way to say which one it reached.
+
+It costs about **1 GB** of disk against **15 MB**, which is why it is a
+separate profile rather than a variable. Everything else is identical: the same
+policy plane, the same journal on the same volume, the same cap.
+
+It is also the only backend that decides the forty other requests a page makes.
+The browser is launched with no route to the network except a proxy scopyx
+owns, and that proxy refuses any destination your policy did not allow.
+
+**About the sandbox**, because it will come up. Chromium's renderer sandbox
+needs kernel features a container does not give it by default, and it refuses
+to start rather than quietly running without one. This profile keeps Chrome's
+sandbox and relaxes the container's syscall filter (`seccomp:unconfined`),
+which is the better trade here: with Chrome's sandbox off, an exploit in a
+hostile page runs as the container's user and can open sockets directly, and
+that is egress that never passes the proxy and never reaches the record. If
+your policy is the other way round, set `SCOPYX_CHROMIUM_NO_SANDBOX=1` in
+`.env` and drop the `security_opt` line.
 The console is on loopback because it arrives over your own tunnel:
 
 ```bash

@@ -258,6 +258,66 @@ services:
       init-volumes:
         condition: service_completed_successfully
 
+  # ---- egress, with a browser ----------------------------------------------
+  #
+  # The same service, the same policy plane, the same journal volume, and one
+  # difference: an image with Chromium in it, which is about 1 GB against the
+  # 15 MB of the one above. That ratio is why this is a second profile rather
+  # than a flag on the first: a box that wanted a governed fetcher should not
+  # get a browser because somebody set a variable.
+  #
+  # `--profile egress-browser` INSTEAD OF `--profile egress`, never both: they
+  # bind the same name in the compose network, and running both would give the
+  # gateway two services called scopyx and no way to say which one it reached.
+  scopyx-browser:
+    <<: *restart
+    profiles: ["egress-browser"]
+    image: stack/scopyx-browser:dev
+    user: "65532:65532"
+    # The name the rest of the box reaches it by. Same as the profile above, so
+    # nothing else in this file changes when an operator switches profiles.
+    networks:
+      default:
+        aliases: ["scopyx"]
+    environment:
+      SCOPYX_ADDR: 0.0.0.0:4300
+      SCOPYX_WARDRYX: http://wardryx:8090
+      SCOPYX_WARDRYX_KEY: ${SCOPYX_WARDRYX_KEY:-}
+      SCOPYX_KEYS: ${SCOPYX_KEYS:-}
+      SCOPYX_EVENTS: /var/lib/scopyx/events.ndjson
+      SCOPYX_BACKEND: chromium
+      SCOPYX_MAX_FETCHES_PER_HOUR: ${SCOPYX_MAX_FETCHES_PER_HOUR:-200}
+      # NOT set here, and the omission is the decision.
+      #
+      # Chromium ships with its renderer sandbox on. In a container that cannot
+      # give it the user namespaces it needs, it refuses to start and says so,
+      # and the operator then chooses which sandbox to keep. The two ways out
+      # are below, and this file takes the one that keeps CHROME's, because
+      # with that off a renderer exploit runs as this container's user and can
+      # open sockets directly: egress that never passes the proxy and never
+      # appears in the record. The container's seccomp filter protects the host
+      # from the container; it does not protect the record from a compromised
+      # renderer.
+      #
+      #   SCOPYX_CHROMIUM_NO_SANDBOX: "1"   # keeps the container's filter
+      #
+    # Chrome's sandbox needs syscalls the default profile refuses. Measured
+    # 2026-08-10: with the default profile the browser refuses to start and
+    # names the sandbox; with this line it renders a live page.
+    security_opt:
+      - seccomp:unconfined
+    # A browser writes: a profile directory per fetch, and its own temporary
+    # files. Both land here, both are wiped with the container, and neither
+    # touches a named volume, because a profile that outlived a fetch is
+    # invariant 4 broken by storage rather than by code.
+    tmpfs:
+      - /tmp:size=512m
+    volumes:
+      - scopyxevents:/var/lib/scopyx
+    depends_on:
+      init-volumes:
+        condition: service_completed_successfully
+
   # ---- money: the control API ----------------------------------------------
   tokenfuse-cloud:
     <<: *restart
