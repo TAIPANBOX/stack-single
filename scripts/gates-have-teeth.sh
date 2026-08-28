@@ -235,8 +235,8 @@ pathlib.Path(".teeth-src").write_text(tmp)')" \
 run_case "record-is-not-on-the-bus: the seal gets the bus writable" fail \
 	'./scripts/record-is-not-on-the-bus.sh' \
 	"$(py 'edit("compose.yaml",
-     "- events:/var/lib/stack/events:ro",
-     "- events:/var/lib/stack/events")')" \
+     "# the mount says so rather than the code being trusted to.\n      - events:/var/lib/stack/events:ro",
+     "# the mount says so rather than the code being trusted to.\n      - events:/var/lib/stack/events")')" \
 	"WRITABLE"
 
 # The failure this gate was actually written for, and the one that looks like
@@ -289,7 +289,11 @@ open("compose.yaml", "w").write(s[:i] + s[j:])')" \
 # been missing from it for as long as both existed.
 run_case "build-context-complete: install.sh stops naming its Dockerfiles" fail \
 	'./scripts/build-context-complete.sh' \
-	"$(py 'edit("install.sh", "-f stack-k8s/images/", "-f stack-k8s/IMAGES/")')" \
+	"$(py 's = open("install.sh").read()
+a, b = "-f stack-k8s/images/", "-f stack-k8s/IMAGES/"
+n = s.count(a)
+assert n > 1, "expected several build invocations, found " + str(n)
+open("install.sh", "w").write(s.replace(a, b))')" \
 	"measured NOTHING"
 
 # THE HOLE. Rewriting the COPY prefix in stack-k8s emptied this check while it
