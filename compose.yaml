@@ -45,7 +45,7 @@ services:
       - sh
       - -euc
       - |
-        mkdir -p /vol/events /vol/traces /vol/cloud /vol/heraldyx
+        mkdir -p /vol/events /vol/traces /vol/cloud /vol/heraldyx /vol/records
         chown 0:10001 /vol/events && chmod 2775 /vol/events
         chown 10001:10001 /vol/traces /vol/cloud && chmod 0775 /vol/traces /vol/cloud
         # The notifier runs 65532:10001 like the Go planes, and writes exactly
@@ -54,6 +54,11 @@ services:
         # log, decides correctly and then cannot save what it decided, so
         # every restart re-sends what it already sent.
         chown 65532:10001 /vol/heraldyx && chmod 0775 /vol/heraldyx
+        # The record plane runs 10001:10001 and is the only writer here.
+        # Same trap as the others: a fresh named volume is root:root 0755,
+        # so without this the seal starts, reads the bus, and cannot write
+        # what it read.
+        chown 10001:10001 /vol/records && chmod 0775 /vol/records
         # idryx is told to load the gateway's log at startup and exits if the
         # file is absent, which on a box that has served no traffic yet it
         # always is. An empty file is a valid empty log, and pre-creating it is
@@ -488,6 +493,115 @@ services:
       idryx:
         condition: service_started
 
+  # ---- record: the tamper-evident store of what this box did ----------------
+  #
+  # Off unless asked for, like the egress plane above. `docker compose up -d`
+  # does not start it; `docker compose --profile record up -d record-seal`
+  # does, and `WITH_RECORD=1 ./install.sh` is what builds its image.
+  #
+  # The bus and the record are two different things and this is the seam
+  # between them. `events` is a BUS: four components append to it, anything may
+  # read it, and an operator clearing space deletes from it. This writes a
+  # hash-chained STORE of sealed segments with one cursor per source file, and
+  # it lives on its OWN volume for exactly that reason. A record kept inside
+  # the volume its own inputs live in is evidence an operator can delete while
+  # tidying up the thing it is evidence about.
+  #
+  # One container running one loop, rather than a timer, because compose has no
+  # cron and because the store takes no cross-process lock: a second writer
+  # would be two minters of one shard. The cluster gets the same property from
+  # `concurrencyPolicy: Forbid` on its CronJob. Serial here is structural, not
+  # a promise.
+  record-seal:
+    <<: *restart
+    image: stack/trailryx:dev
+    user: "10001:10001"
+    profiles: ["record"]
+    environment:
+      # Deliberately invalid, exactly as the cluster's ConfigMap is. This is
+      # the one value nobody else can supply: unlike stack-up, which mints its
+      # own demo fleet, this deployment governs whatever fleet an operator
+      # points at it, so nothing here knows the domain their agents mint under.
+      #
+      # A wrong value used to be worse than a missing one. `--trust-domain`
+      # takes ONE value, every non-matching line is refused, and the cursor
+      # committed the position it reached even when nothing was stored, so one
+      # pass under the wrong domain put those events permanently outside the
+      # record and the next pass answered "nothing new". trailryx holds the
+      # cursor for that case since 2026-08-27 and has two tests on it, so the
+      # loss path is closed at the source. The refusal below is still here
+      # because being told beats being silently correct.
+      RECORD_TRUST_DOMAIN: ${RECORD_TRUST_DOMAIN:-set-me.invalid}
+      # Daily, like the cluster's 05:27 and stack-up's 06:57. Settable so a
+      # box under test does not wait a day to show it works.
+      RECORD_SEAL_INTERVAL: ${RECORD_SEAL_INTERVAL:-86400}
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -u
+        events=/var/lib/stack/events
+        data=/var/lib/stack/records
+        while :; do
+          # REFUSE BEFORE CONSUMING. The check reads the agent ids already on
+          # the bus against the domain about to be passed, and refuses only
+          # when NOTHING matches: a partial match is a normal state for a box
+          # governing more than one domain, and `--trust-domain` takes one.
+          seen=0; matched=0
+          for f in "$$events"/*.ndjson; do
+            [ -e "$$f" ] || continue
+            # `n=$$(grep -c ...) || n=0` and NOT `... || echo 0`. grep -c
+            # prints 0 AND exits 1 when it matches nothing, so the `echo`
+            # form appends a second zero and the arithmetic below dies with
+            # "syntax error in expression". Under `set -u` without `set -e`
+            # the loop then carries on and seals anyway, so the refusal this
+            # whole block exists for would never have fired. Found by running
+            # the script, not by reading it.
+            n=$$(grep -c '"agent_id"' "$$f" 2>/dev/null) || n=0
+            m=$$(grep -c "\"agent_id\":\"agent://$$RECORD_TRUST_DOMAIN/" "$$f" 2>/dev/null) || m=0
+            seen=$$((seen + n)); matched=$$((matched + m))
+          done
+          if [ "$$seen" -gt 0 ] && [ "$$matched" -eq 0 ]; then
+            echo "refusing before importing: none of the $$seen agent id(s) on the bus is under" >&2
+            echo "  agent://$$RECORD_TRUST_DOMAIN/ , so this would seal nothing and say it worked." >&2
+            echo "  Set RECORD_TRUST_DOMAIN in .env to the domain your agents mint under." >&2
+            sleep "$$RECORD_SEAL_INTERVAL"; continue
+          fi
+          sealed=0
+          for f in "$$events"/*.ndjson; do
+            [ -e "$$f" ] || continue
+            # Best-effort per file, like the cluster's job and stack-up's
+            # routine: one unreadable file is that file's problem, not a reason
+            # to leave every other file's new events unsealed.
+            trailryx-node events --file "$$f" --data "$$data" \
+              --trust-domain "$$RECORD_TRUST_DOMAIN" --seal-records 500 || true
+            sealed=$$((sealed + 1))
+          done
+          if [ "$$sealed" -eq 0 ]; then
+            echo "no event files in $$events yet; nothing to seal"
+          else
+            pack="$$data/pack-$$(date -u +%Y%m%dT%H%M%SZ).pack"
+            if trailryx-node read --data "$$data" --all --pack "$$pack"; then
+              # Verified before the loop sleeps. A pack that does not verify is
+              # the one thing that makes this loud, which is the record plane's
+              # own discipline: a refused line is counted and reported and is
+              # not an error.
+              trailryx-verify "$$pack" || echo "PACK DID NOT VERIFY: $$pack" >&2
+            else
+              echo "nothing sealed here to pack yet"
+            fi
+          fi
+          sleep "$$RECORD_SEAL_INTERVAL"
+        done
+    volumes:
+      # Read only. This is a reader of the bus and a writer of the record, and
+      # the mount says so rather than the code being trusted to.
+      - events:/var/lib/stack/events:ro
+      - records:/var/lib/stack/records
+    depends_on:
+      init-volumes:
+        condition: service_completed_successfully
+
 volumes:
   # The shared event log the planes couple through. One machine, so this is
   # simply a volume: the cluster needed a ReadWriteMany class and a storage
@@ -504,6 +618,10 @@ volumes:
   # scopyx's own journal, deliberately NOT the shared `events` volume above.
   scopyxevents:
   heraldyxstate:
+  # The record plane's store, deliberately NOT the shared `events` volume:
+  # a hash-chained record kept inside the volume its own inputs live in is
+  # evidence an operator can delete while clearing space on the bus.
+  records:
   # The WireGuard server's own key. On a volume because regenerating it would
   # invalidate every device config ever issued, silently.
   wgstate:

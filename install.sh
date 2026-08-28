@@ -34,6 +34,7 @@
 # read pages assembled in the browser.
 #
 #   WITH_BROWSER=1 ./install.sh           # also builds stack/scopyx-browser:dev
+#   WITH_RECORD=1 ./install.sh            # also builds stack/trailryx:dev
 #
 # Re-running never changes an existing box: the value lives in .env from the
 # first run, and .env is left alone.
@@ -207,7 +208,12 @@ fi
 # happens once; `restart: unless-stopped` means it is not repeated on reboot.
 say "fetching sources"
 mkdir -p "$SRC_DIR" && cd "$SRC_DIR"
-for r in tokenfuse wardryx idryx qryx mockryx heraldyx scopyx verdryx engram; do
+# trailryx joins the list only when the record profile is wanted: it is a
+# Rust build like tokenfuse, and cloning what will not be built is a minute
+# of somebody's install for nothing.
+repos=(tokenfuse wardryx idryx qryx mockryx heraldyx scopyx verdryx engram)
+[ -z "${WITH_RECORD:-}" ] || repos+=(trailryx)
+for r in "${repos[@]}"; do
   # A && B || C here is deliberate: the refresh is best-effort and C is `true`.
   # shellcheck disable=SC2015
   if [ -d "$r/.git" ]; then (cd "$r" && git pull -q --ff-only 2>/dev/null || true)
@@ -277,6 +283,18 @@ if [ -n "${WITH_BROWSER:-}" ]; then
   docker build -q -f stack-k8s/images/scopyx-browser.Dockerfile \
     --build-arg SRC=./scopyx -t stack/scopyx-browser:dev . >/dev/null \
     || die "image build failed: scopyx-browser"
+fi
+
+# The record plane, only when asked, and for the same reason as the browser
+# above: this is a Rust build and nobody should pay for it on the chance
+# that they might later want a sealed record.
+if [ -n "${WITH_RECORD:-}" ]; then
+  [ -f "$SRC_DIR/stack-k8s/images/trailryx.Dockerfile" ] \
+    || die "WITH_RECORD is set but the stack-k8s tarball has no images/trailryx.Dockerfile"
+  note "building trailryx (the record plane, and slow: Rust)"
+  docker build -q -f stack-k8s/images/trailryx.Dockerfile \
+    --build-arg SRC=./trailryx -t stack/trailryx:dev . >/dev/null \
+    || die "image build failed: trailryx"
 fi
 
 note "building caddy (TLS for the console)"

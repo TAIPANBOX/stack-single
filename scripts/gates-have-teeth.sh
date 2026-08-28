@@ -232,6 +232,32 @@ assert removed, "no copied file under images/ to remove"
 pathlib.Path(".teeth-src").write_text(tmp)')" \
 	"is not in the stack-k8s tarball"
 
+run_case "record-is-not-on-the-bus: the seal gets the bus writable" fail \
+	'./scripts/record-is-not-on-the-bus.sh' \
+	"$(py 'edit("compose.yaml",
+     "# the mount says so rather than the code being trusted to.\n      - events:/var/lib/stack/events:ro",
+     "# the mount says so rather than the code being trusted to.\n      - events:/var/lib/stack/events")')" \
+	"WRITABLE"
+
+# The failure this gate was actually written for, and the one that looks like
+# nothing is wrong: the record kept on the volume its own inputs live in, where
+# an operator clearing space on the bus deletes the evidence about it.
+run_case "record-is-not-on-the-bus: the record is written to the bus volume" fail \
+	'./scripts/record-is-not-on-the-bus.sh' \
+	"$(py 'edit("compose.yaml",
+     "- records:/var/lib/stack/records",
+     "- events:/var/lib/stack/records")')" \
+	"FAIL"
+
+# Two writers of one store. It takes no cross-process lock, so this is not a
+# race that shows up under load; it is two minters of one shard.
+run_case "record-is-not-on-the-bus: a second service writes the record store" fail \
+	'./scripts/record-is-not-on-the-bus.sh' \
+	"$(py 'edit("compose.yaml",
+     "      - events:/var/lib/stack/events\n      - ./environments",
+     "      - events:/var/lib/stack/events\n      - records:/var/lib/stack/records\n      - ./environments")')" \
+	"is also written by"
+
 echo
 echo "=== and what they must NOT catch ==="
 
@@ -245,6 +271,30 @@ run_case "shell-lint: another silenced finding with its reason" pass \
 echo
 echo "=== and the one this estate learned the hard way ==="
 echo "    a gate whose subject is gone must SAY so, not report OK on nothing"
+
+run_case "record-is-not-on-the-bus: no record-seal service left to judge" fail \
+	'./scripts/record-is-not-on-the-bus.sh' \
+	"$(py 'import re
+s = open("compose.yaml").read()
+i = s.index("  record-seal:")
+j = s.index("\nvolumes:")
+assert i < j
+open("compose.yaml", "w").write(s[:i] + s[j:])')" \
+	"measured NOTHING"
+
+# build-context-complete derives its subject list from install.sh since
+# 2026-08-28. A derived list can derive to nothing: rename the invocations and
+# the check sweeps an empty set. It used to be a hand-written list, with a
+# comment claiming an unlisted image would be visible, and scopyx-browser had
+# been missing from it for as long as both existed.
+run_case "build-context-complete: install.sh stops naming its Dockerfiles" fail \
+	'./scripts/build-context-complete.sh' \
+	"$(py 's = open("install.sh").read()
+a, b = "-f stack-k8s/images/", "-f stack-k8s/IMAGES/"
+n = s.count(a)
+assert n > 1, "expected several build invocations, found " + str(n)
+open("install.sh", "w").write(s.replace(a, b))')" \
+	"measured NOTHING"
 
 # THE HOLE. Rewriting the COPY prefix in stack-k8s emptied this check while it
 # reported every path present. This is the case that keeps the fix in place.
