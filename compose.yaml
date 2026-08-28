@@ -610,6 +610,136 @@ services:
       init-volumes:
         condition: service_completed_successfully
 
+  # ---- routines: the scheduled half, which this deployment did not have ------
+  #
+  # Off unless asked for: `docker compose --profile routines up -d`.
+  #
+  # THE GAP THIS CLOSES. stack-up runs five governance routines on a timer and
+  # stack-k8s runs four as CronJobs. This deployment installed NO scheduler of
+  # any kind, so the planes came up and the work that keeps them producing did
+  # not happen. estate-gates recorded that as six divergences from 2026-08-06,
+  # and it is the single-box install, the one most likely to be somebody's first
+  # look at the estate.
+  #
+  # WHY THEY ARE LOOPS AND NOT TIMERS. compose has no cron, which is the same
+  # reason `record-seal` above is a service rather than a job. Each of these
+  # sleeps, runs once, prints, and sleeps again; the artifact is the log, which
+  # is what stack-k8s's quality-drift does too.
+  #
+  # THREE OF THE FIVE, AND THE OTHER TWO ARE SAID OUT LOUD RATHER THAN QUIETLY
+  # LEFT OUT:
+  #
+  #   qryx-trend     scans a SOURCE TREE. stack-up points it at its own
+  #                  checkout of the estate's repositories. There is no source
+  #                  tree in these containers and mounting the operator's disk
+  #                  into a governance plane to look for crypto is a bigger
+  #                  decision than a missing routine.
+  #   mockryx-drill  needs the scenario files, which live in the mockryx
+  #                  repository and are not in this image, and it is opt-in in
+  #                  both other deployments anyway.
+  #
+  # The sixth, trailryx-seal, is the `record` profile above.
+  focus-export:
+    <<: *restart
+    image: stack/tokenfuse:dev
+    user: "10001:10001"
+    profiles: ["routines"]
+    environment:
+      ROUTINE_INTERVAL: ${ROUTINE_INTERVAL:-3600}
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -u
+        traces=/var/lib/stack/traces/gateway
+        out=/var/lib/stack/focus
+        sleep "$$ROUTINE_INTERVAL"
+        while :; do
+          if [ ! -d "$$traces" ]; then
+            echo "focus-export: no trace directory at $$traces yet"
+          elif tokenfuse-gateway focus-export --traces "$$traces" \
+                 --out "$$out/focus-$$(date -u +%Y%m%dT%H%M%SZ).csv" 2>&1; then
+            echo "focus-export: wrote a window"
+          else
+            # An idle window exits non-zero with "no calls found in the trace",
+            # which is not a failure of the export. stack-up's routine makes the
+            # same judgement.
+            echo "focus-export: nothing to export in this window"
+          fi
+          sleep "$$ROUTINE_INTERVAL"
+        done
+    volumes:
+      # Read only. It reads what the gateway wrote and must not be able to edit
+      # it, the same split the record profile makes over the bus.
+      - traces:/var/lib/stack/traces:ro
+      - focus:/var/lib/stack/focus
+    depends_on:
+      init-volumes:
+        condition: service_completed_successfully
+
+  idryx-detect:
+    <<: *restart
+    image: stack/idryx:dev
+    user: "10001:10001"
+    profiles: ["routines"]
+    environment:
+      ROUTINE_INTERVAL: ${ROUTINE_INTERVAL:-3600}
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -u
+        bus=/var/lib/stack/events/tokenfuse.ndjson
+        sleep "$$ROUTINE_INTERVAL"
+        while :; do
+          if [ ! -s "$$bus" ]; then
+            echo "idryx-detect: the bus at $$bus is empty, nothing to detect on"
+          else
+            idryx detect --load "tokenfuse:$$bus" --format human 2>&1 || true
+          fi
+          sleep "$$ROUTINE_INTERVAL"
+        done
+    volumes:
+      - events:/var/lib/stack/events:ro
+    depends_on:
+      init-volumes:
+        condition: service_completed_successfully
+
+  verdryx-drift:
+    <<: *restart
+    image: stack/genaryx-console:dev
+    user: "10001:10001"
+    profiles: ["routines"]
+    environment:
+      ROUTINE_INTERVAL: ${ROUTINE_INTERVAL:-3600}
+      # Empty means "skip", which is the honest default: a drift check needs a
+      # baseline somebody chose, and inventing one would compare against a
+      # number nobody stands behind. stack-up's routine skips for the same
+      # reason and says so.
+      ROUTINE_VERDRYX_BASELINE: ${ROUTINE_VERDRYX_BASELINE:-}
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -u
+        db=/var/lib/stack/.taipan/verdryx.db
+        sleep "$$ROUTINE_INTERVAL"
+        while :; do
+          if [ -z "$$ROUTINE_VERDRYX_BASELINE" ]; then
+            echo "verdryx-drift: skipped, ROUTINE_VERDRYX_BASELINE is not set in .env"
+          elif [ ! -f "$$db" ]; then
+            echo "verdryx-drift: skipped, no store at $$db (no verdryx eval has run here)"
+          else
+            VERDRYX_DB="$$db" verdryx drift --baseline "$$ROUTINE_VERDRYX_BASELINE" 2>&1 || true
+          fi
+          sleep "$$ROUTINE_INTERVAL"
+        done
+    volumes:
+      - consolestate:/var/lib/stack:ro
+    depends_on:
+      init-volumes:
+        condition: service_completed_successfully
+
 volumes:
   # The shared event log the planes couple through. One machine, so this is
   # simply a volume: the cluster needed a ReadWriteMany class and a storage
@@ -629,6 +759,9 @@ volumes:
   # The record plane's store, deliberately NOT the shared `events` volume:
   # a hash-chained record kept inside the volume its own inputs live in is
   # evidence an operator can delete while clearing space on the bus.
+  # focus-export's own output, so it never writes into the trace directory it
+  # reads. Its artifact is the log line; the CSV is a convenience.
+  focus:
   records:
   # The WireGuard server's own key. On a volume because regenerating it would
   # invalidate every device config ever issued, silently.

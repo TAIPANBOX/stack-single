@@ -284,10 +284,14 @@ run_case "manifest-is-true: compose.yaml loses the block that bounds the service
 
 # It declares that it schedules nothing, and that has to be checked rather than
 # assumed: the day a routine arrives, this file has to say what it runs.
-run_case "manifest-is-true: a routine arrives and the manifest still says none" fail \
+# It declared that it schedules nothing until 2026-08-28, and now declares four.
+# Either way the check has to be able to see a routine arrive that the manifest
+# does not claim: a governance routine running unrecorded is the same problem in
+# both directions.
+run_case "manifest-is-true: a routine arrives and the manifest does not claim it" fail \
 	'./scripts/manifest-is-true.sh' \
 	"$(py 'edit("install.sh", "say \"building images", "say \"qryx-trend building images")')" \
-	"schedules"
+	"does not"
 
 echo
 echo "=== and what they must NOT catch ==="
