@@ -60,8 +60,13 @@ fi
 # Derived now, from the one line that cannot lie about it: the `docker build -f`
 # invocations in install.sh. An image the installer stops building drops out on
 # its own, and one it starts building is checked the day it is added.
+# `|| true` is load-bearing, not defensive noise. Under `set -euo pipefail` a
+# grep that matches nothing exits 1, the whole assignment fails, and the script
+# dies HERE, silently, before reaching the check below that exists to say so.
+# Which means the honest message never printed and the gate looked like a crash
+# instead of a finding. Caught by the harness case for exactly this mutation.
 DOCKERFILES=$(grep -oE -- '-f stack-k8s/images/[a-z-]+\.Dockerfile' install.sh |
-  sed 's|.*images/||' | sort -u)
+  sed 's|.*images/||' | sort -u || true)
 
 # A derived subject list can derive to nothing: a rename in install.sh, a
 # changed quoting style, and this file would sweep an empty set and print OK.
