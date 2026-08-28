@@ -292,8 +292,13 @@ if [ -n "${WITH_RECORD:-}" ]; then
   [ -f "$SRC_DIR/stack-k8s/images/trailryx.Dockerfile" ] \
     || die "WITH_RECORD is set but the stack-k8s tarball has no images/trailryx.Dockerfile"
   note "building trailryx (the record plane, and slow: Rust)"
+  # The CONTEXT is ./trailryx, not `.` with a SRC build-arg. This file does
+  # `COPY . .` into /src and takes no SRC, exactly like tokenfuse.Dockerfile
+  # two lines below, and unlike go-service.Dockerfile, which is where the
+  # SRC form came from. Built with the wrong context it dies at
+  # `cargo build` with "could not find Cargo.toml in /src", ten minutes in.
   docker build -q -f stack-k8s/images/trailryx.Dockerfile \
-    --build-arg SRC=./trailryx -t stack/trailryx:dev . >/dev/null \
+    -t stack/trailryx:dev ./trailryx >/dev/null \
     || die "image build failed: trailryx"
 fi
 
