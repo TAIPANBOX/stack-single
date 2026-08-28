@@ -258,6 +258,37 @@ run_case "record-is-not-on-the-bus: a second service writes the record store" fa
      "      - events:/var/lib/stack/events\n      - records:/var/lib/stack/records\n      - ./environments")')" \
 	"is also written by"
 
+# invariant: components.json says what this launcher actually installs.
+#
+# The compose half of the same idea stack-up carries. Two cases: ordinary drift,
+# and the reader losing its subject.
+run_case "manifest-is-true: a compose service is started and not declared" fail \
+	'./scripts/manifest-is-true.sh' \
+	"$(py 'import json
+p = "components.json"
+d = json.load(open(p))
+c = d["components"][0]["checked"]
+before = len(c["installs_services"])
+c["installs_services"] = [s for s in c["installs_services"] if s != "caddy"]
+assert len(c["installs_services"]) == before - 1, "caddy was not in the declared list"
+json.dump(d, open(p, "w"), indent=2)')" \
+	"and components.json does not say so"
+
+# The service keys are the names ABOVE the volumes block, so losing that block
+# means the reader cannot tell a service from a volume. It must say it measured
+# nothing rather than compare two lists it no longer understands.
+run_case "manifest-is-true: compose.yaml loses the block that bounds the services" fail \
+	'./scripts/manifest-is-true.sh' \
+	"$(py 'edit("compose.yaml", "\nvolumes:", "\nVOLUMES:")')" \
+	"measured NOTHING"
+
+# It declares that it schedules nothing, and that has to be checked rather than
+# assumed: the day a routine arrives, this file has to say what it runs.
+run_case "manifest-is-true: a routine arrives and the manifest still says none" fail \
+	'./scripts/manifest-is-true.sh' \
+	"$(py 'edit("install.sh", "say \"building images", "say \"qryx-trend building images")')" \
+	"schedules"
+
 echo
 echo "=== and what they must NOT catch ==="
 

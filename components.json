@@ -1,0 +1,94 @@
+{
+  "$comment": [
+    "What this LAUNCHER installs, and what a check may believe about it.",
+    "`checked` is proved against this repository by scripts/manifest-is-true.sh;",
+    "`declared` is a statement nobody can verify and carries its own `why`.",
+    "",
+    "SAME QUESTION AS stack-up's MANIFEST, DIFFERENT SYNTAX, AND THAT IS WHY THE",
+    "SECOND OPINION MATTERS. estate-gates' C5 reads all three launchers from one",
+    "central file: `register <name>` out of a shell script here, compose service",
+    "keys there, Kubernetes kinds in the third. Three grammars, one parser, none",
+    "of it living where the fact lives. This is the other statement of the same",
+    "fact, made where it does.",
+    "",
+    "IT SCHEDULES NOTHING, AND THAT IS THE LARGEST DIFFERENCE BETWEEN THE THREE.",
+    "`schedules_routines` is empty and checked as empty, not omitted. stack-up",
+    "runs six routines on a timer and stack-k8s runs them as CronJobs; this one",
+    "installs no scheduler of any kind, so all six show up in estate-gates'",
+    "deployment-parity file as recorded gaps. Declaring the emptiness here means",
+    "the day somebody adds cron, this file has to say so rather than staying",
+    "quietly true.",
+    "",
+    "THE IMAGES ARE PART OF WHAT IT INSTALLS. Unlike the other two launchers this",
+    "one BUILDS what it runs, from source it fetches, because there is no public",
+    "registry for these. Six are built by name and six more by a loop over",
+    "`<service>:<repo>` pairs, and the check reads both forms: an image added to",
+    "the loop is as invisible to a reader that only knows the explicit lines as",
+    "an undeclared component is to a central registry.",
+    "",
+    "THREE PROFILES, AND TWO OF THEM ARE ALTERNATIVES. `egress` and",
+    "`egress-browser` must not both be started: compose.yaml says so in its own",
+    "comment. That is a constraint between profiles rather than a fact about any",
+    "one of them, so it is declared rather than checked."
+  ],
+  "schema": "taipanbox.dev/components/v1",
+  "repo": "TAIPANBOX/stack-single",
+  "kind": "launcher",
+  "components": [
+    {
+      "name": "stack-single",
+      "class": "launcher",
+      "checked": {
+        "installs_services": [
+          "caddy",
+          "console",
+          "heraldyx",
+          "idryx",
+          "init-volumes",
+          "policy-db",
+          "record-seal",
+          "scopyx",
+          "scopyx-browser",
+          "tokenfuse-cloud",
+          "tokenfuse-gateway",
+          "wardryx",
+          "wg"
+        ],
+        "schedules_routines": [],
+        "profiles": [
+          "egress",
+          "egress-browser",
+          "record"
+        ],
+        "builds_images": [
+          "stack/caddy:dev",
+          "stack/genaryx-console:dev",
+          "stack/heraldyx:dev",
+          "stack/idryx:dev",
+          "stack/mockryx:dev",
+          "stack/qryx:dev",
+          "stack/scopyx-browser:dev",
+          "stack/scopyx:dev",
+          "stack/tokenfuse:dev",
+          "stack/trailryx:dev",
+          "stack/wardryx:dev",
+          "stack/wg:dev"
+        ]
+      },
+      "declared": {
+        "it_installs_no_scheduler_at_all": {
+          "value": "schedules_routines: []",
+          "why": "The single-box deployment brings up the planes without the scheduled work that keeps them producing. All six routines are recorded as gaps in estate-gates' deployment-parity file, one of them since 2026-08-25. The record profile is the nearest thing to an exception and it is not one: record-seal is a long-running service that seals on its own interval, because compose has no cron."
+        },
+        "egress_and_egress_browser_are_alternatives": {
+          "value": "--profile egress OR --profile egress-browser",
+          "why": "compose.yaml says it in its own comment: never both. That is a constraint between two profiles rather than a fact about either, and nothing here can check what an operator types."
+        },
+        "init_volumes_is_not_a_plane": {
+          "value": "init-volumes",
+          "why": "A one-shot busybox container that creates the shared volume layout and exits. It is in `installs_services` because compose starts it and this list is what compose starts; estate-gates records separately that it is not a component of the product."
+        }
+      }
+    }
+  ]
+}
