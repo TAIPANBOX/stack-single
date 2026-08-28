@@ -557,8 +557,16 @@ services:
             # the loop then carries on and seals anyway, so the refusal this
             # whole block exists for would never have fired. Found by running
             # the script, not by reading it.
-            n=$$(grep -c '"agent_id"' "$$f" 2>/dev/null) || n=0
-            m=$$(grep -c "\"agent_id\":\"agent://$$RECORD_TRUST_DOMAIN/" "$$f" 2>/dev/null) || m=0
+            # `grep -E` with optional whitespace, not a fixed string. The
+            # first version matched `"agent_id":"agent://` exactly and
+            # refused a bus whose writer had put a space after the colon,
+            # reporting 20 ids seen and 0 matched on ids that all matched.
+            # Every producer in this estate is Go or Rust and writes compact
+            # JSON, so this would have held here and broken for the first
+            # producer that did not. Found by running the real image against
+            # a real bus, not by reading it.
+            n=$$(grep -cE '"agent_id"[[:space:]]*:' "$$f" 2>/dev/null) || n=0
+            m=$$(grep -cE "\"agent_id\"[[:space:]]*:[[:space:]]*\"agent://$$RECORD_TRUST_DOMAIN/" "$$f" 2>/dev/null) || m=0
             seen=$$((seen + n)); matched=$$((matched + m))
           done
           if [ "$$seen" -gt 0 ] && [ "$$matched" -eq 0 ]; then
