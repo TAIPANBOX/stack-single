@@ -42,8 +42,10 @@
         "installs_services": [
           "caddy",
           "console",
+          "focus-export",
           "heraldyx",
           "idryx",
+          "idryx-detect",
           "init-volumes",
           "policy-db",
           "record-seal",
@@ -51,14 +53,21 @@
           "scopyx-browser",
           "tokenfuse-cloud",
           "tokenfuse-gateway",
+          "verdryx-drift",
           "wardryx",
           "wg"
         ],
-        "schedules_routines": [],
+        "schedules_routines": {
+          "focus-export": "focus-export",
+          "idryx-detect": "idryx-detect",
+          "verdryx-drift": "verdryx-drift",
+          "record-seal": "trailryx-seal"
+        },
         "profiles": [
           "egress",
           "egress-browser",
-          "record"
+          "record",
+          "routines"
         ],
         "builds_images": [
           "stack/caddy:dev",
@@ -76,10 +85,6 @@
         ]
       },
       "declared": {
-        "it_installs_no_scheduler_at_all": {
-          "value": "schedules_routines: []",
-          "why": "The single-box deployment brings up the planes without the scheduled work that keeps them producing. All six routines are recorded as gaps in estate-gates' deployment-parity file, one of them since 2026-08-25. The record profile is the nearest thing to an exception and it is not one: record-seal is a long-running service that seals on its own interval, because compose has no cron."
-        },
         "egress_and_egress_browser_are_alternatives": {
           "value": "--profile egress OR --profile egress-browser",
           "why": "compose.yaml says it in its own comment: never both. That is a constraint between two profiles rather than a fact about either, and nothing here can check what an operator types."
@@ -87,6 +92,14 @@
         "init_volumes_is_not_a_plane": {
           "value": "init-volumes",
           "why": "A one-shot busybox container that creates the shared volume layout and exits. It is in `installs_services` because compose starts it and this list is what compose starts; estate-gates records separately that it is not a component of the product."
+        },
+        "three_of_the_five_and_the_other_two_are_named": {
+          "value": "--profile routines",
+          "why": "This deployment installed NO scheduler of any kind until 2026-08-28: the planes came up and the work that keeps them producing did not happen. estate-gates recorded six divergences from 2026-08-06, on the single-box install, the one most likely to be somebody's first look at the estate.\\n\\nThree run now, as loops rather than timers, because compose has no cron. The other two are not included and the reasons are facts rather than effort:\\n  qryx-trend scans a SOURCE TREE, and there is none in these containers; mounting the operator's disk into a governance plane to look for crypto is a bigger decision than a missing routine.\\n  mockryx-drill needs scenario files that live in the mockryx repository and are not in this image, and it is opt-in in both other deployments anyway.\\n\\nThe sixth, trailryx-seal, is the `record` profile."
+        },
+        "trailryx_seal_runs_under_a_local_name": {
+          "value": "record-seal",
+          "why": "The service in the `record` profile IS trailryx-seal: the same `trailryx-node events` the other two launchers schedule, under this deployment's own name for it. stack-k8s does the same thing with five CronJobs whose names are all local. Listed under the ESTATE's name here, because that is the name the question is asked in."
         }
       }
     }

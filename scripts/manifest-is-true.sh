@@ -123,19 +123,46 @@ compare(
 # subject, they are the same six the other two launchers schedule, and
 # `record-seal` is deliberately not among them because it is a service here and
 # a CronJob there.
-ROUTINES = ["focus-export", "qryx-trend", "verdryx-drift", "idryx-detect",
-            "mockryx-drill", "trailryx-seal"]
+# A map from THIS deployment's own name for a thing to the routine the estate
+# means, the same shape stack-k8s uses for its five CronJobs. It is a map rather
+# than a list because the names differ: the `record` profile's service is called
+# `record-seal` here and `trailryx-seal` everywhere else, and a list would have
+# to choose one vocabulary and be wrong in the other.
+ROUTINES = {"focus-export", "qryx-trend", "verdryx-drift", "idryx-detect",
+            "mockryx-drill", "trailryx-seal"}
+schedules = checked.get("schedules_routines", {})
+if not isinstance(schedules, dict):
+    print("FAIL: components.json's schedules_routines is not a map of local name to")
+    print("      routine, so this measured NOTHING about what runs here.")
+    problems += 1
+    schedules = {}
+
+for local, routine in sorted(schedules.items()):
+    if routine not in ROUTINES:
+        print(f"FAIL: components.json maps {local!r} to {routine!r}, which is not one of")
+        print(f"      the estate's routines: {sorted(ROUTINES)}")
+        problems += 1
+    if local not in services:
+        print(f"FAIL: components.json says {routine!r} runs here as {local!r} and compose")
+        print(f"      starts no such service.")
+        problems += 1
+if len(set(schedules.values())) != len(schedules):
+    print("FAIL: two services are mapped to the same routine. One routine runs once per")
+    print("      deployment, so this map cannot be right.")
+    problems += 1
+
+# And the other direction, which is what catches a routine arriving without the
+# manifest saying so: a routine NAME appearing in the files, comments stripped,
+# that nothing here claims.
 uncommented = "\n".join(
     line.split("#", 1)[0] for line in (install + "\n" + compose).split("\n")
 )
-scheduled = sorted({r for r in ROUTINES if r in uncommented})
-declared_routines = sorted(checked.get("schedules_routines", []))
-if declared_routines != scheduled:
-    print(f"FAIL: components.json says this launcher schedules {declared_routines} and")
-    print(f"      its files, comments stripped, name {scheduled}.")
-    if not declared_routines:
-        print("      If a scheduler arrived, this file has to say what it runs.")
-    problems += 1
+declared_routines = sorted(schedules.values())
+for r in sorted(ROUTINES):
+    if r in uncommented and r not in declared_routines:
+        print(f"FAIL: {r!r} appears in this launcher's files and components.json does not")
+        print(f"      say it runs here.")
+        problems += 1
 
 if problems:
     print()
@@ -144,6 +171,12 @@ if problems:
 
 print(f"OK: {len(services)} compose service(s), {len(checked.get('profiles', []))} profile(s) "
       f"and {len(images)} image(s) it builds, each compared with compose.yaml and")
-print("    install.sh both ways; and it schedules nothing, which is checked rather than")
-print("    assumed.")
+print("    install.sh both ways.")
+if declared_routines:
+    print(f"    Runs as a loop rather than a timer: {', '.join(declared_routines)}.")
+else:
+    print("    It schedules nothing, which is checked rather than assumed.")
+not_here = sorted(set(ROUTINES) - set(declared_routines))
+if not_here:
+    print(f"    Not run here: {', '.join(not_here)}. estate-gates is where that is judged.")
 PY
