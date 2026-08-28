@@ -125,8 +125,8 @@ an absent invariant.
    None of the four gates here said anything about measuring nothing before
    2026-08-09, which is why all four were checked by hand for that property
    rather than trusted.
-   *(gate: `scripts/gates-have-teeth.sh`, 6 cases: three real faults, one
-   non-fault, and two subjects taken away. Two cases mutate the stack-k8s TREE
+   *(gate: `scripts/gates-have-teeth.sh`, 11 cases: six real faults, one
+   non-fault, and four subjects taken away. Two cases mutate the stack-k8s TREE
    rather than this repo, because that is what the gate reads; the tree is
    resolved once per run, the same three ways the gate resolves it, so a run
    costs at most one fetch. Verified on both paths: with a sibling checkout,
@@ -137,6 +137,26 @@ an absent invariant.
    `shell-lint.sh` has only a non-fault case: its subject is `install.sh` by
    name, and a missing `install.sh` makes shellcheck itself fail, which is not
    a property of the gate.
+
+9. **The record reads the bus and writes somewhere else.** `events` is a bus:
+   four components append to it, anything may read it, and an operator clearing
+   disk space deletes from it. The record plane writes a hash-chained store of
+   sealed segments whose whole value is that nobody can quietly change what it
+   says. Keeping that store on the bus's own volume means an operator tidying
+   up the bus deletes the evidence about it, and nothing looks wrong while it
+   happens: the stack comes up, the seal runs, the pack verifies.
+
+   So `record-seal` mounts `events` READ ONLY, writes the separate `records`
+   volume, and is the only writer of it. The last part is not tidiness: the
+   store takes no cross-process lock, so a second writer is two minters of one
+   shard. The cluster gets the same property from `concurrencyPolicy: Forbid`
+   on its CronJob; here it is one container running one serial loop.
+
+   The profile is off by default, like `egress`. `WITH_RECORD=1 ./install.sh`
+   builds `stack/trailryx:dev`, and `docker compose --profile record up -d
+   record-seal` starts it.
+   *(gate: `scripts/record-is-not-on-the-bus.sh`, which also refuses to report
+   OK when there is no `record-seal` service left to judge)*
 
 ## Decisions that have no gate yet
 

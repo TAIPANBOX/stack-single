@@ -48,10 +48,32 @@ fi
 
 [ -d "$SRC/images" ] || { echo "FAIL: $SRC has no images/ directory"; exit 1; }
 
-# The exact set install.sh builds with. Kept here rather than derived, so that
-# adding an image to the installer without adding it here is visible.
-DOCKERFILES="go-service.Dockerfile tokenfuse.Dockerfile console.Dockerfile wg.Dockerfile caddy.Dockerfile"
+# The exact set install.sh builds with, READ OUT OF install.sh.
+#
+# This was a hand-written list, with a comment saying that adding an image to
+# the installer without adding it here would be visible. It was not visible.
+# `scopyx-browser.Dockerfile` had been built by the installer and absent from
+# the list for as long as both existed, and this check reported OK across five
+# Dockerfiles the whole time. A list of what to check, kept beside the check
+# and never compared to reality, is a subject list nothing gates.
+#
+# Derived now, from the one line that cannot lie about it: the `docker build -f`
+# invocations in install.sh. An image the installer stops building drops out on
+# its own, and one it starts building is checked the day it is added.
+DOCKERFILES=$(grep -oE -- '-f stack-k8s/images/[a-z-]+\.Dockerfile' install.sh |
+  sed 's|.*images/||' | sort -u)
 
+# A derived subject list can derive to nothing: a rename in install.sh, a
+# changed quoting style, and this file would sweep an empty set and print OK.
+# Saying "measured nothing" is the only honest answer to that.
+if [ -z "$DOCKERFILES" ]; then
+  echo "FAIL: no 'docker build -f stack-k8s/images/*.Dockerfile' lines in install.sh."
+  echo "      This check measured NOTHING. Either the installer stopped building"
+  echo "      images, or its invocations changed shape and this pattern missed them."
+  exit 1
+fi
+
+n_dockerfiles=$(printf '%s\n' "$DOCKERFILES" | grep -c .)
 fail=0
 checked=0
 
@@ -129,4 +151,6 @@ if [ "$checked" -eq 0 ]; then
   exit 1
 fi
 
-echo "OK: $checked build-context path(s) across 5 Dockerfiles, every one present."
+# Both numbers are counted, not typed. The 5 here was a literal, and it kept
+# saying 5 while the set it described was 7.
+echo "OK: $checked build-context path(s) across $n_dockerfiles Dockerfile(s), every one present."

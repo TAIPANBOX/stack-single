@@ -281,6 +281,39 @@ ssh -L 17420:127.0.0.1:7420 root@<your box>
 open http://localhost:17420
 ```
 
+
+## The record: what this box did, sealed
+
+Off unless you ask for it, like the egress plane above.
+
+```bash
+WITH_RECORD=1 ./install.sh                        # builds stack/trailryx:dev
+docker compose --profile record up -d record-seal
+```
+
+It reads every `*.ndjson` on the shared event bus, appends what is new to a
+hash-chained store of sealed segments, packs the whole ledger and verifies the
+pack before it sleeps. Daily by default, `RECORD_SEAL_INTERVAL` in seconds to
+change that.
+
+**One value you have to set, and nothing here can guess it.** Unlike the local
+sandbox, this deployment governs whatever fleet you point at it, so it does not
+know the domain your agents mint their ids under:
+
+```bash
+RECORD_TRUST_DOMAIN=your-domain.example    # in .env
+```
+
+Leave it and the seal refuses rather than pretending. `--trust-domain` takes
+one value and every id outside it is refused, so a wrong domain would seal
+nothing and report a clean run. It tells you instead, naming how many ids it
+saw and which prefix it was looking for. A partial match is fine and does not
+refuse: a box governing more than one domain is a normal thing to be.
+
+The store lives on its own volume, not on the bus. That is deliberate and it is
+gated: a record kept where its own inputs live is evidence you can delete while
+clearing space on the thing it is evidence about.
+
 ## What the installer will not do quietly
 
 It verifies itself and tells you what it found. Three of its checks have to
