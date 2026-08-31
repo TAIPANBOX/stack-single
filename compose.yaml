@@ -114,6 +114,19 @@ services:
       WARDRYX_KEYS: ${WARDRYX_KEYS:?set by install.sh}
       WARDRYX_DSN: ${POLICY_DB_DSN:?set by install.sh}
       WARDRYX_APPROVAL_SECRET: ${APPROVAL_SECRET:?set by install.sh}
+      # Every policy set this wardryx makes effective, kept under its own
+      # policy_version, on the events volume that is already here. No new
+      # volume and no new storage: a policy set is kilobytes and the archive
+      # is content-addressed, so the same set is kept once however often it
+      # is loaded.
+      #
+      # Unset, wardryx serves exactly as before and loses one thing: the
+      # policy store is a live control surface where writes overwrite and
+      # deletes remove, so the rules a recorded decision names are gone at
+      # the next policy write and `wardryx replay` can examine none of them.
+      # The loss is one-way, which is why this is set now rather than when
+      # somebody first wants a replay: it works forward from this day only.
+      WARDRYX_POLICY_ARCHIVE: /var/lib/stack/events/wardryx-policy-archive
     volumes:
       - events:/var/lib/stack/events
       - ./policy.yaml:/etc/wardryx/policy.yaml:ro
