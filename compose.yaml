@@ -112,7 +112,15 @@ services:
       - /etc/wardryx/policy.yaml
     environment:
       WARDRYX_KEYS: ${WARDRYX_KEYS:?set by install.sh}
-      WARDRYX_DSN: ${POLICY_DB_DSN:?set by install.sh}
+      # WARDRYX_DB, not WARDRYX_DSN. wardryx reads WARDRYX_DB
+      # (internal/config/config.go) and has never read WARDRYX_DSN, so this
+      # compose generated a correct DSN, waited for policy-db to be healthy,
+      # and then handed the value over under a name the binary ignores. The
+      # effect is the one stack-k8s spells out in its own manifest: with no
+      # DB, wardryx keeps policy AND approvals in memory, so a restart
+      # silently drops every console-written policy and unfreezes the fleet
+      # while the console still shows it stopped.
+      WARDRYX_DB: ${POLICY_DB_DSN:?set by install.sh}
       WARDRYX_APPROVAL_SECRET: ${APPROVAL_SECRET:?set by install.sh}
       # Every policy set this wardryx makes effective, kept under its own
       # policy_version, on the events volume that is already here. No new
