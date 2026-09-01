@@ -70,8 +70,25 @@ kind: this box runs **none of the five, ever, on its own.** Run one by hand
 inside the console container when you want it:
 
 ```bash
-docker compose exec console verdryx drift --baseline <id>   # or qryx, idryx, ...
+docker compose exec console verdryx drift --baseline <id>   # or qryx, ...
 ```
+
+One of the five is defined here as a service you START rather than one that
+loops, because a loop is impossible for it and not merely unwanted. The identity
+sweep runs on the idryx image, which is distroless: there is no shell for a
+`sleep` loop, the binary is `/usr/local/bin/service` rather than `idryx`, and
+`detect` has no `--interval`. So it takes the shape stack-k8s already uses for
+the one job that must never start because a manifest was applied, and a person
+runs it:
+
+```bash
+docker compose run --rm idryx-detect
+```
+
+It sits behind a `manual` profile that no install enables, which
+`scripts/manifest-is-true.sh` checks in both halves: the profile has to be there,
+and `install.sh` must never pass it. Put that line in your own cron if you want
+it hourly.
 
 or add your own cron entry on the host calling `docker compose exec`. This
 was not a documented choice before now; it is simply what the installer and

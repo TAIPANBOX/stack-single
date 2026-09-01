@@ -20,7 +20,9 @@
 # WHAT IT CHECKS, AND WHY EACH ONE IS SEPARATE
 #
 #   installs_services   the compose service keys, which is what `up` starts
-#   schedules_routines  empty here, and checked as empty rather than omitted
+#   schedules_routines  the loops this launcher runs, mapped to estate names
+#   manual_jobs         services a PERSON runs, never started by an install,
+#                       and the check that holds it is below
 #   profiles            the opt-in sets, from `profiles: ["name"]`
 #   builds_images       the `stack/*:dev` tags install.sh builds, from BOTH the
 #                       explicit `-t` lines and the `<service>:<repo>` loop
@@ -85,12 +87,59 @@ services = [
     for m in re.finditer(r"^  ([a-z][a-z0-9-]*):\s*$", compose, re.M)
     if m.start() < end
 ]
+# A manual job is a compose SERVICE too, so it belongs in the declared set the
+# service comparison uses. It is listed apart because what it is, is the whole
+# point: `installs_services` is what `up` starts, and this is the one thing here
+# that `up` must never start.
+manual = checked.get("manual_jobs", {})
+if not isinstance(manual, dict):
+    print("FAIL: components.json's manual_jobs is not a map of service name to reason,")
+    print("      so this measured NOTHING about what a person is expected to run.")
+    problems += 1
+    manual = {}
+
 compare(
     "a compose service",
-    checked.get("installs_services", []),
+    list(checked.get("installs_services", [])) + sorted(manual),
     services,
     "no two-space-indented service key in compose.yaml",
 )
+
+# WHAT HOLDS THE CATEGORY, AND WHY IT IS THIS
+#
+# stack-k8s checks that a job it calls manual actually sets `suspend: true`.
+# Compose has no suspend, so the equivalent property is that no install can
+# start it: the service sits behind a profile, and install.sh never passes that
+# profile. Both halves are checked, because either one alone is satisfiable
+# while the job still comes up on somebody's box.
+#
+# Calling a job manual and leaving it startable is the failure this refuses.
+# The one here cannot even run as a loop: idryx's image is distroless, so a
+# shell loop in it never starts, which is how a service nothing could launch sat
+# in this file unnoticed behind a profile install.sh never enabled.
+for name, reason in sorted(manual.items()):
+    if not str(reason).strip():
+        print(f"FAIL: components.json calls {name!r} a manual job and gives no reason.")
+        print("      A category with no reason beside it is a label.")
+        problems += 1
+    block = re.search(rf"^  {re.escape(name)}:\n(.*?)(?=^  [a-z0-9-]+:\s*$|\Z)",
+                      compose, re.M | re.S)
+    if not block:
+        print(f"FAIL: components.json calls {name!r} a manual job and compose.yaml")
+        print("      has no such service, so this measured NOTHING about it.")
+        problems += 1
+        continue
+    prof = re.search(r'profiles:\s*\["([a-z-]+)"\]', block.group(1))
+    if not prof:
+        print(f"FAIL: {name!r} is declared a manual job and sits behind no profile,")
+        print("      so `docker compose up` starts it like any other service.")
+        problems += 1
+        continue
+    if f"--profile {prof.group(1)}" in install:
+        print(f"FAIL: {name!r} is declared a manual job behind the {prof.group(1)!r}")
+        print(f"      profile, and install.sh passes --profile {prof.group(1)}, so an")
+        print("      install starts it. A manual job an install starts is not one.")
+        problems += 1
 
 compare(
     "an opt-in profile",
@@ -175,10 +224,16 @@ uncommented = "\n".join(
     line.split("#", 1)[0] for line in (install + "\n" + compose).split("\n")
 )
 declared_routines = sorted(schedules.values())
+# A routine name may be accounted for two ways, and the difference is the point.
+# `schedules_routines` says this launcher RUNS it on a loop. `manual_jobs` says
+# the work is here and a person starts it. Both are answers; neither is silence.
+# Only an unaccounted name is a finding, which is the case where the work sits
+# in the files and the manifest says nothing at all about it.
+accounted = set(declared_routines) | set(manual)
 for r in sorted(ROUTINES):
-    if r in uncommented and r not in declared_routines:
+    if r in uncommented and r not in accounted:
         print(f"FAIL: {r!r} appears in this launcher's files and components.json does not")
-        print(f"      say it runs here.")
+        print(f"      say it runs here, on a loop or by hand.")
         problems += 1
 
 if problems:
@@ -193,7 +248,9 @@ if declared_routines:
     print(f"    Runs as a loop rather than a timer: {', '.join(declared_routines)}.")
 else:
     print("    It schedules nothing, which is checked rather than assumed.")
-not_here = sorted(set(ROUTINES) - set(declared_routines))
+if manual:
+    print(f"    Started by a person, never by an install: {', '.join(sorted(manual))}.")
+not_here = sorted(set(ROUTINES) - set(declared_routines) - set(manual))
 if not_here:
     print(f"    Not run here: {', '.join(not_here)}. estate-gates is where that is judged.")
 PY
