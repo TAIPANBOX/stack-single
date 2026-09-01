@@ -557,7 +557,7 @@ if [ -z "$BUILD_FROM_SOURCE" ]; then
   # missing the `ghcr.io/` prefix after a rename, both leave every plane absent
   # while every line above still reads as success.
   [ "$pulled" -gt 0 ] || die "no ghcr.io image was pulled; compose named none. Is compose.yaml the one this installer shipped?"
-  note "pulled $pulled published image(s); nothing was compiled but the tunnel"
+  note "pulled $pulled published image(s); nothing was compiled"
 fi
 
 # ---- 4. the files the services read -----------------------------------------
