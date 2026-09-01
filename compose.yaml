@@ -698,52 +698,58 @@ services:
       init-volumes:
         condition: service_completed_successfully
 
-  # MEASURED 2026-09-01 AND IT CANNOT START, in this shape, on any image this
-  # estate publishes or builds. Two faults, and neither is visible from the
-  # compose file alone:
+  # A TEMPLATE A PERSON RUNS, not a loop, and the reason is that a loop is
+  # impossible here rather than unwanted.
   #
-  #   1. `go-service.Dockerfile` builds on `gcr.io/distroless/static-debian12`,
-  #      so there is NO /bin/sh in the image, locally built or pulled. The
-  #      `command:` below asks for one. Checked directly:
-  #      `docker run --entrypoint /bin/sh ghcr.io/taipanbox/idryx:v0.3.0` gives
-  #      `stat /bin/sh: no such file or directory`.
-  #   2. Even with a shell, the script calls `idryx`. The binary in that image
-  #      is `/usr/local/bin/service`, which is also its entrypoint.
+  # Measured 2026-09-01 against the published image, three ways:
   #
-  # Nothing caught it because the `routines` profile is never enabled by
-  # install.sh, and this README says so out loud: this box runs none of the five
-  # routines on its own. So the service has never been started by anything.
+  #   docker run --entrypoint /bin/sh ghcr.io/taipanbox/idryx:v0.3.0
+  #     stat /bin/sh: no such file or directory
+  #   docker run --entrypoint idryx ...
+  #     exec: "idryx": executable file not found in $PATH
+  #   docker run --entrypoint /usr/local/bin/service ... detect --help
+  #     usage: idryx detect [flags] <log.json>
   #
-  # It is left pointing at the local tag rather than migrated with the rest,
-  # deliberately: migrating it would change a line in a service that does not
-  # run, and hide the decision that has to be made. The cluster solves the same
-  # job by passing `args` to the entrypoint and letting a CronJob be the clock,
-  # which compose has no equivalent of. The three ways out are a published idryx
-  # image that carries a shell, a host cron entry calling
-  # `docker compose run --rm idryx-detect detect ...`, or dropping this service
-  # and keeping the README's advice. That is a product decision, not a rename.
+  # `go-service.Dockerfile` builds on `gcr.io/distroless/static-debian12`, so
+  # there is no shell for a `sleep` loop to run in, and the binary is
+  # `/usr/local/bin/service` whatever the usage line calls itself. This service
+  # was written as a shell loop calling `idryx`, so it could not start on any
+  # image this estate builds or publishes, and nothing noticed because the
+  # `routines` profile is never enabled by install.sh.
+  #
+  # THE THREE WAYS OUT, AND WHY THIS ONE
+  #
+  # Publishing a shell-bearing idryx would put a shell back into a governance
+  # plane to buy a scheduler, which trades a security property for a
+  # convenience. `detect` has no `--interval` or `--watch`, so the loop cannot
+  # move into the binary either: it is a one-shot by design.
+  #
+  # So it becomes what it actually is, and the estate already has the shape:
+  # stack-k8s ships `costcrew-crew` as a suspended CronJob a person runs. The
+  # compose equivalent is a service behind a profile no install ever enables,
+  # started by hand:
+  #
+  #   docker compose run --rm idryx-detect
+  #
+  # `manifest-is-true.sh` checks that install.sh never passes `--profile
+  # manual`, which is this file's answer to the `suspend: true` stack-k8s's own
+  # gate checks. The other two routines in the `routines` profile are unaffected
+  # and still loop: focus-export runs on the tokenfuse image and verdryx-drift
+  # on the console, and both of those have a shell.
   idryx-detect:
-    <<: *restart
-    image: stack/idryx:dev
-    user: "10001:10001"
-    profiles: ["routines"]
-    environment:
-      ROUTINE_INTERVAL: ${ROUTINE_INTERVAL:-3600}
+    restart: "no"
+    image: ${IDRYX_IMAGE:-ghcr.io/taipanbox/idryx:v0.3.0}
+    user: "65532:10001"
+    profiles: ["manual"]
+    # The entrypoint by its real path, and the arguments straight to it, which
+    # is exactly how stack-k8s's identity-sweep CronJob invokes the same work.
+    entrypoint: ["/usr/local/bin/service"]
     command:
-      - /bin/sh
-      - -c
-      - |
-        set -u
-        bus=/var/lib/stack/events/tokenfuse.ndjson
-        sleep "$$ROUTINE_INTERVAL"
-        while :; do
-          if [ ! -s "$$bus" ]; then
-            echo "idryx-detect: the bus at $$bus is empty, nothing to detect on"
-          else
-            idryx detect --load "tokenfuse:$$bus" --format human 2>&1 || true
-          fi
-          sleep "$$ROUTINE_INTERVAL"
-        done
+      - detect
+      - --load
+      - tokenfuse:/var/lib/stack/events/tokenfuse.ndjson
+      - --format
+      - human
     volumes:
       - events:/var/lib/stack/events:ro
     depends_on:

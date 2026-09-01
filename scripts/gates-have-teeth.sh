@@ -365,6 +365,33 @@ run_case "closed-by-default: the bind default is gone from install.sh" fail \
 	"$(py 'edit("install.sh", "GATEWAY_BIND=\"${GATEWAY_BIND:-127.0.0.1}\"", "GATEWAY_BIND_ADDR=\"127.0.0.1\"")')" \
 	"could not find the GATEWAY_BIND default"
 
+# A manual job an install starts is not one. The category has two halves and
+# either alone is satisfiable while the job still comes up on somebody's box:
+# it has to sit behind a profile, and no install may pass that profile.
+#
+# The job in question could not start at ALL until 2026-09-01. It was a shell
+# loop on a distroless image, so any attempt gave `stat /bin/sh: no such file or
+# directory`, and nothing noticed because the profile it sat behind was never
+# enabled either. Two ways of being invisible at once.
+run_case "manifest-is-true: a manual job stops sitting behind a profile" fail \
+	'./scripts/manifest-is-true.sh' \
+	"$(py 'edit("compose.yaml", "    profiles: [\"manual\"]\n", "")')" \
+	"sits behind no profile"
+
+run_case "manifest-is-true: the installer starts the job a person should start" fail \
+	'./scripts/manifest-is-true.sh' \
+	"$(py 'edit("install.sh", "say \"pulling published images\"", "say \"pulling images\" --profile manual")')" \
+	"A manual job an install starts is not one"
+
+run_case "manifest-is-true: a manual job with no reason beside it" fail \
+	'./scripts/manifest-is-true.sh' \
+	"$(py 'import json, collections
+p = "components.json"
+d = json.load(open(p), object_pairs_hook=collections.OrderedDict)
+d["components"][0]["checked"]["manual_jobs"]["idryx-detect"] = ""
+json.dump(d, open(p, "w"), indent=2)')" \
+	"gives no reason"
+
 echo
 if [ -n "$(git status --porcelain)" ]; then
 	printf 'FAIL: this script left the tree dirty, so it cannot be trusted about anything above\n'
