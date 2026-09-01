@@ -416,7 +416,7 @@ services:
   # volume, holding no capability of its own.
   wg:
     <<: *restart
-    image: stack/wg:dev
+    image: ${WG_IMAGE:-ghcr.io/taipanbox/stack-wg:v0.1.2}
     cap_add:
       - NET_ADMIN
     devices:
@@ -451,7 +451,7 @@ services:
   # simply cannot happen over WireGuard, on any device.
   caddy:
     <<: *restart
-    image: stack/caddy:dev
+    image: ${CADDY_IMAGE:-ghcr.io/taipanbox/stack-caddy:v0.1.2}
     environment:
       CONSOLE_DOMAIN: ${CONSOLE_DOMAIN:?set by install.sh}
       CONSOLE_UPSTREAM: console:7420
