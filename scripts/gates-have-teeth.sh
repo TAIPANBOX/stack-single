@@ -293,6 +293,16 @@ run_case "manifest-is-true: a routine arrives and the manifest does not claim it
 	"$(py 'edit("install.sh", "say \"building images", "say \"qryx-trend building images")')" \
 	"does not"
 
+# A pinned tag bumped in compose.yaml and nowhere else. This is the failure the
+# pulls list exists for and it is not hypothetical: the estate has already spent
+# a session where one launcher pulled a version another still named, and the
+# symptom is a container that works until something restarts it. The mutation
+# is one character in one tag, which is exactly how it would arrive.
+run_case "manifest-is-true: a pulled tag moves in compose and not in the manifest" fail \
+	'./scripts/manifest-is-true.sh' \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v0.1.0", "ghcr.io/taipanbox/wardryx:v0.1.1")')" \
+	"an image it pulls"
+
 echo
 echo "=== and what they must NOT catch ==="
 

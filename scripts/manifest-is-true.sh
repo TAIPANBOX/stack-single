@@ -112,6 +112,23 @@ compare(
     "no `-t stack/<name>:dev` and no build loop in install.sh",
 )
 
+# What it PULLS, which since 2026-09-01 is most of the stack and is the whole
+# reason a fresh install no longer waits on a compiler. Derived from the image
+# lines in compose.yaml rather than from a list here, so a tag bumped in one
+# place cannot leave this saying the other.
+#
+# The default half of a `${VAR:-default}` is what is taken: that is what an
+# operator who sets nothing actually runs, and the override exists precisely so
+# a box CAN run something else. A manifest that recorded the override would be
+# recording a hypothetical.
+pulls = sorted(set(re.findall(r"^\s+image: \$\{[A-Z_]+:-(ghcr\.io/[^}]+)\}", compose, re.M)))
+compare(
+    "an image it pulls",
+    checked.get("pulls_images", []),
+    pulls,
+    "no `image: ${VAR:-ghcr.io/...}` line in compose.yaml",
+)
+
 # The one the manifest declares empty, compared anyway: the day this launcher
 # gains a scheduler, the emptiness stops being true and has to be rewritten
 # rather than staying quietly correct.
@@ -170,8 +187,8 @@ if problems:
     sys.exit(1)
 
 print(f"OK: {len(services)} compose service(s), {len(checked.get('profiles', []))} profile(s) "
-      f"and {len(images)} image(s) it builds, each compared with compose.yaml and")
-print("    install.sh both ways.")
+      f"and {len(images)} image(s) it builds and {len(pulls)} it pulls, each")
+print("    compared with compose.yaml and install.sh, both ways.")
 if declared_routines:
     print(f"    Runs as a loop rather than a timer: {', '.join(declared_routines)}.")
 else:

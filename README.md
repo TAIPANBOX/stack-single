@@ -46,6 +46,7 @@ This is the other thing. The differences are the whole point:
 |---|---|---|
 | Reachable by an agent elsewhere | no, and it cannot be | yes, one variable away |
 | Toolchains on your host | Rust, Go, Node, Python | docker and git |
+| Where the planes come from | compiled on your machine | pulled from ghcr.io, pinned |
 | Survives a reboot | no | yes |
 | Console sign-in | no console at all | generated, shown once |
 | Credentials | a dev key | unique per box, 0600, never printed twice |
@@ -245,7 +246,7 @@ The default fetcher runs no JavaScript, so a page built in the browser arrives
 as the shell that builds it. There is a second profile with a real browser:
 
 ```bash
-WITH_BROWSER=1 ./install.sh        # builds the image, once, and it is slow
+WITH_BROWSER=1 ./install.sh        # pulls the chromium image, once
 docker compose --profile egress-browser up -d scopyx-browser
 ```
 
@@ -254,9 +255,9 @@ the compose network, and running both would give the gateway two services
 called `scopyx` and no way to say which one it reached.
 
 It costs about **1 GB** of disk against **15 MB**, which is why it is a
-separate profile rather than a variable. On a box that pulls rather than
-builds, the transfer is 267 MB against 3.5 MB. Everything else is identical: the same
-policy plane, the same journal on the same volume, the same cap.
+separate profile rather than a variable. The transfer is 267 MB against 3.5 MB,
+because this box pulls both. Everything else is identical: the same policy
+plane, the same journal on the same volume, the same cap.
 
 It is also the only backend that decides the other requests a page makes, and
 there are more of them than the phrase suggests: measured on a real node on
@@ -287,7 +288,7 @@ open http://localhost:17420
 Off unless you ask for it, like the egress plane above.
 
 ```bash
-WITH_RECORD=1 ./install.sh                        # builds stack/trailryx:dev
+WITH_RECORD=1 ./install.sh                        # pulls the record plane
 docker compose --profile record up -d record-seal
 ```
 
