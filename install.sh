@@ -40,8 +40,8 @@
 # first run, and .env is left alone.
 #
 # Requires: a Debian or Ubuntu host, root, and outbound internet. Everything
-# else it installs. The planes are PULLED from ghcr.io, so the only thing this
-# compiles is the operator's own door, caddy and wg. `BUILD_FROM_SOURCE=1`
+# else it installs. Every image is PULLED from ghcr.io and nothing is compiled.
+# `BUILD_FROM_SOURCE=1`
 # restores the old behaviour, and that path is the one that costs roughly 3GB
 # of disk and a long wait, most of it Rust.
 set -euo pipefail
@@ -225,7 +225,11 @@ fi
 # stack-k8s/cloud/*/deploy-*.sh carries.
 BUILD_FROM_SOURCE="${BUILD_FROM_SOURCE:-}"
 
-# The image definitions, needed for caddy and wg in both modes.
+# The image definitions. Needed only by the build path now that every image
+# this launcher runs is published, and fetched unconditionally anyway: it is one
+# tarball, it is what `build-context-complete.sh` checks against, and a build
+# that discovers its Dockerfiles are missing ten minutes in is the failure that
+# put this fetch here in the first place.
 #
 # The whole of stack-k8s, not five URLs. This used to fetch exactly five
 # `.Dockerfile` files by raw URL. It worked until `wg.Dockerfile` in that
@@ -312,14 +316,16 @@ if [ -n "$BUILD_FROM_SOURCE" ]; then
   fi
 fi
 
-# The operator's door, in BOTH modes, because stack-k8s does not publish these
-# two yet. When it does, these move into the pull in 3b and this block goes.
-note "building caddy (TLS for the console)"
-docker build -q -f stack-k8s/images/caddy.Dockerfile -t stack/caddy:dev stack-k8s >/dev/null \
-  || die "image build failed: caddy"
-note "building wg (the operator's tunnel)"
-docker build -q -f stack-k8s/images/wg.Dockerfile -t stack/wg:dev stack-k8s >/dev/null \
-  || die "image build failed: wg"
+# The operator's door is published too, since stack-k8s#49, so it is pulled with
+# everything else in 3b and built here only when the operator asked to build.
+if [ -n "$BUILD_FROM_SOURCE" ]; then
+  note "building caddy (TLS for the console)"
+  docker build -q -f stack-k8s/images/caddy.Dockerfile -t stack/caddy:dev stack-k8s >/dev/null \
+    || die "image build failed: caddy"
+  note "building wg (the operator's tunnel)"
+  docker build -q -f stack-k8s/images/wg.Dockerfile -t stack/wg:dev stack-k8s >/dev/null \
+    || die "image build failed: wg"
+fi
 cd "$STACK_DIR"
 
 # ---- 3. secrets --------------------------------------------------------------
@@ -501,6 +507,8 @@ if [ -n "$BUILD_FROM_SOURCE" ]; then
   add_env_default TOKENFUSE_CLOUD_IMAGE  stack/tokenfuse:dev
   add_env_default CONSOLE_IMAGE          stack/genaryx-console:dev
   add_env_default TRAILRYX_IMAGE         stack/trailryx:dev
+  add_env_default CADDY_IMAGE            stack/caddy:dev
+  add_env_default WG_IMAGE               stack/wg:dev
 fi
 
 # Out of this shell's memory now that it is on disk at 0600.
