@@ -40,8 +40,10 @@
 # first run, and .env is left alone.
 #
 # Requires: a Debian or Ubuntu host, root, and outbound internet. Everything
-# else it installs. Roughly 3GB of disk for the images and ten minutes for the
-# first build, most of it Rust.
+# else it installs. The planes are PULLED from ghcr.io, so the only thing this
+# compiles is the operator's own door, caddy and wg. `BUILD_FROM_SOURCE=1`
+# restores the old behaviour, and that path is the one that costs roughly 3GB
+# of disk and a long wait, most of it Rust.
 set -euo pipefail
 
 REPO_RAW="${REPO_RAW:-https://raw.githubusercontent.com/TAIPANBOX/stack-k8s/main}"
@@ -138,7 +140,7 @@ else
 fi
 cd "$STACK_DIR"
 
-# ---- 1b. notifications, asked BEFORE the ten minutes of building ------------
+# ---- 1b. notifications, asked BEFORE anything long ---------------------------
 # Asked here for the same reason the cluster installer asks its questions at the
 # top: an operator should answer everything they have to answer before a long
 # build, not after it. Blank is a real answer and the default one.
@@ -202,120 +204,122 @@ else
   note "environment and re-run, or edit .env afterwards, to add them."
 fi
 
-# ---- 2. sources and images --------------------------------------------------
-# Built here rather than pulled: there is no public registry for these, and a
-# private one is another component to secure and another bill. The build
-# happens once; `restart: unless-stopped` means it is not repeated on reboot.
-say "fetching sources"
-mkdir -p "$SRC_DIR" && cd "$SRC_DIR"
-# trailryx joins the list only when the record profile is wanted: it is a
-# Rust build like tokenfuse, and cloning what will not be built is a minute
-# of somebody's install for nothing.
-repos=(tokenfuse wardryx idryx qryx mockryx heraldyx scopyx verdryx engram)
-[ -z "${WITH_RECORD:-}" ] || repos+=(trailryx)
-for r in "${repos[@]}"; do
-  # A && B || C here is deliberate: the refresh is best-effort and C is `true`.
-  # shellcheck disable=SC2015
-  if [ -d "$r/.git" ]; then (cd "$r" && git pull -q --ff-only 2>/dev/null || true)
-  else git clone --depth 1 -q "https://github.com/TAIPANBOX/$r.git" "$r" || die "could not clone $r"; fi
-done
-# The console is Apache-2.0 and public since 2026-07-27, so it clones like
-# everything else and needs no token. CONSOLE_TOKEN still works, for the one
-# case it is now good for: a private fork of your own.
-# The console is cloned straight into its build directory name, like every
-# other source above. It used to land in `genaryx` and be renamed afterwards,
-# and the guard on the renamed directory could not tell "the operator dropped
-# their own source here" from "we put it here on the last run". So from the
-# second run onward the console was never refreshed while the other seven
-# repositories were: `stack-single` updated everything except its own console,
-# silently. `.git` is what distinguishes the two cases, exactly as the loop
-# above already does per repository.
-if [ -d "$SRC_DIR/genaryx-a360/.git" ]; then
-  # A && B || C here is deliberate: the refresh is best-effort and C is `true`.
-  # shellcheck disable=SC2015
-  (cd genaryx-a360 && git pull -q --ff-only 2>/dev/null || true)
-elif [ -d "$SRC_DIR/genaryx-a360" ]; then
-  note "console source already present and not a checkout, leaving it alone"
-elif [ -n "$CONSOLE_TOKEN" ]; then
-  git clone --depth 1 -q "https://x-access-token:${CONSOLE_TOKEN}@github.com/TAIPANBOX/genaryx.git" genaryx-a360 \
-    || die "could not clone the console with the token given; is it valid for your fork?"
-else
-  git clone --depth 1 -q "https://github.com/TAIPANBOX/genaryx.git" genaryx-a360 \
-    || die "could not clone the console"
-fi
+# ---- 2. images ---------------------------------------------------------------
+# PULLED, not built. This section used to open with "Built here rather than
+# pulled: there is no public registry for these, and a private one is another
+# component to secure and another bill." That sentence was true when it was
+# written and stopped being true on 2026-09-01, when the estate finished
+# publishing every plane to ghcr.io and the CLUSTER launcher stopped building
+# on its nodes. This launcher was left behind, so a person installing on their
+# own box kept paying a compile for images that already existed, and the
+# comment above told them it was necessary.
+#
+# What is still built here, and why: `caddy` and `wg`. They are the operator's
+# door rather than a plane, they live in stack-k8s/images rather than in a
+# service repository, and until stack-k8s publishes them there is nothing to
+# pull. Both are small next to what used to be here.
+#
+# BUILD_FROM_SOURCE=1 restores the old path in full, for the two cases a
+# registry does not serve: a change that is not released yet, and a box that
+# cannot reach ghcr.io. It is the same escape hatch, and the same name, that
+# stack-k8s/cloud/*/deploy-*.sh carries.
+BUILD_FROM_SOURCE="${BUILD_FROM_SOURCE:-}"
 
+# The image definitions, needed for caddy and wg in both modes.
+#
+# The whole of stack-k8s, not five URLs. This used to fetch exactly five
+# `.Dockerfile` files by raw URL. It worked until `wg.Dockerfile` in that
+# repository grew a `COPY images/uapi-proxy`, which is a DIRECTORY in its build
+# context, and nothing here fetched it. A clean install then died ten minutes
+# in with "failed to compute cache key: /images/uapi-proxy: not found", and
+# neither repository's CI could have seen it: the break is in the seam between
+# them, and this side had not changed. One tarball cannot drift file by file.
 say "fetching the image definitions"
-# The whole of stack-k8s, not five URLs.
-#
-# This used to fetch exactly five `.Dockerfile` files by raw URL. It worked
-# until `wg.Dockerfile` in that repository grew a `COPY images/uapi-proxy`,
-# which is a DIRECTORY in its build context, and nothing here fetched it. A
-# clean install then died ten minutes in with "failed to compute cache key:
-# /images/uapi-proxy: not found", and neither repository's CI could have seen
-# it: the break is in the seam between them, and this side had not changed.
-#
-# One tarball cannot drift file by file. It is also what `stack-k8s`'s own
-# `deploy.sh` does, so the two installers now build from the same shape and
-# with the same contexts.
+mkdir -p "$SRC_DIR"
 rm -rf "$SRC_DIR/stack-k8s"
 mkdir -p "$SRC_DIR/stack-k8s"
 curl -fsSL "$REPO_TARBALL" | tar -xz -C "$SRC_DIR/stack-k8s" --strip-components=1 \
   || die "could not fetch the image definitions from stack-k8s"
 [ -f "$SRC_DIR/stack-k8s/images/wg.Dockerfile" ] \
   || die "the stack-k8s tarball has no images/wg.Dockerfile; the layout changed"
-
-say "building images (first run is slow: Rust)"
 cd "$SRC_DIR"
-for pair in wardryx:wardryx idryx:idryx qryx:qryx mockryx:mockryx heraldyx:heraldyx scopyx:scopyx; do
-  name="${pair%%:*}"; repo="${pair##*:}"
-  note "building $name"
-  docker build -q -f stack-k8s/images/go-service.Dockerfile \
-    --build-arg SERVICE="$name" --build-arg SRC="./$repo" -t "stack/$name:dev" . >/dev/null \
-    || die "image build failed: $name"
-done
-# The browser image, only when asked. It is the slowest build here and the
-# largest artifact by a factor of sixty-seven, so it is not built on the chance
-# that somebody might later want it.
-if [ -n "${WITH_BROWSER:-}" ]; then
-  [ -f "$SRC_DIR/stack-k8s/images/scopyx-browser.Dockerfile" ] \
-    || die "WITH_BROWSER is set but the stack-k8s tarball has no images/scopyx-browser.Dockerfile"
-  note "building scopyx-browser (about 1GB, and slow: it installs chromium)"
-  docker build -q -f stack-k8s/images/scopyx-browser.Dockerfile \
-    --build-arg SRC=./scopyx -t stack/scopyx-browser:dev . >/dev/null \
-    || die "image build failed: scopyx-browser"
+
+if [ -n "$BUILD_FROM_SOURCE" ]; then
+  note "BUILD_FROM_SOURCE is set: cloning every plane and compiling here"
+  repos=(tokenfuse wardryx idryx qryx mockryx heraldyx scopyx verdryx engram)
+  [ -z "${WITH_RECORD:-}" ] || repos+=(trailryx)
+  for r in "${repos[@]}"; do
+    # A && B || C here is deliberate: the refresh is best-effort and C is `true`.
+    # shellcheck disable=SC2015
+    if [ -d "$r/.git" ]; then (cd "$r" && git pull -q --ff-only 2>/dev/null || true)
+    else git clone --depth 1 -q "https://github.com/TAIPANBOX/$r.git" "$r" || die "could not clone $r"; fi
+  done
+  # The console is Apache-2.0 and public since 2026-07-27, so it clones like
+  # everything else and needs no token. CONSOLE_TOKEN still works, for the one
+  # case it is now good for: a private fork of your own.
+  if [ -d "$SRC_DIR/genaryx-a360/.git" ]; then
+    # shellcheck disable=SC2015
+    (cd genaryx-a360 && git pull -q --ff-only 2>/dev/null || true)
+  elif [ -d "$SRC_DIR/genaryx-a360" ]; then
+    note "console source already present and not a checkout, leaving it alone"
+  elif [ -n "$CONSOLE_TOKEN" ]; then
+    git clone --depth 1 -q "https://x-access-token:${CONSOLE_TOKEN}@github.com/TAIPANBOX/genaryx.git" genaryx-a360 \
+      || die "could not clone the console with the token given; is it valid for your fork?"
+  else
+    git clone --depth 1 -q "https://github.com/TAIPANBOX/genaryx.git" genaryx-a360 \
+      || die "could not clone the console"
+  fi
+
+  say "building images (first run is slow: Rust)"
+  # The tags built here are the ones the *_IMAGE overrides in compose.yaml
+  # accept, so this path needs no second copy of the compose file. An operator
+  # taking this route sets them in .env; install.sh writes them below.
+  for pair in wardryx:wardryx idryx:idryx heraldyx:heraldyx scopyx:scopyx; do
+    name="${pair%%:*}"; repo="${pair##*:}"
+    note "building $name"
+    docker build -q -f stack-k8s/images/go-service.Dockerfile \
+      --build-arg SERVICE="$name" --build-arg SRC="./$repo" -t "stack/$name:dev" . >/dev/null \
+      || die "image build failed: $name"
+  done
+  if [ -n "${WITH_BROWSER:-}" ]; then
+    [ -f "$SRC_DIR/stack-k8s/images/scopyx-browser.Dockerfile" ] \
+      || die "WITH_BROWSER is set but the stack-k8s tarball has no images/scopyx-browser.Dockerfile"
+    note "building scopyx-browser (about 1GB, and slow: it installs chromium)"
+    docker build -q -f stack-k8s/images/scopyx-browser.Dockerfile \
+      --build-arg SRC=./scopyx -t stack/scopyx-browser:dev . >/dev/null \
+      || die "image build failed: scopyx-browser"
+  fi
+  if [ -n "${WITH_RECORD:-}" ]; then
+    [ -f "$SRC_DIR/stack-k8s/images/trailryx.Dockerfile" ] \
+      || die "WITH_RECORD is set but the stack-k8s tarball has no images/trailryx.Dockerfile"
+    note "building trailryx (the record plane, and slow: Rust)"
+    # The CONTEXT is ./trailryx, not `.` with a SRC build-arg. This file does
+    # `COPY . .` into /src and takes no SRC, exactly like tokenfuse.Dockerfile,
+    # and unlike go-service.Dockerfile, which is where the SRC form came from.
+    # Built with the wrong context it dies at `cargo build` with "could not
+    # find Cargo.toml in /src", ten minutes in.
+    docker build -q -f stack-k8s/images/trailryx.Dockerfile \
+      -t stack/trailryx:dev ./trailryx >/dev/null \
+      || die "image build failed: trailryx"
+  fi
+  note "building tokenfuse (gateway + cloud)"
+  docker build -q -f stack-k8s/images/tokenfuse.Dockerfile -t stack/tokenfuse:dev ./tokenfuse >/dev/null \
+    || die "image build failed: tokenfuse"
+  if [ -d genaryx-a360 ]; then
+    note "building the console (four languages, it hosts the tools it runs)"
+    docker build -q -f stack-k8s/images/console.Dockerfile -t stack/genaryx-console:dev . >/dev/null \
+      || die "image build failed: console"
+  fi
 fi
 
-# The record plane, only when asked, and for the same reason as the browser
-# above: this is a Rust build and nobody should pay for it on the chance
-# that they might later want a sealed record.
-if [ -n "${WITH_RECORD:-}" ]; then
-  [ -f "$SRC_DIR/stack-k8s/images/trailryx.Dockerfile" ] \
-    || die "WITH_RECORD is set but the stack-k8s tarball has no images/trailryx.Dockerfile"
-  note "building trailryx (the record plane, and slow: Rust)"
-  # The CONTEXT is ./trailryx, not `.` with a SRC build-arg. This file does
-  # `COPY . .` into /src and takes no SRC, exactly like tokenfuse.Dockerfile
-  # two lines below, and unlike go-service.Dockerfile, which is where the
-  # SRC form came from. Built with the wrong context it dies at
-  # `cargo build` with "could not find Cargo.toml in /src", ten minutes in.
-  docker build -q -f stack-k8s/images/trailryx.Dockerfile \
-    -t stack/trailryx:dev ./trailryx >/dev/null \
-    || die "image build failed: trailryx"
-fi
-
+# The operator's door, in BOTH modes, because stack-k8s does not publish these
+# two yet. When it does, these move into the pull in 3b and this block goes.
 note "building caddy (TLS for the console)"
 docker build -q -f stack-k8s/images/caddy.Dockerfile -t stack/caddy:dev stack-k8s >/dev/null \
   || die "image build failed: caddy"
 note "building wg (the operator's tunnel)"
 docker build -q -f stack-k8s/images/wg.Dockerfile -t stack/wg:dev stack-k8s >/dev/null \
   || die "image build failed: wg"
-note "building tokenfuse (gateway + cloud)"
-docker build -q -f stack-k8s/images/tokenfuse.Dockerfile -t stack/tokenfuse:dev ./tokenfuse >/dev/null \
-  || die "image build failed: tokenfuse"
-if [ -d genaryx-a360 ]; then
-  note "building the console (four languages, it hosts the tools it runs)"
-  docker build -q -f stack-k8s/images/console.Dockerfile -t stack/genaryx-console:dev . >/dev/null \
-    || die "image build failed: console"
-fi
 cd "$STACK_DIR"
 
 # ---- 3. secrets --------------------------------------------------------------
@@ -475,6 +479,30 @@ add_env_default SCOPYX_WARDRYX_KEY "$(sq_ "$WARDRYX_GATEWAY_SECRET")"
 # anybody hears of it is a bill or a rate-limit from the site being fetched.
 add_env_default SCOPYX_MAX_FETCHES_PER_HOUR 200
 
+# When the operator asked to build, compose has to be pointed at what was
+# built. Without these nine lines a BUILD_FROM_SOURCE install compiles every
+# plane and then runs the PUBLISHED ones anyway, which is the worst of both:
+# the wait is paid and the change being tested is not what runs.
+#
+# `add_env_default`, so a box that already carries an override keeps it.
+#
+# One asymmetry worth the line: the published gateway and control plane are two
+# images, and the local build is one carrying both binaries. The `command:`
+# entries need no switch because stack-k8s/images/tokenfuse.Dockerfile installs
+# the gateway under BOTH names, `tokenfuse` and `tokenfuse-gateway`, so the one
+# compose names resolves either way.
+if [ -n "$BUILD_FROM_SOURCE" ]; then
+  add_env_default WARDRYX_IMAGE          stack/wardryx:dev
+  add_env_default IDRYX_IMAGE            stack/idryx:dev
+  add_env_default HERALDYX_IMAGE         stack/heraldyx:dev
+  add_env_default SCOPYX_IMAGE           stack/scopyx:dev
+  add_env_default SCOPYX_BROWSER_IMAGE   stack/scopyx-browser:dev
+  add_env_default TOKENFUSE_IMAGE        stack/tokenfuse:dev
+  add_env_default TOKENFUSE_CLOUD_IMAGE  stack/tokenfuse:dev
+  add_env_default CONSOLE_IMAGE          stack/genaryx-console:dev
+  add_env_default TRAILRYX_IMAGE         stack/trailryx:dev
+fi
+
 # Out of this shell's memory now that it is on disk at 0600.
 SMTP_PASS=""
 
@@ -485,6 +513,44 @@ SMTP_PASS=""
 # announcing a boundary this run merely intended.
 # shellcheck disable=SC1091  # generated at install time, not in this repo
 . ./.env
+
+# ---- 3b. the images, pulled ---------------------------------------------------
+# Here rather than in section 2, and the reason is mechanical: the list comes
+# from `docker compose config`, which interpolates .env, and .env does not
+# exist until section 3 has written it. Asked any earlier, compose refuses the
+# whole file over the `:?` variables it is right to demand.
+#
+# Nothing is pulled when the operator asked to build instead: section 2 already
+# produced the `stack/*:dev` tags, and pulling published images on top of them
+# would download what this box was told not to use.
+if [ -z "$BUILD_FROM_SOURCE" ]; then
+  say "pulling published images"
+  # The list is READ from compose.yaml rather than repeated here. A tag bumped
+  # in one place and forgotten in the other would pull one version and run
+  # another, and the symptom is a container that works until it restarts.
+  # `config` resolves the ${VAR:-default} forms and the profile switches, so
+  # this is the same set docker will actually run.
+  profiles=()
+  [ -z "${WITH_BROWSER:-}" ] || profiles+=(--profile egress-browser)
+  [ -z "${WITH_RECORD:-}" ]  || profiles+=(--profile record)
+  [ -z "${WITH_EGRESS:-}" ]  || profiles+=(--profile egress)
+  pulled=0
+  while read -r img; do
+    case "$img" in
+      ghcr.io/*)
+        note "pulling $img"
+        docker pull -q "$img" >/dev/null || die "could not pull $img"
+        pulled=$((pulled + 1))
+        ;;
+    esac
+  done < <("${COMPOSE[@]}" "${profiles[@]}" config --images 2>/dev/null | sort -u)
+  # A pull loop that pulled nothing is the failure this catches, and it is not
+  # hypothetical: `config --images` printing an empty list, or every line
+  # missing the `ghcr.io/` prefix after a rename, both leave every plane absent
+  # while every line above still reads as success.
+  [ "$pulled" -gt 0 ] || die "no ghcr.io image was pulled; compose named none. Is compose.yaml the one this installer shipped?"
+  note "pulled $pulled published image(s); nothing was compiled but the tunnel"
+fi
 
 # ---- 4. the files the services read -----------------------------------------
 if [ ! -f policy.yaml ]; then

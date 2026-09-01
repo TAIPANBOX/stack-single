@@ -97,7 +97,7 @@ services:
   # ---- policy --------------------------------------------------------------
   wardryx:
     <<: *restart
-    image: stack/wardryx:dev
+    image: ${WARDRYX_IMAGE:-ghcr.io/taipanbox/wardryx:v0.1.0}
     # The image's own 65532:65532, with the GID moved to the one that owns the
     # shared event directory. The binary is a static Go binary and reads no
     # /etc/passwd, so a numeric pair it was not built with is fine.
@@ -149,7 +149,7 @@ services:
   # writes, and the mount says so.
   idryx:
     <<: *restart
-    image: stack/idryx:dev
+    image: ${IDRYX_IMAGE:-ghcr.io/taipanbox/idryx:v0.3.0}
     user: "65532:10001"
     command:
       - serve
@@ -179,7 +179,7 @@ services:
   # real and is not hidden: on one machine the boundary is the machine.
   heraldyx:
     <<: *restart
-    image: stack/heraldyx:dev
+    image: ${HERALDYX_IMAGE:-ghcr.io/taipanbox/heraldyx:v0.2.2}
     user: "65532:10001"
     environment:
       HERALDYX_EVENTS: /var/lib/stack/events
@@ -240,7 +240,7 @@ services:
   scopyx:
     <<: *restart
     profiles: ["egress"]
-    image: stack/scopyx:dev
+    image: ${SCOPYX_IMAGE:-ghcr.io/taipanbox/scopyx:v0.1.2}
     user: "65532:65532"
     environment:
       # Inside the compose network, not on the host. Nothing publishes a port
@@ -298,7 +298,7 @@ services:
   scopyx-browser:
     <<: *restart
     profiles: ["egress-browser"]
-    image: stack/scopyx-browser:dev
+    image: ${SCOPYX_BROWSER_IMAGE:-ghcr.io/taipanbox/scopyx:v0.1.2-chromium}
     user: "65532:65532"
     # The name the rest of the box reaches it by. Same as the profile above, so
     # nothing else in this file changes when an operator switches profiles.
@@ -347,7 +347,7 @@ services:
   # ---- money: the control API ----------------------------------------------
   tokenfuse-cloud:
     <<: *restart
-    image: stack/tokenfuse:dev
+    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v0.4.1}
     command: ["/usr/local/bin/tokenfuse-cloud"]
     environment:
       PORT: "8080"
@@ -371,8 +371,8 @@ services:
   # gets a hard refusal rather than a log line.
   tokenfuse-gateway:
     <<: *restart
-    image: stack/tokenfuse:dev
-    command: ["/usr/local/bin/tokenfuse-gateway"]
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v0.4.1}
+    command: ["/usr/local/bin/tokenfuse"]
     environment:
       TOKENFUSE_ADDR: 0.0.0.0:4100
       TOKENFUSE_MODE: enforce
@@ -468,7 +468,7 @@ services:
 
   console:
     <<: *restart
-    image: stack/genaryx-console:dev
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v0.1.1}
     environment:
       HOME: /var/lib/stack
       TAIPAN_HOME: /etc/genaryx/taipan
@@ -535,7 +535,7 @@ services:
   # a promise.
   record-seal:
     <<: *restart
-    image: stack/trailryx:dev
+    image: ${TRAILRYX_IMAGE:-ghcr.io/taipanbox/trailryx-node:v0.1.2}
     user: "10001:10001"
     profiles: ["record"]
     environment:
@@ -662,7 +662,7 @@ services:
   # The sixth, trailryx-seal, is the `record` profile above.
   focus-export:
     <<: *restart
-    image: stack/tokenfuse:dev
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v0.4.1}
     user: "10001:10001"
     profiles: ["routines"]
     environment:
@@ -678,7 +678,7 @@ services:
         while :; do
           if [ ! -d "$$traces" ]; then
             echo "focus-export: no trace directory at $$traces yet"
-          elif tokenfuse-gateway focus-export --traces "$$traces" \
+          elif tokenfuse focus-export --traces "$$traces" \
                  --out "$$out/focus-$$(date -u +%Y%m%dT%H%M%SZ).csv" 2>&1; then
             echo "focus-export: wrote a window"
           else
@@ -698,6 +698,30 @@ services:
       init-volumes:
         condition: service_completed_successfully
 
+  # MEASURED 2026-09-01 AND IT CANNOT START, in this shape, on any image this
+  # estate publishes or builds. Two faults, and neither is visible from the
+  # compose file alone:
+  #
+  #   1. `go-service.Dockerfile` builds on `gcr.io/distroless/static-debian12`,
+  #      so there is NO /bin/sh in the image, locally built or pulled. The
+  #      `command:` below asks for one. Checked directly:
+  #      `docker run --entrypoint /bin/sh ghcr.io/taipanbox/idryx:v0.3.0` gives
+  #      `stat /bin/sh: no such file or directory`.
+  #   2. Even with a shell, the script calls `idryx`. The binary in that image
+  #      is `/usr/local/bin/service`, which is also its entrypoint.
+  #
+  # Nothing caught it because the `routines` profile is never enabled by
+  # install.sh, and this README says so out loud: this box runs none of the five
+  # routines on its own. So the service has never been started by anything.
+  #
+  # It is left pointing at the local tag rather than migrated with the rest,
+  # deliberately: migrating it would change a line in a service that does not
+  # run, and hide the decision that has to be made. The cluster solves the same
+  # job by passing `args` to the entrypoint and letting a CronJob be the clock,
+  # which compose has no equivalent of. The three ways out are a published idryx
+  # image that carries a shell, a host cron entry calling
+  # `docker compose run --rm idryx-detect detect ...`, or dropping this service
+  # and keeping the README's advice. That is a product decision, not a rename.
   idryx-detect:
     <<: *restart
     image: stack/idryx:dev
@@ -728,7 +752,7 @@ services:
 
   verdryx-drift:
     <<: *restart
-    image: stack/genaryx-console:dev
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v0.1.1}
     user: "10001:10001"
     profiles: ["routines"]
     environment:
