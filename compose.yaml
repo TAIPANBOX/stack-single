@@ -347,7 +347,7 @@ services:
   # ---- money: the control API ----------------------------------------------
   tokenfuse-cloud:
     <<: *restart
-    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v0.4.1}
+    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v0.4.3}
     command: ["/usr/local/bin/tokenfuse-cloud"]
     environment:
       PORT: "8080"
@@ -371,7 +371,7 @@ services:
   # gets a hard refusal rather than a log line.
   tokenfuse-gateway:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v0.4.1}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v0.4.3}
     command: ["/usr/local/bin/tokenfuse"]
     environment:
       TOKENFUSE_ADDR: 0.0.0.0:4100
@@ -662,7 +662,7 @@ services:
   # The sixth, trailryx-seal, is the `record` profile above.
   focus-export:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v0.4.1}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v0.4.3}
     user: "10001:10001"
     profiles: ["routines"]
     environment:
