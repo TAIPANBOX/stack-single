@@ -29,6 +29,11 @@ jobs:
       - name: every image has the files it copies
         run: ./scripts/build-context-complete.sh
 
+      - name: components.json says what this launcher actually installs
+        run: ./scripts/manifest-is-true.sh
+      - name: the record plane reads the bus and writes somewhere else
+        run: ./scripts/record-is-not-on-the-bus.sh
+
       # Last, because it mutates tracked files and restores them. It needs a
       # clean tree and says so plainly, so it also reports any earlier step
       # that starts writing into the checkout. Two of its cases mutate a copy
