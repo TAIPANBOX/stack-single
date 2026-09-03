@@ -2,8 +2,9 @@
 #
 # Local gate before anything leaves this machine.
 #
-# This repository has no CI, so this hook is the ONLY thing that runs the gates.
-# A gate nothing calls is a comment with an exit code.
+# The gates also run in CI, in .github/workflows/gates.yml, on every push and
+# pull request. This hook runs the same checks before anything leaves this
+# machine: the local half, before the push even reaches CI.
 #
 # Install (once):  git config core.hooksPath .githooks
 # Skip (rarely):   git push --no-verify
@@ -32,6 +33,8 @@ echo "pre-push gate"
 step "shellcheck install.sh" "./scripts/shell-lint.sh"
 step "gateway binds loopback by default" "./scripts/closed-by-default.sh"
 step "fails before doing half the job" "./scripts/fail-before-half-the-job.sh"
+step "manifest matches what this installs" "./scripts/manifest-is-true.sh"
+step "record reads the bus, writes elsewhere" "./scripts/record-is-not-on-the-bus.sh"
 # Reaches the network (a tarball from the sibling repo), which is why it is
 # last: everything that can be judged offline has already spoken by here.
 step "every image has the files it copies" "./scripts/build-context-complete.sh"
