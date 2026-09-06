@@ -726,6 +726,59 @@ if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx console; then
   check "console can manage peers over UAPI" \
         "$DC exec -T console test -r /var/run/wireguard/console.sock"
 fi
+
+# ---- 8b. your first device ---------------------------------------------------
+# With GENARYX_WEB_REQUIRE_PASSKEY=1 (compose.yaml), the five sensitive console
+# commands refuse on a session cookie alone until a passkey is enrolled, and
+# enrolment can only happen at https://$CONSOLE_DOMAIN over the tunnel:
+# GENARYX_WEB_ORIGIN is that exact name, and WebAuthn refuses to enrol against
+# any other origin, including an SSH port-forward to localhost. So the FIRST
+# device cannot come from the browser (it needs a passkey, and none exists
+# yet) and cannot come from enrolling one either (wrong origin over SSH).
+# Somebody has to hand out the first device from outside the browser, and the
+# only channel that exists before a tunnel does is this installer itself.
+# stack-k8s's tunnel/up.sh solves the identical problem the identical way.
+#
+# Only when the tunnel and the console's UAPI access already checked out
+# above: issuing a device this box cannot dial anywhere is not a step worth
+# taking. Skipped with FIRST_DEVICE=0 on a re-run, or when the config already
+# exists: a second run should not mint a peer nobody asked for, and existing
+# devices are never touched either way.
+if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx console; then
+  CONF_OUT="$STACK_DIR/${CONSOLE_DOMAIN}.conf"
+  if [ -s "$CONF_OUT" ]; then
+    note "first device already issued: $CONF_OUT, left as is"
+  elif [ "${FIRST_DEVICE:-1}" = "0" ]; then
+    note "FIRST_DEVICE=0: skipping first-device issuance"
+  else
+    say "your first device"
+    # stdout is the config and stderr is the QR plus the notes, so the redirect
+    # saves the file and the QR still reaches the terminal.
+    #
+    # umask in a subshell, not chmod afterwards. This file carries the device's
+    # private key from the moment the first byte lands, and a chmod after the
+    # redirect leaves it world-readable for however long the write takes.
+    if ( umask 077
+         "${COMPOSE[@]}" exec -T console /usr/local/bin/genaryx-web issue-device --no-color \
+           >"$CONF_OUT.tmp" 2>"/tmp/issue-device.$$" ); then
+      mv "$CONF_OUT.tmp" "$CONF_OUT"
+      cat "/tmp/issue-device.$$" >&2
+      rm -f "/tmp/issue-device.$$"
+      note "saved to $CONF_OUT (mode 0600)"
+    else
+      rm -f "$CONF_OUT.tmp"
+      sed 's/^/   /' "/tmp/issue-device.$$" >&2
+      rm -f "/tmp/issue-device.$$"
+      # Not `die`: the rest of the install is sound, and an operator can run
+      # this by hand once they want the first device. Printing the exact
+      # command is the point, not just the fact that it failed.
+      note "could not issue the first device automatically. The rest of the box"
+      note "is fine. Run it yourself when you are ready:"
+      note "  cd $STACK_DIR && ${COMPOSE[*]} exec console genaryx-web issue-device"
+    fi
+  fi
+fi
+
 # `--protocol udp <port>`, not `<port>/udp`: compose parses the argument as a
 # bare integer and fails with "strconv.ParseUint: invalid syntax" on the form
 # `docker port` accepts, so the check reported a healthy tunnel as broken.
@@ -852,11 +905,25 @@ ${CONSOLE_PASSWORD:+  Console sign-in, shown once and stored nowhere:
       tunnel   $WG_ENDPOINT_HOST:${WG_LISTEN_PORT:-51820}/udp
 $CONSOLE_ACCESS_NOTE
 
-  Issuing and revoking a device both need a passkey, like a kill does: a road
-  into the control plane is not something a stolen session should be able to
-  mint quietly. Enrol one on first sign-in.
+  Killing a run, setting a budget, deciding an approval, and issuing or
+  revoking a device all need a passkey: a road into the control plane is not
+  something a stolen session should be able to mint quietly. That passkey can
+  only be enrolled at https://$CONSOLE_DOMAIN over the tunnel, so the sequence
+  for your first session is:
 
-  SSH stays as the way in before the first device exists:
+      1. import $STACK_DIR/$CONSOLE_DOMAIN.conf (or scan the QR this run
+         printed above) into your WireGuard client, and connect
+      2. open https://$CONSOLE_DOMAIN, trusting this box's own CA first if
+         no CLOUDFLARE_API_TOKEN was set (see above)
+      3. sign in with the password above
+      4. enrol a passkey under Session > Passkeys
+
+  Only after step 4 do kill, budget, approval and device commands work. A
+  passkey cannot be enrolled over the SSH forward below: WebAuthn checks the
+  origin, and that forward is http://localhost, never $CONSOLE_DOMAIN.
+
+  SSH stays as the way to read the console before the tunnel exists, not to
+  act on it:
 
       ssh -L 17420:127.0.0.1:7420 root@$PUBLIC_IP
       open http://localhost:17420
