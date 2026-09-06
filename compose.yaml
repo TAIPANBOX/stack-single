@@ -507,6 +507,14 @@ services:
       # mismatch that reads like a broken passkey rather than a wrong origin.
       GENARYX_WEB_RP_ID: ${CONSOLE_DOMAIN:?set by install.sh}
       GENARYX_WEB_ORIGIN: https://${CONSOLE_DOMAIN:?set by install.sh}
+      # The five sensitive commands (kill a run, set a budget, decide an
+      # approval, issue a device, revoke one) must not run on a session cookie
+      # alone: a stolen session should not be able to pull the switch. Enrolment
+      # happens over the tunnel at CONSOLE_DOMAIN, with the operator password as
+      # the factor, and the first device is issued by install.sh itself, not in
+      # the browser, because the browser cannot reach that domain before a
+      # tunnel exists.
+      GENARYX_WEB_REQUIRE_PASSKEY: "1"
     ports:
       - "127.0.0.1:7420:7420"
     volumes:

@@ -131,10 +131,28 @@ nowhere else - see the next section, because that name is not optional if you
 want passkeys to work at all.
 
 Issuing a device and revoking one both require a passkey, the same ceremony a
-kill does. A peer config is a road into the control plane, so a stolen console
-session must not be able to mint one quietly. Enrol a passkey on first sign-in.
+kill, a budget change or an approval decision does: a peer config is a road
+into the control plane, so a stolen console session must not be able to mint
+one quietly. Your first device is issued by `install.sh` itself, not the
+browser: a passkey cannot be enrolled before a tunnel exists, so the browser
+has nothing to issue the first device from. Every device after that goes
+through the console once you have one.
 
-SSH is still how you get in before the first device exists:
+The sequence for your first session:
+
+1. import the `.conf` file `install.sh` printed the path to (or scan the QR
+   it printed on that run) into your WireGuard client, and connect
+2. open `https://<your CONSOLE_DOMAIN>`, trusting this box's own CA first if
+   you did not set `CLOUDFLARE_API_TOKEN` (see the next section)
+3. sign in with the password `install.sh` printed
+4. enrol a passkey under Session > Passkeys
+
+Only after step 4 do kill, budget, approval and device commands work.
+
+SSH is still how you read the console before the tunnel exists, not how you
+act on it: a passkey cannot be enrolled over an SSH forward, because WebAuthn
+checks the origin, and that forward is `http://localhost`, never your console
+domain.
 
 ```bash
 ssh -L 17420:127.0.0.1:7420 root@<your box>
