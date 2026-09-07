@@ -347,7 +347,7 @@ services:
   # ---- money: the control API ----------------------------------------------
   tokenfuse-cloud:
     <<: *restart
-    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v0.4.3}
+    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v0.4.4}
     command: ["/usr/local/bin/tokenfuse-cloud"]
     environment:
       PORT: "8080"
@@ -371,20 +371,20 @@ services:
   # gets a hard refusal rather than a log line.
   tokenfuse-gateway:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v0.4.3}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v0.4.4}
     command: ["/usr/local/bin/tokenfuse"]
     environment:
       TOKENFUSE_ADDR: 0.0.0.0:4100
       # The gateway's observability and kill routes (/v1/runs,
       # /v1/runs/{id}/kill, /v1/keys, /v1/policy-plane, /v1/agent-ids) take
-      # this key, GATEWAY_ADMIN from install.sh, as a bearer credential from
-      # tokenfuse v0.4.4 on; the console presents the same value below. The
-      # image running today is still v0.4.3, which does not read
-      # TOKENFUSE_ADMIN_KEYS at all, so TOKENFUSE_ALLOW_OPEN_OBS stays set as
-      # the bridge until the image tag moves (phase 3 of the gateway admin
-      # key plan, 2026-09-07): it is deleted in that same change, not before.
+      # this key, GATEWAY_ADMIN from install.sh, as a bearer credential.
+      # tokenfuse v0.4.4 enforces it: with no key or the wrong one, all five
+      # routes refuse; the console presents the same value below. The bridge
+      # that used to hold this open, TOKENFUSE_ALLOW_OPEN_OBS, is gone as of
+      # phase 3 of the gateway admin key plan (2026-09-07): the key is the
+      # only door now, and widening GATEWAY_BIND no longer widens these
+      # routes to anyone without it.
       TOKENFUSE_ADMIN_KEYS: ${GATEWAY_ADMIN:?set by install.sh}
-      TOKENFUSE_ALLOW_OPEN_OBS: "1"
       TOKENFUSE_MODE: enforce
       TOKENFUSE_DATA_DIR: /var/lib/stack/traces/gateway
       TOKENFUSE_UPSTREAM: https://api.anthropic.com/v1/messages
@@ -478,7 +478,7 @@ services:
 
   console:
     <<: *restart
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v0.1.1}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v0.1.2}
     environment:
       HOME: /var/lib/stack
       TAIPAN_HOME: /etc/genaryx/taipan
@@ -493,8 +493,8 @@ services:
       # all along, which is what made the difference easy to miss.
       TOKENFUSE_CLOUD_ADMIN_KEY: ${CLOUD_ADMIN:?set by install.sh}
       # The same GATEWAY_ADMIN key the gateway enforces above, so the console
-      # can reach its observability and kill routes once tokenfuse v0.4.4
-      # requires it. Harmless against today's v0.4.3, which ignores it.
+      # can reach its observability and kill routes: tokenfuse v0.4.4
+      # requires it on all five, with no bridge left to fall back to.
       TOKENFUSE_GATEWAY_ADMIN_KEY: ${GATEWAY_ADMIN:?set by install.sh}
       WARDRYX_URL: http://wardryx:8090
       WARDRYX_ADMIN_KEY: ${WARDRYX_ADMIN:?set by install.sh}
@@ -684,7 +684,7 @@ services:
   # The sixth, trailryx-seal, is the `record` profile above.
   focus-export:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v0.4.3}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v0.4.4}
     user: "10001:10001"
     profiles: ["routines"]
     environment:
@@ -780,7 +780,7 @@ services:
 
   verdryx-drift:
     <<: *restart
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v0.1.1}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v0.1.2}
     user: "10001:10001"
     profiles: ["routines"]
     environment:

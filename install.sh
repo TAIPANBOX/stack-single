@@ -422,12 +422,11 @@ add_env_default WG_BIND 0.0.0.0
 # certificate with no other change.
 add_env_default CONSOLE_DOMAIN console.genaryx.internal
 
-# The gateway's admin key, new in this release. It is the bare key the console
-# presents on the gateway's five observability and kill routes (/v1/runs,
-# /v1/runs/{id}/kill, /v1/keys, /v1/policy-plane, /v1/agent-ids). The gateway
-# only enforces it from tokenfuse v0.4.4 on; today's image (v0.4.3) still
-# relies on TOKENFUSE_ALLOW_OPEN_OBS in compose.yaml, and both are wired
-# together now so the key is already in place when the image moves.
+# The gateway's admin key. It is the bare key the console presents on the
+# gateway's five observability and kill routes (/v1/runs, /v1/runs/{id}/kill,
+# /v1/keys, /v1/policy-plane, /v1/agent-ids). tokenfuse v0.4.4 enforces it on
+# all five: no key or the wrong one is refused. There is no bridge variable
+# left to fall back to.
 add_env_default GATEWAY_ADMIN "$(gen 40)"
 
 # Notifications, from the answers given before the build.
@@ -693,6 +692,12 @@ probe() { docker run --rm --network "$NET" busybox:1.36 wget -q -T5 -O /dev/null
 code() { docker run --rm --network "$NET" busybox:1.36 \
            wget -S -q -T5 -O /dev/null --header="Authorization: Bearer $2" "$1" 2>&1 \
          | awk '/^  HTTP\//{c=$2} END{print c+0}'; }
+# Same as code(), minus the header entirely: an empty bearer token is still a
+# credential, and the point of this one is that none was presented at all.
+# shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
+codenokey() { docker run --rm --network "$NET" busybox:1.36 \
+           wget -S -q -T5 -O /dev/null "$1" 2>&1 \
+         | awk '/^  HTTP\//{c=$2} END{print c+0}'; }
 
 check "gateway answers on 4100"      "curl -fsS -m5 -o /dev/null http://127.0.0.1:4100/healthz"
 check "cloud answers inside"         "probe http://tokenfuse-cloud:8080/healthz"
@@ -706,6 +711,16 @@ check "policy store is up"           "$DC exec -T policy-db pg_isready -U wardry
 check "policy plane accepts its admin key"   "[ \"\$(code http://wardryx:8090/v1/policies '$WARDRYX_ADMIN')\" = 200 ]"
 check "policy plane rejects an unknown key"  "[ \"\$(code http://wardryx:8090/v1/policies nonsense-not-a-key)\" = 401 ]"
 check "gateway's key cannot write policy"    "[ \"\$(code http://wardryx:8090/v1/policies '$WARDRYX_GATEWAY')\" = 403 ]"
+
+# The gateway's own admin key, the same shape of check for the same reason:
+# this one MUST fail to pass, exactly like the "not reachable from the host"
+# checks below. A gateway that answers /v1/runs to nobody in particular has
+# reopened the routes TOKENFUSE_ALLOW_OPEN_OBS used to hold open on purpose.
+check "gateway refuses /v1/runs without the admin key" \
+      "c=\$(codenokey http://tokenfuse-gateway:4100/v1/runs); case \"\$c\" in 401|403) true ;; *) false ;; esac"
+check "gateway serves /v1/runs with the admin key" \
+      "[ \"\$(code http://tokenfuse-gateway:4100/v1/runs '$GATEWAY_ADMIN')\" = 200 ]"
+
 check "cloud is NOT on the host"     "! curl -fsS -m3 -o /dev/null http://127.0.0.1:8080/healthz"
 check "wardryx is NOT on the host"   "! curl -fsS -m3 -o /dev/null http://127.0.0.1:8090/healthz"
 # Not the variable, the rule Docker actually wrote. A default that says

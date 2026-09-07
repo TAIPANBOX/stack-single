@@ -247,14 +247,12 @@ names resolve the same way in both:
 | `heraldyx` | none | it has none. It reads the event volume read-only and dials your mail server, so nothing ever calls it |
 | `scopyx` | none | **opt-in, off unless you ask for it.** Inside the compose network only. See below |
 
-The gateway's own observability routes (`/v1/runs`, `/v1/keys` and three
-more) carry no credential on this box; `TOKENFUSE_ALLOW_OPEN_OBS=1` in
-`compose.yaml` keeps that behaviour once tokenfuse starts refusing them on a
-non-loopback bind, and a per-install admin key the console presents is the
-recorded follow-up. Widening `GATEWAY_BIND` widens those routes too.
-The key itself is already minted and wired (`GATEWAY_ADMIN` in `.env`): the
-gateway enforces it once the image moves to tokenfuse v0.4.4, and today's
-v0.4.3 ignores it, which is why the opt-out above still has to stay for now.
+The gateway's own observability and kill routes (`/v1/runs`, `/v1/keys` and
+three more) take a per-install admin key: `GATEWAY_ADMIN` in `.env`, minted
+by `install.sh` and presented by the console as `TOKENFUSE_GATEWAY_ADMIN_KEY`.
+A request with no key, or the wrong one, is refused. Widening `GATEWAY_BIND`
+no longer widens those routes to anyone without the key: it decides who can
+reach the port, the key decides who those five routes answer once reached.
 
 "Not published" is not a firewall rule that might be misread: those services
 have no host port at all, so nothing outside this machine can address them.

@@ -85,15 +85,15 @@
           "stack/wg:dev"
         ],
         "pulls_images": [
-          "ghcr.io/taipanbox/genaryx-console:v0.1.1",
+          "ghcr.io/taipanbox/genaryx-console:v0.1.2",
           "ghcr.io/taipanbox/heraldyx:v0.2.2",
           "ghcr.io/taipanbox/idryx:v0.3.0",
           "ghcr.io/taipanbox/scopyx:v0.1.2",
           "ghcr.io/taipanbox/scopyx:v0.1.2-chromium",
           "ghcr.io/taipanbox/stack-caddy:v0.1.2",
           "ghcr.io/taipanbox/stack-wg:v0.1.2",
-          "ghcr.io/taipanbox/tokenfuse-control-plane:v0.4.3",
-          "ghcr.io/taipanbox/tokenfuse:v0.4.3",
+          "ghcr.io/taipanbox/tokenfuse-control-plane:v0.4.4",
+          "ghcr.io/taipanbox/tokenfuse:v0.4.4",
           "ghcr.io/taipanbox/trailryx-node:v0.1.2",
           "ghcr.io/taipanbox/wardryx:v0.1.0"
         ]
