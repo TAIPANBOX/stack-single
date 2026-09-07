@@ -376,14 +376,14 @@ services:
     environment:
       TOKENFUSE_ADDR: 0.0.0.0:4100
       # The gateway's observability and kill routes (/v1/runs,
-      # /v1/runs/{id}/kill, /v1/keys, /v1/policy-plane, /v1/agent-ids) are
-      # open on this compose network today by design: the host publish below
-      # is loopback unless GATEWAY_BIND widens it. tokenfuse after v0.4.3
-      # refuses those routes on a non-loopback bind unless this opt-out or
-      # TOKENFUSE_ADMIN_KEYS is set, and the console reads /v1/keys with no
-      # credential, so this keeps today's behaviour across the image bump.
-      # The stronger shape, a generated admin key here that the console
-      # presents, is a recorded follow-up (security review 2026-09-06).
+      # /v1/runs/{id}/kill, /v1/keys, /v1/policy-plane, /v1/agent-ids) take
+      # this key, GATEWAY_ADMIN from install.sh, as a bearer credential from
+      # tokenfuse v0.4.4 on; the console presents the same value below. The
+      # image running today is still v0.4.3, which does not read
+      # TOKENFUSE_ADMIN_KEYS at all, so TOKENFUSE_ALLOW_OPEN_OBS stays set as
+      # the bridge until the image tag moves (phase 3 of the gateway admin
+      # key plan, 2026-09-07): it is deleted in that same change, not before.
+      TOKENFUSE_ADMIN_KEYS: ${GATEWAY_ADMIN:?set by install.sh}
       TOKENFUSE_ALLOW_OPEN_OBS: "1"
       TOKENFUSE_MODE: enforce
       TOKENFUSE_DATA_DIR: /var/lib/stack/traces/gateway
@@ -492,6 +492,10 @@ services:
       # healthy Cloud sat one container away. The policy plane below was right
       # all along, which is what made the difference easy to miss.
       TOKENFUSE_CLOUD_ADMIN_KEY: ${CLOUD_ADMIN:?set by install.sh}
+      # The same GATEWAY_ADMIN key the gateway enforces above, so the console
+      # can reach its observability and kill routes once tokenfuse v0.4.4
+      # requires it. Harmless against today's v0.4.3, which ignores it.
+      TOKENFUSE_GATEWAY_ADMIN_KEY: ${GATEWAY_ADMIN:?set by install.sh}
       WARDRYX_URL: http://wardryx:8090
       WARDRYX_ADMIN_KEY: ${WARDRYX_ADMIN:?set by install.sh}
       GENARYX_WG_IFACE: ${WG_IFACE:-wg-op}

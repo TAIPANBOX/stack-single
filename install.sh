@@ -422,6 +422,14 @@ add_env_default WG_BIND 0.0.0.0
 # certificate with no other change.
 add_env_default CONSOLE_DOMAIN console.genaryx.internal
 
+# The gateway's admin key, new in this release. It is the bare key the console
+# presents on the gateway's five observability and kill routes (/v1/runs,
+# /v1/runs/{id}/kill, /v1/keys, /v1/policy-plane, /v1/agent-ids). The gateway
+# only enforces it from tokenfuse v0.4.4 on; today's image (v0.4.3) still
+# relies on TOKENFUSE_ALLOW_OPEN_OBS in compose.yaml, and both are wired
+# together now so the key is already in place when the image moves.
+add_env_default GATEWAY_ADMIN "$(gen 40)"
+
 # Notifications, from the answers given before the build.
 #
 # Single-quoted, and this is not fussiness. `.env` has TWO readers: compose

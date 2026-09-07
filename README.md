@@ -252,6 +252,9 @@ more) carry no credential on this box; `TOKENFUSE_ALLOW_OPEN_OBS=1` in
 `compose.yaml` keeps that behaviour once tokenfuse starts refusing them on a
 non-loopback bind, and a per-install admin key the console presents is the
 recorded follow-up. Widening `GATEWAY_BIND` widens those routes too.
+The key itself is already minted and wired (`GATEWAY_ADMIN` in `.env`): the
+gateway enforces it once the image moves to tokenfuse v0.4.4, and today's
+v0.4.3 ignores it, which is why the opt-out above still has to stay for now.
 
 "Not published" is not a firewall rule that might be misread: those services
 have no host port at all, so nothing outside this machine can address them.
