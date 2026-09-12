@@ -33,6 +33,7 @@
   ],
   "schema": "taipanbox.dev/components/v1",
   "repo": "TAIPANBOX/stack-single",
+  "distribution": "git clone and ./install.sh on one machine; pins released images of every plane",
   "kind": "launcher",
   "components": [
     {
