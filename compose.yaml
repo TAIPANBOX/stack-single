@@ -163,7 +163,7 @@ services:
   # writes, and the mount says so.
   idryx:
     <<: *restart
-    image: ${IDRYX_IMAGE:-ghcr.io/taipanbox/idryx:v0.3.0}
+    image: ${IDRYX_IMAGE:-ghcr.io/taipanbox/idryx:v0.3.1}
     user: "65532:10001"
     command:
       - serve
@@ -361,7 +361,7 @@ services:
   # ---- money: the control API ----------------------------------------------
   tokenfuse-cloud:
     <<: *restart
-    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v0.4.4}
+    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v0.5.0}
     command: ["/usr/local/bin/tokenfuse-cloud"]
     environment:
       PORT: "8080"
@@ -385,7 +385,7 @@ services:
   # gets a hard refusal rather than a log line.
   tokenfuse-gateway:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v0.4.4}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v0.5.0}
     command: ["/usr/local/bin/tokenfuse"]
     environment:
       TOKENFUSE_ADDR: 0.0.0.0:4100
@@ -707,7 +707,7 @@ services:
   # The sixth, trailryx-seal, is the `record` profile above.
   focus-export:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v0.4.4}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v0.5.0}
     user: "10001:10001"
     profiles: ["routines"]
     environment:
@@ -748,7 +748,7 @@ services:
   #
   # Measured 2026-09-01 against the published image, three ways:
   #
-  #   docker run --entrypoint /bin/sh ghcr.io/taipanbox/idryx:v0.3.0
+  #   docker run --entrypoint /bin/sh ghcr.io/taipanbox/idryx:v0.3.1
   #     stat /bin/sh: no such file or directory
   #   docker run --entrypoint idryx ...
   #     exec: "idryx": executable file not found in $PATH
@@ -783,7 +783,7 @@ services:
   # on the console, and both of those have a shell.
   idryx-detect:
     restart: "no"
-    image: ${IDRYX_IMAGE:-ghcr.io/taipanbox/idryx:v0.3.0}
+    image: ${IDRYX_IMAGE:-ghcr.io/taipanbox/idryx:v0.3.1}
     user: "65532:10001"
     profiles: ["manual"]
     # The entrypoint by its real path, and the arguments straight to it, which
