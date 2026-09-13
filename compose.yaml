@@ -111,7 +111,7 @@ services:
   # ---- policy --------------------------------------------------------------
   wardryx:
     <<: *restart
-    image: ${WARDRYX_IMAGE:-ghcr.io/taipanbox/wardryx:v0.1.0}
+    image: ${WARDRYX_IMAGE:-ghcr.io/taipanbox/wardryx:v1.0.0}
     # The image's own 65532:65532, with the GID moved to the one that owns the
     # shared event directory. The binary is a static Go binary and reads no
     # /etc/passwd, so a numeric pair it was not built with is fine.
@@ -163,7 +163,7 @@ services:
   # writes, and the mount says so.
   idryx:
     <<: *restart
-    image: ${IDRYX_IMAGE:-ghcr.io/taipanbox/idryx:v0.3.1}
+    image: ${IDRYX_IMAGE:-ghcr.io/taipanbox/idryx:v1.0.0}
     user: "65532:10001"
     command:
       - serve
@@ -254,7 +254,7 @@ services:
   scopyx:
     <<: *restart
     profiles: ["egress"]
-    image: ${SCOPYX_IMAGE:-ghcr.io/taipanbox/scopyx:v0.1.2}
+    image: ${SCOPYX_IMAGE:-ghcr.io/taipanbox/scopyx:v1.0.0}
     user: "65532:65532"
     environment:
       # Inside the compose network, not on the host. Nothing publishes a port
@@ -312,7 +312,7 @@ services:
   scopyx-browser:
     <<: *restart
     profiles: ["egress-browser"]
-    image: ${SCOPYX_BROWSER_IMAGE:-ghcr.io/taipanbox/scopyx:v0.1.2-chromium}
+    image: ${SCOPYX_BROWSER_IMAGE:-ghcr.io/taipanbox/scopyx:v1.0.0-chromium}
     user: "65532:65532"
     # The name the rest of the box reaches it by. Same as the profile above, so
     # nothing else in this file changes when an operator switches profiles.
@@ -580,7 +580,7 @@ services:
   # a promise.
   record-seal:
     <<: *restart
-    image: ${TRAILRYX_IMAGE:-ghcr.io/taipanbox/trailryx-node:v0.1.2}
+    image: ${TRAILRYX_IMAGE:-ghcr.io/taipanbox/trailryx-node:v1.0.0}
     user: "10001:10001"
     profiles: ["record"]
     environment:
@@ -748,7 +748,7 @@ services:
   #
   # Measured 2026-09-01 against the published image, three ways:
   #
-  #   docker run --entrypoint /bin/sh ghcr.io/taipanbox/idryx:v0.3.1
+  #   docker run --entrypoint /bin/sh ghcr.io/taipanbox/idryx:v1.0.0
   #     stat /bin/sh: no such file or directory
   #   docker run --entrypoint idryx ...
   #     exec: "idryx": executable file not found in $PATH
@@ -783,7 +783,7 @@ services:
   # on the console, and both of those have a shell.
   idryx-detect:
     restart: "no"
-    image: ${IDRYX_IMAGE:-ghcr.io/taipanbox/idryx:v0.3.1}
+    image: ${IDRYX_IMAGE:-ghcr.io/taipanbox/idryx:v1.0.0}
     user: "65532:10001"
     profiles: ["manual"]
     # The entrypoint by its real path, and the arguments straight to it, which
