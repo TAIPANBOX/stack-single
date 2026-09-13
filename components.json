@@ -96,7 +96,7 @@
           "ghcr.io/taipanbox/tokenfuse-control-plane:v0.5.1",
           "ghcr.io/taipanbox/tokenfuse:v0.5.1",
           "ghcr.io/taipanbox/trailryx-node:v1.0.0",
-          "ghcr.io/taipanbox/wardryx:v1.0.0"
+          "ghcr.io/taipanbox/wardryx:v1.0.2"
         ]
       },
       "declared": {
