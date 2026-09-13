@@ -700,6 +700,12 @@ codenokey() { docker run --rm --network "$NET" busybox:1.36 \
          | awk '/^  HTTP\//{c=$2} END{print c+0}'; }
 
 check "gateway answers on 4100"      "curl -fsS -m5 -o /dev/null http://127.0.0.1:4100/healthz"
+# The bus half of the stack. tokenfuse logs this line once at start when
+# TOKENFUSE_EVENTS_PATH is set and the file could be opened; without it the
+# exporter is off and idryx loads an empty log forever. Read from the
+# gateway's own log rather than the file: a fresh box has served no traffic,
+# so the file is legitimately empty and its size proves nothing yet.
+check "gateway exports agent events"    "$DC logs tokenfuse-gateway 2>&1 | grep -q 'NDJSON export enabled'"
 check "cloud answers inside"         "probe http://tokenfuse-cloud:8080/healthz"
 check "wardryx answers inside"       "probe http://wardryx:8090/healthz"
 check "idryx answers inside"         "probe http://idryx:8081/healthz"

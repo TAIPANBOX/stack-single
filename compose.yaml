@@ -45,7 +45,7 @@ services:
       - sh
       - -euc
       - |
-        mkdir -p /vol/events /vol/traces /vol/cloud /vol/heraldyx /vol/records
+        mkdir -p /vol/events /vol/traces /vol/cloud /vol/heraldyx /vol/records /vol/scopyx /vol/focus
         chown 0:10001 /vol/events && chmod 2775 /vol/events
         chown 10001:10001 /vol/traces /vol/cloud && chmod 0775 /vol/traces /vol/cloud
         # The notifier runs 65532:10001 like the Go planes, and writes exactly
@@ -59,6 +59,17 @@ services:
         # so without this the seal starts, reads the bus, and cannot write
         # what it read.
         chown 10001:10001 /vol/records && chmod 0775 /vol/records
+        # scopyx (profile egress) runs 65532:65532 and keeps its own journal
+        # here. Until 2026-09-13 neither this volume nor `records` above was
+        # mounted into this container, so the two chowns landed on this
+        # container's own filesystem and the profiles crash-looped
+        # (scopyx) or sealed nothing with a running container (record-seal)
+        # on every fresh box. `bus-has-a-writer.sh` now requires every
+        # volume a non-root service writes to be mounted AND owned here.
+        chown 65532:65532 /vol/scopyx && chmod 0775 /vol/scopyx
+        # focus-export (profile routines) runs 10001:10001 and writes the FOCUS
+        # CSVs here; found by the gate the day it was written, same trap.
+        chown 10001:10001 /vol/focus && chmod 0775 /vol/focus
         # idryx is told to load the gateway's log at startup and exits if the
         # file is absent, which on a box that has served no traffic yet it
         # always is. An empty file is a valid empty log, and pre-creating it is
@@ -73,6 +84,9 @@ services:
       - traces:/vol/traces
       - cloudstate:/vol/cloud
       - heraldyxstate:/vol/heraldyx
+      - records:/vol/records
+      - scopyxevents:/vol/scopyx
+      - focus:/vol/focus
     restart: "no"
 
   # ---- the policy plane's durable store ------------------------------------
@@ -387,6 +401,15 @@ services:
       TOKENFUSE_ADMIN_KEYS: ${GATEWAY_ADMIN:?set by install.sh}
       TOKENFUSE_MODE: enforce
       TOKENFUSE_DATA_DIR: /var/lib/stack/traces/gateway
+      # The bus half of this stack. Without it the gateway's exporter is off
+      # (tokenfuse reads this variable and nothing else), the file init-volumes
+      # pre-creates stays empty, idryx loads an empty log forever, heraldyx
+      # alerts on nothing from the money plane and the record seals none of
+      # it. It was missing until 2026-09-13, when the 1.0 proving run found
+      # the file at 0 bytes after a day of refusals; every install check had
+      # passed. `bus-has-a-writer.sh` holds it now, and install.sh section 8
+      # reads the gateway's own "export enabled" line.
+      TOKENFUSE_EVENTS_PATH: /var/lib/stack/events/tokenfuse.ndjson
       TOKENFUSE_UPSTREAM: https://api.anthropic.com/v1/messages
       TOKENFUSE_CLOUD_URL: http://tokenfuse-cloud:8080
       TOKENFUSE_CLOUD_KEY: ${CLOUD_ADMIN:?set by install.sh}

@@ -36,6 +36,8 @@ jobs:
         run: ./scripts/manifest-is-true.sh
       - name: the record plane reads the bus and writes somewhere else
         run: ./scripts/record-is-not-on-the-bus.sh
+      - name: the bus has a writer and every volume an owner
+        run: ./scripts/bus-has-a-writer.sh
 
       # Last, because it mutates tracked files and restores them. It needs a
       # clean tree and says so plainly, so it also reports any earlier step

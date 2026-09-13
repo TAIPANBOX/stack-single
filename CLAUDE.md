@@ -41,6 +41,7 @@ change here is a change to something with root on somebody else's box.
 ./scripts/closed-by-default.sh
 ./scripts/fail-before-half-the-job.sh
 ./scripts/build-context-complete.sh
+./scripts/bus-has-a-writer.sh
 ./scripts/gates-have-teeth.sh   # invariant 8; needs a clean tree
 ```
 
@@ -157,6 +158,29 @@ an absent invariant.
    record-seal` starts it.
    *(gate: `scripts/record-is-not-on-the-bus.sh`, which also refuses to report
    OK when there is no `record-seal` service left to judge)*
+
+10. **The bus has a writer, and every volume a non-root service writes has an
+    owner.** Two faults of one shape were live on every install until
+    2026-09-13 and passed every check. The gateway had no
+    `TOKENFUSE_EVENTS_PATH`, so its exporter was off, the file init-volumes
+    pre-creates for idryx stayed at 0 bytes, idryx loaded an empty log, heraldyx
+    had nothing from the money plane and the record sealed none of it. And
+    init-volumes chowned `/vol/records` without mounting `records`, and did
+    nothing for `scopyxevents` or `focus`, so on a fresh box scopyx crash-looped
+    on "permission denied", record-seal ran and stored nothing while printing
+    "nothing sealed here to pack yet", and focus-export could not write a CSV.
+    A fresh named volume is root:root 0755; a service that is not root cannot
+    write it until something says who owns it.
+
+    So `tokenfuse-gateway` names its events file inside a volume it mounts
+    read-write, every `--load tokenfuse:` in compose.yaml names that same file,
+    and every named volume a non-root service mounts read-write is mounted by
+    `init-volumes` and given to that uid or gid there. install.sh section 8
+    reads the gateway's own "export enabled" line, because on a fresh box the
+    file is legitimately empty and its size proves nothing.
+    *(gate: `scripts/bus-has-a-writer.sh`, which refuses to report OK when the
+    gateway, init-volumes, or every writable volume has been taken away;
+    teeth in `scripts/gates-have-teeth.sh`)*
 
 ## Decisions that have no gate yet
 

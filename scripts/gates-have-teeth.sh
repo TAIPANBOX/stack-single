@@ -258,6 +258,50 @@ run_case "record-is-not-on-the-bus: a second service writes the record store" fa
      "      - events:/var/lib/stack/events\n      - records:/var/lib/stack/records\n      - ./environments")')" \
 	"is also written by"
 
+# invariant 10: the bus has a writer, and every volume a non-root service
+# writes has an owner. Both faults were live on every install until 2026-09-13.
+run_case "bus-has-a-writer: the gateway stops exporting events" fail \
+	'./scripts/bus-has-a-writer.sh' \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_EVENTS_PATH: /var/lib/stack/events/tokenfuse.ndjson\n", "")')" \
+	"no TOKENFUSE_EVENTS_PATH"
+
+# The reader and the writer name different files: idryx would load one file
+# forever while the gateway fills another.
+run_case "bus-has-a-writer: idryx loads a file the gateway does not write" fail \
+	'./scripts/bus-has-a-writer.sh' \
+	"$(py 'edit("compose.yaml", "      - tokenfuse:/var/lib/stack/events/tokenfuse.ndjson\n", "      - tokenfuse:/var/lib/stack/events/gateway.ndjson\n")')" \
+	"reader and writer disagree"
+
+# The fault as found: a volume a non-root profile writes, never mounted by
+# init-volumes, so it comes up root:root 0755 and the service cannot write.
+run_case "bus-has-a-writer: a written volume is not mounted by init-volumes" fail \
+	'./scripts/bus-has-a-writer.sh' \
+	"$(py 'edit("compose.yaml", "      - scopyxevents:/vol/scopyx\n", "")')" \
+	"init-volumes never mounts it"
+
+# Mounted but given to the wrong owner: the same symptom with a subtler cause.
+run_case "bus-has-a-writer: a volume is owned by somebody else" fail \
+	'./scripts/bus-has-a-writer.sh' \
+	"$(py 'edit("compose.yaml", "chown 65532:65532 /vol/scopyx", "chown 10001:10001 /vol/scopyx")')" \
+	"neither the uid nor the gid matches"
+
+# A read-only mount is not a write, and must not be asked for an owner.
+run_case "bus-has-a-writer: a read-only mount is left alone" pass \
+	'./scripts/bus-has-a-writer.sh' \
+	"$(py 'edit("compose.yaml", "      - events:/var/lib/stack/events:ro\n      - heraldyxstate:/var/lib/stack/heraldyx", "      - events:/var/lib/stack/events:ro\n      - pgdata:/var/lib/stack/pgdata-peek:ro\n      - heraldyxstate:/var/lib/stack/heraldyx")')"
+
+# The subject taken away: no gateway service left, and the gate must say it
+# measured nothing rather than report OK.
+run_case "bus-has-a-writer: no gateway service left to judge" fail \
+	'./scripts/bus-has-a-writer.sh' \
+	"$(py 'import re
+s = open("compose.yaml").read()
+i = s.index("  tokenfuse-gateway:")
+j = s.index("\n  # ---- the console")
+assert i < j
+open("compose.yaml", "w").write(s[:i] + s[j:])')" \
+	"measured nothing"
+
 # invariant: components.json says what this launcher actually installs.
 #
 # The compose half of the same idea stack-up carries. Two cases: ordinary drift,
