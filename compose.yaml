@@ -361,7 +361,7 @@ services:
   # ---- money: the control API ----------------------------------------------
   tokenfuse-cloud:
     <<: *restart
-    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v0.5.1}
+    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v1.0.0}
     command: ["/usr/local/bin/tokenfuse-cloud"]
     environment:
       PORT: "8080"
@@ -385,7 +385,7 @@ services:
   # gets a hard refusal rather than a log line.
   tokenfuse-gateway:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v0.5.1}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.0.0}
     command: ["/usr/local/bin/tokenfuse"]
     environment:
       TOKENFUSE_ADDR: 0.0.0.0:4100
@@ -449,7 +449,7 @@ services:
   # volume, holding no capability of its own.
   wg:
     <<: *restart
-    image: ${WG_IMAGE:-ghcr.io/taipanbox/stack-wg:v0.1.2}
+    image: ${WG_IMAGE:-ghcr.io/taipanbox/stack-wg:v1.0.0}
     cap_add:
       - NET_ADMIN
     devices:
@@ -484,7 +484,7 @@ services:
   # simply cannot happen over WireGuard, on any device.
   caddy:
     <<: *restart
-    image: ${CADDY_IMAGE:-ghcr.io/taipanbox/stack-caddy:v0.1.2}
+    image: ${CADDY_IMAGE:-ghcr.io/taipanbox/stack-caddy:v1.0.0}
     environment:
       CONSOLE_DOMAIN: ${CONSOLE_DOMAIN:?set by install.sh}
       CONSOLE_UPSTREAM: console:7420
@@ -501,7 +501,7 @@ services:
 
   console:
     <<: *restart
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v0.1.2}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.0.0}
     environment:
       HOME: /var/lib/stack
       TAIPAN_HOME: /etc/genaryx/taipan
@@ -707,7 +707,7 @@ services:
   # The sixth, trailryx-seal, is the `record` profile above.
   focus-export:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v0.5.1}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.0.0}
     user: "10001:10001"
     profiles: ["routines"]
     environment:
@@ -803,7 +803,7 @@ services:
 
   verdryx-drift:
     <<: *restart
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v0.1.2}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.0.0}
     user: "10001:10001"
     profiles: ["routines"]
     environment:
