@@ -501,10 +501,16 @@ services:
 
   console:
     <<: *restart
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.0.0}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.1.1}
     environment:
       HOME: /var/lib/stack
       TAIPAN_HOME: /etc/genaryx/taipan
+      # Where the console keeps its bus history (console.sqlite). Said outright
+      # since 2026-09-14: without it the console used <TAIPAN_HOME>/genaryx,
+      # which is the read-only config mount above, could not create it, and
+      # served every install with an empty Bus Explorer (genaryx#71, #49). The
+      # state volume is the one place it can write, so it is named here.
+      GENARYX_STATE_DIR: /var/lib/stack/genaryx
       GENARYX_SCAN_TARGET: /srv/ui
       GENARYX_COPILOT_PROVIDER: ollama
       TOKENFUSE_CLOUD_URL: http://tokenfuse-cloud:8080
@@ -803,7 +809,7 @@ services:
 
   verdryx-drift:
     <<: *restart
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.0.0}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.1.1}
     user: "10001:10001"
     profiles: ["routines"]
     environment:

@@ -833,6 +833,14 @@ if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx console; then
         "$DC exec -T console printenv TOKENFUSE_CLOUD_ADMIN_KEY"
   check "console resolves the policy plane" \
         "$DC exec -T console printenv WARDRYX_ADMIN_KEY"
+  # Resolving the planes is still not the bus. The console keeps its history
+  # in a store it has to CREATE at startup; with TAIPAN_HOME pointed at a
+  # root-owned config directory it could not, logged one line and served on
+  # with an empty Bus Explorer, on every install from 2026-08-31 to
+  # 2026-09-14, and the two checks above were green throughout (genaryx#71,
+  # #49). The console's own startup line is the only place this shows.
+  check "console's bus is live" \
+        "$DC logs console 2>&1 | grep -q 'bus LIVE' && ! $DC logs console 2>&1 | grep -q 'bus startup failed'"
 fi
 
 # The test message, but only on the run that CONFIGURED mail. A re-run must not
