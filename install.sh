@@ -669,6 +669,23 @@ check() { # name, command
   [ "$#" -eq 2 ] || die "internal: check() got $# arguments, expected 2 (\$1='${1:-}')"
   if eval "$2" >/dev/null 2>&1; then printf '   ok    %s\n' "$1"; else printf '   FAIL  %s\n' "$1"; fail=$((fail+1)); fi
 }
+# The same, for a check that reads a container's LOG: retried for up to ten
+# seconds. A log line is written once, some milliseconds after the process
+# starts, and `docker compose logs` read moments after `up` has once come
+# back without a line that was there a minute later: 2026-09-14, an arm64
+# box, `gateway exports agent events` FAIL on run 1 with the line stamped
+# nine seconds before the check, ok on run 2 with the same container and no
+# restart. A one-shot read of a log is a race with the log driver; a check
+# that stays red for ten seconds is a real absence.
+check_log() { # name, command
+  [ "$#" -eq 2 ] || die "internal: check_log() got $# arguments, expected 2 (\$1='${1:-}')"
+  local left=10
+  while [ "$left" -gt 0 ]; do
+    if eval "$2" >/dev/null 2>&1; then printf '   ok    %s\n' "$1"; return 0; fi
+    sleep 1; left=$((left - 1))
+  done
+  printf '   FAIL  %s\n' "$1"; fail=$((fail+1))
+}
 # One word, not an array. `"${COMPOSE[@]}"` inside a larger quoted string does
 # not stay one argument: it word-splits, check() silently receives three
 # arguments instead of two, `$2` becomes the fragment `"docker`, and every
@@ -705,7 +722,7 @@ check "gateway answers on 4100"      "curl -fsS -m5 -o /dev/null http://127.0.0.
 # exporter is off and idryx loads an empty log forever. Read from the
 # gateway's own log rather than the file: a fresh box has served no traffic,
 # so the file is legitimately empty and its size proves nothing yet.
-check "gateway exports agent events"    "$DC logs tokenfuse-gateway 2>&1 | grep -q 'NDJSON export enabled'"
+check_log "gateway exports agent events" "$DC logs tokenfuse-gateway 2>&1 | grep -q 'NDJSON export enabled'"
 check "cloud answers inside"         "probe http://tokenfuse-cloud:8080/healthz"
 check "wardryx answers inside"       "probe http://wardryx:8090/healthz"
 check "idryx answers inside"         "probe http://idryx:8081/healthz"
@@ -839,7 +856,7 @@ if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx console; then
   # with an empty Bus Explorer, on every install from 2026-08-31 to
   # 2026-09-14, and the two checks above were green throughout (genaryx#71,
   # #49). The console's own startup line is the only place this shows.
-  check "console's bus is live" \
+  check_log "console's bus is live" \
         "$DC logs console 2>&1 | grep -q 'bus LIVE' && ! $DC logs console 2>&1 | grep -q 'bus startup failed'"
 fi
 
