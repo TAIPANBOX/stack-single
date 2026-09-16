@@ -373,6 +373,17 @@ If the console source is not present it says so and installs the governed
 stack without it, which is a real deployment: the planes enforce with or
 without a UI in front of them.
 
+Two things it does not check, said here rather than found later. The
+`events` volume is shared by every plane that writes the bus, group-writable
+so each can append its own file; a line's `source` is whatever the writer
+put there, and the notifier and the record plane take it as that plane's
+word. The containers sharing that volume trust each other as much as they
+trust the box. And delegation is verified nowhere on this box unless you
+set `TOKENFUSE_DELEGATION_ISSUER` and `TOKENFUSE_DELEGATION_JWKS` yourself:
+without them an agent's `on_behalf_of` is a claim the caller wrote, and a
+policy that asks for a proven chain refuses only callers honest enough to
+say they did not prove it.
+
 ## The console
 
 All of it is Apache-2.0 and public, the console included: Genaryx went open on
