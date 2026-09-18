@@ -52,6 +52,11 @@ This is the other thing. The differences are the whole point:
 | Credentials | a dev key | unique per box, 0600, never printed twice |
 | Governance routines on a schedule | all five, as OS timers | none, see below |
 
+That "yes" is measured once, 2026-09-17: on a gateway bound to the box's
+tailnet address, the first reboot came back failed and the fix described
+below made the second succeed in 40 s; the default loopback bind has not
+yet been rebooted under measurement.
+
 ## What this box does not run
 
 Two things a look at `compose.yaml` alone will not tell you, both about
@@ -356,6 +361,68 @@ refuse: a box governing more than one domain is a normal thing to be.
 The store lives on its own volume, not on the bus. That is deliberate and it is
 gated: a record kept where its own inputs live is evidence you can delete while
 clearing space on the thing it is evidence about.
+
+## The appliance shape: a box at your premises, the agents in two clouds
+
+<div align="center">
+
+<img src="assets/appliance.svg" alt="A box at the customer's premises, closed by carrier-grade NAT and reachable only over its own tailnet, runs the policy, identity, notifier, console and record planes plus a second gateway door for the FinOps crew; two clouds each dial its gateway from a small cluster, the box reaches the model provider on its own, and the operator reaches the console over ssh or the WireGuard door" width="960">
+
+</div>
+
+On 2026-09-17 this launcher was proven in the shape an operator actually
+wants: a box at a premises, closed to the internet, with agents dialling in
+from elsewhere. The evidence is public in
+[`estate-gates/PROVEN.md`](https://github.com/TAIPANBOX/estate-gates/blob/main/PROVEN.md),
+the nine rows dated that day.
+
+**What was installed.** v1.1.3 from this repository, on a Debian 13
+(trixie) mini PC that already had Docker CE 29.8.1 and Compose v5.5.1, with
+`GATEWAY_BIND` set to the box's tailnet address and `WITH_RECORD=1`. Phase A
+ran in 61 s: 22 checks ok and check 1 FAIL by construction, because it
+probed loopback whatever `GATEWAY_BIND` said (fixed by #59). A second run
+added a compose override for the appliance shape itself (the crew's own
+door, client keys and an identity map on the customer door, the notifier to
+a file, a record seal every 120 s): 36 s, the same 22 ok.
+
+**Before phase A**, `apt-get install -s docker-buildx` on that box answered
+`Remv docker-ce`: the distro's own package would have removed Docker CE.
+The run held the Docker packages and pinned Debian's `docker-buildx` out
+instead. Fixed by #59: every `apt-get install` here now carries
+`--no-remove`, and buildx is asked for only when missing, as
+`docker-buildx-plugin` beside `docker-ce`.
+
+**Two customer clusters**, a single-node k3s on a GCP `e2-medium` and one
+on an AWS `t3.medium`, joined the tailnet with an ephemeral key each and
+reached the gateway from a pod: direct WireGuard paths of 23 ms (AWS) and
+29 ms (GCP). Both agents ran 17 calls at `200` and were then refused with
+`402 budget_exceeded` from call 18 onward, interleaved on one bus; the box
+told the two clouds apart by key and by id.
+
+**The reboot.** With the gateway bound to a tailnet address, the first
+reboot brought it back as `Exited (128)`: Docker programmed the bind
+before `tailscaled` held the address, the failed start was never retried,
+and a later `up -d` started the container with no port mapping. Fixed on
+the box with `net.ipv4.ip_nonlocal_bind = 1` and a `docker.service`
+drop-in ordered after `tailscaled`, and proven by a second reboot, the
+gateway back on its own in 40 s. Both are what `install.sh` section 4b now
+writes (#59).
+
+**The control plane's own events file.** On v1.1.3 the control plane could
+not create `tokenfuse-cloud.ndjson` (it runs as uid 10001, gid 999, against
+a `root:10001 2775` directory) and said nothing about it, so no
+control-plane incident, `budget_exhausted` among them, reached the
+notifier or the record. Now pre-created by `init-volumes` and named by
+`TOKENFUSE_EVENTS_PATH` (#59 here; the image side is tokenfuse#303).
+
+**Teardown.** Both cloud accounts were verified empty by direct query
+afterwards: about 63 VM-minutes per cloud, and about USD 0.18 for the whole
+day. The box's own stack is still what this README installs.
+
+**What this run did not prove.** A reboot on the default loopback bind
+(never measured); managed clusters; arm64 for this shape; mail delivery
+beyond the file transport; the passkey ceremony; the WireGuard door
+reached from outside the LAN; `down -v`; a full disk; a lost `.env`.
 
 ## What the installer will not do quietly
 
