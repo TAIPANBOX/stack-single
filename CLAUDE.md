@@ -182,6 +182,15 @@ an absent invariant.
     `init-volumes` and given to that uid or gid there. install.sh section 8
     reads the gateway's own "export enabled" line, because on a fresh box the
     file is legitimately empty and its size proves nothing.
+
+    The control plane is the second writer of the same bus and had the same
+    fault until 2026-09-17 (#57): no `TOKENFUSE_EVENTS_PATH`, so a budget gone
+    and a sustained loop stayed inside `/v1/incidents`, unseen by the notifier
+    and the record. And naming the file is not enough for either tokenfuse
+    image: they run as uid 10001 with gid 999, which cannot CREATE a file in
+    the `root:10001 2775` events directory, and the exporter swallows the open
+    error. So each money-plane writer names its own file, and `init-volumes`
+    pre-creates both by name, owned by that uid.
     *(gate: `scripts/bus-has-a-writer.sh`, which refuses to report OK when the
     gateway, init-volumes, or every writable volume has been taken away;
     teeth in `scripts/gates-have-teeth.sh`)*

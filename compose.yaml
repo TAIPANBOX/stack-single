@@ -74,7 +74,17 @@ services:
         # file is absent, which on a box that has served no traffic yet it
         # always is. An empty file is a valid empty log, and pre-creating it is
         # the difference between "no events yet" and a crash loop.
-        for f in tokenfuse.ndjson wardryx.ndjson; do
+        #
+        # The money plane's two files are pre-created for a second reason as
+        # well: the tokenfuse images run as uid 10001 with gid 999 (`useradd
+        # -r` with no matching group), so against this directory's root:10001
+        # 2775 neither the gateway nor the control plane can CREATE a file
+        # here, and the exporter swallows the open error. Owned by that uid,
+        # an existing file is theirs to append to. The control plane's was
+        # missing until 2026-09-17 (#57): budget_exhausted and the other
+        # Cloud detectors stayed inside /v1/incidents, invisible to the
+        # notifier and the record. `bus-has-a-writer.sh` holds both names.
+        for f in tokenfuse.ndjson tokenfuse-cloud.ndjson wardryx.ndjson; do
           [ -e "/vol/events/$$f" ] || : > "/vol/events/$$f"
           chown 10001:10001 "/vol/events/$$f" && chmod 0664 "/vol/events/$$f"
         done
@@ -370,6 +380,15 @@ services:
       TOKENFUSE_CLOUD_HOST: 0.0.0.0
       TOKENFUSE_CLOUD_KEYS: ${CLOUD_KEYS:?set by install.sh}
       TOKENFUSE_CLOUD_DATA: /var/lib/stack/cloud/state.json
+      # The control plane's own half of the bus. Its detectors (a budget gone,
+      # a sustained loop) are incidents the notifier should mail and the
+      # record should seal, and without this line they never left
+      # /v1/incidents and the console. Its own file, not the gateway's: two
+      # writers appending to one file is a race on a bus that has no lock.
+      # init-volumes pre-creates it, because this uid cannot (see there).
+      # Measured 2026-09-17 with both in place: the next budget_exhausted
+      # reached the bus and the notifier's offsets picked the file up (#57).
+      TOKENFUSE_EVENTS_PATH: /var/lib/stack/events/tokenfuse-cloud.ndjson
     volumes:
       - events:/var/lib/stack/events
       - cloudstate:/var/lib/stack/cloud

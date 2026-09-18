@@ -265,6 +265,22 @@ run_case "bus-has-a-writer: the gateway stops exporting events" fail \
 	"$(py 'edit("compose.yaml", "      TOKENFUSE_EVENTS_PATH: /var/lib/stack/events/tokenfuse.ndjson\n", "")')" \
 	"no TOKENFUSE_EVENTS_PATH"
 
+# The control plane's half of the bus (#57): with no TOKENFUSE_EVENTS_PATH
+# its detectors stay inside /v1/incidents, and the notifier and the record
+# never hear of a budget gone.
+run_case "bus-has-a-writer: the control plane stops exporting events" fail \
+	'./scripts/bus-has-a-writer.sh' \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_EVENTS_PATH: /var/lib/stack/events/tokenfuse-cloud.ndjson\n", "")')" \
+	"tokenfuse-cloud sets no TOKENFUSE_EVENTS_PATH"
+
+# Named but not pre-created: uid 10001 with gid 999 cannot create a file in a
+# root:10001 2775 directory, the exporter swallows the error, and the variable
+# reads as wired while the file never exists.
+run_case "bus-has-a-writer: the control plane's file is not pre-created" fail \
+	'./scripts/bus-has-a-writer.sh' \
+	"$(py 'edit("compose.yaml", "for f in tokenfuse.ndjson tokenfuse-cloud.ndjson wardryx.ndjson; do", "for f in tokenfuse.ndjson wardryx.ndjson; do")')" \
+	"does not pre-create tokenfuse-cloud.ndjson"
+
 # The reader and the writer name different files: idryx would load one file
 # forever while the gateway fills another.
 run_case "bus-has-a-writer: idryx loads a file the gateway does not write" fail \
