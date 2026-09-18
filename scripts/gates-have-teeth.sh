@@ -265,6 +265,22 @@ run_case "bus-has-a-writer: the gateway stops exporting events" fail \
 	"$(py 'edit("compose.yaml", "      TOKENFUSE_EVENTS_PATH: /var/lib/stack/events/tokenfuse.ndjson\n", "")')" \
 	"no TOKENFUSE_EVENTS_PATH"
 
+# The control plane's half of the bus (#57): with no TOKENFUSE_EVENTS_PATH
+# its detectors stay inside /v1/incidents, and the notifier and the record
+# never hear of a budget gone.
+run_case "bus-has-a-writer: the control plane stops exporting events" fail \
+	'./scripts/bus-has-a-writer.sh' \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_EVENTS_PATH: /var/lib/stack/events/tokenfuse-cloud.ndjson\n", "")')" \
+	"tokenfuse-cloud sets no TOKENFUSE_EVENTS_PATH"
+
+# Named but not pre-created: uid 10001 with gid 999 cannot create a file in a
+# root:10001 2775 directory, the exporter swallows the error, and the variable
+# reads as wired while the file never exists.
+run_case "bus-has-a-writer: the control plane's file is not pre-created" fail \
+	'./scripts/bus-has-a-writer.sh' \
+	"$(py 'edit("compose.yaml", "for f in tokenfuse.ndjson tokenfuse-cloud.ndjson wardryx.ndjson; do", "for f in tokenfuse.ndjson wardryx.ndjson; do")')" \
+	"does not pre-create tokenfuse-cloud.ndjson"
+
 # The reader and the writer name different files: idryx would load one file
 # forever while the gateway fills another.
 run_case "bus-has-a-writer: idryx loads a file the gateway does not write" fail \
@@ -301,6 +317,90 @@ j = s.index("\n  # ---- the console")
 assert i < j
 open("compose.yaml", "w").write(s[:i] + s[j:])')" \
 	"measured nothing"
+
+# invariant 11: the operator's bind is honoured end to end. Check 1 probed
+# loopback whatever GATEWAY_BIND said, and a healthy appliance bound to its
+# tailscale address exited 1 twice (#54, measured 2026-09-17).
+run_case "bind-is-honoured: the gateway check probes loopback again" fail \
+	'./scripts/bind-is-honoured.sh' \
+	"$(py 'edit("install.sh", "http://$GATEWAY_PROBE:4100/healthz", "http://127.0.0.1:4100/healthz")')" \
+	"probes 127.0.0.1:4100 whatever GATEWAY_BIND says"
+
+# Every address includes loopback; probing http://0.0.0.0:4100 is a URL, not
+# a place, and it happens to work on Linux, which is how it would go unnoticed.
+run_case "bind-is-honoured: 0.0.0.0 stops mapping to loopback" fail \
+	'./scripts/bind-is-honoured.sh' \
+	"$(py 'edit("install.sh", "0.0.0.0) GATEWAY_PROBE=127.0.0.1 ;;", "0.0.0.0) GATEWAY_PROBE=0.0.0.0 ;;")')" \
+	"no \`0.0.0.0) GATEWAY_PROBE=127.0.0.1\` arm"
+
+# The must-fail companion taken away: a gateway published wider than the
+# operator decided would read as healthy again.
+run_case "bind-is-honoured: the loopback refusal is gone" fail \
+	'./scripts/bind-is-honoured.sh' \
+	"$(py 'edit("install.sh", "  *) check \"gateway is NOT on loopback\" \"! curl -fsS -m3 -o /dev/null http://127.0.0.1:4100/healthz\" ;;\n", "")')" \
+	"never shown to refuse loopback"
+
+# The refusal kept, but run for every bind: on the default box it would then
+# fail on a gateway that is exactly where it should be.
+run_case "bind-is-honoured: the loopback refusal runs for every bind" fail \
+	'./scripts/bind-is-honoured.sh' \
+	"$(py 'edit("install.sh", "  127.0.0.1|localhost|::1|0.0.0.0) ;;\n  *) check \"gateway is NOT on loopback\"", "  localhost|::1) ;;\n  *) check \"gateway is NOT on loopback\"")')" \
+	"no arm that skips both 127.0.0.1 and 0.0.0.0"
+
+# The same invariant, on the host side (#56): a gateway bound to one address
+# came back from a reboot as Exited (128) and was never retried, until
+# ip_nonlocal_bind and a docker-after-tailscaled drop-in were written by hand.
+run_case "bind-is-honoured: the sysctl for a reboot names the wrong key" fail \
+	'./scripts/bind-is-honoured.sh' \
+	"$(py 'edit("install.sh", "net.ipv4.ip_nonlocal_bind = 1\\n", "net.ipv4.ip_forward = 1\\n")')" \
+	"never writes net.ipv4.ip_nonlocal_bind"
+
+# The write kept, the refusal dropped: a box that could not be prepared would
+# look installed until its first reboot.
+run_case "bind-is-honoured: the sysctl write stops refusing" fail \
+	'./scripts/bind-is-honoured.sh' \
+	"$(py 'edit("install.sh", "      || die \"could not write /etc/sysctl.d/90-agent-stack-bind.conf: a gateway bound to $GATEWAY_BIND would not come back after a reboot\"", "      || true")')" \
+	"has no \`|| die\`"
+
+run_case "bind-is-honoured: docker is no longer ordered after tailscaled" fail \
+	'./scripts/bind-is-honoured.sh' \
+	"$(py 'edit("install.sh", "[Unit]\\nAfter=tailscaled.service\\nWants=tailscaled.service\\n", "[Unit]\\nWants=tailscaled.service\\n")')" \
+	"does not carry After=tailscaled.service"
+
+# The host block run for every bind: the default box would get a sysctl and
+# a drop-in it never needed, and a refusal on a box with no /etc/sysctl.d.
+run_case "bind-is-honoured: the reboot block runs for every bind" fail \
+	'./scripts/bind-is-honoured.sh' \
+	"$(py 'edit("install.sh", "  127.0.0.1|localhost|::1|0.0.0.0) ;;\n  *)\n    say \"bind on", "  localhost|::1) ;;\n  *)\n    say \"bind on")')" \
+	"no arm that skips both 127.0.0.1 and 0.0.0.0"
+
+# `Started` believed again: the check that asks Docker about the port is gone.
+run_case "bind-is-honoured: Started is believed about the port" fail \
+	'./scripts/bind-is-honoured.sh' \
+	"$(py 'edit("install.sh", "check \"gateway has a port mapping\"", "check \"gateway has a port\"")')" \
+	"is believed"
+
+# invariant 12: the package step never takes Docker away, and never asks apt
+# for what the box already has. On Debian 13 with Docker CE, the distro's
+# docker-buildx resolves to `Remv docker-ce` (#55, measured 2026-09-17).
+run_case "apt-never-removes-docker: an apt line loses --no-remove" fail \
+	'./scripts/apt-never-removes-docker.sh' \
+	"$(py 'edit("install.sh", "apt-get install -y -qq --no-remove git curl >/dev/null 2>&1 || true", "apt-get install -y -qq git curl >/dev/null 2>&1 || true")')" \
+	"has no --no-remove"
+
+# The guard taken away: buildx asked for on every box that has docker, which
+# on a Docker CE box is the exact line that removes it.
+run_case "apt-never-removes-docker: buildx is asked for though the box has it" fail \
+	'./scripts/apt-never-removes-docker.sh' \
+	"$(py 'edit("install.sh", "if ! docker buildx version >/dev/null 2>&1; then", "if true; then")')" \
+	"though the box already has it"
+
+# The repository choice taken away: a Docker CE box asked for the distro's
+# package, which is the one that conflicts with docker-ce-cli.
+run_case "apt-never-removes-docker: a Docker CE box is offered the distro's buildx" fail \
+	'./scripts/apt-never-removes-docker.sh' \
+	"$(py 'edit("install.sh", "apt-get install -y -qq --no-remove docker-buildx-plugin >/dev/null 2>&1 || true", "apt-get install -y -qq --no-remove docker-buildx >/dev/null 2>&1 || true")')" \
+	"expected docker-buildx-plugin"
 
 # invariant: components.json says what this launcher actually installs.
 #
@@ -357,6 +457,24 @@ run_case "shell-lint: another silenced finding with its reason" pass \
 	'./scripts/shell-lint.sh' \
 	"$(py 'edit("install.sh", "die()  {", "# shellcheck disable=SC2317  # reachable, called from a trap\ndie()  {")')"
 
+# The sysctl file's own name is the installer's to choose; the key is not.
+run_case "bind-is-honoured: the sysctl file is renamed" pass \
+	'./scripts/bind-is-honoured.sh' \
+	"$(py 's = open("install.sh").read()
+a, b = "/etc/sysctl.d/90-agent-stack-bind.conf", "/etc/sysctl.d/90-agent-stack.conf"
+assert s.count(a) >= 2, "expected the sysctl file named more than once"
+open("install.sh", "w").write(s.replace(a, b))')"
+
+# A quieter apt-get update changes nothing about what is installed or removed.
+run_case "apt-never-removes-docker: apt-get update gets a different flag" pass \
+	'./scripts/apt-never-removes-docker.sh' \
+	"$(py 'edit("install.sh", "apt-get update -qq >/dev/null 2>&1 || true", "apt-get update -q >/dev/null 2>&1 || true")')"
+
+# A longer timeout on the probe is a tuning, not a change of where it probes.
+run_case "bind-is-honoured: the probe's timeout changes" pass \
+	'./scripts/bind-is-honoured.sh' \
+	"$(py 'edit("install.sh", "curl -fsS -m5 -o /dev/null http://$GATEWAY_PROBE", "curl -fsS -m9 -o /dev/null http://$GATEWAY_PROBE")')"
+
 echo
 echo "=== and the one this estate learned the hard way ==="
 echo "    a gate whose subject is gone must SAY so, not report OK on nothing"
@@ -408,6 +526,22 @@ run_case "closed-by-default: the bind default is gone from install.sh" fail \
 	'./scripts/closed-by-default.sh' \
 	"$(py 'edit("install.sh", "GATEWAY_BIND=\"${GATEWAY_BIND:-127.0.0.1}\"", "GATEWAY_BIND_ADDR=\"127.0.0.1\"")')" \
 	"could not find the GATEWAY_BIND default"
+
+# The package step's own anchor renamed: the slice matches nothing, runs
+# nothing, and would pass every assertion about what it did not ask for.
+run_case "apt-never-removes-docker: the package step's anchor is gone" fail \
+	'./scripts/apt-never-removes-docker.sh' \
+	"$(py 'edit("install.sh", "say \"installing docker and git\"", "say \"installing docker, git\"")')" \
+	"measured NOTHING"
+
+run_case "bind-is-honoured: the gateway check itself is gone" fail \
+	'./scripts/bind-is-honoured.sh' \
+	"$(py 'import re
+s = open("install.sh").read()
+n = len(re.findall(r"(?m)^check \"gateway answers on .*\n", s))
+assert n == 1, "expected one gateway check, found " + str(n)
+open("install.sh", "w").write(re.sub(r"(?m)^check \"gateway answers on .*\n", "", s))')" \
+	"measured nothing"
 
 # A manual job an install starts is not one. The category has two halves and
 # either alone is satisfiable while the job still comes up on somebody's box:

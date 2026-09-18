@@ -96,21 +96,41 @@ esac
 
 say "installing docker and git"
 export DEBIAN_FRONTEND=noninteractive
+# `--no-remove` on every apt line here, and it is not decoration. On Debian 13
+# the distro's `docker-buildx` depends on Debian's `docker-cli`, which
+# conflicts with Docker's own `docker-ce-cli`, so on a box running Docker CE
+# `apt-get install docker-buildx` resolves to `Remv docker-ce` and `Remv
+# docker-ce-cli` (#55, measured 2026-09-17 with `apt-get install -s`): this
+# installer would have taken Docker off the box it was about to run Docker's
+# workloads on. `--no-remove` makes that resolution an error rather than a
+# removal, whichever package is being asked for.
 if ! command -v docker >/dev/null 2>&1; then
   apt-get update -qq
   # docker.io from the distro, not get.docker.com: one less script piped from
   # the internet on a box that is about to hold an enforcement plane.
   # docker-buildx as well: the distro's docker.io does not include it, and
   # without it every build runs on the deprecated legacy builder.
-  apt-get install -y -qq docker.io docker-buildx git curl >/dev/null 2>&1 \
-    || apt-get install -y -qq docker.io git curl >/dev/null
+  apt-get install -y -qq --no-remove docker.io docker-buildx git curl >/dev/null 2>&1 \
+    || apt-get install -y -qq --no-remove docker.io git curl >/dev/null
 else
   apt-get update -qq >/dev/null 2>&1 || true
+  apt-get install -y -qq --no-remove git curl >/dev/null 2>&1 || true
   # buildx here too, not only on the first-install branch: a box that already
-  # had docker is exactly the box that does not have it, and every build then
-  # runs on the deprecated legacy builder while telling you so twice per image.
-  apt-get install -y -qq git curl docker-buildx >/dev/null 2>&1 \
-    || apt-get install -y -qq git curl >/dev/null 2>&1 || true
+  # had docker may not have it, and every build then runs on the deprecated
+  # legacy builder while telling you so twice per image. But asked for only
+  # when it is missing: a box with Docker CE already has it, as
+  # docker-buildx-plugin, and the distro's package is the one that removes
+  # Docker CE. And when it is missing on a Docker CE box, asked for from
+  # Docker's own repository, which is where that box's packages come from.
+  # Either install may fail and the box goes on without it: a build is the
+  # BUILD_FROM_SOURCE path, and a pull needs no builder at all.
+  if ! docker buildx version >/dev/null 2>&1; then
+    if dpkg -s docker-ce 2>/dev/null | grep -q '^Status: install ok installed'; then
+      apt-get install -y -qq --no-remove docker-buildx-plugin >/dev/null 2>&1 || true
+    else
+      apt-get install -y -qq --no-remove docker-buildx >/dev/null 2>&1 || true
+    fi
+  fi
 fi
 systemctl enable --now docker >/dev/null 2>&1 || die "docker did not start."
 # Compose v2 as a plugin, or the standalone binary, or neither.
@@ -119,7 +139,7 @@ if docker compose version >/dev/null 2>&1; then
 elif command -v docker-compose >/dev/null 2>&1; then
   COMPOSE=(docker-compose)
 else
-  apt-get install -y -qq docker-compose-v2 >/dev/null 2>&1 || apt-get install -y -qq docker-compose >/dev/null 2>&1 || true
+  apt-get install -y -qq --no-remove docker-compose-v2 >/dev/null 2>&1 || apt-get install -y -qq --no-remove docker-compose >/dev/null 2>&1 || true
   if docker compose version >/dev/null 2>&1; then COMPOSE=(docker compose)
   elif command -v docker-compose >/dev/null 2>&1; then COMPOSE=(docker-compose)
   else die "no docker compose available; install the docker-compose-v2 package."; fi
@@ -613,6 +633,50 @@ EOF
   note "wrote environments/single.json"
 fi
 
+# ---- 4b. a bind on one address, made to survive a reboot ---------------------
+# A gateway published on ONE address depends on the host holding that address
+# at the moment Docker starts, and after a reboot it may not. Measured
+# 2026-09-17 on a box whose GATEWAY_BIND was its tailscale address:
+# docker.service became active two seconds after tailscaled, before tailscale0
+# carried the address, the port bind failed, the gateway ended `Exited (128)`
+# with "driver failed programming external connectivity", and `unless-stopped`
+# never retries a container whose START failed. A later `up -d` printed
+# `Started` for a container with no port mapping at all, until
+# `--force-recreate`. The agent in flight got 44 refused connections in 2.5
+# minutes (#56).
+#
+# Two things put it right, proven by a second reboot (published, healthz 200,
+# within 40 s). `ip_nonlocal_bind` lets Docker's proxy bind an address the
+# host does not hold yet, so the mapping exists from the first start and
+# traffic flows the moment the address arrives. And when tailscaled is what
+# provides addresses on this box, docker.service is ordered after it (Wants=
+# as well as After=, so a docker start pulls tailscaled up with it). Written
+# on every run, the same bytes each time, and only for a bind that is one
+# address: loopback and 0.0.0.0 are always there. A write that fails is a
+# refusal with the reason, not a box that looks installed until it reboots.
+case "$GATEWAY_BIND" in
+  127.0.0.1|localhost|::1|0.0.0.0) ;;
+  *)
+    say "bind on $GATEWAY_BIND, made to survive a reboot"
+    mkdir -p /etc/sysctl.d || die "could not create /etc/sysctl.d"
+    printf 'net.ipv4.ip_nonlocal_bind = 1\n' > /etc/sysctl.d/90-agent-stack-bind.conf \
+      || die "could not write /etc/sysctl.d/90-agent-stack-bind.conf: a gateway bound to $GATEWAY_BIND would not come back after a reboot"
+    sysctl -q -p /etc/sysctl.d/90-agent-stack-bind.conf \
+      || die "could not apply net.ipv4.ip_nonlocal_bind=1: a gateway bound to $GATEWAY_BIND would not come back after a reboot"
+    note "net.ipv4.ip_nonlocal_bind = 1, from /etc/sysctl.d/90-agent-stack-bind.conf"
+    if systemctl cat tailscaled.service >/dev/null 2>&1; then
+      mkdir -p /etc/systemd/system/docker.service.d \
+        || die "could not create /etc/systemd/system/docker.service.d"
+      printf '[Unit]\nAfter=tailscaled.service\nWants=tailscaled.service\n' \
+        > /etc/systemd/system/docker.service.d/10-after-tailscaled.conf \
+        || die "could not write the docker.service drop-in: docker would start before tailscaled holds $GATEWAY_BIND"
+      systemctl daemon-reload \
+        || die "systemctl daemon-reload failed after writing the docker.service drop-in"
+      note "docker.service starts after tailscaled.service (drop-in 10-after-tailscaled.conf)"
+    fi
+    ;;
+esac
+
 # ---- 5. up ------------------------------------------------------------------
 say "starting the stack"
 "${COMPOSE[@]}" up -d --remove-orphans
@@ -716,7 +780,21 @@ codenokey() { docker run --rm --network "$NET" busybox:1.36 \
            wget -S -q -T5 -O /dev/null "$1" 2>&1 \
          | awk '/^  HTTP\//{c=$2} END{print c+0}'; }
 
-check "gateway answers on 4100"      "curl -fsS -m5 -o /dev/null http://127.0.0.1:4100/healthz"
+# Where the gateway is probed: the address the operator chose, not loopback.
+# With GATEWAY_BIND set to ONE address (a tailnet address is the shape an
+# appliance wants: reachable from the customer's clouds over a private mesh,
+# not from the LAN) Docker publishes on that address only, so loopback
+# refuses, and this line read FAIL twice on a healthy box while the same probe
+# against that address answered 200 and "published on $GATEWAY_BIND only"
+# below passed (#54, measured 2026-09-17). 0.0.0.0 is every address, and
+# loopback is the one of those that is always there. An IPv6 literal is
+# bracketed, as a URL needs.
+case "$GATEWAY_BIND" in
+  0.0.0.0) GATEWAY_PROBE=127.0.0.1 ;;
+  *:*)     GATEWAY_PROBE="[$GATEWAY_BIND]" ;;
+  *)       GATEWAY_PROBE="$GATEWAY_BIND" ;;
+esac
+check "gateway answers on $GATEWAY_PROBE:4100" "curl -fsS -m5 -o /dev/null http://$GATEWAY_PROBE:4100/healthz"
 # The bus half of the stack. tokenfuse logs this line once at start when
 # TOKENFUSE_EVENTS_PATH is set and the file could be opened; without it the
 # exporter is off and idryx loads an empty log forever. Read from the
@@ -746,6 +824,25 @@ check "gateway serves /v1/runs with the admin key" \
 
 check "cloud is NOT on the host"     "! curl -fsS -m3 -o /dev/null http://127.0.0.1:8080/healthz"
 check "wardryx is NOT on the host"   "! curl -fsS -m3 -o /dev/null http://127.0.0.1:8090/healthz"
+# The companion of the first check, for a bind that is one address rather
+# than every address: loopback must then REFUSE, the way the cloud and wardryx
+# must refuse above, and this one has to fail to pass for the same reason. A
+# gateway that answers on an address the operator did not name is published
+# wider than they decided, and the check below reads Docker's rule for the
+# named address without asking whether another one answers as well.
+case "$GATEWAY_BIND" in
+  127.0.0.1|localhost|::1|0.0.0.0) ;;
+  *) check "gateway is NOT on loopback" "! curl -fsS -m3 -o /dev/null http://127.0.0.1:4100/healthz" ;;
+esac
+# Whether a mapping EXISTS at all, read from the container Docker is actually
+# running, apart from whether it is on the right address (the next check).
+# On 2026-09-17, after a reboot had failed the gateway's first bind, `up -d`
+# printed `Started` for a container with no port mapping: healthz unreachable
+# and `docker port` empty until `up -d --force-recreate tokenfuse-gateway`
+# (#56). `Started` is compose's word for the container; this is Docker's
+# word for the port.
+check "gateway has a port mapping" \
+      "docker port \"\$($DC ps -q tokenfuse-gateway)\" 4100/tcp | grep -q ."
 # Not the variable, the rule Docker actually wrote. A default that says
 # loopback while the published port says otherwise is worse than no default at
 # all, because the banner then tells you the box is closed while it is open.

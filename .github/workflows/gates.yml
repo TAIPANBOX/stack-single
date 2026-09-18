@@ -38,6 +38,10 @@ jobs:
         run: ./scripts/record-is-not-on-the-bus.sh
       - name: the bus has a writer and every volume an owner
         run: ./scripts/bus-has-a-writer.sh
+      - name: the operator's bind is honoured end to end
+        run: ./scripts/bind-is-honoured.sh
+      - name: the package step never takes Docker away
+        run: ./scripts/apt-never-removes-docker.sh
 
       # Last, because it mutates tracked files and restores them. It needs a
       # clean tree and says so plainly, so it also reports any earlier step

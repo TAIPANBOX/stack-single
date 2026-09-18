@@ -23,12 +23,23 @@
 #      quiet. A fresh named volume is root:root 0755; init-volumes' own
 #      comments describe the trap for the volumes it did prepare.
 #
+#   3. (2026-09-17, #57) The control plane wrote nothing either. It had no
+#      `TOKENFUSE_EVENTS_PATH`, and even with one it could not have created the
+#      file: the tokenfuse images run as uid 10001 with gid 999 against an
+#      `events` directory that is root:10001 2775, and the exporter swallows
+#      the open error. So budget_exhausted (critical), sustained_loop and the
+#      other Cloud detectors stayed inside /v1/incidents and the console,
+#      invisible to heraldyx, idryx and record-seal, on every install.
+#
 # So this holds two things about compose.yaml, both structural:
 #
-#   A. `tokenfuse-gateway` sets `TOKENFUSE_EVENTS_PATH`, the file sits inside a
-#      volume that service mounts read-write, and every `--load tokenfuse:<path>`
-#      in compose.yaml (idryx, at start and on demand) names that same file.
-#      A bus with a reader and no writer is the fault above.
+#   A. Each money-plane writer, `tokenfuse-gateway` and `tokenfuse-cloud`, sets
+#      `TOKENFUSE_EVENTS_PATH`, the file sits inside a volume that service
+#      mounts read-write, the two name different files (one bus file, two
+#      appenders, no lock), and `init-volumes` pre-creates each file by name
+#      in that volume, since neither uid can. Every `--load tokenfuse:<path>`
+#      in compose.yaml (idryx, at start and on demand) names the gateway's
+#      file. A bus with a reader and no writer is the fault above.
 #
 #   B. Every named volume that a service running as a non-root `user:` mounts
 #      read-write is mounted by `init-volumes` and given to that uid or gid by
@@ -101,19 +112,56 @@ def volume_mounts(block):
     return out
 
 # ---- A. the bus has a writer ------------------------------------------------
-gateway = blocks.get("tokenfuse-gateway")
-if gateway is None:
-    note("no tokenfuse-gateway service in compose.yaml: nothing to hold the bus writer on, so this gate measured nothing")
-    events_path = None
-else:
-    events_path = field(gateway, "TOKENFUSE_EVENTS_PATH")
-    if not events_path:
-        note("tokenfuse-gateway sets no TOKENFUSE_EVENTS_PATH: the gateway exports no agent events, the bus has readers and no writer")
-    else:
-        mounts = volume_mounts(gateway)
-        inside = [(n, t) for n, t, ro in mounts if not ro and events_path.startswith(t.rstrip("/") + "/")]
-        if not inside:
-            note(f"TOKENFUSE_EVENTS_PATH {events_path} is not inside a volume tokenfuse-gateway mounts read-write: the export lands in the container and dies with it")
+init = blocks.get("init-volumes")
+init_mounts = {n: t for n, t, ro in (volume_mounts(init) if init else [])}
+init_text = "\n".join(init or [])
+
+
+def precreated(dirpath):
+    """File names init-volumes creates under dirpath: the items of every
+    `for f in ...; do` loop whose body writes `dirpath/$$f`, plus any direct
+    `: > dirpath/<name>`. compose doubles the `$`, so `$$f` is what the text
+    holds."""
+    names = set()
+    d = re.escape(dirpath.rstrip("/"))
+    for m in re.finditer(r"for\s+(\w+)\s+in\s+([^;\n]+);\s*do(.*?)\bdone\b", init_text, re.S):
+        var, items, body = m.groups()
+        if re.search(d + r'/"?\$\$?\{?' + re.escape(var) + r"\b", body):
+            names.update(items.split())
+    for m in re.finditer(r":\s*>\s*\"?" + d + r"/([A-Za-z0-9._-]+)", init_text):
+        names.add(m.group(1))
+    return names
+
+
+WRITERS = {
+    "tokenfuse-gateway": "the gateway exports no agent events, the bus has readers and no writer",
+    "tokenfuse-cloud": "the control plane's incidents (a budget gone, a sustained loop) never leave /v1/incidents for the notifier, the identity plane or the record",
+}
+written = {}
+for name, consequence in WRITERS.items():
+    svc = blocks.get(name)
+    if svc is None:
+        note(f"no {name} service in compose.yaml: nothing to hold the bus writer on, so this gate measured nothing")
+        continue
+    path = field(svc, "TOKENFUSE_EVENTS_PATH")
+    if not path:
+        note(f"{name} sets no TOKENFUSE_EVENTS_PATH: {consequence}")
+        continue
+    written[name] = path
+    inside = [(n, t) for n, t, ro in volume_mounts(svc) if not ro and path.startswith(t.rstrip("/") + "/")]
+    if not inside:
+        note(f"TOKENFUSE_EVENTS_PATH {path} is not inside a volume {name} mounts read-write: the export lands in the container and dies with it")
+        continue
+    vol, target = inside[0]
+    if vol not in init_mounts:
+        note(f"{name} writes {path} on volume {vol}, and init-volumes never mounts it: nothing can pre-create the file, and uid 10001 with gid 999 cannot")
+        continue
+    base = path[len(target.rstrip("/")) + 1:]
+    if base not in precreated(init_mounts[vol]):
+        note(f"init-volumes does not pre-create {base} in {init_mounts[vol]}: {name} runs as a uid that cannot create it in a root:10001 2775 directory, the exporter swallows the open error, and {consequence.split(',')[0]}")
+if len(set(written.values())) < len(written):
+    note("tokenfuse-gateway and tokenfuse-cloud name the same TOKENFUSE_EVENTS_PATH: two appenders on one file with no lock")
+events_path = written.get("tokenfuse-gateway")
 
 loads = re.findall(r"--load\s*\n?\s*-?\s*tokenfuse:(/\S+)|tokenfuse:(/var/lib/stack/events/\S+)", text)
 load_paths = sorted({a or b for a, b in loads})
@@ -125,11 +173,8 @@ elif events_path:
             note(f"a service loads tokenfuse:{p} but the gateway writes {events_path}: reader and writer disagree on the file")
 
 # ---- B. every volume a non-root service writes has an owner ----------------
-init = blocks.get("init-volumes")
 if init is None:
     note("no init-volumes service in compose.yaml: nothing prepares the named volumes, so this gate measured nothing")
-init_mounts = {n: t for n, t, ro in (volume_mounts(init) if init else [])}
-init_text = "\n".join(init or [])
 judged = 0
 for name, block in blocks.items():
     if name == "init-volumes":
@@ -159,5 +204,5 @@ if judged == 0:
 if problems:
     print(f"{len(problems)} problem(s)")
     sys.exit(1)
-print(f"OK: the gateway exports to {events_path}, {len(load_paths)} reader(s) load the same file, and every one of {judged} writable volume mount(s) of a non-root service is prepared by init-volumes")
+print(f"OK: the gateway exports to {events_path} and the control plane to {written.get('tokenfuse-cloud')}, both pre-created by init-volumes; {len(load_paths)} reader(s) load the gateway's file, and every one of {judged} writable volume mount(s) of a non-root service is prepared by init-volumes")
 PY

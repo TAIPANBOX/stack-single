@@ -41,11 +41,16 @@ change here is a change to something with root on somebody else's box.
 ./scripts/closed-by-default.sh
 ./scripts/fail-before-half-the-job.sh
 ./scripts/build-context-complete.sh
+./scripts/manifest-is-true.sh
+./scripts/record-is-not-on-the-bus.sh
 ./scripts/bus-has-a-writer.sh
+./scripts/bind-is-honoured.sh
+./scripts/apt-never-removes-docker.sh
 ./scripts/gates-have-teeth.sh   # invariant 8; needs a clean tree
 ```
 
-The last one reaches the network, because what it checks lives in another
+The same list, in the same order, as `.github/workflows/gates.yml` runs. The
+last one reaches the network, because what it checks lives in another
 repository.
 
 ## Where the gates run
@@ -178,9 +183,71 @@ an absent invariant.
     `init-volumes` and given to that uid or gid there. install.sh section 8
     reads the gateway's own "export enabled" line, because on a fresh box the
     file is legitimately empty and its size proves nothing.
+
+    The control plane is the second writer of the same bus and had the same
+    fault until 2026-09-17 (#57): no `TOKENFUSE_EVENTS_PATH`, so a budget gone
+    and a sustained loop stayed inside `/v1/incidents`, unseen by the notifier
+    and the record. And naming the file is not enough for either tokenfuse
+    image: they run as uid 10001 with gid 999, which cannot CREATE a file in
+    the `root:10001 2775` events directory, and the exporter swallows the open
+    error. So each money-plane writer names its own file, and `init-volumes`
+    pre-creates both by name, owned by that uid.
     *(gate: `scripts/bus-has-a-writer.sh`, which refuses to report OK when the
     gateway, init-volumes, or every writable volume has been taken away;
     teeth in `scripts/gates-have-teeth.sh`)*
+
+11. **The operator's bind is honoured end to end.** `GATEWAY_BIND` is the one
+    address decision an operator makes here, and every check that depends on
+    it reads it rather than assuming loopback. Check 1 probed
+    `http://127.0.0.1:4100/healthz` whatever the variable said, so a box whose
+    gateway was published on its tailscale address only, the shape an
+    appliance wants, exited 1 on two runs while every other check passed and
+    the same probe against that address answered 200 (#54, 2026-09-17).
+
+    So the probe goes to `$GATEWAY_PROBE`, which is the bind with `0.0.0.0`
+    mapped to loopback (every address includes it), and when the bind is ONE
+    address the run also shows loopback REFUSING, a check that must fail to
+    pass like the "NOT on the host" ones: a gateway that answers on an address
+    the operator did not name is published wider than they decided.
+
+    The same bind has to survive a reboot, and on that box it did not (#56):
+    docker.service became active two seconds after tailscaled, before
+    tailscale0 carried the address, the gateway's bind failed, the container
+    ended `Exited (128)`, and `unless-stopped` never retries a start that
+    failed. A later `up -d` said `Started` of a container with no port
+    mapping. So for a bind that is one address the installer writes
+    `net.ipv4.ip_nonlocal_bind = 1` into `/etc/sysctl.d/` and applies it, and
+    where `tailscaled.service` exists a `docker.service` drop-in with
+    `After=` and `Wants=tailscaled.service`, each with `|| die` (a box that
+    looks installed until its first reboot is invariant 6's half-install),
+    and section 8 reads the gateway's port mapping from `docker port` on the
+    container rather than believing `Started`. Proven by a second reboot on
+    that box: published, healthz 200, within 40 s.
+    *(gate: `scripts/bind-is-honoured.sh`, which refuses to report OK when the
+    gateway check or the `case "$GATEWAY_BIND"` block is gone; teeth in
+    `scripts/gates-have-teeth.sh`)*
+
+12. **The package step never takes Docker away, and never asks apt for what
+    the box already has.** On Debian 13 with Docker CE installed, the line
+    this installer ran on any box that already had docker,
+    `apt-get install docker-buildx`, resolved to `Remv docker-ce` and `Remv
+    docker-ce-cli`: the distro's buildx depends on Debian's `docker-cli`,
+    which conflicts with Docker's own (#55, measured 2026-09-17 with
+    `apt-get install -s`). The box already had buildx, as
+    `docker-buildx-plugin`. Every earlier run was on Ubuntu with no Docker
+    present, where the line is harmless, which is how an installer that
+    removes Docker shipped.
+
+    So every `apt-get install` here carries `--no-remove`, which makes such a
+    resolution an error rather than a removal whatever a distro's dependency
+    graph says this year; buildx is asked for only when `docker buildx
+    version` fails; and on a Docker CE box it is asked for from Docker's own
+    repository, as `docker-buildx-plugin`.
+    *(gate: `scripts/apt-never-removes-docker.sh`: the static half reads every
+    apt line, the behavioural half runs the package step under stub `apt-get`,
+    `docker` and `dpkg` and reads back what apt was asked for; it refuses to
+    report OK when no apt line or the step's anchors are left; teeth in
+    `scripts/gates-have-teeth.sh`)*
 
 ## Decisions that have no gate yet
 

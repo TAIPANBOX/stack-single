@@ -35,6 +35,9 @@ step "gateway binds loopback by default" "./scripts/closed-by-default.sh"
 step "fails before doing half the job" "./scripts/fail-before-half-the-job.sh"
 step "manifest matches what this installs" "./scripts/manifest-is-true.sh"
 step "record reads the bus, writes elsewhere" "./scripts/record-is-not-on-the-bus.sh"
+step "the bus has a writer, every volume an owner" "./scripts/bus-has-a-writer.sh"
+step "the operator's bind is honoured end to end" "./scripts/bind-is-honoured.sh"
+step "the package step never takes Docker away" "./scripts/apt-never-removes-docker.sh"
 # Reaches the network (a tarball from the sibling repo), which is why it is
 # last: everything that can be judged offline has already spoken by here.
 step "every image has the files it copies" "./scripts/build-context-complete.sh"
