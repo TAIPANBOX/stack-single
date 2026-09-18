@@ -633,6 +633,50 @@ EOF
   note "wrote environments/single.json"
 fi
 
+# ---- 4b. a bind on one address, made to survive a reboot ---------------------
+# A gateway published on ONE address depends on the host holding that address
+# at the moment Docker starts, and after a reboot it may not. Measured
+# 2026-09-17 on a box whose GATEWAY_BIND was its tailscale address:
+# docker.service became active two seconds after tailscaled, before tailscale0
+# carried the address, the port bind failed, the gateway ended `Exited (128)`
+# with "driver failed programming external connectivity", and `unless-stopped`
+# never retries a container whose START failed. A later `up -d` printed
+# `Started` for a container with no port mapping at all, until
+# `--force-recreate`. The agent in flight got 44 refused connections in 2.5
+# minutes (#56).
+#
+# Two things put it right, proven by a second reboot (published, healthz 200,
+# within 40 s). `ip_nonlocal_bind` lets Docker's proxy bind an address the
+# host does not hold yet, so the mapping exists from the first start and
+# traffic flows the moment the address arrives. And when tailscaled is what
+# provides addresses on this box, docker.service is ordered after it (Wants=
+# as well as After=, so a docker start pulls tailscaled up with it). Written
+# on every run, the same bytes each time, and only for a bind that is one
+# address: loopback and 0.0.0.0 are always there. A write that fails is a
+# refusal with the reason, not a box that looks installed until it reboots.
+case "$GATEWAY_BIND" in
+  127.0.0.1|localhost|::1|0.0.0.0) ;;
+  *)
+    say "bind on $GATEWAY_BIND, made to survive a reboot"
+    mkdir -p /etc/sysctl.d || die "could not create /etc/sysctl.d"
+    printf 'net.ipv4.ip_nonlocal_bind = 1\n' > /etc/sysctl.d/90-agent-stack-bind.conf \
+      || die "could not write /etc/sysctl.d/90-agent-stack-bind.conf: a gateway bound to $GATEWAY_BIND would not come back after a reboot"
+    sysctl -q -p /etc/sysctl.d/90-agent-stack-bind.conf \
+      || die "could not apply net.ipv4.ip_nonlocal_bind=1: a gateway bound to $GATEWAY_BIND would not come back after a reboot"
+    note "net.ipv4.ip_nonlocal_bind = 1, from /etc/sysctl.d/90-agent-stack-bind.conf"
+    if systemctl cat tailscaled.service >/dev/null 2>&1; then
+      mkdir -p /etc/systemd/system/docker.service.d \
+        || die "could not create /etc/systemd/system/docker.service.d"
+      printf '[Unit]\nAfter=tailscaled.service\nWants=tailscaled.service\n' \
+        > /etc/systemd/system/docker.service.d/10-after-tailscaled.conf \
+        || die "could not write the docker.service drop-in: docker would start before tailscaled holds $GATEWAY_BIND"
+      systemctl daemon-reload \
+        || die "systemctl daemon-reload failed after writing the docker.service drop-in"
+      note "docker.service starts after tailscaled.service (drop-in 10-after-tailscaled.conf)"
+    fi
+    ;;
+esac
+
 # ---- 5. up ------------------------------------------------------------------
 say "starting the stack"
 "${COMPOSE[@]}" up -d --remove-orphans
@@ -790,6 +834,15 @@ case "$GATEWAY_BIND" in
   127.0.0.1|localhost|::1|0.0.0.0) ;;
   *) check "gateway is NOT on loopback" "! curl -fsS -m3 -o /dev/null http://127.0.0.1:4100/healthz" ;;
 esac
+# Whether a mapping EXISTS at all, read from the container Docker is actually
+# running, apart from whether it is on the right address (the next check).
+# On 2026-09-17, after a reboot had failed the gateway's first bind, `up -d`
+# printed `Started` for a container with no port mapping: healthz unreachable
+# and `docker port` empty until `up -d --force-recreate tokenfuse-gateway`
+# (#56). `Started` is compose's word for the container; this is Docker's
+# word for the port.
+check "gateway has a port mapping" \
+      "docker port \"\$($DC ps -q tokenfuse-gateway)\" 4100/tcp | grep -q ."
 # Not the variable, the rule Docker actually wrote. A default that says
 # loopback while the published port says otherwise is worse than no default at
 # all, because the banner then tells you the box is closed while it is open.

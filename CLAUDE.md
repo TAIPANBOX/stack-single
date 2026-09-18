@@ -209,6 +209,20 @@ an absent invariant.
     address the run also shows loopback REFUSING, a check that must fail to
     pass like the "NOT on the host" ones: a gateway that answers on an address
     the operator did not name is published wider than they decided.
+
+    The same bind has to survive a reboot, and on that box it did not (#56):
+    docker.service became active two seconds after tailscaled, before
+    tailscale0 carried the address, the gateway's bind failed, the container
+    ended `Exited (128)`, and `unless-stopped` never retries a start that
+    failed. A later `up -d` said `Started` of a container with no port
+    mapping. So for a bind that is one address the installer writes
+    `net.ipv4.ip_nonlocal_bind = 1` into `/etc/sysctl.d/` and applies it, and
+    where `tailscaled.service` exists a `docker.service` drop-in with
+    `After=` and `Wants=tailscaled.service`, each with `|| die` (a box that
+    looks installed until its first reboot is invariant 6's half-install),
+    and section 8 reads the gateway's port mapping from `docker port` on the
+    container rather than believing `Started`. Proven by a second reboot on
+    that box: published, healthz 200, within 40 s.
     *(gate: `scripts/bind-is-honoured.sh`, which refuses to report OK when the
     gateway check or the `case "$GATEWAY_BIND"` block is gone; teeth in
     `scripts/gates-have-teeth.sh`)*

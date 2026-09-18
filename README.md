@@ -369,6 +369,18 @@ rule Docker actually wrote for port 4100, rather than trusting the variable
 that was supposed to produce it. A green install with an open plane is the outcome
 worth designing against.
 
+A gateway published on one address that is not loopback (a tailnet address,
+say) needs two things from the host that the installer writes rather than
+leaves for the first reboot to reveal: `net.ipv4.ip_nonlocal_bind = 1` in
+`/etc/sysctl.d/90-agent-stack-bind.conf`, so Docker can bind the address
+before the host holds it, and, where `tailscaled.service` exists, a
+`docker.service` drop-in that starts Docker after tailscaled. Without them the
+gateway came back from a reboot as `Exited (128)` and was never retried, and a
+later `up` said `Started` of a container with no port mapping, which is why
+one check now reads the mapping from `docker port` rather than believing
+`Started`. If either file cannot be written the installer refuses and says so;
+a bind changed by hand in `.env` afterwards gets them on the next run.
+
 If the console source is not present it says so and installs the governed
 stack without it, which is a real deployment: the planes enforce with or
 without a UI in front of them.

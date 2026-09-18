@@ -347,6 +347,39 @@ run_case "bind-is-honoured: the loopback refusal runs for every bind" fail \
 	"$(py 'edit("install.sh", "  127.0.0.1|localhost|::1|0.0.0.0) ;;\n  *) check \"gateway is NOT on loopback\"", "  localhost|::1) ;;\n  *) check \"gateway is NOT on loopback\"")')" \
 	"no arm that skips both 127.0.0.1 and 0.0.0.0"
 
+# The same invariant, on the host side (#56): a gateway bound to one address
+# came back from a reboot as Exited (128) and was never retried, until
+# ip_nonlocal_bind and a docker-after-tailscaled drop-in were written by hand.
+run_case "bind-is-honoured: the sysctl for a reboot names the wrong key" fail \
+	'./scripts/bind-is-honoured.sh' \
+	"$(py 'edit("install.sh", "net.ipv4.ip_nonlocal_bind = 1\\n", "net.ipv4.ip_forward = 1\\n")')" \
+	"never writes net.ipv4.ip_nonlocal_bind"
+
+# The write kept, the refusal dropped: a box that could not be prepared would
+# look installed until its first reboot.
+run_case "bind-is-honoured: the sysctl write stops refusing" fail \
+	'./scripts/bind-is-honoured.sh' \
+	"$(py 'edit("install.sh", "      || die \"could not write /etc/sysctl.d/90-agent-stack-bind.conf: a gateway bound to $GATEWAY_BIND would not come back after a reboot\"", "      || true")')" \
+	"has no \`|| die\`"
+
+run_case "bind-is-honoured: docker is no longer ordered after tailscaled" fail \
+	'./scripts/bind-is-honoured.sh' \
+	"$(py 'edit("install.sh", "[Unit]\\nAfter=tailscaled.service\\nWants=tailscaled.service\\n", "[Unit]\\nWants=tailscaled.service\\n")')" \
+	"does not carry After=tailscaled.service"
+
+# The host block run for every bind: the default box would get a sysctl and
+# a drop-in it never needed, and a refusal on a box with no /etc/sysctl.d.
+run_case "bind-is-honoured: the reboot block runs for every bind" fail \
+	'./scripts/bind-is-honoured.sh' \
+	"$(py 'edit("install.sh", "  127.0.0.1|localhost|::1|0.0.0.0) ;;\n  *)\n    say \"bind on", "  localhost|::1) ;;\n  *)\n    say \"bind on")')" \
+	"no arm that skips both 127.0.0.1 and 0.0.0.0"
+
+# `Started` believed again: the check that asks Docker about the port is gone.
+run_case "bind-is-honoured: Started is believed about the port" fail \
+	'./scripts/bind-is-honoured.sh' \
+	"$(py 'edit("install.sh", "check \"gateway has a port mapping\"", "check \"gateway has a port\"")')" \
+	"is believed"
+
 # invariant 12: the package step never takes Docker away, and never asks apt
 # for what the box already has. On Debian 13 with Docker CE, the distro's
 # docker-buildx resolves to `Remv docker-ce` (#55, measured 2026-09-17).
@@ -423,6 +456,14 @@ echo "=== and what they must NOT catch ==="
 run_case "shell-lint: another silenced finding with its reason" pass \
 	'./scripts/shell-lint.sh' \
 	"$(py 'edit("install.sh", "die()  {", "# shellcheck disable=SC2317  # reachable, called from a trap\ndie()  {")')"
+
+# The sysctl file's own name is the installer's to choose; the key is not.
+run_case "bind-is-honoured: the sysctl file is renamed" pass \
+	'./scripts/bind-is-honoured.sh' \
+	"$(py 's = open("install.sh").read()
+a, b = "/etc/sysctl.d/90-agent-stack-bind.conf", "/etc/sysctl.d/90-agent-stack.conf"
+assert s.count(a) >= 2, "expected the sysctl file named more than once"
+open("install.sh", "w").write(s.replace(a, b))')"
 
 # A quieter apt-get update changes nothing about what is installed or removed.
 run_case "apt-never-removes-docker: apt-get update gets a different flag" pass \

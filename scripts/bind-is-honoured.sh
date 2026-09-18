@@ -27,6 +27,29 @@
 #      be wrong. A gateway answering on an address the operator did not name
 #      is published wider than they decided.
 #
+# And about what the same bind needs from the HOST. Measured the same day
+# (#56): after a reboot, docker.service became active two seconds after
+# tailscaled, before tailscale0 carried the address, the gateway's port bind
+# failed, the container ended `Exited (128)`, and `unless-stopped` never
+# retries a start that failed. A later `up -d` printed `Started` for a
+# container with no port mapping at all. Put right, and proven by a second
+# reboot, with `net.ipv4.ip_nonlocal_bind = 1` and a docker.service drop-in
+# ordered after tailscaled. So:
+#
+#   3. For a bind that is one address, install.sh writes the sysctl into
+#      /etc/sysctl.d/, applies it, and refuses with the reason (`|| die`) if
+#      either fails: a box that looks installed until its first reboot is the
+#      half-install invariant 6 is about.
+#
+#   4. Where tailscaled.service exists, it writes a docker.service drop-in
+#      carrying both `After=tailscaled.service` and `Wants=tailscaled.service`,
+#      reloads systemd, and refuses with the reason if it cannot.
+#
+#   5. The verification section reads the gateway's port mapping from
+#      `docker port` on the container itself. `Started` is compose's word for
+#      the container; the mapping is Docker's word for the port, and on that
+#      box the two disagreed.
+#
 # AND IT REFUSES TO REPORT OK ON NOTHING
 #
 # No "gateway answers" check left, or no `case "$GATEWAY_BIND"` block left to
@@ -101,6 +124,57 @@ if refusal is None:
 else:
     guarded_by_bind_case(refusal, 'the "gateway is NOT on loopback" check')
 
+# ---- 3. the sysctl that lets the bind survive a reboot -----------------------
+def command_at(idx):
+    """The logical command the line at idx belongs to, continuation lines
+    joined: back to its first line, forward to its last."""
+    while idx > 0 and lines[idx - 1].rstrip().endswith("\\"):
+        idx -= 1
+    parts = [lines[idx]]
+    j = idx
+    while parts[-1].rstrip().endswith("\\") and j + 1 < len(lines):
+        j += 1
+        parts.append(lines[j])
+    return " ".join(p.strip().rstrip("\\").strip() for p in parts)
+
+
+sysctl_write = find(r"ip_nonlocal_bind = 1.*>\s*/etc/sysctl\.d/\S+\.conf")
+if sysctl_write is None:
+    note("install.sh never writes net.ipv4.ip_nonlocal_bind = 1 into /etc/sysctl.d/: a gateway bound to one address comes back from a reboot as Exited (128), and nothing retries it")
+else:
+    if "|| die" not in command_at(sysctl_write):
+        note("the sysctl write into /etc/sysctl.d/ has no `|| die`: a box that could not be made to survive a reboot would look installed until it rebooted")
+    applied = find(r"^\s*sysctl\s", sysctl_write)
+    if applied is None or "|| die" not in command_at(applied):
+        note("the sysctl file is written but not applied with `sysctl ... || die`: the setting would wait for the next reboot, which is the moment it was needed")
+    guarded_by_bind_case(sysctl_write, "the sysctl write")
+
+# ---- 4. docker after tailscaled, where tailscaled exists ---------------------
+dropin = find(r">\s*/etc/systemd/system/docker\.service\.d/\S+\.conf")
+if dropin is None:
+    note("install.sh never writes a docker.service drop-in under /etc/systemd/system/docker.service.d/: docker starts before tailscaled holds the address it must bind")
+else:
+    cmd = command_at(dropin)
+    for unit in ("After=tailscaled.service", "Wants=tailscaled.service"):
+        if unit not in cmd:
+            note(f"the docker.service drop-in does not carry {unit}: ordering docker after tailscaled is what a second reboot proved")
+    if "|| die" not in cmd:
+        note("the docker.service drop-in write has no `|| die`: a box that could not be ordered after tailscaled would look installed until it rebooted")
+    guard = find(r"^\s*if\s.*tailscaled\.service", 0, dropin)
+    if guard is None:
+        note("the docker.service drop-in is written without checking that tailscaled.service exists: a Wants= on a unit that is not there fails docker.service itself")
+    reload = find(r"^\s*systemctl daemon-reload\b", dropin)
+    if reload is None or "|| die" not in command_at(reload):
+        note("no `systemctl daemon-reload || die` after the docker.service drop-in: systemd would not read it until something else reloaded")
+    guarded_by_bind_case(dropin, "the docker.service drop-in")
+
+# ---- 5. the port mapping is read from docker, not from `Started` -------------
+mapping = find(r'^\s*check "gateway has a port mapping"')
+if mapping is None:
+    note('no `check "gateway has a port mapping"` in install.sh: `Started` from `up -d` is believed, and on 2026-09-17 it was said of a container with no port mapping')
+elif "docker port" not in command_at(mapping):
+    note('the "gateway has a port mapping" check does not read `docker port`: it is not asking Docker about the port')
+
 if find(r'^\s*case "\$GATEWAY_BIND" in\s*$') is None:
     note('no `case "$GATEWAY_BIND" in` block in install.sh at all: nothing branches on the operator\'s bind, so this gate measured nothing')
 
@@ -111,6 +185,7 @@ if problems:
     print("loopback reads a healthy appliance as broken. See CLAUDE.md invariant 11.")
     sys.exit(1)
 
-print("OK: the gateway is probed on $GATEWAY_PROBE (0.0.0.0 mapped to loopback),")
-print("    and a bind on one address is shown to refuse loopback.")
+print("OK: the gateway is probed on $GATEWAY_PROBE (0.0.0.0 mapped to loopback), a bind")
+print("    on one address is shown to refuse loopback, gets ip_nonlocal_bind and a docker")
+print("    drop-in after tailscaled or a refusal, and the port mapping is read from docker.")
 PY
