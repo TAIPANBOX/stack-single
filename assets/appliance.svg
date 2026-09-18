@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-18 -18 996 402" width="996" height="402" role="img" aria-label="A box at the customer's premises, behind carrier-grade NAT, runs the policy, identity, notifier, console and record planes plus a second gateway door for the FinOps crew. Its gateway is published on the box's own tailnet address only. Two clouds, AWS and GCP, each run a small cluster whose agent joins the tailnet and dials that gateway, both refused at call 18 on their per-run budget. The box itself reaches the model provider, and the operator reaches the console over ssh or the WireGuard door">
+  <title>the appliance shape: closed to the internet, open on the tailnet to two clouds and the operator</title>
+  <rect x="-18" y="-18" width="996" height="402" rx="16" fill="#0A0E13"/>
+  <rect x="-17.5" y="-17.5" width="995" height="401" rx="15.5" fill="none" stroke="rgba(255,255,255,.09)"/>
+
+  <defs>
+    <marker id="ap-b" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L8 4 L0 8 z" fill="#4493F8"/>
+    </marker>
+    <marker id="ap-g" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L8 4 L0 8 z" fill="#3FB950"/>
+    </marker>
+  </defs>
+
+  <g font-family="ui-monospace,Menlo" text-anchor="middle">
+
+    <text x="480" y="24" fill="#E9EFF6" font-size="13" font-weight="700">the appliance shape: a box at your premises, agents in two clouds</text>
+    <text x="480" y="41" fill="#5A6675" font-size="10.5">nothing reaches this box from the internet; the gateway is published on its tailnet address only</text>
+
+    <!-- the box, at the customer's premises -->
+    <rect x="14" y="56" width="472" height="272" rx="13" fill="none" stroke="#4493F8" stroke-dasharray="6 4" stroke-width="1.3">
+      <animate attributeName="stroke-opacity" values="1;.45;1" dur="3.6s" repeatCount="indefinite"/>
+    </rect>
+    <text x="250" y="76" fill="#4493F8" font-size="10.5" font-weight="700">the box, at the customer's premises</text>
+    <text x="250" y="91" fill="#8A97A6" font-size="10.5">behind carrier-grade NAT: nothing inbound from the internet</text>
+
+    <rect x="30" y="102" width="440" height="52" rx="9" fill="#141C27" stroke="#E3B341"/>
+    <text x="250" y="121" fill="#E3B341" font-size="10.5" font-weight="700">the gateway: tailnet address only</text>
+    <text x="250" y="137" fill="#8A97A6" font-size="10.5">no LAN port, no public port, no inbound path</text>
+    <text x="250" y="150" fill="#8A97A6" font-size="10.5">both clouds: 17 calls ok, then 402 at call 18</text>
+
+    <rect x="30" y="162" width="440" height="46" rx="9" fill="#141C27" stroke="#2a3547"/>
+    <text x="250" y="181" fill="#E9EFF6" font-size="10.5" font-weight="700">policy, identity, notifier, console, record</text>
+    <text x="250" y="197" fill="#8A97A6" font-size="10.5">wardryx, idryx, heraldyx, the console, record-seal</text>
+
+    <rect x="30" y="216" width="440" height="46" rx="9" fill="#141C27" stroke="#A371F7"/>
+    <text x="250" y="235" fill="#A371F7" font-size="10.5" font-weight="700">the crew's own gateway door, inside the box</text>
+    <text x="250" y="251" fill="#8A97A6" font-size="10.5">tokenfuse-crew-gateway, beside the customer's door</text>
+
+    <rect x="30" y="270" width="440" height="46" rx="9" fill="#10161F" stroke="#2a3547"/>
+    <text x="250" y="289" fill="#8A97A6" font-size="10.5">the agents this box governs run in the two clouds,</text>
+    <text x="250" y="304" fill="#8A97A6" font-size="10.5">not on this box: it enforces, it does not execute</text>
+
+    <!-- the provider, reached from the box -->
+    <path d="M486 84 L528 84" stroke="#3FB950" stroke-width="1.3" marker-end="url(#ap-g)" fill="none"/>
+    <circle cx="488" cy="84" r="2.6" fill="#3FB950">
+      <animate attributeName="cx" values="488;526" dur="2.2s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;1;1;0" dur="2.2s" repeatCount="indefinite"/>
+    </circle>
+
+    <rect x="534" y="56" width="412" height="56" rx="12" fill="#10161F" stroke="#3FB950"/>
+    <text x="740" y="76" fill="#3FB950" font-size="10.5" font-weight="700">the provider, reached from the box</text>
+    <text x="740" y="92" fill="#8A97A6" font-size="10.5">api.anthropic.com/v1/messages, the real API</text>
+    <text x="740" y="105" fill="#8A97A6" font-size="10.5">claude-haiku-4-5, budget 0.0006 usd per run</text>
+
+    <!-- AWS dials in over the tailnet -->
+    <path d="M534 151 L490 122" stroke="#4493F8" stroke-width="1.3" marker-end="url(#ap-b)" fill="none"/>
+    <circle cx="532" cy="149" r="2.6" fill="#4493F8">
+      <animate attributeName="cx" values="532;492" dur="2.2s" repeatCount="indefinite"/>
+      <animate attributeName="cy" values="149;124" dur="2.2s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;1;1;0" dur="2.2s" repeatCount="indefinite"/>
+    </circle>
+    <text x="516" y="114" fill="#4493F8" font-size="10.5" font-weight="700">23 ms</text>
+
+    <rect x="534" y="128" width="412" height="46" rx="12" fill="#10161F" stroke="#4493F8"/>
+    <text x="740" y="147" fill="#4493F8" font-size="10.5" font-weight="700">AWS, t3.medium, eu-central-1a</text>
+    <text x="740" y="163" fill="#8A97A6" font-size="10.5">single-node k3s, ephemeral tailnet key</text>
+
+    <!-- GCP dials in over the tailnet -->
+    <path d="M534 213 L490 140" stroke="#4493F8" stroke-width="1.3" marker-end="url(#ap-b)" fill="none"/>
+    <circle cx="532" cy="209" r="2.6" fill="#4493F8">
+      <animate attributeName="cx" values="532;492" dur="2.6s" repeatCount="indefinite"/>
+      <animate attributeName="cy" values="209;144" dur="2.6s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;1;1;0" dur="2.6s" repeatCount="indefinite"/>
+    </circle>
+    <text x="516" y="187" fill="#4493F8" font-size="10.5" font-weight="700">29 ms</text>
+
+    <rect x="534" y="190" width="412" height="46" rx="12" fill="#10161F" stroke="#4493F8"/>
+    <text x="740" y="209" fill="#4493F8" font-size="10.5" font-weight="700">GCP, e2-medium, europe-west3-a</text>
+    <text x="740" y="225" fill="#8A97A6" font-size="10.5">single-node k3s, ephemeral tailnet key</text>
+
+    <!-- the operator, coming in -->
+    <path d="M534 275 L488 184" stroke="#4493F8" stroke-width="1.3" marker-end="url(#ap-b)" fill="none"/>
+    <circle cx="532" cy="271" r="2.6" fill="#4493F8">
+      <animate attributeName="cx" values="532;490" dur="3s" repeatCount="indefinite"/>
+      <animate attributeName="cy" values="271;188" dur="3s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;1;1;0" dur="3s" repeatCount="indefinite"/>
+    </circle>
+
+    <rect x="534" y="252" width="412" height="46" rx="12" fill="#10161F" stroke="#4493F8"/>
+    <text x="740" y="271" fill="#4493F8" font-size="10.5" font-weight="700">the operator, reaching the console</text>
+    <text x="740" y="287" fill="#8A97A6" font-size="10.5">over ssh -L, or the WireGuard door once enrolled</text>
+
+    <text x="230" y="345" fill="#5A6675" font-size="10.5">the same stack, now with a customer's clouds dialling in</text>
+    <text x="820" y="345" fill="#5A6675" font-size="10.5">github.com/TAIPANBOX/stack-single</text>
+  </g>
+</svg>
