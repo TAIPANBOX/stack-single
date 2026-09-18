@@ -96,21 +96,41 @@ esac
 
 say "installing docker and git"
 export DEBIAN_FRONTEND=noninteractive
+# `--no-remove` on every apt line here, and it is not decoration. On Debian 13
+# the distro's `docker-buildx` depends on Debian's `docker-cli`, which
+# conflicts with Docker's own `docker-ce-cli`, so on a box running Docker CE
+# `apt-get install docker-buildx` resolves to `Remv docker-ce` and `Remv
+# docker-ce-cli` (#55, measured 2026-09-17 with `apt-get install -s`): this
+# installer would have taken Docker off the box it was about to run Docker's
+# workloads on. `--no-remove` makes that resolution an error rather than a
+# removal, whichever package is being asked for.
 if ! command -v docker >/dev/null 2>&1; then
   apt-get update -qq
   # docker.io from the distro, not get.docker.com: one less script piped from
   # the internet on a box that is about to hold an enforcement plane.
   # docker-buildx as well: the distro's docker.io does not include it, and
   # without it every build runs on the deprecated legacy builder.
-  apt-get install -y -qq docker.io docker-buildx git curl >/dev/null 2>&1 \
-    || apt-get install -y -qq docker.io git curl >/dev/null
+  apt-get install -y -qq --no-remove docker.io docker-buildx git curl >/dev/null 2>&1 \
+    || apt-get install -y -qq --no-remove docker.io git curl >/dev/null
 else
   apt-get update -qq >/dev/null 2>&1 || true
+  apt-get install -y -qq --no-remove git curl >/dev/null 2>&1 || true
   # buildx here too, not only on the first-install branch: a box that already
-  # had docker is exactly the box that does not have it, and every build then
-  # runs on the deprecated legacy builder while telling you so twice per image.
-  apt-get install -y -qq git curl docker-buildx >/dev/null 2>&1 \
-    || apt-get install -y -qq git curl >/dev/null 2>&1 || true
+  # had docker may not have it, and every build then runs on the deprecated
+  # legacy builder while telling you so twice per image. But asked for only
+  # when it is missing: a box with Docker CE already has it, as
+  # docker-buildx-plugin, and the distro's package is the one that removes
+  # Docker CE. And when it is missing on a Docker CE box, asked for from
+  # Docker's own repository, which is where that box's packages come from.
+  # Either install may fail and the box goes on without it: a build is the
+  # BUILD_FROM_SOURCE path, and a pull needs no builder at all.
+  if ! docker buildx version >/dev/null 2>&1; then
+    if dpkg -s docker-ce 2>/dev/null | grep -q '^Status: install ok installed'; then
+      apt-get install -y -qq --no-remove docker-buildx-plugin >/dev/null 2>&1 || true
+    else
+      apt-get install -y -qq --no-remove docker-buildx >/dev/null 2>&1 || true
+    fi
+  fi
 fi
 systemctl enable --now docker >/dev/null 2>&1 || die "docker did not start."
 # Compose v2 as a plugin, or the standalone binary, or neither.
@@ -119,7 +139,7 @@ if docker compose version >/dev/null 2>&1; then
 elif command -v docker-compose >/dev/null 2>&1; then
   COMPOSE=(docker-compose)
 else
-  apt-get install -y -qq docker-compose-v2 >/dev/null 2>&1 || apt-get install -y -qq docker-compose >/dev/null 2>&1 || true
+  apt-get install -y -qq --no-remove docker-compose-v2 >/dev/null 2>&1 || apt-get install -y -qq --no-remove docker-compose >/dev/null 2>&1 || true
   if docker compose version >/dev/null 2>&1; then COMPOSE=(docker compose)
   elif command -v docker-compose >/dev/null 2>&1; then COMPOSE=(docker-compose)
   else die "no docker compose available; install the docker-compose-v2 package."; fi

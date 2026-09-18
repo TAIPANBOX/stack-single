@@ -347,6 +347,28 @@ run_case "bind-is-honoured: the loopback refusal runs for every bind" fail \
 	"$(py 'edit("install.sh", "  127.0.0.1|localhost|::1|0.0.0.0) ;;\n  *) check \"gateway is NOT on loopback\"", "  localhost|::1) ;;\n  *) check \"gateway is NOT on loopback\"")')" \
 	"no arm that skips both 127.0.0.1 and 0.0.0.0"
 
+# invariant 12: the package step never takes Docker away, and never asks apt
+# for what the box already has. On Debian 13 with Docker CE, the distro's
+# docker-buildx resolves to `Remv docker-ce` (#55, measured 2026-09-17).
+run_case "apt-never-removes-docker: an apt line loses --no-remove" fail \
+	'./scripts/apt-never-removes-docker.sh' \
+	"$(py 'edit("install.sh", "apt-get install -y -qq --no-remove git curl >/dev/null 2>&1 || true", "apt-get install -y -qq git curl >/dev/null 2>&1 || true")')" \
+	"has no --no-remove"
+
+# The guard taken away: buildx asked for on every box that has docker, which
+# on a Docker CE box is the exact line that removes it.
+run_case "apt-never-removes-docker: buildx is asked for though the box has it" fail \
+	'./scripts/apt-never-removes-docker.sh' \
+	"$(py 'edit("install.sh", "if ! docker buildx version >/dev/null 2>&1; then", "if true; then")')" \
+	"though the box already has it"
+
+# The repository choice taken away: a Docker CE box asked for the distro's
+# package, which is the one that conflicts with docker-ce-cli.
+run_case "apt-never-removes-docker: a Docker CE box is offered the distro's buildx" fail \
+	'./scripts/apt-never-removes-docker.sh' \
+	"$(py 'edit("install.sh", "apt-get install -y -qq --no-remove docker-buildx-plugin >/dev/null 2>&1 || true", "apt-get install -y -qq --no-remove docker-buildx >/dev/null 2>&1 || true")')" \
+	"expected docker-buildx-plugin"
+
 # invariant: components.json says what this launcher actually installs.
 #
 # The compose half of the same idea stack-up carries. Two cases: ordinary drift,
@@ -401,6 +423,11 @@ echo "=== and what they must NOT catch ==="
 run_case "shell-lint: another silenced finding with its reason" pass \
 	'./scripts/shell-lint.sh' \
 	"$(py 'edit("install.sh", "die()  {", "# shellcheck disable=SC2317  # reachable, called from a trap\ndie()  {")')"
+
+# A quieter apt-get update changes nothing about what is installed or removed.
+run_case "apt-never-removes-docker: apt-get update gets a different flag" pass \
+	'./scripts/apt-never-removes-docker.sh' \
+	"$(py 'edit("install.sh", "apt-get update -qq >/dev/null 2>&1 || true", "apt-get update -q >/dev/null 2>&1 || true")')"
 
 # A longer timeout on the probe is a tuning, not a change of where it probes.
 run_case "bind-is-honoured: the probe's timeout changes" pass \
@@ -458,6 +485,13 @@ run_case "closed-by-default: the bind default is gone from install.sh" fail \
 	'./scripts/closed-by-default.sh' \
 	"$(py 'edit("install.sh", "GATEWAY_BIND=\"${GATEWAY_BIND:-127.0.0.1}\"", "GATEWAY_BIND_ADDR=\"127.0.0.1\"")')" \
 	"could not find the GATEWAY_BIND default"
+
+# The package step's own anchor renamed: the slice matches nothing, runs
+# nothing, and would pass every assertion about what it did not ask for.
+run_case "apt-never-removes-docker: the package step's anchor is gone" fail \
+	'./scripts/apt-never-removes-docker.sh' \
+	"$(py 'edit("install.sh", "say \"installing docker and git\"", "say \"installing docker, git\"")')" \
+	"measured NOTHING"
 
 run_case "bind-is-honoured: the gateway check itself is gone" fail \
 	'./scripts/bind-is-honoured.sh' \
