@@ -302,6 +302,35 @@ assert i < j
 open("compose.yaml", "w").write(s[:i] + s[j:])')" \
 	"measured nothing"
 
+# invariant 11: the operator's bind is honoured end to end. Check 1 probed
+# loopback whatever GATEWAY_BIND said, and a healthy appliance bound to its
+# tailscale address exited 1 twice (#54, measured 2026-09-17).
+run_case "bind-is-honoured: the gateway check probes loopback again" fail \
+	'./scripts/bind-is-honoured.sh' \
+	"$(py 'edit("install.sh", "http://$GATEWAY_PROBE:4100/healthz", "http://127.0.0.1:4100/healthz")')" \
+	"probes 127.0.0.1:4100 whatever GATEWAY_BIND says"
+
+# Every address includes loopback; probing http://0.0.0.0:4100 is a URL, not
+# a place, and it happens to work on Linux, which is how it would go unnoticed.
+run_case "bind-is-honoured: 0.0.0.0 stops mapping to loopback" fail \
+	'./scripts/bind-is-honoured.sh' \
+	"$(py 'edit("install.sh", "0.0.0.0) GATEWAY_PROBE=127.0.0.1 ;;", "0.0.0.0) GATEWAY_PROBE=0.0.0.0 ;;")')" \
+	"no \`0.0.0.0) GATEWAY_PROBE=127.0.0.1\` arm"
+
+# The must-fail companion taken away: a gateway published wider than the
+# operator decided would read as healthy again.
+run_case "bind-is-honoured: the loopback refusal is gone" fail \
+	'./scripts/bind-is-honoured.sh' \
+	"$(py 'edit("install.sh", "  *) check \"gateway is NOT on loopback\" \"! curl -fsS -m3 -o /dev/null http://127.0.0.1:4100/healthz\" ;;\n", "")')" \
+	"never shown to refuse loopback"
+
+# The refusal kept, but run for every bind: on the default box it would then
+# fail on a gateway that is exactly where it should be.
+run_case "bind-is-honoured: the loopback refusal runs for every bind" fail \
+	'./scripts/bind-is-honoured.sh' \
+	"$(py 'edit("install.sh", "  127.0.0.1|localhost|::1|0.0.0.0) ;;\n  *) check \"gateway is NOT on loopback\"", "  localhost|::1) ;;\n  *) check \"gateway is NOT on loopback\"")')" \
+	"no arm that skips both 127.0.0.1 and 0.0.0.0"
+
 # invariant: components.json says what this launcher actually installs.
 #
 # The compose half of the same idea stack-up carries. Two cases: ordinary drift,
@@ -357,6 +386,11 @@ run_case "shell-lint: another silenced finding with its reason" pass \
 	'./scripts/shell-lint.sh' \
 	"$(py 'edit("install.sh", "die()  {", "# shellcheck disable=SC2317  # reachable, called from a trap\ndie()  {")')"
 
+# A longer timeout on the probe is a tuning, not a change of where it probes.
+run_case "bind-is-honoured: the probe's timeout changes" pass \
+	'./scripts/bind-is-honoured.sh' \
+	"$(py 'edit("install.sh", "curl -fsS -m5 -o /dev/null http://$GATEWAY_PROBE", "curl -fsS -m9 -o /dev/null http://$GATEWAY_PROBE")')"
+
 echo
 echo "=== and the one this estate learned the hard way ==="
 echo "    a gate whose subject is gone must SAY so, not report OK on nothing"
@@ -408,6 +442,15 @@ run_case "closed-by-default: the bind default is gone from install.sh" fail \
 	'./scripts/closed-by-default.sh' \
 	"$(py 'edit("install.sh", "GATEWAY_BIND=\"${GATEWAY_BIND:-127.0.0.1}\"", "GATEWAY_BIND_ADDR=\"127.0.0.1\"")')" \
 	"could not find the GATEWAY_BIND default"
+
+run_case "bind-is-honoured: the gateway check itself is gone" fail \
+	'./scripts/bind-is-honoured.sh' \
+	"$(py 'import re
+s = open("install.sh").read()
+n = len(re.findall(r"(?m)^check \"gateway answers on .*\n", s))
+assert n == 1, "expected one gateway check, found " + str(n)
+open("install.sh", "w").write(re.sub(r"(?m)^check \"gateway answers on .*\n", "", s))')" \
+	"measured nothing"
 
 # A manual job an install starts is not one. The category has two halves and
 # either alone is satisfiable while the job still comes up on somebody's box:

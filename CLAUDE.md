@@ -41,11 +41,15 @@ change here is a change to something with root on somebody else's box.
 ./scripts/closed-by-default.sh
 ./scripts/fail-before-half-the-job.sh
 ./scripts/build-context-complete.sh
+./scripts/manifest-is-true.sh
+./scripts/record-is-not-on-the-bus.sh
 ./scripts/bus-has-a-writer.sh
+./scripts/bind-is-honoured.sh
 ./scripts/gates-have-teeth.sh   # invariant 8; needs a clean tree
 ```
 
-The last one reaches the network, because what it checks lives in another
+The same list, in the same order, as `.github/workflows/gates.yml` runs. The
+last one reaches the network, because what it checks lives in another
 repository.
 
 ## Where the gates run
@@ -181,6 +185,23 @@ an absent invariant.
     *(gate: `scripts/bus-has-a-writer.sh`, which refuses to report OK when the
     gateway, init-volumes, or every writable volume has been taken away;
     teeth in `scripts/gates-have-teeth.sh`)*
+
+11. **The operator's bind is honoured end to end.** `GATEWAY_BIND` is the one
+    address decision an operator makes here, and every check that depends on
+    it reads it rather than assuming loopback. Check 1 probed
+    `http://127.0.0.1:4100/healthz` whatever the variable said, so a box whose
+    gateway was published on its tailscale address only, the shape an
+    appliance wants, exited 1 on two runs while every other check passed and
+    the same probe against that address answered 200 (#54, 2026-09-17).
+
+    So the probe goes to `$GATEWAY_PROBE`, which is the bind with `0.0.0.0`
+    mapped to loopback (every address includes it), and when the bind is ONE
+    address the run also shows loopback REFUSING, a check that must fail to
+    pass like the "NOT on the host" ones: a gateway that answers on an address
+    the operator did not name is published wider than they decided.
+    *(gate: `scripts/bind-is-honoured.sh`, which refuses to report OK when the
+    gateway check or the `case "$GATEWAY_BIND"` block is gone; teeth in
+    `scripts/gates-have-teeth.sh`)*
 
 ## Decisions that have no gate yet
 

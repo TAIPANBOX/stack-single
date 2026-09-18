@@ -716,7 +716,21 @@ codenokey() { docker run --rm --network "$NET" busybox:1.36 \
            wget -S -q -T5 -O /dev/null "$1" 2>&1 \
          | awk '/^  HTTP\//{c=$2} END{print c+0}'; }
 
-check "gateway answers on 4100"      "curl -fsS -m5 -o /dev/null http://127.0.0.1:4100/healthz"
+# Where the gateway is probed: the address the operator chose, not loopback.
+# With GATEWAY_BIND set to ONE address (a tailnet address is the shape an
+# appliance wants: reachable from the customer's clouds over a private mesh,
+# not from the LAN) Docker publishes on that address only, so loopback
+# refuses, and this line read FAIL twice on a healthy box while the same probe
+# against that address answered 200 and "published on $GATEWAY_BIND only"
+# below passed (#54, measured 2026-09-17). 0.0.0.0 is every address, and
+# loopback is the one of those that is always there. An IPv6 literal is
+# bracketed, as a URL needs.
+case "$GATEWAY_BIND" in
+  0.0.0.0) GATEWAY_PROBE=127.0.0.1 ;;
+  *:*)     GATEWAY_PROBE="[$GATEWAY_BIND]" ;;
+  *)       GATEWAY_PROBE="$GATEWAY_BIND" ;;
+esac
+check "gateway answers on $GATEWAY_PROBE:4100" "curl -fsS -m5 -o /dev/null http://$GATEWAY_PROBE:4100/healthz"
 # The bus half of the stack. tokenfuse logs this line once at start when
 # TOKENFUSE_EVENTS_PATH is set and the file could be opened; without it the
 # exporter is off and idryx loads an empty log forever. Read from the
@@ -746,6 +760,16 @@ check "gateway serves /v1/runs with the admin key" \
 
 check "cloud is NOT on the host"     "! curl -fsS -m3 -o /dev/null http://127.0.0.1:8080/healthz"
 check "wardryx is NOT on the host"   "! curl -fsS -m3 -o /dev/null http://127.0.0.1:8090/healthz"
+# The companion of the first check, for a bind that is one address rather
+# than every address: loopback must then REFUSE, the way the cloud and wardryx
+# must refuse above, and this one has to fail to pass for the same reason. A
+# gateway that answers on an address the operator did not name is published
+# wider than they decided, and the check below reads Docker's rule for the
+# named address without asking whether another one answers as well.
+case "$GATEWAY_BIND" in
+  127.0.0.1|localhost|::1|0.0.0.0) ;;
+  *) check "gateway is NOT on loopback" "! curl -fsS -m3 -o /dev/null http://127.0.0.1:4100/healthz" ;;
+esac
 # Not the variable, the rule Docker actually wrote. A default that says
 # loopback while the published port says otherwise is worse than no default at
 # all, because the banner then tells you the box is closed while it is open.
