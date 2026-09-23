@@ -444,7 +444,7 @@ run_case "manifest-is-true: a routine arrives and the manifest does not claim it
 # is one character in one tag, which is exactly how it would arrive.
 run_case "manifest-is-true: a pulled tag moves in compose and not in the manifest" fail \
 	'./scripts/manifest-is-true.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v1.0.2", "ghcr.io/taipanbox/wardryx:v1.0.3")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v1.0.3", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
 	"an image it pulls"
 
 echo
