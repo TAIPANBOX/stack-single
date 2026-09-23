@@ -121,7 +121,7 @@ services:
   # ---- policy --------------------------------------------------------------
   wardryx:
     <<: *restart
-    image: ${WARDRYX_IMAGE:-ghcr.io/taipanbox/wardryx:v1.0.2}
+    image: ${WARDRYX_IMAGE:-ghcr.io/taipanbox/wardryx:v1.0.3}
     # The image's own 65532:65532, with the GID moved to the one that owns the
     # shared event directory. The binary is a static Go binary and reads no
     # /etc/passwd, so a numeric pair it was not built with is fine.
@@ -203,7 +203,7 @@ services:
   # real and is not hidden: on one machine the boundary is the machine.
   heraldyx:
     <<: *restart
-    image: ${HERALDYX_IMAGE:-ghcr.io/taipanbox/heraldyx:v0.2.4}
+    image: ${HERALDYX_IMAGE:-ghcr.io/taipanbox/heraldyx:v0.2.5}
     user: "65532:10001"
     environment:
       HERALDYX_EVENTS: /var/lib/stack/events
@@ -371,7 +371,7 @@ services:
   # ---- money: the control API ----------------------------------------------
   tokenfuse-cloud:
     <<: *restart
-    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v1.0.3}
+    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v1.0.4}
     command: ["/usr/local/bin/tokenfuse-cloud"]
     environment:
       PORT: "8080"
@@ -404,7 +404,7 @@ services:
   # gets a hard refusal rather than a log line.
   tokenfuse-gateway:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.0.3}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.0.4}
     command: ["/usr/local/bin/tokenfuse"]
     environment:
       TOKENFUSE_ADDR: 0.0.0.0:4100
@@ -732,7 +732,7 @@ services:
   # The sixth, trailryx-seal, is the `record` profile above.
   focus-export:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.0.3}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.0.4}
     user: "10001:10001"
     profiles: ["routines"]
     environment:
