@@ -805,6 +805,12 @@ check "cloud answers inside"         "probe http://tokenfuse-cloud:8080/healthz"
 check "wardryx answers inside"       "probe http://wardryx:8090/healthz"
 check "idryx answers inside"         "probe http://idryx:8081/healthz"
 check "policy store is up"           "$DC exec -T policy-db pg_isready -U wardryx -d wardryx"
+# Not the same question as the line above. pg_isready asks the database;
+# /readyz asks wardryx whether IT can reach the store with the DSN and the
+# network it was given (wardryx 1.0.3, #63), answering 503 when it cannot,
+# while /healthz stays 200 and a policy write fails. A wrong WARDRYX_DB, or a
+# store the plane cannot resolve, passes both checks above and fails here.
+check "policy plane reaches its store" "probe http://wardryx:8090/readyz"
 
 # The three below are about the KEYS, and they exist because a plane with a
 # malformed key spec starts cleanly, authenticates nobody, and answers 401 to
