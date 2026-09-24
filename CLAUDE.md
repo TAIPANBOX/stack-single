@@ -46,6 +46,7 @@ change here is a change to something with root on somebody else's box.
 ./scripts/bus-has-a-writer.sh
 ./scripts/bind-is-honoured.sh
 ./scripts/apt-never-removes-docker.sh
+./scripts/gateway-cache-is-off.sh
 ./scripts/gates-have-teeth.sh   # invariant 8; needs a clean tree
 ```
 
@@ -247,6 +248,17 @@ an absent invariant.
     apt line, the behavioural half runs the package step under stub `apt-get`,
     `docker` and `dpkg` and reads back what apt was asked for; it refuses to
     report OK when no apt line or the step's anchors are left; teeth in
+    `scripts/gates-have-teeth.sh`)*
+
+13. **The gateway's semantic cache is off, explicitly.** @decided 2026-09-24:
+    the launcher turns the tokenfuse gateway's semantic response cache off by
+    name, because its shadow-mode default serialises every call behind one
+    lock while it walks the whole cache computing cosine similarity and serves
+    nothing (tokenfuse#319). Every compose service that runs the gateway
+    binary with no subcommand carries `TOKENFUSE_CACHE: "off"`.
+    *(gate: `scripts/gateway-cache-is-off.sh`, subjects derived from
+    compose.yaml's own image and command lines, not a hard-coded service name;
+    refuses to report OK when no such service is left to judge; teeth in
     `scripts/gates-have-teeth.sh`)*
 
 ## Decisions that have no gate yet

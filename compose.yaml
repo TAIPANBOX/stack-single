@@ -420,6 +420,15 @@ services:
       TOKENFUSE_ADMIN_KEYS: ${GATEWAY_ADMIN:?set by install.sh}
       TOKENFUSE_MODE: enforce
       TOKENFUSE_DATA_DIR: /var/lib/stack/traces/gateway
+      # With this unset, the gateway defaults its semantic response cache to
+      # `shadow`: every call takes one global mutex, walks up to 10,000 cached
+      # entries computing cosine similarity, serves nothing, and appends
+      # another entry. Measured on a 4-core N150 appliance under this
+      # launcher's own stack: 50 agents gave 177 calls/s with 403 refusals and
+      # CPU 79-92% inside SemanticCache::get; with the cache off, 1102
+      # calls/s, zero refusals, no slowdown over time (tokenfuse#319). Off
+      # explicitly, ahead of the gateway's own default changing.
+      TOKENFUSE_CACHE: "off"
       # The bus half of this stack. Without it the gateway's exporter is off
       # (tokenfuse reads this variable and nothing else), the file init-volumes
       # pre-creates stays empty, idryx loads an empty log forever, heraldyx
