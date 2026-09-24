@@ -402,6 +402,29 @@ run_case "apt-never-removes-docker: a Docker CE box is offered the distro's buil
 	"$(py 'edit("install.sh", "apt-get install -y -qq --no-remove docker-buildx-plugin >/dev/null 2>&1 || true", "apt-get install -y -qq --no-remove docker-buildx >/dev/null 2>&1 || true")')" \
 	"expected docker-buildx-plugin"
 
+# invariant 13: the gateway's semantic cache is off, explicitly. Unset,
+# tokenfuse defaults it to shadow mode, one global mutex and up to 10,000
+# cosine-similarity comparisons on every call (tokenfuse#319).
+run_case "gateway-cache-is-off: TOKENFUSE_CACHE goes missing" fail \
+	'./scripts/gateway-cache-is-off.sh' \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_CACHE: \"off\"\n", "")')" \
+	"sets no TOKENFUSE_CACHE"
+
+# Turned on rather than removed: the same fault, a different way to arrive at
+# it, and the gate has to read the value, not just its presence.
+run_case "gateway-cache-is-off: TOKENFUSE_CACHE flips to on" fail \
+	'./scripts/gateway-cache-is-off.sh' \
+	"$(py 'edit("compose.yaml", "TOKENFUSE_CACHE: \"off\"", "TOKENFUSE_CACHE: \"on\"")')" \
+	'not "off"'
+
+# The subject taken away: the gateway service renamed out from under the
+# check (its image and bare-binary command line are how the gate finds it),
+# and it must say it measured nothing rather than report OK on an empty list.
+run_case "gateway-cache-is-off: no gateway service left to judge" fail \
+	'./scripts/gateway-cache-is-off.sh' \
+	"$(py 'edit("compose.yaml", "command: [\"/usr/local/bin/tokenfuse\"]", "command: [\"/usr/local/bin/tokenfuse\", \"serve\"]")')" \
+	"measured NOTHING"
+
 # invariant: components.json says what this launcher actually installs.
 #
 # The compose half of the same idea stack-up carries. Two cases: ordinary drift,
@@ -474,6 +497,13 @@ run_case "apt-never-removes-docker: apt-get update gets a different flag" pass \
 run_case "bind-is-honoured: the probe's timeout changes" pass \
 	'./scripts/bind-is-honoured.sh' \
 	"$(py 'edit("install.sh", "curl -fsS -m5 -o /dev/null http://$GATEWAY_PROBE", "curl -fsS -m9 -o /dev/null http://$GATEWAY_PROBE")')"
+
+# focus-export runs the same image as the gateway, but as `tokenfuse
+# focus-export`, a subcommand, never the bare serve binary. It must stay
+# outside this gate's subject list whatever its own command line does.
+run_case "gateway-cache-is-off: focus-export's command changes" pass \
+	'./scripts/gateway-cache-is-off.sh' \
+	"$(py 'edit("compose.yaml", "ROUTINE_INTERVAL: ${ROUTINE_INTERVAL:-3600}", "ROUTINE_INTERVAL: ${ROUTINE_INTERVAL:-7200}")')"
 
 echo
 echo "=== and the one this estate learned the hard way ==="
