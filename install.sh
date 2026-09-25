@@ -35,6 +35,15 @@
 #
 #   WITH_BROWSER=1 ./install.sh           # also builds stack/scopyx-browser:dev
 #   WITH_RECORD=1 ./install.sh            # also builds stack/trailryx:dev
+#   WITH_TYPED=1 ./install.sh             # also pulls the typed-answer plane
+#
+# The typed-answer plane (typryx) answers a typed question from one of the
+# three templates baked into its image, with a probability for every option,
+# on a free, deterministic backend that makes no outbound call. An operator
+# who wants a real model instead sets TYPRYX_BACKEND=openai-logprobs plus
+# TYPRYX_OPENAI_URL and TYPRYX_OPENAI_MODEL (optionally TYPRYX_OPENAI_KEY_FILE)
+# in .env; a hosted endpoint there is metered, and `jev` is external and
+# metered. Neither is the default this launcher ships.
 #
 # Re-running never changes an existing box: the value lives in .env from the
 # first run, and .env is left alone.
@@ -511,6 +520,11 @@ add_env_default SCOPYX_WARDRYX_KEY "$(sq_ "$WARDRYX_GATEWAY_SECRET")"
 # discovers it can fetch will do so as fast as it is allowed, and the first
 # anybody hears of it is a bill or a rate-limit from the site being fetched.
 add_env_default SCOPYX_MAX_FETCHES_PER_HOUR 200
+# The typed-answer plane's own door, handled exactly like scopyx's above:
+# same generation, same file, empty refuses to start. `.invalid` for the same
+# reason: a trust domain nobody configured cannot collide with a real one an
+# operator later uses.
+add_env_default TYPRYX_KEYS "$(gen 40)=agent://local.invalid/default-agent"
 
 # When the operator asked to build, compose has to be pointed at what was
 # built. Without these nine lines a BUILD_FROM_SOURCE install compiles every
@@ -569,6 +583,7 @@ if [ -z "$BUILD_FROM_SOURCE" ]; then
   [ -z "${WITH_BROWSER:-}" ] || profiles+=(--profile egress-browser)
   [ -z "${WITH_RECORD:-}" ]  || profiles+=(--profile record)
   [ -z "${WITH_EGRESS:-}" ]  || profiles+=(--profile egress)
+  [ -z "${WITH_TYPED:-}" ]   || profiles+=(--profile typed)
   pulled=0
   while read -r img; do
     case "$img" in

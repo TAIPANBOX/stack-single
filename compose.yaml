@@ -12,7 +12,8 @@
 #   which is the single-box equivalent of the cluster's default-deny
 #   NetworkPolicy. The gateway is the one service agents elsewhere must reach,
 #   and the console is bound to loopback so it arrives over the operator's own
-#   tunnel rather than off the open internet.
+#   tunnel rather than off the open internet. scopyx and typryx, both opt-in,
+#   join that same closed set: neither publishes a port either.
 #
 # Secrets come from `.env`, which `install.sh` generates with 0600 and never
 # commits. Nothing here has a default credential.
@@ -45,7 +46,7 @@ services:
       - sh
       - -euc
       - |
-        mkdir -p /vol/events /vol/traces /vol/cloud /vol/heraldyx /vol/records /vol/scopyx /vol/focus
+        mkdir -p /vol/events /vol/traces /vol/cloud /vol/heraldyx /vol/records /vol/scopyx /vol/focus /vol/typryx
         chown 0:10001 /vol/events && chmod 2775 /vol/events
         chown 10001:10001 /vol/traces /vol/cloud && chmod 0775 /vol/traces /vol/cloud
         # The notifier runs 65532:10001 like the Go planes, and writes exactly
@@ -67,6 +68,11 @@ services:
         # on every fresh box. `bus-has-a-writer.sh` now requires every
         # volume a non-root service writes to be mounted AND owned here.
         chown 65532:65532 /vol/scopyx && chmod 0775 /vol/scopyx
+        # typryx (profile typed) runs 65532:65532 and keeps its own journal and
+        # ledger here, the same reasoning as scopyx above: a fresh named volume
+        # is root:root 0755, so without this chown the plane crash-loops on
+        # "permission denied" the moment it is started.
+        chown 65532:65532 /vol/typryx && chmod 0775 /vol/typryx
         # focus-export (profile routines) runs 10001:10001 and writes the FOCUS
         # CSVs here; found by the gate the day it was written, same trap.
         chown 10001:10001 /vol/focus && chmod 0775 /vol/focus
@@ -97,6 +103,7 @@ services:
       - records:/vol/records
       - scopyxevents:/vol/scopyx
       - focus:/vol/focus
+      - typryxdata:/vol/typryx
     restart: "no"
 
   # ---- the policy plane's durable store ------------------------------------
@@ -364,6 +371,51 @@ services:
       - /tmp:size=512m
     volumes:
       - scopyxevents:/var/lib/scopyx
+    depends_on:
+      init-volumes:
+        condition: service_completed_successfully
+
+  # ---- typed: template-based answer typing --------------------------------
+  #
+  # Optional add-on, off unless asked for, like scopyx above. Absent, the
+  # stack behaves exactly as before. Answers a typed question (a choice, a
+  # score, a yes or no) from one of the three templates baked into the image,
+  # with a probability for every option, and scores those probabilities
+  # against truths recorded later.
+  #
+  # TYPRYX_BACKEND is pinned to `stub` here: free, deterministic, no outbound
+  # call. The image's other two backends are `openai-logprobs` (any
+  # OpenAI-compatible model server, local or hosted, a hosted one metered;
+  # needs TYPRYX_OPENAI_URL, TYPRYX_OPENAI_MODEL and optionally
+  # TYPRYX_OPENAI_KEY_FILE) and `jev` (external, metered). Neither is a default this launcher ships; an operator who
+  # wants one sets TYPRYX_BACKEND and the matching variables in `.env`.
+  #
+  # It refuses to start without TYPRYX_KEYS, the same door scopyx has: a wide
+  # bind with no credential is an unauthenticated typed-answer service, and
+  # anything reaching it could ask under the operator's name.
+  typryx:
+    <<: *restart
+    profiles: ["typed"]
+    image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.1.0}
+    user: "65532:65532"
+    environment:
+      TYPRYX_BACKEND: ${TYPRYX_BACKEND:-stub}
+      # `:-` and NOT `:?`, for the same reason as scopyx's own key: compose
+      # interpolates every service in this file, including one whose profile
+      # is off, so a `:?` here would refuse the whole file on a box that never
+      # asked for this plane. Empty is safe because typryx itself refuses to
+      # start without TYPRYX_KEYS.
+      TYPRYX_KEYS: ${TYPRYX_KEYS:-}
+      # Its own journal and ledger, on its own volume, never the shared
+      # `events` volume above. typryx's four event types (typed_answer,
+      # typed_unanswered, typed_refused, calibration_drift) are not yet
+      # registered in agent-passport SPEC 6.2 (phase F), so putting them on
+      # the shared bus would add a source nothing there recognises. The same
+      # choice scopyx's own journal makes.
+      TYPRYX_EVENTS: /var/lib/typryx/events.ndjson
+      TYPRYX_LEDGER_DIR: /var/lib/typryx/ledger
+    volumes:
+      - typryxdata:/var/lib/typryx
     depends_on:
       init-volumes:
         condition: service_completed_successfully
@@ -885,6 +937,10 @@ volumes:
   # incident.
   # scopyx's own journal, deliberately NOT the shared `events` volume above.
   scopyxevents:
+  # typryx's own journal and ledger, deliberately NOT the shared `events`
+  # volume, for the same reason: its event types are not yet registered
+  # anywhere that bus's readers would recognise them.
+  typryxdata:
   heraldyxstate:
   # The record plane's store, deliberately NOT the shared `events` volume:
   # a hash-chained record kept inside the volume its own inputs live in is
