@@ -251,6 +251,7 @@ names resolve the same way in both:
 | `wg` | 51820/udp | **yes**, and it is the one port here that has to be |
 | `heraldyx` | none | it has none. It reads the event volume read-only and dials your mail server, so nothing ever calls it |
 | `scopyx` | none | **opt-in, off unless you ask for it.** Inside the compose network only. See below |
+| `typryx` | none | **opt-in, off unless you ask for it.** Inside the compose network only. See below |
 
 The gateway's own observability and kill routes (`/v1/runs`, `/v1/keys` and
 three more) take a per-install admin key: `GATEWAY_ADMIN` in `.env`, minted
@@ -361,6 +362,35 @@ refuse: a box governing more than one domain is a normal thing to be.
 The store lives on its own volume, not on the bus. That is deliberate and it is
 gated: a record kept where its own inputs live is evidence you can delete while
 clearing space on the thing it is evidence about.
+
+## Typed answers: was the task actually met
+
+Off unless you ask for it, like the egress plane above.
+
+```bash
+WITH_TYPED=1 ./install.sh                         # pulls the typed-answer plane
+docker compose --profile typed up -d typryx
+```
+
+`typryx` answers a typed question (a choice, a score, a yes or no) from one
+of three templates baked into its image, with a probability for every
+option, and scores those probabilities against truths recorded later. `install.sh` has already put a credential in `.env`, so turning it
+on is the flag above and nothing else; without the credential it refuses to
+start, the same stance scopyx takes.
+
+**The default backend is `stub`**: free, deterministic, no outbound call.
+The image also carries `openai-logprobs`, which asks any OpenAI-compatible
+model server for its token probabilities and needs `TYPRYX_OPENAI_URL` and
+`TYPRYX_OPENAI_MODEL` (optionally `TYPRYX_OPENAI_KEY_FILE`) in `.env`, and
+`jev`, an external service. A hosted endpoint costs money and either one
+leaves this box; neither is what this launcher ships by default, so set
+`TYPRYX_BACKEND` yourself to use one.
+
+Its journal and ledger live on their own volume, never the shared event bus:
+typryx's four event types (`typed_answer`, `typed_unanswered`,
+`typed_refused`, `calibration_drift`) are not yet registered anywhere that
+bus's other readers would recognise them, the same reason scopyx's own
+journal is not there either.
 
 ## The appliance shape: a box at your premises, the agents in two clouds
 
