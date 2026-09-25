@@ -386,11 +386,12 @@ model server for its token probabilities and needs `TYPRYX_OPENAI_URL` and
 leaves this box; neither is what this launcher ships by default, so set
 `TYPRYX_BACKEND` yourself to use one.
 
-Its journal and ledger live on their own volume, never the shared event bus:
+Its journal and ledger live on their own volume, not the shared event bus.
 typryx's four event types (`typed_answer`, `typed_unanswered`,
-`typed_refused`, `calibration_drift`) are not yet registered anywhere that
-bus's other readers would recognise them, the same reason scopyx's own
-journal is not there either.
+`typed_refused`, `calibration_drift`) have been registered in agent-passport's
+SPEC 6.2 since 2026-09-25, so the journal could move onto the bus; that is a
+separate choice this launcher has not made yet, and until then it sits on its
+own volume, as scopyx's own journal does.
 
 ## The appliance shape: a box at your premises, the agents in two clouds
 
