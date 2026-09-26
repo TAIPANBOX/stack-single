@@ -418,7 +418,7 @@ services:
   typryx:
     <<: *restart
     profiles: ["typed"]
-    image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.1.0}
+    image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.2.0}
     # Group 10001, not 65532 alone, since 2026-09-26: the journal below moved
     # onto the shared `events` volume (root:10001 2775), the same group every
     # other Go plane's bus writer runs as. The ledger stays on typryxdata,
@@ -455,14 +455,13 @@ services:
       # not running: nothing outside this compose network reaches this port,
       # and a caller who never sets _meta is unaffected.
       #
-      # NOT YET LIVE on the pinned v0.1.0 image: this variable, and _meta
-      # credential reading entirely, landed in typryx commit 96fc5c3 (#6),
-      # after v0.1.0 was tagged, the only release typryx has cut. @measured
-      # live on this Mac, 2026-09-26: with this set and a valid secret at
-      # `_meta["typryx/key"]`, every call through the broker still answers
-      # 401 from typryx itself. Setting it now costs nothing and needs no
-      # later change here; it starts working the moment a typryx release
-      # past #6 is cut and TYPRYX_IMAGE is bumped to it.
+      # Needs typryx v0.2.0 or later: _meta credential reading is typryx#6,
+      # not in v0.1.0. @measured live on this Mac, 2026-09-26, this compose
+      # file with typryx v0.2.0 and tokenfuse v1.1.1: an `ask` whose key
+      # travelled only as `{{secret:typryx_key}}` through the broker was
+      # answered, and its `typed_answer` landed on the shared bus under the
+      # key's agent with the caller's run id; a wrong key was refused 401; the
+      # same call against v0.1.0 was refused 401.
       TYPRYX_ACCEPT_KEY_IN_META: "1"
     volumes:
       # Its own ledger, deliberately not the shared bus (see TYPRYX_LEDGER_DIR

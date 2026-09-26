@@ -1042,15 +1042,26 @@ if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx tokenfuse-mcp-broker; th
   }
   MCP_BROKER_KEY="$(sed -n 's/^TOKENFUSE_MCP_KEYS=\([^:]*\):.*/\1/p' .env 2>/dev/null | head -1)"
   # Named "reaches typryx", not "answers": the MCP wire reports an upstream
-  # refusal as a JSON-RPC error object over HTTP 200, so this proves the
-  # broker is up, authenticated the caller, resolved its secret and forwarded
-  # to typryx, whatever typryx itself then does with the call. On typryx
-  # v0.1.0, the only release cut so far, that is still a 401: _meta credential
-  # reading landed in typryx commit 96fc5c3, after v0.1.0 was tagged. This
-  # check does not read the response body for that reason, and starts proving
-  # a real answer with no code change here once TYPRYX_IMAGE moves past it.
+  # refusal as a JSON-RPC error object over HTTP 200, so this proves only that
+  # the broker is up, authenticated the caller and forwarded to typryx.
   check "typed plane: broker reaches typryx for tools/list" \
         "[ \"\$(mcp_status http://tokenfuse-mcp-broker:4200/mcp '$MCP_BROKER_KEY' tools/list)\" = 200 ]"
+  # The answer itself, read from the body: an `ask` whose typryx credential
+  # travels only as the handle {{secret:typryx_key}}, resolved from the
+  # broker's vault, must come back as a result with "isError":false. This is
+  # the whole path (broker door, vault, _meta credential, typryx's own door,
+  # a template, the stub backend), and it needs typryx v0.2.0 or later:
+  # _meta credential reading is typryx#6, not in v0.1.0.
+  # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
+  mcp_ask_answered() { # url, key
+    docker run --rm --network "$NET" busybox:1.36 wget -q -T5 -O - \
+        --header="Content-Type: application/json" --header="X-Fuse-Mcp-Upstream: typryx" \
+        --header="x-fuse-key: $2" \
+        --post-data='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ask","arguments":{"template":"eval.outcome_met","state":{"task":"2+2","final_answer":"4"}},"_meta":{"typryx/key":"{{secret:typryx_key}}"}}}' \
+        "$1" 2>/dev/null | grep -q '"isError":false'
+  }
+  check "typed plane: an ask through the broker is answered" \
+        "mcp_ask_answered http://tokenfuse-mcp-broker:4200/mcp '$MCP_BROKER_KEY'"
   # Must fail to pass, like the admin-key checks above: a call this broker
   # would forward with nobody's key on it is the same open door those checks
   # exist to catch on a different plane.

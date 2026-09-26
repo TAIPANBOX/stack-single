@@ -287,13 +287,13 @@ an absent invariant.
     one subject; *(not enforced)* for the broker specifically. install.sh's
     own end-of-run checks, only when the broker is running, prove the broker
     reaches typryx for a `tools/list` and refuses a `tools/call` with no
-    client key. NOT PROVEN by any check here: an actual typryx answer through
-    the broker. typryx only reads a credential from `_meta` since its commit
-    `96fc5c3` (#6), after `v0.1.0` was tagged, the only release cut so far;
-    @measured live on this Mac, 2026-09-26, every call this broker forwards to
-    that image answers `401` from typryx itself, wrapped as a JSON-RPC error
-    over HTTP 200. The wiring is typryx's own documented contract and needs no
-    change here once a later typryx release is pinned)*
+    client key. They also prove an actual typryx answer through the broker:
+    `an ask through the broker is answered` sends an `ask` whose key travels
+    only as `{{secret:typryx_key}}` and requires `"isError":false` in the body.
+    It needs typryx v0.2.0 or later (`_meta` credential reading is typryx#6).
+    @measured live on this Mac, 2026-09-26, against the compose project with
+    the broker's own network: green on typryx v0.2.0, red on v0.1.0, red with
+    a wrong broker key, red with typryx stopped)*
 
 ## Decisions that have no gate yet
 
