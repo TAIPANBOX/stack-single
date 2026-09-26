@@ -278,7 +278,7 @@ run_case "bus-has-a-writer: the control plane stops exporting events" fail \
 # reads as wired while the file never exists.
 run_case "bus-has-a-writer: the control plane's file is not pre-created" fail \
 	'./scripts/bus-has-a-writer.sh' \
-	"$(py 'edit("compose.yaml", "for f in tokenfuse.ndjson tokenfuse-cloud.ndjson wardryx.ndjson; do", "for f in tokenfuse.ndjson wardryx.ndjson; do")')" \
+	"$(py 'edit("compose.yaml", "for f in tokenfuse.ndjson tokenfuse-cloud.ndjson tokenfuse-mcp.ndjson wardryx.ndjson typryx.ndjson; do", "for f in tokenfuse.ndjson tokenfuse-mcp.ndjson wardryx.ndjson typryx.ndjson; do")')" \
 	"does not pre-create tokenfuse-cloud.ndjson"
 
 # typryx joined the bus 2026-09-26; its writer entry has its own env var name
