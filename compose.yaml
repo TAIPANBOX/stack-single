@@ -406,12 +406,12 @@ services:
       # asked for this plane. Empty is safe because typryx itself refuses to
       # start without TYPRYX_KEYS.
       TYPRYX_KEYS: ${TYPRYX_KEYS:-}
-      # Its own journal and ledger, on its own volume, never the shared
+      # Its own journal and ledger, on its own volume, not the shared
       # `events` volume above. typryx's four event types (typed_answer,
-      # typed_unanswered, typed_refused, calibration_drift) are not yet
-      # registered in agent-passport SPEC 6.2 (phase F), so putting them on
-      # the shared bus would add a source nothing there recognises. The same
-      # choice scopyx's own journal makes.
+      # typed_unanswered, typed_refused, calibration_drift) are registered in
+      # agent-passport SPEC 6.2 since 2026-09-25, so moving the journal onto
+      # the shared bus is possible; it is a separate choice not made here yet.
+      # Until then, the same placement scopyx's own journal has.
       TYPRYX_EVENTS: /var/lib/typryx/events.ndjson
       TYPRYX_LEDGER_DIR: /var/lib/typryx/ledger
     volumes:
@@ -937,9 +937,9 @@ volumes:
   # incident.
   # scopyx's own journal, deliberately NOT the shared `events` volume above.
   scopyxevents:
-  # typryx's own journal and ledger, deliberately NOT the shared `events`
-  # volume, for the same reason: its event types are not yet registered
-  # anywhere that bus's readers would recognise them.
+  # typryx's own journal and ledger, NOT the shared `events` volume. Its
+  # event types are registered in agent-passport since 2026-09-25; moving
+  # the journal onto the bus is a separate choice not made yet.
   typryxdata:
   heraldyxstate:
   # The record plane's store, deliberately NOT the shared `events` volume:
