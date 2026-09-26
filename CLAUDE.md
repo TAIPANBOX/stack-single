@@ -285,9 +285,15 @@ an absent invariant.
     separately checked, the same as every other service's own `ports:` line
     beyond the gateway's, which invariant 1 leaves to `closed-by-default.sh`'s
     one subject; *(not enforced)* for the broker specifically. install.sh's
-    own end-of-run checks, only when the broker is running, prove a
-    `tools/list` answers with the client key and a `tools/call` with none is
-    refused)*
+    own end-of-run checks, only when the broker is running, prove the broker
+    reaches typryx for a `tools/list` and refuses a `tools/call` with no
+    client key. NOT PROVEN by any check here: an actual typryx answer through
+    the broker. typryx only reads a credential from `_meta` since its commit
+    `96fc5c3` (#6), after `v0.1.0` was tagged, the only release cut so far;
+    @measured live on this Mac, 2026-09-26, every call this broker forwards to
+    that image answers `401` from typryx itself, wrapped as a JSON-RPC error
+    over HTTP 200. The wiring is typryx's own documented contract and needs no
+    change here once a later typryx release is pinned)*
 
 ## Decisions that have no gate yet
 

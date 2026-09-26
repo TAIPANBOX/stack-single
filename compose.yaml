@@ -453,6 +453,15 @@ services:
       # tools/list need no credential either way. Harmless with the broker
       # not running: nothing outside this compose network reaches this port,
       # and a caller who never sets _meta is unaffected.
+      #
+      # NOT YET LIVE on the pinned v0.1.0 image: this variable, and _meta
+      # credential reading entirely, landed in typryx commit 96fc5c3 (#6),
+      # after v0.1.0 was tagged, the only release typryx has cut. @measured
+      # live on this Mac, 2026-09-26: with this set and a valid secret at
+      # `_meta["typryx/key"]`, every call through the broker still answers
+      # 401 from typryx itself. Setting it now costs nothing and needs no
+      # later change here; it starts working the moment a typryx release
+      # past #6 is cut and TYPRYX_IMAGE is bumped to it.
       TYPRYX_ACCEPT_KEY_IN_META: "1"
     volumes:
       # Its own ledger, deliberately not the shared bus (see TYPRYX_LEDGER_DIR

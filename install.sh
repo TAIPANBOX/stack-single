@@ -1041,7 +1041,15 @@ if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx tokenfuse-mcp-broker; th
       | awk '/^  HTTP\//{c=$2} END{print c+0}'
   }
   MCP_BROKER_KEY="$(sed -n 's/^TOKENFUSE_MCP_KEYS=\([^:]*\):.*/\1/p' .env 2>/dev/null | head -1)"
-  check "typed plane: broker answers tools/list for typryx" \
+  # Named "reaches typryx", not "answers": the MCP wire reports an upstream
+  # refusal as a JSON-RPC error object over HTTP 200, so this proves the
+  # broker is up, authenticated the caller, resolved its secret and forwarded
+  # to typryx, whatever typryx itself then does with the call. On typryx
+  # v0.1.0, the only release cut so far, that is still a 401: _meta credential
+  # reading landed in typryx commit 96fc5c3, after v0.1.0 was tagged. This
+  # check does not read the response body for that reason, and starts proving
+  # a real answer with no code change here once TYPRYX_IMAGE moves past it.
+  check "typed plane: broker reaches typryx for tools/list" \
         "[ \"\$(mcp_status http://tokenfuse-mcp-broker:4200/mcp '$MCP_BROKER_KEY' tools/list)\" = 200 ]"
   # Must fail to pass, like the admin-key checks above: a call this broker
   # would forward with nobody's key on it is the same open door those checks

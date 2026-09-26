@@ -428,6 +428,17 @@ the caller ever sees:
 `install.sh` prints the URL and the header names at the end of a run with
 `WITH_TYPED=1`; it never prints a key's value.
 
+**Not yet live end to end, on the image this launcher pins.** typryx only
+reads a `_meta` credential since commit `96fc5c3` (typryx#6), after `v0.1.0`
+was tagged, the only release cut so far. Measured live on this Mac,
+2026-09-26: the broker resolves `{{secret:typryx_key}}` and forwards
+correctly (the network path, the vault, and the broker's own client-key door
+are all proven this way), and typryx answers every one of those calls `401
+unauthorized`, because this exact image has no code path reading `_meta` yet.
+Nothing here needs to change once that changes: the wiring above is typryx's
+own documented contract, and it starts working the day a typryx release past
+`#6` exists and `TYPRYX_IMAGE` is bumped to it.
+
 ## The appliance shape: a box at your premises, the agents in two clouds
 
 <div align="center">
