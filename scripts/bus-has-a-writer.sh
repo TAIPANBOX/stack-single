@@ -45,6 +45,15 @@
 #      read-write is mounted by `init-volumes` and given to that uid or gid by
 #      a `chown` line there. Root services are skipped: root writes anything.
 #
+# typryx (profile typed) joined the same bus 2026-09-26, once agent-passport
+# registered its four event types: it names its own file, TYPRYX_EVENTS, so
+# the writer table below carries a var name per service rather than assuming
+# TOKENFUSE_EVENTS_PATH for everyone. That does not mean record-seal SEALS
+# typryx's events: as of the trailryx release this launcher pins, it has no
+# mapping for any of the four and refuses each by name, counting it refused.
+# What moving the journal here buys is heraldyx alerting on them, since
+# heraldyx reads the whole directory.
+#
 # AND IT REFUSES TO REPORT OK ON NOTHING
 #
 # No gateway service, no init-volumes service, or no non-root service with a
@@ -133,24 +142,28 @@ def precreated(dirpath):
     return names
 
 
+# Each writer's own env var name differs (typryx and the broker do not read
+# TOKENFUSE_EVENTS_PATH), so the table carries the var name beside the
+# consequence rather than assuming one name for every writer.
 WRITERS = {
-    "tokenfuse-gateway": "the gateway exports no agent events, the bus has readers and no writer",
-    "tokenfuse-cloud": "the control plane's incidents (a budget gone, a sustained loop) never leave /v1/incidents for the notifier, the identity plane or the record",
+    "tokenfuse-gateway": ("TOKENFUSE_EVENTS_PATH", "the gateway exports no agent events, the bus has readers and no writer"),
+    "tokenfuse-cloud": ("TOKENFUSE_EVENTS_PATH", "the control plane's incidents (a budget gone, a sustained loop) never leave /v1/incidents for the notifier, the identity plane or the record"),
+    "typryx": ("TYPRYX_EVENTS", "typryx's typed_answer, typed_unanswered, typed_refused and calibration_drift events never reach heraldyx or the record"),
 }
 written = {}
-for name, consequence in WRITERS.items():
+for name, (envvar, consequence) in WRITERS.items():
     svc = blocks.get(name)
     if svc is None:
         note(f"no {name} service in compose.yaml: nothing to hold the bus writer on, so this gate measured nothing")
         continue
-    path = field(svc, "TOKENFUSE_EVENTS_PATH")
+    path = field(svc, envvar)
     if not path:
-        note(f"{name} sets no TOKENFUSE_EVENTS_PATH: {consequence}")
+        note(f"{name} sets no {envvar}: {consequence}")
         continue
     written[name] = path
     inside = [(n, t) for n, t, ro in volume_mounts(svc) if not ro and path.startswith(t.rstrip("/") + "/")]
     if not inside:
-        note(f"TOKENFUSE_EVENTS_PATH {path} is not inside a volume {name} mounts read-write: the export lands in the container and dies with it")
+        note(f"{envvar} {path} is not inside a volume {name} mounts read-write: the export lands in the container and dies with it")
         continue
     vol, target = inside[0]
     if vol not in init_mounts:
@@ -158,9 +171,9 @@ for name, consequence in WRITERS.items():
         continue
     base = path[len(target.rstrip("/")) + 1:]
     if base not in precreated(init_mounts[vol]):
-        note(f"init-volumes does not pre-create {base} in {init_mounts[vol]}: {name} runs as a uid that cannot create it in a root:10001 2775 directory, the exporter swallows the open error, and {consequence.split(',')[0]}")
+        note(f"init-volumes does not pre-create {base} in {init_mounts[vol]}: {name} may not be able to create it there, and {consequence.split(',')[0]}")
 if len(set(written.values())) < len(written):
-    note("tokenfuse-gateway and tokenfuse-cloud name the same TOKENFUSE_EVENTS_PATH: two appenders on one file with no lock")
+    note("two writers name the same events path: two appenders on one file with no lock")
 events_path = written.get("tokenfuse-gateway")
 
 loads = re.findall(r"--load\s*\n?\s*-?\s*tokenfuse:(/\S+)|tokenfuse:(/var/lib/stack/events/\S+)", text)
@@ -204,5 +217,5 @@ if judged == 0:
 if problems:
     print(f"{len(problems)} problem(s)")
     sys.exit(1)
-print(f"OK: the gateway exports to {events_path} and the control plane to {written.get('tokenfuse-cloud')}, both pre-created by init-volumes; {len(load_paths)} reader(s) load the gateway's file, and every one of {judged} writable volume mount(s) of a non-root service is prepared by init-volumes")
+print(f"OK: the gateway exports to {events_path}, the control plane to {written.get('tokenfuse-cloud')}, and typryx to {written.get('typryx')}, every one pre-created by init-volumes; {len(load_paths)} reader(s) load the gateway's file, and every one of {judged} writable volume mount(s) of a non-root service is prepared by init-volumes")
 PY

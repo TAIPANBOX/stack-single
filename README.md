@@ -252,6 +252,7 @@ names resolve the same way in both:
 | `heraldyx` | none | it has none. It reads the event volume read-only and dials your mail server, so nothing ever calls it |
 | `scopyx` | none | **opt-in, off unless you ask for it.** Inside the compose network only. See below |
 | `typryx` | none | **opt-in, off unless you ask for it.** Inside the compose network only. See below |
+| `tokenfuse-mcp-broker` | 4200 | **opt-in, off unless you ask for it.** `GATEWAY_BIND` decides where, same as the gateway. See below |
 
 The gateway's own observability and kill routes (`/v1/runs`, `/v1/keys` and
 three more) take a per-install admin key: `GATEWAY_ADMIN` in `.env`, minted
@@ -368,8 +369,17 @@ clearing space on the thing it is evidence about.
 Off unless you ask for it, like the egress plane above.
 
 ```bash
-WITH_TYPED=1 ./install.sh                         # pulls the typed-answer plane
+WITH_TYPED=1 ./install.sh
+```
+
+pulls the typed-answer plane and tokenfuse's MCP broker in front of it, and
+brings both up: this is the one opt-in profile this launcher starts on its
+own rather than leaving for a second manual command. Without the flag, bring
+either or both up by hand:
+
+```bash
 docker compose --profile typed up -d typryx
+docker compose --profile typed up -d typryx tokenfuse-mcp-broker
 ```
 
 `typryx` answers a typed question (a choice, a score, a yes or no) from one
@@ -386,12 +396,37 @@ model server for its token probabilities and needs `TYPRYX_OPENAI_URL` and
 leaves this box; neither is what this launcher ships by default, so set
 `TYPRYX_BACKEND` yourself to use one.
 
-Its journal and ledger live on their own volume, not the shared event bus.
+`@decided 2026-09-26`: the journal joins the shared `events` volume now that
 typryx's four event types (`typed_answer`, `typed_unanswered`,
-`typed_refused`, `calibration_drift`) have been registered in agent-passport's
-SPEC 6.2 since 2026-09-25, so the journal could move onto the bus; that is a
-separate choice this launcher has not made yet, and until then it sits on its
-own volume, as scopyx's own journal does.
+`typed_refused`, `calibration_drift`) are registered in agent-passport's
+SPEC 6.2. heraldyx reads the whole event directory, so it can alert on them;
+`record-seal`, as of the trailryx release this launcher pins, has no mapping
+for any of the four and refuses each one by name, counting it refused rather
+than sealing it, the way it already refuses roughly forty other event types
+on the bus it does not map. The ledger (typryx's own answer/outcome store,
+not an agent-event stream) stays on its own volume.
+
+### Reaching it through tokenfuse's MCP broker
+
+`tokenfuse-mcp-broker` runs the same pinned tokenfuse image as the gateway,
+one subcommand, `mcp-broker`, unchanged: typryx joins it entirely by
+configuration, never by a code change in either repository. It publishes on
+`${GATEWAY_BIND:-127.0.0.1}:4200`, the identical expression the gateway's own
+port uses, so it is closed by default the same way and widens with the same
+one variable.
+
+An agent reaches typryx at `http://<this box>:4200/mcp`, with the header
+`X-Fuse-Mcp-Upstream: typryx` naming which plane the broker forwards to, and
+its own client key (`TOKENFUSE_MCP_KEYS` in `.env`) as `x-fuse-key`. A
+`tools/call` carries the typed-plane credential the broker injects, not a key
+the caller ever sees:
+
+```json
+{"_meta": {"typryx/key": "{{secret:typryx_key}}"}}
+```
+
+`install.sh` prints the URL and the header names at the end of a run with
+`WITH_TYPED=1`; it never prints a key's value.
 
 ## The appliance shape: a box at your premises, the agents in two clouds
 

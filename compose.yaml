@@ -13,7 +13,11 @@
 #   NetworkPolicy. The gateway is the one service agents elsewhere must reach,
 #   and the console is bound to loopback so it arrives over the operator's own
 #   tunnel rather than off the open internet. scopyx and typryx, both opt-in,
-#   join that same closed set: neither publishes a port either.
+#   join that same closed set: neither publishes a port either. tokenfuse's
+#   MCP broker (opt-in too, `typed` profile) is the exception among them: it
+#   does publish, on `${GATEWAY_BIND:-127.0.0.1}:4200`, the identical
+#   expression the gateway's own port uses, so it inherits the same
+#   closed-by-default posture rather than a second one to keep in sync.
 #
 # Secrets come from `.env`, which `install.sh` generates with 0600 and never
 # commits. Nothing here has a default credential.
@@ -90,7 +94,23 @@ services:
         # missing until 2026-09-17 (#57): budget_exhausted and the other
         # Cloud detectors stayed inside /v1/incidents, invisible to the
         # notifier and the record. `bus-has-a-writer.sh` holds both names.
-        for f in tokenfuse.ndjson tokenfuse-cloud.ndjson wardryx.ndjson; do
+        #
+        # Two more join this loop 2026-09-26, for the typed plane (profile
+        # typed). typryx runs 65532:10001, the same group every other Go
+        # plane's bus writer uses, so it could create its own file through
+        # that group; pre-created anyway, so a box that never enables the
+        # typed profile still has an empty file here rather than nothing, the
+        # same as every other name in this loop. tokenfuse's MCP broker is
+        # the tokenfuse image again, uid 10001 gid 999, so it needs this the
+        # way the gateway and the control plane do: it cannot create here on
+        # its own. Each names its own file, never another writer's, for the
+        # one-appender-per-file reason above. heraldyx reads this whole
+        # directory, so it can now alert on typryx's own events; record-seal
+        # reads it too but, as of this trailryx release, refuses typryx's
+        # four event types BY NAME (no mapping for them yet) and counts them
+        # refused rather than sealing them, the same way it already refuses
+        # roughly forty other types it does not map.
+        for f in tokenfuse.ndjson tokenfuse-cloud.ndjson tokenfuse-mcp.ndjson wardryx.ndjson typryx.ndjson; do
           [ -e "/vol/events/$$f" ] || : > "/vol/events/$$f"
           chown 10001:10001 "/vol/events/$$f" && chmod 0664 "/vol/events/$$f"
         done
@@ -397,7 +417,12 @@ services:
     <<: *restart
     profiles: ["typed"]
     image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.1.0}
-    user: "65532:65532"
+    # Group 10001, not 65532 alone, since 2026-09-26: the journal below moved
+    # onto the shared `events` volume (root:10001 2775), the same group every
+    # other Go plane's bus writer runs as. The ledger stays on typryxdata,
+    # still owned 65532:65532 below, and uid 65532 keeps full owner access
+    # there whatever the primary gid is.
+    user: "65532:10001"
     environment:
       TYPRYX_BACKEND: ${TYPRYX_BACKEND:-stub}
       # `:-` and NOT `:?`, for the same reason as scopyx's own key: compose
@@ -406,19 +431,87 @@ services:
       # asked for this plane. Empty is safe because typryx itself refuses to
       # start without TYPRYX_KEYS.
       TYPRYX_KEYS: ${TYPRYX_KEYS:-}
-      # Its own journal and ledger, on its own volume, not the shared
-      # `events` volume above. typryx's four event types (typed_answer,
-      # typed_unanswered, typed_refused, calibration_drift) are registered in
-      # agent-passport SPEC 6.2 since 2026-09-25, so moving the journal onto
-      # the shared bus is possible; it is a separate choice not made here yet.
-      # Until then, the same placement scopyx's own journal has.
-      TYPRYX_EVENTS: /var/lib/typryx/events.ndjson
+      # @decided 2026-09-26: the journal joins the shared `events` volume now
+      # that agent-passport SPEC 6.2 registers typryx's four event types
+      # (typed_answer, typed_unanswered, typed_refused, calibration_drift).
+      # heraldyx reads this whole directory, so it can now alert on them.
+      # record-seal reads the same directory but, as of the trailryx release
+      # this launcher pins, has no mapping for any of the four and refuses
+      # each one by name, counting it refused rather than sealing it, the
+      # same way it already refuses roughly forty other event types on this
+      # bus it does not map; this does not seal typryx's events, it only lets
+      # them reach the notifier.
+      TYPRYX_EVENTS: /var/lib/stack/events/typryx.ndjson
+      # The ledger is a different kind of store, typryx's own answer/outcome
+      # record rather than an agent-event stream, so it stays off the bus.
       TYPRYX_LEDGER_DIR: /var/lib/typryx/ledger
+      # Off unless tokenfuse's MCP broker fronts this plane (see
+      # tokenfuse-mcp-broker below): lets a tools/call with no X-Typryx-Key
+      # header carry its credential at params._meta["typryx/key"] instead,
+      # which is how the broker, itself blind to identity on the forwarding
+      # leg, hands typryx an agent to journal a call against. initialize and
+      # tools/list need no credential either way. Harmless with the broker
+      # not running: nothing outside this compose network reaches this port,
+      # and a caller who never sets _meta is unaffected.
+      TYPRYX_ACCEPT_KEY_IN_META: "1"
     volumes:
+      # Its own ledger, deliberately not the shared bus (see TYPRYX_LEDGER_DIR
+      # above).
       - typryxdata:/var/lib/typryx
+      # The shared bus, read-write, for the journal above.
+      - events:/var/lib/stack/events
     depends_on:
       init-volumes:
         condition: service_completed_successfully
+
+  # ---- tokenfuse's MCP broker, fronting typryx ------------------------------
+  #
+  # OPT-IN, behind the same `typed` profile as typryx itself, never in the
+  # default set. @decided 2026-09-26: tokenfuse's MCP broker fronts typryx by
+  # configuration alone; tokenfuse's own code is not touched for this, same
+  # image and same pinned tag as the gateway above, one subcommand:
+  # `mcp-broker`.
+  #
+  # Bound the same way the gateway is, `${GATEWAY_BIND:-127.0.0.1}`: closed by
+  # default, and a box that never widened GATEWAY_BIND never widens this door
+  # either, with no second variable to remember. `gateway-cache-is-off.sh`
+  # does not judge this service: its command line carries the `mcp-broker`
+  # subcommand, not the bare binary, the same shape focus-export already sits
+  # outside that gate for.
+  tokenfuse-mcp-broker:
+    <<: *restart
+    profiles: ["typed"]
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.1.1}
+    command: ["/usr/local/bin/tokenfuse", "mcp-broker"]
+    environment:
+      TOKENFUSE_MCP_ADDR: 0.0.0.0:4200
+      TOKENFUSE_MCP_UPSTREAMS: typryx=http://typryx:4320/mcp
+      # `:-` and NOT `:?`: the same interpolate-every-service reason scopyx's
+      # and typryx's own keys carry above. Empty is safe because the broker
+      # itself refuses a non-loopback bind with no client keys configured
+      # (tokenfuse's own invariant 20); this launcher never sets
+      # TOKENFUSE_MCP_ALLOW_OPEN_BIND.
+      TOKENFUSE_MCP_KEYS: ${TOKENFUSE_MCP_KEYS:-}
+      # The one secret in the broker's vault, reusing typryx's own TYPRYX_KEYS
+      # bare key (install.sh) rather than minting a second credential that
+      # could drift from the one typryx itself checks. Scoped to typryx's
+      # three tools, so a secret meant for this plane cannot be pulled for
+      # any other named upstream this broker might gain later.
+      TOKENFUSE_MCP_SECRETS: ${TOKENFUSE_MCP_SECRETS:-}
+      TOKENFUSE_MCP_SECRET_SCOPES: typryx_key=tools:ask|ask_freeform|list_questions
+      # Its own file on the bus, never the gateway's, the control plane's or
+      # typryx's own: two appenders on one file is a race with no lock, the
+      # same reason the money plane's two writers each name their own file.
+      TOKENFUSE_EVENTS_PATH: /var/lib/stack/events/tokenfuse-mcp.ndjson
+    ports:
+      - "${GATEWAY_BIND:-127.0.0.1}:4200:4200"
+    volumes:
+      - events:/var/lib/stack/events
+    depends_on:
+      init-volumes:
+        condition: service_completed_successfully
+      typryx:
+        condition: service_started
 
   # ---- money: the control API ----------------------------------------------
   tokenfuse-cloud:
@@ -937,9 +1030,11 @@ volumes:
   # incident.
   # scopyx's own journal, deliberately NOT the shared `events` volume above.
   scopyxevents:
-  # typryx's own journal and ledger, NOT the shared `events` volume. Its
-  # event types are registered in agent-passport since 2026-09-25; moving
-  # the journal onto the bus is a separate choice not made yet.
+  # typryx's own LEDGER only (answers.ndjson, outcomes.ndjson) since
+  # 2026-09-26; its journal moved onto the shared `events` volume above, now
+  # that agent-passport registers its four event types. The ledger is a
+  # different kind of store, typryx's own answer/outcome record rather than
+  # an agent-event stream, and stays here.
   typryxdata:
   heraldyxstate:
   # The record plane's store, deliberately NOT the shared `events` volume:

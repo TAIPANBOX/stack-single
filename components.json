@@ -54,6 +54,7 @@
           "scopyx-browser",
           "tokenfuse-cloud",
           "tokenfuse-gateway",
+          "tokenfuse-mcp-broker",
           "typryx",
           "verdryx-drift",
           "wardryx",
