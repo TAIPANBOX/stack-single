@@ -482,7 +482,19 @@ services:
     <<: *restart
     profiles: ["typed"]
     image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.1.1}
-    command: ["/usr/local/bin/tokenfuse", "mcp-broker"]
+    # Just the subcommand, not the full binary path: the image's own
+    # ENTRYPOINT is already `tokenfuse` (@measured `docker inspect
+    # ghcr.io/taipanbox/tokenfuse:v1.1.1`, 2026-09-26), so `command:` supplies
+    # CMD, the argv the entrypoint receives. `["/usr/local/bin/tokenfuse",
+    # "mcp-broker"]` here first ran the plain gateway instead, because that
+    # extra leading argument is an unrecognised subcommand and main.rs falls
+    # through to `serve()` for anything it does not match; the gateway's own
+    # `command: ["/usr/local/bin/tokenfuse"]` above works today only because
+    # that same fallthrough is what a bare start needs anyway. @measured live
+    # on this Mac, 2026-09-26: with the full path, this container served the
+    # LLM proxy on :4100 and never opened the MCP door; with just
+    # `["mcp-broker"]`, it logged "mcp credential-broker listening" on :4200.
+    command: ["mcp-broker"]
     environment:
       TOKENFUSE_MCP_ADDR: 0.0.0.0:4200
       TOKENFUSE_MCP_UPSTREAMS: typryx=http://typryx:4320/mcp
