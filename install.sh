@@ -35,7 +35,7 @@
 #
 #   WITH_BROWSER=1 ./install.sh           # also builds stack/scopyx-browser:dev
 #   WITH_RECORD=1 ./install.sh            # also builds stack/trailryx:dev
-#   WITH_TYPED=1 ./install.sh             # also pulls the typed-answer plane
+#   WITH_TYPED=1 ./install.sh             # pulls AND starts the typed plane
 #
 # The typed-answer plane (typryx) answers a typed question from one of the
 # three templates baked into its image, with a probability for every option,
@@ -44,6 +44,14 @@
 # TYPRYX_OPENAI_URL and TYPRYX_OPENAI_MODEL (optionally TYPRYX_OPENAI_KEY_FILE)
 # in .env; a hosted endpoint there is metered, and `jev` is external and
 # metered. Neither is the default this launcher ships.
+#
+# WITH_TYPED=1 also brings up tokenfuse's MCP broker in front of it
+# (tokenfuse-mcp-broker, same pinned image as the gateway, unchanged code,
+# fronting typryx by configuration alone), bound to ${GATEWAY_BIND:-127.0.0.1}
+# like the gateway itself: closed by default, one word to widen. This is the
+# one profile this launcher starts on its own rather than leaving for a
+# second manual `docker compose --profile typed up -d` (the way `record` and
+# `egress` still do), so install.sh's own end-of-run checks can verify it.
 #
 # Re-running never changes an existing box: the value lives in .env from the
 # first run, and .env is left alone.
@@ -524,7 +532,36 @@ add_env_default SCOPYX_MAX_FETCHES_PER_HOUR 200
 # same generation, same file, empty refuses to start. `.invalid` for the same
 # reason: a trust domain nobody configured cannot collide with a real one an
 # operator later uses.
+#
+# @claude 2026-09-26: this identity is NOT derived from RECORD_TRUST_DOMAIN,
+# matching SCOPYX_KEYS right above it rather than the record plane's own
+# trust domain. It would not change what record-seal does with typryx's
+# events either way: that plane refuses all four (agent-event v1.0 is a
+# schema trailryx 1.0 does not read, and its mapper refuses the four types by
+# name on purpose, trailryx#81), so a matching trust domain would not make
+# them seal, only keep the identity honest if that ever changes. Staying consistent with
+# every other generated identity here is worth more than that, until then.
 add_env_default TYPRYX_KEYS "$(gen 40)=agent://local.invalid/default-agent"
+
+# tokenfuse's MCP broker, fronting typryx (profile typed, same as above).
+# @decided 2026-09-26: tokenfuse's own code is not touched for this; typryx
+# joins it entirely by configuration, so everything below is a key spec and
+# two variables, never a code change in either repository.
+#
+# The broker's OWN client-side door: whoever calls it for the typed plane
+# presents this key. Generated once, like every other key here.
+add_env_default TOKENFUSE_MCP_KEYS "$(gen 40):stack-single"
+# The vault entry the broker resolves {{secret:typryx_key}} against, reusing
+# TYPRYX_KEYS's own bare key rather than minting a second credential that
+# could drift from the one typryx itself checks.
+#
+# Read back from .env rather than kept in this shell's memory, for
+# WARDRYX_GATEWAY_SECRET's own reason above: TYPRYX_KEYS is generated inside
+# the block that writes .env for the first time, which a re-run skips.
+TYPRYX_KEY_BARE="${TYPRYX_KEY_BARE:-$(sed -n 's/^TYPRYX_KEYS=\([^=]*\)=.*/\1/p' .env 2>/dev/null | head -1)}"
+[ -n "$TYPRYX_KEY_BARE" ] || die "could not find TYPRYX_KEYS in .env, so the broker would be given an empty secret for the typed plane"
+add_env_default TOKENFUSE_MCP_SECRETS "typryx_key=$TYPRYX_KEY_BARE"
+add_env_default TOKENFUSE_MCP_SECRET_SCOPES "typryx_key=tools:ask|ask_freeform|list_questions"
 
 # When the operator asked to build, compose has to be pointed at what was
 # built. Without these nine lines a BUILD_FROM_SOURCE install compiles every
@@ -694,7 +731,14 @@ esac
 
 # ---- 5. up ------------------------------------------------------------------
 say "starting the stack"
-"${COMPOSE[@]}" up -d --remove-orphans
+UP_PROFILES=()
+# The typed plane is the one profile this launcher brings up automatically
+# when asked, rather than leaving it for a second manual command the way
+# `egress` and `record` do. Section 8 below verifies the broker answers and
+# refuses a caller with no key, and a check that verifies a service nothing
+# started would be verifying nothing.
+[ -z "${WITH_TYPED:-}" ] || UP_PROFILES+=(--profile typed)
+"${COMPOSE[@]}" "${UP_PROFILES[@]}" up -d --remove-orphans
 sleep 8
 
 # ---- 6. the firewall ---------------------------------------------------------
@@ -976,6 +1020,58 @@ if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx console; then
   # #49). The console's own startup line is the only place this shows.
   check_log "console's bus is live" \
         "$DC logs console 2>&1 | grep -q 'bus LIVE' && ! $DC logs console 2>&1 | grep -q 'bus startup failed'"
+fi
+
+# The typed plane's own door, only when WITH_TYPED actually brought it up
+# (section 5): a check that asked a service nothing started would prove
+# nothing, the same reasoning every other opt-in check here follows.
+if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx tokenfuse-mcp-broker; then
+  # Not `docker compose exec ... curl`: the same reason as the money and
+  # policy planes above, this image has neither curl nor a shell. The MCP
+  # wire is JSON-RPC over HTTP, so this is one wget POST with the right
+  # headers, from the same throwaway busybox that probes everything else
+  # here.
+  # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
+  mcp_status() { # url, key (may be empty), method
+    local url="$1" key="${2:-}" method="$3"
+    local hdrs=(--header="Content-Type: application/json" --header="X-Fuse-Mcp-Upstream: typryx")
+    [ -n "$key" ] && hdrs+=(--header="x-fuse-key: $key")
+    docker run --rm --network "$NET" busybox:1.36 wget -S -q -T5 -O /dev/null \
+        "${hdrs[@]}" --post-data="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"$method\"}" "$url" 2>&1 \
+      | awk '/^  HTTP\//{c=$2} END{print c+0}'
+  }
+  MCP_BROKER_KEY="$(sed -n 's/^TOKENFUSE_MCP_KEYS=\([^:]*\):.*/\1/p' .env 2>/dev/null | head -1)"
+  # Named "reaches typryx", not "answers": the MCP wire reports an upstream
+  # refusal as a JSON-RPC error object over HTTP 200, so this proves only that
+  # the broker is up, authenticated the caller and forwarded to typryx.
+  check "typed plane: broker reaches typryx for tools/list" \
+        "[ \"\$(mcp_status http://tokenfuse-mcp-broker:4200/mcp '$MCP_BROKER_KEY' tools/list)\" = 200 ]"
+  # The answer itself, read from the body: an `ask` whose typryx credential
+  # travels only as the handle {{secret:typryx_key}}, resolved from the
+  # broker's vault, must come back as a result with "isError":false. This is
+  # the whole path (broker door, vault, _meta credential, typryx's own door,
+  # a template, the stub backend), and it needs typryx v0.2.0 or later:
+  # _meta credential reading is typryx#6, not in v0.1.0.
+  # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
+  mcp_ask_answered() { # url, key
+    docker run --rm --network "$NET" busybox:1.36 wget -q -T5 -O - \
+        --header="Content-Type: application/json" --header="X-Fuse-Mcp-Upstream: typryx" \
+        --header="x-fuse-key: $2" \
+        --post-data='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ask","arguments":{"template":"eval.outcome_met","state":{"task":"2+2","final_answer":"4"}},"_meta":{"typryx/key":"{{secret:typryx_key}}"}}}' \
+        "$1" 2>/dev/null | grep -q '"isError":false'
+  }
+  check "typed plane: an ask through the broker is answered" \
+        "mcp_ask_answered http://tokenfuse-mcp-broker:4200/mcp '$MCP_BROKER_KEY'"
+  # Must fail to pass, like the admin-key checks above: a call this broker
+  # would forward with nobody's key on it is the same open door those checks
+  # exist to catch on a different plane.
+  check "typed plane: a tools/call with no broker key is refused" \
+        "c=\$(mcp_status http://tokenfuse-mcp-broker:4200/mcp '' tools/call); case \"\$c\" in 401|403) true ;; *) false ;; esac"
+  say "the typed plane, through tokenfuse's MCP broker"
+  note "an agent reaches typryx at http://<this box>:4200/mcp ($GATEWAY_BIND unless you widen it)"
+  note "  with the header X-Fuse-Mcp-Upstream: typryx and its own client key in x-fuse-key"
+  note "  a tools/call then carries the typed-plane credential as"
+  note "  \"_meta\":{\"typryx/key\":\"{{secret:typryx_key}}\"}, never a real key value"
 fi
 
 # The test message, but only on the run that CONFIGURED mail. A re-run must not

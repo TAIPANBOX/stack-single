@@ -278,8 +278,17 @@ run_case "bus-has-a-writer: the control plane stops exporting events" fail \
 # reads as wired while the file never exists.
 run_case "bus-has-a-writer: the control plane's file is not pre-created" fail \
 	'./scripts/bus-has-a-writer.sh' \
-	"$(py 'edit("compose.yaml", "for f in tokenfuse.ndjson tokenfuse-cloud.ndjson wardryx.ndjson; do", "for f in tokenfuse.ndjson wardryx.ndjson; do")')" \
+	"$(py 'edit("compose.yaml", "for f in tokenfuse.ndjson tokenfuse-cloud.ndjson tokenfuse-mcp.ndjson wardryx.ndjson typryx.ndjson; do", "for f in tokenfuse.ndjson tokenfuse-mcp.ndjson wardryx.ndjson typryx.ndjson; do")')" \
 	"does not pre-create tokenfuse-cloud.ndjson"
+
+# typryx joined the bus 2026-09-26; its writer entry has its own env var name
+# (TYPRYX_EVENTS, not TOKENFUSE_EVENTS_PATH) and its own note text, so this
+# proves the generalised table still catches its own fault rather than only
+# the two money-plane ones it was written for first.
+run_case "bus-has-a-writer: typryx stops exporting to the shared bus" fail \
+	'./scripts/bus-has-a-writer.sh' \
+	"$(py 'edit("compose.yaml", "      TYPRYX_EVENTS: /var/lib/stack/events/typryx.ndjson\n", "")')" \
+	"typryx sets no TYPRYX_EVENTS"
 
 # The reader and the writer name different files: idryx would load one file
 # forever while the gateway fills another.
@@ -504,6 +513,13 @@ run_case "bind-is-honoured: the probe's timeout changes" pass \
 run_case "gateway-cache-is-off: focus-export's command changes" pass \
 	'./scripts/gateway-cache-is-off.sh' \
 	"$(py 'edit("compose.yaml", "ROUTINE_INTERVAL: ${ROUTINE_INTERVAL:-3600}", "ROUTINE_INTERVAL: ${ROUTINE_INTERVAL:-7200}")')"
+
+# tokenfuse-mcp-broker (2026-09-26) is the same image again, running the
+# `mcp-broker` subcommand, never the bare gateway. It must stay outside this
+# gate's subject list too, whatever its own configuration does.
+run_case "gateway-cache-is-off: the mcp broker's configuration changes" pass \
+	'./scripts/gateway-cache-is-off.sh' \
+	"$(py 'edit("compose.yaml", "TOKENFUSE_MCP_ADDR: 0.0.0.0:4200", "TOKENFUSE_MCP_ADDR: 0.0.0.0:4201")')"
 
 echo
 echo "=== and the one this estate learned the hard way ==="

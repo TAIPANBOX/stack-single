@@ -29,7 +29,10 @@
 # (`ghcr.io/taipanbox/tokenfuse:`, not `tokenfuse-control-plane:`) and whose
 # `command:` is the bare binary with no subcommand,
 # `["/usr/local/bin/tokenfuse"]`. A service matching the image but running a
-# subcommand is left alone on purpose.
+# subcommand is left alone on purpose: `tokenfuse-mcp-broker` (profile typed,
+# added 2026-09-26) is the same image again, running `mcp-broker`, which is
+# not the gateway's cache path at all and is not this gate's subject, the
+# same way `focus-export` already sat outside it running its own subcommand.
 #
 # AND IT REFUSES TO REPORT OK ON NOTHING
 #

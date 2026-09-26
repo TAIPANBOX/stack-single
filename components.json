@@ -54,6 +54,7 @@
           "scopyx-browser",
           "tokenfuse-cloud",
           "tokenfuse-gateway",
+          "tokenfuse-mcp-broker",
           "typryx",
           "verdryx-drift",
           "wardryx",
@@ -98,7 +99,7 @@
           "ghcr.io/taipanbox/tokenfuse-control-plane:v1.1.1",
           "ghcr.io/taipanbox/tokenfuse:v1.1.1",
           "ghcr.io/taipanbox/trailryx-node:v1.0.0",
-          "ghcr.io/taipanbox/typryx:v0.1.0",
+          "ghcr.io/taipanbox/typryx:v0.2.0",
           "ghcr.io/taipanbox/wardryx:v1.0.3"
         ]
       },
