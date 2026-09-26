@@ -533,13 +533,13 @@ add_env_default SCOPYX_MAX_FETCHES_PER_HOUR 200
 # reason: a trust domain nobody configured cannot collide with a real one an
 # operator later uses.
 #
-# @decided 2026-09-26: this identity is NOT derived from RECORD_TRUST_DOMAIN,
+# @claude 2026-09-26: this identity is NOT derived from RECORD_TRUST_DOMAIN,
 # matching SCOPYX_KEYS right above it rather than the record plane's own
 # trust domain. It would not change what record-seal does with typryx's
-# events either way: that plane refuses typryx's four event types BY NAME
-# (no mapping for them in the trailryx release this launcher pins), so a
-# matching trust domain would not make them seal, only keep the identity
-# honest if a future trailryx release maps them. Staying consistent with
+# events either way: that plane refuses all four (agent-event v1.0 is a
+# schema trailryx 1.0 does not read, and its mapper refuses the four types by
+# name on purpose, trailryx#81), so a matching trust domain would not make
+# them seal, only keep the identity honest if that ever changes. Staying consistent with
 # every other generated identity here is worth more than that, until then.
 add_env_default TYPRYX_KEYS "$(gen 40)=agent://local.invalid/default-agent"
 

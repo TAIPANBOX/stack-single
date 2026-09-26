@@ -400,10 +400,10 @@ leaves this box; neither is what this launcher ships by default, so set
 typryx's four event types (`typed_answer`, `typed_unanswered`,
 `typed_refused`, `calibration_drift`) are registered in agent-passport's
 SPEC 6.2. heraldyx reads the whole event directory, so it can alert on them;
-`record-seal`, as of the trailryx release this launcher pins, has no mapping
-for any of the four and refuses each one by name, counting it refused rather
-than sealing it, the way it already refuses roughly forty other event types
-on the bus it does not map. The ledger (typryx's own answer/outcome store,
+`record-seal` counts all four refused rather than sealing them: they carry
+agent-event v1.0, a schema trailryx 1.0 does not read (`unknown_schema`), and
+past the schema trailryx refuses these four types by name on purpose, since an
+answer to a question is not a decision the agent took (trailryx#81). The ledger (typryx's own answer/outcome store,
 not an agent-event stream) stays on its own volume.
 
 ### Reaching it through tokenfuse's MCP broker

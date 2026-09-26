@@ -106,10 +106,12 @@ services:
         # its own. Each names its own file, never another writer's, for the
         # one-appender-per-file reason above. heraldyx reads this whole
         # directory, so it can now alert on typryx's own events; record-seal
-        # reads it too but, as of this trailryx release, refuses typryx's
-        # four event types BY NAME (no mapping for them yet) and counts them
-        # refused rather than sealing them, the same way it already refuses
-        # roughly forty other types it does not map.
+        # reads it too and counts typryx's four event types refused rather than
+        # sealing them: they carry agent-event v1.0, which trailryx 1.0 does
+        # not read (unknown_schema, measured on stack-up 2026-09-26), and past
+        # the schema its mapper refuses all four by name on purpose
+        # (trailryx#81: an answer to a question is not a decision the agent
+        # took).
         for f in tokenfuse.ndjson tokenfuse-cloud.ndjson tokenfuse-mcp.ndjson wardryx.ndjson typryx.ndjson; do
           [ -e "/vol/events/$$f" ] || : > "/vol/events/$$f"
           chown 10001:10001 "/vol/events/$$f" && chmod 0664 "/vol/events/$$f"
@@ -435,12 +437,11 @@ services:
       # that agent-passport SPEC 6.2 registers typryx's four event types
       # (typed_answer, typed_unanswered, typed_refused, calibration_drift).
       # heraldyx reads this whole directory, so it can now alert on them.
-      # record-seal reads the same directory but, as of the trailryx release
-      # this launcher pins, has no mapping for any of the four and refuses
-      # each one by name, counting it refused rather than sealing it, the
-      # same way it already refuses roughly forty other event types on this
-      # bus it does not map; this does not seal typryx's events, it only lets
-      # them reach the notifier.
+      # record-seal reads the same directory and counts all four refused,
+      # never sealed: they carry agent-event v1.0, which trailryx 1.0 does not
+      # read (unknown_schema, measured on stack-up 2026-09-26), and past the
+      # schema its mapper refuses them by name on purpose (trailryx#81). So
+      # this does not seal typryx's events; it lets them reach the notifier.
       TYPRYX_EVENTS: /var/lib/stack/events/typryx.ndjson
       # The ledger is a different kind of store, typryx's own answer/outcome
       # record rather than an agent-event stream, so it stays off the bus.

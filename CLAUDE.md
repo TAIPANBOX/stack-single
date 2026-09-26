@@ -266,10 +266,10 @@ an absent invariant.
     in sync.** @decided 2026-09-26: `typryx`'s journal moves onto the shared
     `events` volume now that agent-passport registers its four event types
     (typed_answer, typed_unanswered, typed_refused, calibration_drift), so
-    heraldyx can alert on them; `record-seal`, as of the trailryx release this
-    launcher pins, has no mapping for any of the four and refuses each one by
-    name, counting it refused rather than sealed, the same way it already
-    refuses roughly forty other event types on the bus it does not map.
+    heraldyx can alert on them; `record-seal` counts all four refused rather than
+    sealed: they carry agent-event v1.0, a schema trailryx 1.0 does not read
+    (unknown_schema), and past the schema its mapper refuses the four by name
+    on purpose (trailryx#81).
     `tokenfuse-mcp-broker`, a new opt-in service fronting `typryx` by
     configuration alone (tokenfuse's own code is not touched), publishes on
     `${GATEWAY_BIND:-127.0.0.1}:4200`, the identical expression
