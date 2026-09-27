@@ -577,6 +577,25 @@ run_case "delegation-dirs-are-split: a comment in the gateway block changes" pas
 	'./scripts/delegation-dirs-are-split.sh' \
 	"$(py 'edit("compose.yaml", "# ./delegation, which holds vouchryx", "# ./delegation, the directory that holds vouchryx")')"
 
+run_case "env-sources-cleanly: a default goes back to an unquoted pipe" fail \
+	'./scripts/env-sources-cleanly.sh' \
+	"$(py 'edit("install.sh", "add_env_default TOKENFUSE_MCP_SECRET_SCOPES \"$(sq_ \x27typryx_key=tools:ask|ask_freeform|list_questions\x27)\"", "add_env_default TOKENFUSE_MCP_SECRET_SCOPES \"typryx_key=tools:ask|ask_freeform|list_questions\"")')" \
+	"writes an unquoted value the shell would act on"
+
+run_case "env-sources-cleanly: the repair stops quoting" fail \
+	'./scripts/env-sources-cleanly.sh' \
+	"$(py 'edit("install.sh", "print name \"=\\047\" val \"\\047\"; fixed++; next", "print name \"=\" val; fixed++; next")')" \
+	"does not source cleanly"
+
+run_case "env-sources-cleanly: the repair call removed" fail \
+	'./scripts/env-sources-cleanly.sh' \
+	"$(py 'edit("install.sh", "repair_env_quoting .env || die", "true || die")')" \
+	"does not call repair_env_quoting"
+
+run_case "env-sources-cleanly: a plain default added" pass \
+	'./scripts/env-sources-cleanly.sh' \
+	"$(py 'edit("install.sh", "add_env_default ALERT_MIN_SEVERITY high\n", "add_env_default ALERT_MIN_SEVERITY high\nadd_env_default EXTRA_PLAIN value-1\n")')"
+
 run_case "felyx-through-the-gateway: the base URL points past the gateway" fail \
 	'./scripts/felyx-through-the-gateway.sh' \
 	"$(py 'edit("compose.yaml", "      GENARYX_COPILOT_BASE_URL: http://tokenfuse-gateway:4100\n", "      GENARYX_COPILOT_BASE_URL: https://api.anthropic.com\n")')" \

@@ -623,6 +623,11 @@ The Kubernetes sibling of this repo,
 with every trap both deployments hit. These are the ones a first install would
 have walked straight into, closed here rather than left for you:
 
+- `install.sh` writes `.env` and then sources it, so every value in it is
+  shell. From v1.1.9 to v1.1.12 one default carried an unquoted `|`, the shell
+  ran the words after it as commands, and every install stopped at that line.
+  The value is quoted now, and a `.env` one of those releases wrote is repaired
+  before it is sourced, so a box that installed one can simply re-run.
 - Both planes take a bearer-key spec of the form `key:org[:role]`, and an entry
   without the `:org` half parses to **zero** valid keys. The plane then starts
   cleanly, stays reachable, and authenticates nobody. Every health check passes

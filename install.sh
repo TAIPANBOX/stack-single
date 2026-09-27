@@ -586,7 +586,10 @@ add_env_default TOKENFUSE_MCP_KEYS "$(gen 40):stack-single"
 TYPRYX_KEY_BARE="${TYPRYX_KEY_BARE:-$(sed -n 's/^TYPRYX_KEYS=\([^=]*\)=.*/\1/p' .env 2>/dev/null | head -1)}"
 [ -n "$TYPRYX_KEY_BARE" ] || die "could not find TYPRYX_KEYS in .env, so the broker would be given an empty secret for the typed plane"
 add_env_default TOKENFUSE_MCP_SECRETS "typryx_key=$TYPRYX_KEY_BARE"
-add_env_default TOKENFUSE_MCP_SECRET_SCOPES "typryx_key=tools:ask|ask_freeform|list_questions"
+# Quoted: `|` is a pipe to the shell that sources .env below, so unquoted this
+# line ran `ask_freeform` and `list_questions` as commands and stopped every
+# install at `. ./.env` (v1.1.9 to v1.1.12, measured 2026-09-27 on Debian 13).
+add_env_default TOKENFUSE_MCP_SECRET_SCOPES "$(sq_ 'typryx_key=tools:ask|ask_freeform|list_questions')"
 
 # The delegation plane's own door (profile delegation), handled like every
 # other opt-in plane's key above: generated whether or not WITH_DELEGATION is
@@ -640,6 +643,34 @@ SMTP_PASS=""
 # so an existing deployment keeps its own binding and its own credentials, and
 # every section below then reports and verifies the real values instead of
 # announcing a boundary this run merely intended.
+# A .env written by v1.1.9 to v1.1.12 carries one unquoted value with `|` in
+# it, and add_env_default never rewrites a line that exists, so without this a
+# box that installed one of those releases could not re-run any later one.
+# Quotes, in place, every unquoted value holding a character the shell would
+# act on; a value that is already quoted, or plain, is left byte for byte.
+# (gate: scripts/env-sources-cleanly.sh runs this function on such a file.)
+repair_env_quoting() {
+  local f="$1" tmp
+  tmp="$(mktemp)" || return 1
+  awk '
+    /^[A-Za-z_][A-Za-z0-9_]*=/ {
+      i = index($0, "="); name = substr($0, 1, i - 1); val = substr($0, i + 1)
+      first = substr(val, 1, 1)
+      if (first != "\047" && first != "\"" && val ~ /[|&;<>()`$ \t\\]/) {
+        gsub(/\047/, "\047\\\047\047", val)
+        print name "=\047" val "\047"; fixed++; next
+      }
+    }
+    { print }
+    END { if (fixed) printf "%d\n", fixed > "/dev/stderr" }
+  ' "$f" >"$tmp" 2>"$tmp.n" || { rm -f "$tmp" "$tmp.n"; return 1; }
+  if [ -s "$tmp.n" ]; then
+    cat "$tmp" >"$f"
+    note "quoted $(cat "$tmp.n") value(s) in .env that the shell would have run as commands"
+  fi
+  rm -f "$tmp" "$tmp.n"
+}
+repair_env_quoting .env || die "could not check .env's quoting"
 # shellcheck disable=SC1091  # generated at install time, not in this repo
 . ./.env
 
