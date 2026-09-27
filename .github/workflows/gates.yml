@@ -50,6 +50,8 @@ jobs:
         run: ./scripts/delegation-key-not-printed.sh
       - name: the delegation plane's directories stay apart
         run: ./scripts/delegation-dirs-are-split.sh
+      - name: Felyx reaches its model through the gateway
+        run: ./scripts/felyx-through-the-gateway.sh
       - name: the delegation plane's keys are reused on a re-run
         run: ./scripts/delegation-key-reused-on-rerun.sh
 

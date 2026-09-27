@@ -609,6 +609,13 @@ no token.
 useful, but for a different reason now: they let you install a build of your
 own rather than reach GitHub at all.
 
+Felyx, the console's copilot, asks its model through this box's own gateway,
+under `agent://<RECORD_TRUST_DOMAIN>/genaryx/felyx`, so its questions are
+metered and policy-checked like any agent's calls. It ships without a key: put
+your provider key in `.env` as `GENARYX_COPILOT_KEY` and run
+`docker compose up -d console`. Until then Felyx says it is not configured and
+the rest of the console works as before.
+
 ## Traps, already fixed here
 
 The Kubernetes sibling of this repo,

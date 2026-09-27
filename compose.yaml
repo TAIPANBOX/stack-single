@@ -811,7 +811,7 @@ services:
 
   console:
     <<: *restart
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.1.14}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.1.17}
     environment:
       HOME: /var/lib/stack
       TAIPAN_HOME: /etc/genaryx/taipan
@@ -822,7 +822,23 @@ services:
       # state volume is the one place it can write, so it is named here.
       GENARYX_STATE_DIR: /var/lib/stack/genaryx
       GENARYX_SCAN_TARGET: /srv/ui
-      GENARYX_COPILOT_PROVIDER: ollama
+      # Felyx, the console's copilot, talks to its model THROUGH this box's own
+      # gateway, so its calls are priced, budgeted and policy-checked like any
+      # agent's. @decided 2026-09-27: the launchers route Felyx through the
+      # stack's gateway by default, with its agent id in the trust domain.
+      # Its residency check refuses any endpoint it cannot prove local; the
+      # gateway is reached by its compose service name, allow-listed here and
+      # resolved on every connection to private addresses only (genaryx
+      # invariant 14, console v1.1.17 on). No key ships: set
+      # GENARYX_COPILOT_KEY in .env and `docker compose up -d console`; until
+      # then Felyx says it is not configured and the console works as before.
+      GENARYX_COPILOT_PROVIDER: anthropic
+      GENARYX_COPILOT_BASE_URL: http://tokenfuse-gateway:4100
+      GENARYX_COPILOT_LOCAL_HOSTNAMES: tokenfuse-gateway
+      GENARYX_COPILOT_MODEL: ${GENARYX_COPILOT_MODEL:-claude-haiku-4-5}
+      GENARYX_COPILOT_AGENT_ID: agent://${RECORD_TRUST_DOMAIN:-local}/genaryx/felyx
+      GENARYX_COPILOT_API_KEY_REF: env:GENARYX_COPILOT_KEY
+      GENARYX_COPILOT_KEY: ${GENARYX_COPILOT_KEY:-}
       TOKENFUSE_CLOUD_URL: http://tokenfuse-cloud:8080
       # ADMIN_KEY, not CLOUD_KEY. `TOKENFUSE_CLOUD_KEY` is the name the GATEWAY
       # reads; the console's money plane looks for `TOKENFUSE_CLOUD_ADMIN_KEY`
@@ -1119,7 +1135,7 @@ services:
 
   verdryx-drift:
     <<: *restart
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.1.14}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.1.17}
     user: "10001:10001"
     profiles: ["routines"]
     environment:
