@@ -12,10 +12,10 @@
 #   which is the single-box equivalent of the cluster's default-deny
 #   NetworkPolicy. The gateway is the one service agents elsewhere must reach,
 #   and the console is bound to loopback so it arrives over the operator's own
-#   tunnel rather than off the open internet. scopyx and typryx, both opt-in,
-#   join that same closed set: neither publishes a port either. tokenfuse's
-#   MCP broker (opt-in too, `typed` profile) is the exception among them: it
-#   does publish, on `${GATEWAY_BIND:-127.0.0.1}:4200`, the identical
+#   tunnel rather than off the open internet. scopyx, typryx and vouchryx, all
+#   opt-in, join that same closed set: none of them publishes a port either.
+#   tokenfuse's MCP broker (opt-in too, `typed` profile) is the exception among
+#   them: it does publish, on `${GATEWAY_BIND:-127.0.0.1}:4200`, the identical
 #   expression the gateway's own port uses, so it inherits the same
 #   closed-by-default posture rather than a second one to keep in sync.
 #
@@ -50,7 +50,7 @@ services:
       - sh
       - -euc
       - |
-        mkdir -p /vol/events /vol/traces /vol/cloud /vol/heraldyx /vol/records /vol/scopyx /vol/focus /vol/typryx
+        mkdir -p /vol/events /vol/traces /vol/cloud /vol/heraldyx /vol/records /vol/scopyx /vol/focus /vol/typryx /vol/vouchryx
         chown 0:10001 /vol/events && chmod 2775 /vol/events
         chown 10001:10001 /vol/traces /vol/cloud && chmod 0775 /vol/traces /vol/cloud
         # The notifier runs 65532:10001 like the Go planes, and writes exactly
@@ -77,6 +77,15 @@ services:
         # is root:root 0755, so without this chown the plane crash-loops on
         # "permission denied" the moment it is started.
         chown 65532:65532 /vol/typryx && chmod 0775 /vol/typryx
+        # vouchryx (profile delegation) runs 65532:10001, the same pair every
+        # other Go plane's bus writer uses, and keeps its own revocation store
+        # here (VOUCHRYX_REVOCATIONS_PATH), deliberately not the shared events
+        # volume: a revocation is not an agent event, and it must survive a
+        # `docker compose down` the same way pgdata and wgstate already do.
+        # Same trap as every other named volume in this loop: root:root 0755
+        # by default, and without this chown the plane refuses to start rather
+        # than run with a revocation list nobody can prove survived a restart.
+        chown 65532:10001 /vol/vouchryx && chmod 0775 /vol/vouchryx
         # focus-export (profile routines) runs 10001:10001 and writes the FOCUS
         # CSVs here; found by the gate the day it was written, same trap.
         chown 10001:10001 /vol/focus && chmod 0775 /vol/focus
@@ -112,7 +121,7 @@ services:
         # the schema its mapper refuses all four by name on purpose
         # (trailryx#81: an answer to a question is not a decision the agent
         # took).
-        for f in tokenfuse.ndjson tokenfuse-cloud.ndjson tokenfuse-mcp.ndjson wardryx.ndjson typryx.ndjson; do
+        for f in tokenfuse.ndjson tokenfuse-cloud.ndjson tokenfuse-mcp.ndjson wardryx.ndjson typryx.ndjson vouchryx.ndjson; do
           [ -e "/vol/events/$$f" ] || : > "/vol/events/$$f"
           chown 10001:10001 "/vol/events/$$f" && chmod 0664 "/vol/events/$$f"
         done
@@ -126,6 +135,7 @@ services:
       - scopyxevents:/vol/scopyx
       - focus:/vol/focus
       - typryxdata:/vol/typryx
+      - vouchryxdata:/vol/vouchryx
     restart: "no"
 
   # ---- the policy plane's durable store ------------------------------------
@@ -535,6 +545,76 @@ services:
       typryx:
         condition: service_started
 
+  # ---- delegation: a proved chain instead of a claimed one -----------------
+  #
+  # OPT-IN, behind the `delegation` profile, off unless asked for, like
+  # scopyx, typryx and the record plane above. `docker compose up -d` does not
+  # start it; `WITH_DELEGATION=1 ./install.sh` does.
+  #
+  # @decided 2026-09-27: the launchers offer vouchryx as an opt-in delegation
+  # plane, off by default, so a gateway can verify a proved delegation chain
+  # instead of trusting a claimed one. Off, `chainproof::resolve` in the
+  # gateway returns a CLAIMED chain: `x-fuse-on-behalf-of` is whatever the
+  # caller typed, and a policy reading `deny_if_chain_unproven` denies on the
+  # strength of an assertion rather than a proof. This is the gap the previous
+  # revision of this file's own README named and left open; see the
+  # "Delegation" section there for what turning this on buys and what it does
+  # not cover.
+  #
+  # WHY VOUCHRYX_ADDR IS HARDCODED HERE, UNLIKE EVERY OTHER `${VAR:-default}`
+  # LINE IN THIS FILE. vouchryx's own default, `127.0.0.1:4310`, binds inside
+  # this container to an address nothing else in the compose network can
+  # reach, the same trap README's "Traps, already fixed here" already names
+  # for the money and policy planes. There is no operator decision to make
+  # here (this plane is never published to the host either way, see below),
+  # so the fix is a fixed value, not a variable with a safer default.
+  vouchryx:
+    <<: *restart
+    profiles: ["delegation"]
+    image: ${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.1.0}
+    # Group 10001, the same pair typryx and the money plane's writers use: its
+    # journal (VOUCHRYX_EVENTS_PATH) lands on the shared `events` volume,
+    # root:10001 2775, and this is how it can append there.
+    user: "65532:10001"
+    environment:
+      VOUCHRYX_ADDR: 0.0.0.0:4310
+      # This exact literal, `http://vouchryx:4310`, is also `install.sh`'s own
+      # `TOKENFUSE_DELEGATION_ISSUER` default once WITH_DELEGATION=1: the
+      # gateway verifies a token issued under the issuer this line names, so
+      # the two must read identically. Section 9's `WARDRYX_DB` trap is the
+      # same shape one variable over; if you are changing this line, change
+      # that one with it.
+      VOUCHRYX_ISSUER: http://vouchryx:4310
+      VOUCHRYX_SIGNING_KEY: /etc/vouchryx/signing.pem
+      # `:-` and NOT `:?`, the same reason scopyx's and typryx's own keys
+      # carry above: compose interpolates every service in this file,
+      # including one whose profile is off, so a `:?` here would refuse the
+      # whole file on a box that never asked for this plane. Empty is safe
+      # because vouchryx itself refuses to start with zero trusted issuers
+      # (an empty `VOUCHRYX_TRUSTED_ISSUERS` parses to zero entries), the same
+      # closed-by-default shape scopyx and typryx take on their own keys.
+      VOUCHRYX_TRUSTED_ISSUERS: ${VOUCHRYX_TRUSTED_ISSUERS:-}
+      VOUCHRYX_EVENTS_PATH: /var/lib/stack/events/vouchryx.ndjson
+      # Empty here means `POST /v1/revoke` itself refuses every call
+      # (vouchryx's own fail-closed default), not that this plane is open.
+      VOUCHRYX_REVOKE_KEYS: ${VOUCHRYX_REVOKE_KEYS:-}
+      # On its own volume, never the shared `events` bus: a revocation is not
+      # an agent event, and it has to survive a plain `docker compose down`
+      # the same way `pgdata` and `wgstate` already do, so an operator
+      # clearing the bus never quietly un-revokes a delegation.
+      VOUCHRYX_REVOCATIONS_PATH: /var/lib/vouchryx/revocations.ndjson
+    volumes:
+      # The signing key and, when WITH_DELEGATION_DEMO_ISSUER minted one, the
+      # demo issuer's own public JWKS: both written once by install.sh into
+      # ./delegation and reused on every later run, read only here because
+      # this container never needs to write either.
+      - ./delegation:/etc/vouchryx:ro
+      - vouchryxdata:/var/lib/vouchryx
+      - events:/var/lib/stack/events
+    depends_on:
+      init-volumes:
+        condition: service_completed_successfully
+
   # ---- money: the control API ----------------------------------------------
   tokenfuse-cloud:
     <<: *restart
@@ -616,6 +696,33 @@ services:
       TOKENFUSE_WARDRYX_FAILMODE: closed
       TOKENFUSE_WARDRYX_TIMEOUT_MS: "250"
       TOKENFUSE_WARDRYX_CACHE_TTL_MS: "3000"
+      # Delegation, opt-in like the typed plane above: every one of these six
+      # is `:-` with an EMPTY fallback, and install.sh only ever writes a
+      # non-empty value into .env when WITH_DELEGATION=1. Empty is not a
+      # smaller version of the feature, it is the feature off: unset,
+      # `chainproof::resolve` returns a claimed chain exactly as it does
+      # today, on every box that does not ask for this. Never widen any one
+      # of these defaults on its own; see CLAUDE.md invariant 15.
+      TOKENFUSE_DELEGATION_ISSUER: ${TOKENFUSE_DELEGATION_ISSUER:-}
+      # A file path INSIDE this container, read once at startup; the volume
+      # mount below is what makes it exist there. install.sh writes the file
+      # itself only after vouchryx is up and answering its own
+      # /.well-known/jwks.json, never from vouchryx-demo's own keygen output:
+      # vouchryx signs with the key's RFC 7638 thumbprint as `kid`, not
+      # whatever label a keygen run was given, so a JWKS this deployment did
+      # not fetch FROM the running vouchryx would carry the wrong `kid` and
+      # every token would be refused `BadToken`. Measured 2026-09-27.
+      TOKENFUSE_DELEGATION_JWKS: ${TOKENFUSE_DELEGATION_JWKS:-}
+      TOKENFUSE_DELEGATION_AUDIENCE: ${TOKENFUSE_DELEGATION_AUDIENCE:-}
+      # The absolute origin agents actually reach this gateway at, for the
+      # DPoP `htu` a hand-off proof is checked against; install.sh derives it
+      # from GATEWAY_BIND the same way its own health check does.
+      TOKENFUSE_DELEGATION_URL: ${TOKENFUSE_DELEGATION_URL:-}
+      # Reached over the compose network by service name: this plane is never
+      # published to the host (see the vouchryx service above), and the
+      # gateway does not need it to be.
+      TOKENFUSE_DELEGATION_REVOCATIONS: ${TOKENFUSE_DELEGATION_REVOCATIONS:-}
+      TOKENFUSE_DELEGATION_REVOCATIONS_INTERVAL_MS: ${TOKENFUSE_DELEGATION_REVOCATIONS_INTERVAL_MS:-}
     ports:
       # Loopback if the variable is absent, matching install.sh. The fallback
       # matters on its own: someone running `docker compose up` by hand
@@ -626,6 +733,13 @@ services:
     volumes:
       - events:/var/lib/stack/events
       - traces:/var/lib/stack/traces
+      # Read only, and always mounted: the delegation JWKS file install.sh
+      # writes lives here once WITH_DELEGATION=1, at the exact path
+      # TOKENFUSE_DELEGATION_JWKS names above. Harmless on a default box the
+      # same way ./environments is always mounted into the console below
+      # whether or not that plane is installed: an empty directory, nothing
+      # this container reads unless the env var above also names a file in it.
+      - ./delegation:/etc/tokenfuse/delegation:ro
     depends_on:
       init-volumes:
         condition: service_completed_successfully
@@ -1058,6 +1172,12 @@ volumes:
   # different kind of store, typryx's own answer/outcome record rather than
   # an agent-event stream, and stays here.
   typryxdata:
+  # vouchryx's own revocation store (VOUCHRYX_REVOCATIONS_PATH), deliberately
+  # not the shared `events` volume above: a revocation is not an agent event,
+  # and it has to survive a plain `docker compose down` the way `pgdata` and
+  # `wgstate` already do, so an operator clearing the bus never quietly
+  # un-revokes a delegation.
+  vouchryxdata:
   heraldyxstate:
   # The record plane's store, deliberately NOT the shared `events` volume:
   # a hash-chained record kept inside the volume its own inputs live in is

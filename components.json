@@ -57,6 +57,7 @@
           "tokenfuse-mcp-broker",
           "typryx",
           "verdryx-drift",
+          "vouchryx",
           "wardryx",
           "wg"
         ],
@@ -69,6 +70,7 @@
           "idryx-detect": "A TEMPLATE a person runs, not a schedule, and not by preference. Measured 2026-09-01 on the published image: `go-service.Dockerfile` builds on distroless, so there is no /bin/sh for a loop, the binary is `/usr/local/bin/service` rather than `idryx`, and `detect` has no --interval or --watch. A loop is impossible here rather than unwanted. Publishing a shell-bearing idryx would put a shell back into a governance plane to buy a scheduler, which is a security property traded for a convenience.\\n\\nSo it takes the shape the estate already has for exactly this: stack-k8s ships `costcrew-crew` as a suspended CronJob a person runs, and this is the compose equivalent, behind a profile no install enables. Run it with `docker compose run --rm idryx-detect`.\\n\\nVerified rather than asserted: manifest-is-true.sh requires the service to exist, to sit behind a profile, and requires install.sh never to pass that profile. That is this file's answer to the `suspend: true` stack-k8s's own gate checks."
         },
         "profiles": [
+          "delegation",
           "egress",
           "egress-browser",
           "manual",
@@ -100,6 +102,7 @@
           "ghcr.io/taipanbox/tokenfuse:v1.4.0",
           "ghcr.io/taipanbox/trailryx-node:v1.0.0",
           "ghcr.io/taipanbox/typryx:v0.2.0",
+          "ghcr.io/taipanbox/vouchryx:v0.1.0",
           "ghcr.io/taipanbox/wardryx:v1.1.1"
         ]
       },
@@ -119,6 +122,10 @@
         "trailryx_seal_runs_under_a_local_name": {
           "value": "record-seal",
           "why": "The service in the `record` profile IS trailryx-seal: the same `trailryx-node events` the other two launchers schedule, under this deployment's own name for it. stack-k8s does the same thing with five CronJobs whose names are all local. Listed under the ESTATE's name here, because that is the name the question is asked in."
+        },
+        "vouchryx_is_off_by_default": {
+          "value": "profile delegation, WITH_DELEGATION=1 ./install.sh",
+          "why": "@decided 2026-09-27: the launchers offer vouchryx as an opt-in delegation plane, off by default, so a gateway can verify a proved delegation chain instead of trusting a claimed one. Enabling it requires a trusted upstream issuer (VOUCHRYX_TRUSTED_ISSUERS) or an explicit, clearly-labelled demo issuer (WITH_DELEGATION_DEMO_ISSUER=1, never a production posture); install.sh refuses before anything starts if neither is given. Never published to the host: the gateway reaches it over the compose network only, and polls its revocations from there."
         }
       }
     }
