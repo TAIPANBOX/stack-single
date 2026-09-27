@@ -734,12 +734,13 @@ services:
       - events:/var/lib/stack/events
       - traces:/var/lib/stack/traces
       # Read only, and always mounted: the delegation JWKS file install.sh
-      # writes lives here once WITH_DELEGATION=1, at the exact path
+      # writes lives here once WITH_DELEGATION=1 (./delegation-public, never
+      # ./delegation, which holds vouchryx's signing key and is its uid's alone), at the exact path
       # TOKENFUSE_DELEGATION_JWKS names above. Harmless on a default box the
       # same way ./environments is always mounted into the console below
       # whether or not that plane is installed: an empty directory, nothing
       # this container reads unless the env var above also names a file in it.
-      - ./delegation:/etc/tokenfuse/delegation:ro
+      - ./delegation-public:/etc/tokenfuse/delegation:ro
     depends_on:
       init-volumes:
         condition: service_completed_successfully

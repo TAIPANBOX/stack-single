@@ -674,7 +674,14 @@ for a clearly-labelled, self-signed issuer this installer mints for you; it is n
 posture and README says so."
   fi
 
+  # vouchryx's own directory: its signing key, and the demo issuer's JWKS
+  # when one is minted. Owned by the uid vouchryx runs as (65532, distroless
+  # nonroot) and closed to everyone else, the gateway included: a bind mount
+  # keeps the host's ownership and mode, so a root-owned 0700 directory is one
+  # the container cannot even enter (measured 2026-09-27 on Debian 13; Docker
+  # Desktop on macOS ignores bind-mount ownership and hides this).
   mkdir -p delegation
+  chown 65532:65532 delegation
   chmod 700 delegation
 
   # The signing key vouchryx issues delegation tokens with. Minted by
@@ -831,8 +838,12 @@ fi
 # turned on without a second `docker compose up` to create the mount point),
 # and a box that never asks for delegation gets an empty directory here, the
 # same as an install with no console gets an unused environments/.
-mkdir -p delegation
+mkdir -p delegation delegation-public
+chown 65532:65532 delegation
 chmod 700 delegation
+# The gateway's side: only the JWKS vouchryx SERVES, public by definition,
+# readable by the gateway's own uid (10001) and never next to a private key.
+chmod 755 delegation-public
 
 # ---- 4b. a bind on one address, made to survive a reboot ---------------------
 # A gateway published on ONE address depends on the host holding that address
@@ -910,22 +921,22 @@ if [ -n "${WITH_DELEGATION:-}" ]; then
   left=15
   while [ "$left" -gt 0 ]; do
     if docker run --rm --network agent-stack_default busybox:1.36 wget -q -T5 -O - \
-         http://vouchryx:4310/.well-known/jwks.json >delegation/vouchryx.jwks.json.tmp 2>/dev/null \
-       && [ -s delegation/vouchryx.jwks.json.tmp ]; then
+         http://vouchryx:4310/.well-known/jwks.json >delegation-public/vouchryx.jwks.json.tmp 2>/dev/null \
+       && [ -s delegation-public/vouchryx.jwks.json.tmp ]; then
       fetched=1
       break
     fi
     sleep 1; left=$((left - 1))
   done
   if [ "$fetched" -ne 1 ]; then
-    rm -f delegation/vouchryx.jwks.json.tmp
+    rm -f delegation-public/vouchryx.jwks.json.tmp
     die "vouchryx did not answer /.well-known/jwks.json within 15s. WITH_DELEGATION=1 asked for a \
 verified chain and nothing came up to verify it against. Check: ${COMPOSE[*]} logs vouchryx"
   fi
-  mv delegation/vouchryx.jwks.json.tmp delegation/vouchryx.jwks.json
-  chmod 644 delegation/vouchryx.jwks.json
+  mv delegation-public/vouchryx.jwks.json.tmp delegation-public/vouchryx.jwks.json
+  chmod 644 delegation-public/vouchryx.jwks.json
   # A file path INSIDE the gateway's own container, not the host path above:
-  # compose.yaml bind-mounts ./delegation there read only. Written here,
+  # compose.yaml bind-mounts ./delegation-public there read only. Written here,
   # after the fetch succeeded, rather than earlier alongside this run's other
   # TOKENFUSE_DELEGATION_* defaults, because a value naming a file that does
   # not exist yet would be worse than the variable staying unset (the
@@ -1288,7 +1299,7 @@ if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx vouchryx; then
   note "  network only, never published to the host (see the service's own comment"
   note "  in compose.yaml). The gateway polls its revocations at"
   note "  http://vouchryx:4310/v1/revocations and verifies a chain against the JWKS"
-  note "  this run fetched from it, at $STACK_DIR/delegation/vouchryx.jwks.json."
+  note "  this run fetched from it, at $STACK_DIR/delegation-public/vouchryx.jwks.json."
   note "  POST /v1/revoke needs VOUCHRYX_REVOKE_KEYS from .env as a bearer key, and"
   note "  reaches vouchryx only from inside this compose network, the same way an"
   note "  operator revokes a policy plane key today: from a container on it, not the host."

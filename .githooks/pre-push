@@ -41,6 +41,7 @@ step "the package step never takes Docker away" "./scripts/apt-never-removes-doc
 step "the gateway's semantic cache is off" "./scripts/gateway-cache-is-off.sh"
 step "delegation is off by default" "./scripts/delegation-off-by-default.sh"
 step "the delegation plane's keys are never printed" "./scripts/delegation-key-not-printed.sh"
+step "the delegation plane's directories stay apart" "./scripts/delegation-dirs-are-split.sh"
 step "the delegation plane's keys are reused on a re-run" "./scripts/delegation-key-reused-on-rerun.sh"
 # Reaches the network (a tarball from the sibling repo), which is why it is
 # last: everything that can be judged offline has already spoken by here.

@@ -576,7 +576,9 @@ anything starts, naming what is missing, unless one of these is true:
   who it says it is, because nothing can, by construction.
 
 **The signing key and the revocation key are generated once**, into
-`./delegation` (0600, owned by the uid vouchryx runs as), and reused on
+`./delegation` (the directory 0700 and the keys 0600, owned by the uid
+vouchryx runs as, so no other container can enter it; the gateway reads only
+the public JWKS, from `./delegation-public`), and reused on
 every later run, exactly like every other credential `.env` holds. Neither
 is ever printed. Revocations persist on their own volume, not the shared
 `events` bus, so clearing the bus never quietly un-revokes a delegation, and

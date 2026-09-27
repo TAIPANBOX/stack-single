@@ -312,9 +312,15 @@ an absent invariant.
     missing. The signing key and the revocation key are minted once, into
     files this launcher owns, never printed, and reused on every later run.
     vouchryx is never published to the host: the gateway reaches it, and
-    polls its revocations, over the compose network only.
+    polls its revocations, over the compose network only. `./delegation`
+    (the signing key) belongs to vouchryx's uid 65532 and is mounted into
+    vouchryx alone; the gateway reads the served JWKS from
+    `./delegation-public`. A bind mount keeps host ownership, so on Linux a
+    root-owned 0700 directory stops both containers (measured 2026-09-27 on
+    Debian 13: both exited 2); Docker Desktop on macOS hides it.
     *(gate: `scripts/delegation-off-by-default.sh`, `scripts/delegation-key-not-printed.sh`,
-    `scripts/delegation-key-reused-on-rerun.sh`; teeth in `scripts/gates-have-teeth.sh`)*
+    `scripts/delegation-key-reused-on-rerun.sh`, `scripts/delegation-dirs-are-split.sh`;
+    teeth in `scripts/gates-have-teeth.sh`)*
 
 ## Decisions that have no gate yet
 

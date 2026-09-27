@@ -560,6 +560,23 @@ run_case "delegation-key-not-printed: a comment names the variable with no \$" p
 	'./scripts/delegation-key-not-printed.sh' \
 	"$(py 'edit("install.sh", "add_env_default VOUCHRYX_REVOKE_KEYS \"$(gen 40)\"", "# VOUCHRYX_REVOKE_KEYS is a bearer key, not a spec.\nadd_env_default VOUCHRYX_REVOKE_KEYS \"$(gen 40)\"")')"
 
+run_case "delegation-dirs-are-split: the gateway mounts vouchryx's private directory" fail \
+	'./scripts/delegation-dirs-are-split.sh' \
+	"$(py 'edit("compose.yaml", "      - ./delegation-public:/etc/tokenfuse/delegation:ro", "      - ./delegation:/etc/tokenfuse/delegation:ro")')" \
+	"that directory holds vouchryx's signing key"
+
+run_case "delegation-dirs-are-split: ./delegation left to root" fail \
+	'./scripts/delegation-dirs-are-split.sh' \
+	"$(py 'import re
+s = open("install.sh").read()
+s = re.sub(r"(?m)^\s*chown 65532:65532 delegation\s*\n", "", s)
+open("install.sh", "w").write(s)')" \
+	"never gives ./delegation to uid 65532"
+
+run_case "delegation-dirs-are-split: a comment in the gateway block changes" pass \
+	'./scripts/delegation-dirs-are-split.sh' \
+	"$(py 'edit("compose.yaml", "# ./delegation, which holds vouchryx", "# ./delegation, the directory that holds vouchryx")')"
+
 run_case "delegation-key-reused-on-rerun: the reused-message wording changes" pass \
 	'./scripts/delegation-key-reused-on-rerun.sh' \
 	"$(py 'edit("install.sh", "vouchryx: signing key already present, reused", "vouchryx: signing key present already, reusing it")')"
