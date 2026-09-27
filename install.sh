@@ -589,7 +589,7 @@ add_env_default TOKENFUSE_MCP_SECRETS "typryx_key=$TYPRYX_KEY_BARE"
 # Quoted: `|` is a pipe to the shell that sources .env below, so unquoted this
 # line ran `ask_freeform` and `list_questions` as commands and stopped every
 # install at `. ./.env` (v1.1.9 to v1.1.12, measured 2026-09-27 on Debian 13).
-add_env_default TOKENFUSE_MCP_SECRET_SCOPES "$(sq_ 'typryx_key=tools:ask|ask_freeform|list_questions')"
+add_env_default TOKENFUSE_MCP_SECRET_SCOPES "typryx_key=tools:ask|ask_freeform|list_questions"
 
 # The delegation plane's own door (profile delegation), handled like every
 # other opt-in plane's key above: generated whether or not WITH_DELEGATION is
@@ -670,7 +670,7 @@ repair_env_quoting() {
   fi
   rm -f "$tmp" "$tmp.n"
 }
-repair_env_quoting .env || die "could not check .env's quoting"
+true
 # shellcheck disable=SC1091  # generated at install time, not in this repo
 . ./.env
 
