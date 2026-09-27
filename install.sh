@@ -36,6 +36,7 @@
 #   WITH_BROWSER=1 ./install.sh           # also builds stack/scopyx-browser:dev
 #   WITH_RECORD=1 ./install.sh            # also builds stack/trailryx:dev
 #   WITH_TYPED=1 ./install.sh             # pulls AND starts the typed plane
+#   WITH_DELEGATION=1 ./install.sh        # pulls AND starts vouchryx
 #
 # The typed-answer plane (typryx) answers a typed question from one of the
 # three templates baked into its image, with a probability for every option,
@@ -52,6 +53,17 @@
 # one profile this launcher starts on its own rather than leaving for a
 # second manual `docker compose --profile typed up -d` (the way `record` and
 # `egress` still do), so install.sh's own end-of-run checks can verify it.
+#
+# The delegation plane (vouchryx) lets the gateway verify a PROVED delegation
+# chain instead of trusting a claimed one. It is off by default and needs the
+# operator to name the trusted upstream issuer(s) that mint the subject and
+# actor tokens it exchanges: VOUCHRYX_TRUSTED_ISSUERS, one `iss|aud|jwks-path`
+# per line, the jwks-path readable inside ./delegation. With neither that nor
+# WITH_DELEGATION_DEMO_ISSUER=1 (a clearly-labelled, self-signed issuer for
+# trying this out, never a production posture), WITH_DELEGATION=1 refuses
+# before anything starts, naming what is missing. Like WITH_TYPED, this
+# brings vouchryx up on its own rather than leaving it for a second manual
+# command, because the gateway needs its JWKS on disk before it can start.
 #
 # Re-running never changes an existing box: the value lives in .env from the
 # first run, and .env is left alone.
@@ -79,6 +91,19 @@ CONSOLE_USER="${CONSOLE_USER:-ops}"
 # compose.yaml and has to be, because loopback inside a container is
 # unreachable even from the container beside it.
 GATEWAY_BIND="${GATEWAY_BIND:-127.0.0.1}"
+# Where the gateway is actually reached from outside its own container: the
+# bind with 0.0.0.0 mapped to loopback (every address includes it) and an
+# IPv6 literal bracketed, as a URL needs. Computed once, here, because both
+# section 8's own health check and the delegation plane's
+# TOKENFUSE_DELEGATION_URL (the origin a hand-off proof's DPoP `htu` is
+# checked against) need the identical answer; two copies of this case
+# statement disagreeing would be the same trap CLAUDE.md's WARDRYX_DB story
+# already names, one variable over.
+case "$GATEWAY_BIND" in
+  0.0.0.0) GATEWAY_PROBE=127.0.0.1 ;;
+  *:*)     GATEWAY_PROBE="[$GATEWAY_BIND]" ;;
+  *)       GATEWAY_PROBE="$GATEWAY_BIND" ;;
+esac
 
 say()  { printf '\n\033[1m>> %s\033[0m\n' "$*"; }
 note() { printf '   %s\n' "$*"; }
@@ -354,7 +379,7 @@ if [ -n "$BUILD_FROM_SOURCE" ]; then
 fi
 
 # The operator's door is published too, since stack-k8s#49, so it is pulled with
-# everything else in 3b and built here only when the operator asked to build.
+# everything else in 3c and built here only when the operator asked to build.
 if [ -n "$BUILD_FROM_SOURCE" ]; then
   note "building caddy (TLS for the console)"
   docker build -q -f stack-k8s/images/caddy.Dockerfile -t stack/caddy:dev stack-k8s >/dev/null \
@@ -563,6 +588,24 @@ TYPRYX_KEY_BARE="${TYPRYX_KEY_BARE:-$(sed -n 's/^TYPRYX_KEYS=\([^=]*\)=.*/\1/p' 
 add_env_default TOKENFUSE_MCP_SECRETS "typryx_key=$TYPRYX_KEY_BARE"
 add_env_default TOKENFUSE_MCP_SECRET_SCOPES "typryx_key=tools:ask|ask_freeform|list_questions"
 
+# The delegation plane's own door (profile delegation), handled like every
+# other opt-in plane's key above: generated whether or not WITH_DELEGATION is
+# set this run, because vouchryx itself sits behind a profile no install
+# enables on its own, so an unused credential here is as harmless as
+# TYPRYX_KEYS is on a box that never sets WITH_TYPED.
+#
+# `POST /v1/revoke`'s own bearer key. Vouchryx's own convention, not this
+# repo's spec-then-bare-key shape the other planes use: a plain bearer
+# credential, no `:org` half to omit by mistake.
+add_env_default VOUCHRYX_REVOKE_KEYS "$(gen 40)"
+# VOUCHRYX_TRUSTED_ISSUERS is deliberately NOT given an empty default here,
+# unlike every key above: it is written to .env only once a real value
+# exists, either the operator's own or WITH_DELEGATION_DEMO_ISSUER's minted
+# one, in the WITH_DELEGATION block below (after .env is read back). A box
+# that never asks for delegation simply never gets this line at all, and
+# compose's own `${VOUCHRYX_TRUSTED_ISSUERS:-}` treats its absence exactly
+# like an empty value.
+
 # When the operator asked to build, compose has to be pointed at what was
 # built. Without these nine lines a BUILD_FROM_SOURCE install compiles every
 # plane and then runs the PUBLISHED ones anyway, which is the worst of both:
@@ -600,7 +643,111 @@ SMTP_PASS=""
 # shellcheck disable=SC1091  # generated at install time, not in this repo
 . ./.env
 
-# ---- 3b. the images, pulled ---------------------------------------------------
+# ---- 3b. delegation: vouchryx, opt-in -----------------------------------------
+# @decided 2026-09-27: the launchers offer vouchryx as an opt-in delegation
+# plane, off by default, so a gateway can verify a proved delegation chain
+# instead of trusting a claimed one. Off, exactly as before this release, the
+# gateway's own chainproof stays unset and `x-fuse-on-behalf-of` is whatever
+# the caller typed; see README's "Delegation" section for the rest.
+#
+# WHY THIS REFUSES BEFORE ANYTHING ELSE STARTS (invariant 6, fail before doing
+# half the job, and CLAUDE.md invariant 15). vouchryx itself refuses to start
+# with zero trusted issuers (an empty VOUCHRYX_TRUSTED_ISSUERS parses to zero
+# entries), so a stack that pulled every image and wrote every other
+# credential and only THEN discovered vouchryx would not come up would leave
+# every other plane running while the one thing the operator actually asked
+# for, a verified chain, silently never happened. So this is checked here,
+# before section 3c pulls a single image.
+if [ -n "${WITH_DELEGATION:-}" ]; then
+  say "delegation"
+  # The value on this box now, whichever run put it there: an operator's own
+  # VOUCHRYX_TRUSTED_ISSUERS in the environment this run, or .env already
+  # carrying one from an earlier run (just sourced above).
+  VOUCHRYX_TRUSTED_ISSUERS="${VOUCHRYX_TRUSTED_ISSUERS:-}"
+  if [ -z "$VOUCHRYX_TRUSTED_ISSUERS" ] && [ -z "${WITH_DELEGATION_DEMO_ISSUER:-}" ]; then
+    die "WITH_DELEGATION=1 needs a trusted upstream issuer to verify the subject and actor \
+tokens it exchanges against, and none is configured. Set VOUCHRYX_TRUSTED_ISSUERS='iss|aud|jwks-path' \
+(the jwks-path readable inside $STACK_DIR/delegation once this run finishes), naming the identity \
+provider your agents actually get their tokens from. There is no safe value to invent here, so \
+nothing started. To try this out instead of wiring a real issuer, set WITH_DELEGATION_DEMO_ISSUER=1 \
+for a clearly-labelled, self-signed issuer this installer mints for you; it is never a production \
+posture and README says so."
+  fi
+
+  # vouchryx's own directory: its signing key, and the demo issuer's JWKS
+  # when one is minted. Owned by the uid vouchryx runs as (65532, distroless
+  # nonroot) and closed to everyone else, the gateway included: a bind mount
+  # keeps the host's ownership and mode, so a root-owned 0700 directory is one
+  # the container cannot even enter (measured 2026-09-27 on Debian 13; Docker
+  # Desktop on macOS ignores bind-mount ownership and hides this).
+  mkdir -p delegation
+  chown 65532:65532 delegation
+  chmod 700 delegation
+
+  # The signing key vouchryx issues delegation tokens with. Minted by
+  # vouchryx's own reference client rather than by openssl here, because a
+  # keygen tool built for a raw PEM would be this launcher holding an opinion
+  # about vouchryx's own key format; reused on every later run, exactly like
+  # every credential .env holds. `--user 0:0`: the image's own default user is
+  # a distroless nonroot uid, which cannot create a file in a directory this
+  # script just made 0700 for root, so the container runs as root to write it
+  # and this script then hands the file to the uid vouchryx itself runs as,
+  # the same shape init-volumes already uses for every volume in this file a
+  # non-root plane has to write.
+  #
+  # Deliberately no `-kid`: vouchryx signs with the key's own RFC 7638
+  # thumbprint, never a label a keygen run was given, so naming one here would
+  # only mislabel a file nothing reads by that name.
+  if [ ! -f delegation/signing.pem ]; then
+    note "vouchryx: minting a signing key"
+    docker run --rm --user 0:0 -v "$STACK_DIR/delegation:/out" \
+        --entrypoint vouchryx-demo "${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.1.0}" \
+        keygen -out /out/signing >/dev/null \
+      || die "could not mint vouchryx's signing key"
+    chown 65532:65532 delegation/signing.pem delegation/signing.jwks.json
+    chmod 600 delegation/signing.pem
+  else
+    note "vouchryx: signing key already present, reused"
+  fi
+
+  # The clearly-labelled demo issuer: a self-signed stand-in for the upstream
+  # IdP a real deployment would point at instead, minted the same way the
+  # signing key above is. Never a production posture, and never chosen unless
+  # the operator names it explicitly (CLAUDE.md invariant 15).
+  if [ -z "$VOUCHRYX_TRUSTED_ISSUERS" ]; then
+    if [ ! -f delegation/idp.pem ]; then
+      note "vouchryx: minting a demo issuer (WITH_DELEGATION_DEMO_ISSUER=1, never for production)"
+      docker run --rm --user 0:0 -v "$STACK_DIR/delegation:/out" \
+          --entrypoint vouchryx-demo "${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.1.0}" \
+          keygen -out /out/idp -kid stack-single-demo-idp >/dev/null \
+        || die "could not mint the demo issuer key"
+      chown 65532:65532 delegation/idp.pem delegation/idp.jwks.json
+      chmod 600 delegation/idp.pem
+    else
+      note "vouchryx: demo issuer already present, reused"
+    fi
+    VOUCHRYX_TRUSTED_ISSUERS="https://idp.stack-single.local|stack-single|/etc/vouchryx/idp.jwks.json"
+  fi
+  add_env_default VOUCHRYX_TRUSTED_ISSUERS "$(sq_ "$VOUCHRYX_TRUSTED_ISSUERS")"
+
+  add_env_default TOKENFUSE_DELEGATION_ISSUER http://vouchryx:4310
+  # Empty accepts any audience, which tokenfuse's own docs call out as a real
+  # choice, not a lesser one, for a single-tenant deployment - and a box this
+  # launcher installs is exactly that: one operator's own fleet, not a
+  # multi-tenant door serving several distinct audiences at once.
+  add_env_default TOKENFUSE_DELEGATION_AUDIENCE ""
+  add_env_default TOKENFUSE_DELEGATION_URL "http://$GATEWAY_PROBE:4100"
+  add_env_default TOKENFUSE_DELEGATION_REVOCATIONS http://vouchryx:4310/v1/revocations
+  add_env_default TOKENFUSE_DELEGATION_REVOCATIONS_INTERVAL_MS 12000
+  # TOKENFUSE_DELEGATION_JWKS is deliberately NOT written here: its value has
+  # to name a file this run actually produced, fetched from vouchryx's own
+  # live /.well-known/jwks.json once it is running (section 5), never from
+  # this keygen step's own output. Compose.yaml's comment on the gateway's own
+  # environment block names the trap that guards against: vouchryx signs with
+  # the key's thumbprint as `kid`, not whatever label a keygen run gave it.
+fi
+
+# ---- 3c. the images, pulled ---------------------------------------------------
 # Here rather than in section 2, and the reason is mechanical: the list comes
 # from `docker compose config`, which interpolates .env, and .env does not
 # exist until section 3 has written it. Asked any earlier, compose refuses the
@@ -621,6 +768,7 @@ if [ -z "$BUILD_FROM_SOURCE" ]; then
   [ -z "${WITH_RECORD:-}" ]  || profiles+=(--profile record)
   [ -z "${WITH_EGRESS:-}" ]  || profiles+=(--profile egress)
   [ -z "${WITH_TYPED:-}" ]   || profiles+=(--profile typed)
+  [ -z "${WITH_DELEGATION:-}" ] || profiles+=(--profile delegation)
   pulled=0
   while read -r img; do
     case "$img" in
@@ -684,6 +832,18 @@ if [ ! -f environments/single.json ]; then
 EOF
   note "wrote environments/single.json"
 fi
+# Unconditionally, like environments/ above, whether or not WITH_DELEGATION is
+# set: the gateway's own compose block always bind-mounts this directory (so
+# TOKENFUSE_DELEGATION_JWKS names a path that exists once delegation is
+# turned on without a second `docker compose up` to create the mount point),
+# and a box that never asks for delegation gets an empty directory here, the
+# same as an install with no console gets an unused environments/.
+mkdir -p delegation delegation-public
+chown 65532:65532 delegation
+chmod 700 delegation
+# The gateway's side: only the JWKS vouchryx SERVES, public by definition,
+# readable by the gateway's own uid (10001) and never next to a private key.
+chmod 755 delegation-public
 
 # ---- 4b. a bind on one address, made to survive a reboot ---------------------
 # A gateway published on ONE address depends on the host holding that address
@@ -737,7 +897,56 @@ UP_PROFILES=()
 # `egress` and `record` do. Section 8 below verifies the broker answers and
 # refuses a caller with no key, and a check that verifies a service nothing
 # started would be verifying nothing.
-[ -z "${WITH_TYPED:-}" ] || UP_PROFILES+=(--profile typed)
+[ -z "${WITH_TYPED:-}" ]      || UP_PROFILES+=(--profile typed)
+[ -z "${WITH_DELEGATION:-}" ] || UP_PROFILES+=(--profile delegation)
+
+# Delegation needs a head start, the same reason `stack-up` starts vouchryx
+# before its own gateway (README, "Delegation: a proved chain"): the gateway
+# reads TOKENFUSE_DELEGATION_JWKS once, at startup, and that file has to hold
+# vouchryx's OWN live keys, fetched from its running `/.well-known/jwks.json`,
+# never vouchryx-demo's own keygen output (the `kid` trap named on the
+# gateway's own compose block). So vouchryx comes up alone first, this run
+# fetches its JWKS onto disk, and only then does the gateway start for the
+# first time with that file already in place.
+if [ -n "${WITH_DELEGATION:-}" ]; then
+  say "vouchryx"
+  "${COMPOSE[@]}" --profile delegation up -d vouchryx
+  # Not published to the host (compose.yaml's own comment on the vouchryx
+  # service says why), so this is fetched from inside the compose network,
+  # the same throwaway-busybox shape section 8 uses for every other
+  # container-side probe here. `agent-stack_default`: the fixed network name
+  # `name: agent-stack` in compose.yaml produces, the same literal section 8
+  # uses as `$NET`.
+  fetched=0
+  left=15
+  while [ "$left" -gt 0 ]; do
+    if docker run --rm --network agent-stack_default busybox:1.36 wget -q -T5 -O - \
+         http://vouchryx:4310/.well-known/jwks.json >delegation-public/vouchryx.jwks.json.tmp 2>/dev/null \
+       && [ -s delegation-public/vouchryx.jwks.json.tmp ]; then
+      fetched=1
+      break
+    fi
+    sleep 1; left=$((left - 1))
+  done
+  if [ "$fetched" -ne 1 ]; then
+    rm -f delegation-public/vouchryx.jwks.json.tmp
+    die "vouchryx did not answer /.well-known/jwks.json within 15s. WITH_DELEGATION=1 asked for a \
+verified chain and nothing came up to verify it against. Check: ${COMPOSE[*]} logs vouchryx"
+  fi
+  mv delegation-public/vouchryx.jwks.json.tmp delegation-public/vouchryx.jwks.json
+  chmod 644 delegation-public/vouchryx.jwks.json
+  # A file path INSIDE the gateway's own container, not the host path above:
+  # compose.yaml bind-mounts ./delegation-public there read only. Written here,
+  # after the fetch succeeded, rather than earlier alongside this run's other
+  # TOKENFUSE_DELEGATION_* defaults, because a value naming a file that does
+  # not exist yet would be worse than the variable staying unset (the
+  # gateway's own chainproof::base_config_from_env aborts rather than starting
+  # with a JWKS it cannot read).
+  add_env_default TOKENFUSE_DELEGATION_JWKS /etc/tokenfuse/delegation/vouchryx.jwks.json
+  # shellcheck disable=SC1091  # generated at install time, not in this repo
+  . ./.env
+fi
+
 "${COMPOSE[@]}" "${UP_PROFILES[@]}" up -d --remove-orphans
 sleep 8
 
@@ -845,14 +1054,8 @@ codenokey() { docker run --rm --network "$NET" busybox:1.36 \
 # not from the LAN) Docker publishes on that address only, so loopback
 # refuses, and this line read FAIL twice on a healthy box while the same probe
 # against that address answered 200 and "published on $GATEWAY_BIND only"
-# below passed (#54, measured 2026-09-17). 0.0.0.0 is every address, and
-# loopback is the one of those that is always there. An IPv6 literal is
-# bracketed, as a URL needs.
-case "$GATEWAY_BIND" in
-  0.0.0.0) GATEWAY_PROBE=127.0.0.1 ;;
-  *:*)     GATEWAY_PROBE="[$GATEWAY_BIND]" ;;
-  *)       GATEWAY_PROBE="$GATEWAY_BIND" ;;
-esac
+# below passed (#54, measured 2026-09-17). GATEWAY_PROBE itself is computed
+# once, at the top of this file, alongside GATEWAY_BIND.
 check "gateway answers on $GATEWAY_PROBE:4100" "curl -fsS -m5 -o /dev/null http://$GATEWAY_PROBE:4100/healthz"
 # The bus half of the stack. tokenfuse logs this line once at start when
 # TOKENFUSE_EVENTS_PATH is set and the file could be opened; without it the
@@ -1072,6 +1275,34 @@ if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx tokenfuse-mcp-broker; th
   note "  with the header X-Fuse-Mcp-Upstream: typryx and its own client key in x-fuse-key"
   note "  a tools/call then carries the typed-plane credential as"
   note "  \"_meta\":{\"typryx/key\":\"{{secret:typryx_key}}\"}, never a real key value"
+fi
+
+# The delegation plane's own checks, only when WITH_DELEGATION actually
+# brought vouchryx up: the same reasoning as the typed plane above, a check
+# that asked a service nothing started would prove nothing.
+if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx vouchryx; then
+  # Must fail to pass, exactly like "cloud is NOT on the host" above: vouchryx
+  # is a real running service, deliberately never published (compose.yaml's
+  # own comment on it says so), and a reachable JWKS endpoint on the host
+  # would be the same open door those checks exist to catch on the money and
+  # policy planes.
+  check "vouchryx is NOT on the host" \
+        "! curl -fsS -m3 -o /dev/null http://127.0.0.1:4310/.well-known/jwks.json"
+  check "vouchryx answers inside" "probe http://vouchryx:4310/.well-known/jwks.json"
+  # Reachability is not the same as the gateway actually trusting it: this
+  # reads the environment variable this run wrote, the same shape "console
+  # resolves the money plane" checks a wired value rather than a live call.
+  check "gateway resolves the delegation door" \
+        "$DC exec -T tokenfuse-gateway printenv TOKENFUSE_DELEGATION_ISSUER"
+  say "delegation"
+  note "vouchryx issues delegation tokens and answers revocations on the compose"
+  note "  network only, never published to the host (see the service's own comment"
+  note "  in compose.yaml). The gateway polls its revocations at"
+  note "  http://vouchryx:4310/v1/revocations and verifies a chain against the JWKS"
+  note "  this run fetched from it, at $STACK_DIR/delegation-public/vouchryx.jwks.json."
+  note "  POST /v1/revoke needs VOUCHRYX_REVOKE_KEYS from .env as a bearer key, and"
+  note "  reaches vouchryx only from inside this compose network, the same way an"
+  note "  operator revokes a policy plane key today: from a container on it, not the host."
 fi
 
 # The test message, but only on the run that CONFIGURED mail. A re-run must not

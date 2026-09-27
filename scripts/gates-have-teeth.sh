@@ -278,7 +278,7 @@ run_case "bus-has-a-writer: the control plane stops exporting events" fail \
 # reads as wired while the file never exists.
 run_case "bus-has-a-writer: the control plane's file is not pre-created" fail \
 	'./scripts/bus-has-a-writer.sh' \
-	"$(py 'edit("compose.yaml", "for f in tokenfuse.ndjson tokenfuse-cloud.ndjson tokenfuse-mcp.ndjson wardryx.ndjson typryx.ndjson; do", "for f in tokenfuse.ndjson tokenfuse-mcp.ndjson wardryx.ndjson typryx.ndjson; do")')" \
+	"$(py 'edit("compose.yaml", "for f in tokenfuse.ndjson tokenfuse-cloud.ndjson tokenfuse-mcp.ndjson wardryx.ndjson typryx.ndjson vouchryx.ndjson; do", "for f in tokenfuse.ndjson tokenfuse-mcp.ndjson wardryx.ndjson typryx.ndjson vouchryx.ndjson; do")')" \
 	"does not pre-create tokenfuse-cloud.ndjson"
 
 # typryx joined the bus 2026-09-26; its writer entry has its own env var name
@@ -479,6 +479,32 @@ run_case "manifest-is-true: a pulled tag moves in compose and not in the manifes
 	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v1.1.1", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
 	"an image it pulls"
 
+# invariant 15: the delegation plane's default is byte-for-byte what it was
+# before this plane existed: vouchryx off, and the gateway's six
+# TOKENFUSE_DELEGATION_* variables all defaulting to empty.
+run_case "delegation-off-by-default: a delegation variable gets a literal default" fail \
+	'./scripts/delegation-off-by-default.sh' \
+	"$(py 'edit("compose.yaml", "TOKENFUSE_DELEGATION_AUDIENCE: ${TOKENFUSE_DELEGATION_AUDIENCE:-}", "TOKENFUSE_DELEGATION_AUDIENCE: stack-single")')" \
+	"not the empty-default form"
+
+run_case "delegation-off-by-default: install.sh starts the profile unconditionally" fail \
+	'./scripts/delegation-off-by-default.sh' \
+	"$(py 'edit("install.sh", "[ -z \"${WITH_DELEGATION:-}\" ] || UP_PROFILES+=(--profile delegation)", "UP_PROFILES+=(--profile delegation)")')" \
+	"no WITH_DELEGATION guard"
+
+# The signing key and the revoke key never reach a printed line.
+run_case "delegation-key-not-printed: the revoke key is expanded into a print call" fail \
+	'./scripts/delegation-key-not-printed.sh' \
+	"$(py 'edit("install.sh", "add_env_default VOUCHRYX_REVOKE_KEYS \"$(gen 40)\"", "add_env_default VOUCHRYX_REVOKE_KEYS \"$(gen 40)\"\nnote \"debug: $VOUCHRYX_REVOKE_KEYS\"")')" \
+	"expands \$VOUCHRYX_REVOKE_KEYS"
+
+# The signing key and the revoke key are reused, never regenerated, on a
+# re-run: installer second-run faults are a known class in this estate.
+run_case "delegation-key-reused-on-rerun: the signing key is minted on every run" fail \
+	'./scripts/delegation-key-reused-on-rerun.sh' \
+	"$(py 'edit("install.sh", "if [ ! -f delegation/signing.pem ]; then", "if true; then")')" \
+	"regenerated the signing key"
+
 echo
 echo "=== and what they must NOT catch ==="
 
@@ -520,6 +546,40 @@ run_case "gateway-cache-is-off: focus-export's command changes" pass \
 run_case "gateway-cache-is-off: the mcp broker's configuration changes" pass \
 	'./scripts/gateway-cache-is-off.sh' \
 	"$(py 'edit("compose.yaml", "TOKENFUSE_MCP_ADDR: 0.0.0.0:4200", "TOKENFUSE_MCP_ADDR: 0.0.0.0:4201")')"
+
+# A wording change beside the delegation section is not a change to whether
+# the profile is off by default, whether a secret is printed, or whether a
+# key is reused.
+run_case "delegation-off-by-default: a comment near it is reworded" pass \
+	'./scripts/delegation-off-by-default.sh' \
+	"$(py 'edit("compose.yaml", "root:10001 2775, and this is how it can append there.", "root:10001 2775, which is how it can append there.")')"
+
+# Naming the variable in prose, with no $ in front of it, is not an expansion:
+# it prints nothing but the sentence itself.
+run_case "delegation-key-not-printed: a comment names the variable with no \$" pass \
+	'./scripts/delegation-key-not-printed.sh' \
+	"$(py 'edit("install.sh", "add_env_default VOUCHRYX_REVOKE_KEYS \"$(gen 40)\"", "# VOUCHRYX_REVOKE_KEYS is a bearer key, not a spec.\nadd_env_default VOUCHRYX_REVOKE_KEYS \"$(gen 40)\"")')"
+
+run_case "delegation-dirs-are-split: the gateway mounts vouchryx's private directory" fail \
+	'./scripts/delegation-dirs-are-split.sh' \
+	"$(py 'edit("compose.yaml", "      - ./delegation-public:/etc/tokenfuse/delegation:ro", "      - ./delegation:/etc/tokenfuse/delegation:ro")')" \
+	"that directory holds vouchryx's signing key"
+
+run_case "delegation-dirs-are-split: ./delegation left to root" fail \
+	'./scripts/delegation-dirs-are-split.sh' \
+	"$(py 'import re
+s = open("install.sh").read()
+s = re.sub(r"(?m)^\s*chown 65532:65532 delegation\s*\n", "", s)
+open("install.sh", "w").write(s)')" \
+	"never gives ./delegation to uid 65532"
+
+run_case "delegation-dirs-are-split: a comment in the gateway block changes" pass \
+	'./scripts/delegation-dirs-are-split.sh' \
+	"$(py 'edit("compose.yaml", "# ./delegation, which holds vouchryx", "# ./delegation, the directory that holds vouchryx")')"
+
+run_case "delegation-key-reused-on-rerun: the reused-message wording changes" pass \
+	'./scripts/delegation-key-reused-on-rerun.sh' \
+	"$(py 'edit("install.sh", "vouchryx: signing key already present, reused", "vouchryx: signing key present already, reusing it")')"
 
 echo
 echo "=== and the one this estate learned the hard way ==="
@@ -615,6 +675,26 @@ d = json.load(open(p), object_pairs_hook=collections.OrderedDict)
 d["components"][0]["checked"]["manual_jobs"]["idryx-detect"] = ""
 json.dump(d, open(p, "w"), indent=2)')" \
 	"gives no reason"
+
+run_case "delegation-off-by-default: no vouchryx service left to judge" fail \
+	'./scripts/delegation-off-by-default.sh' \
+	"$(py 'import re
+s = open("compose.yaml").read()
+i = s.index("  vouchryx:")
+j = s.index("\n  # ---- money: the control API")
+assert i < j
+open("compose.yaml", "w").write(s[:i] + s[j:])')" \
+	"measured nothing about it"
+
+run_case "delegation-key-not-printed: VOUCHRYX_REVOKE_KEYS is gone from install.sh" fail \
+	'./scripts/delegation-key-not-printed.sh' \
+	"$(py 'edit("install.sh", "add_env_default VOUCHRYX_REVOKE_KEYS \"$(gen 40)\"\n", "")')" \
+	"measured nothing"
+
+run_case "delegation-key-reused-on-rerun: both anchors are gone" fail \
+	'./scripts/delegation-key-reused-on-rerun.sh' \
+	"$(py 'edit("install.sh", "add_env_default VOUCHRYX_REVOKE_KEYS \"$(gen 40)\"", "VOUCHRYX_REVOKE_KEYS_LINE_REMOVED=1")')" \
+	"measured NOTHING"
 
 echo
 if [ -n "$(git status --porcelain)" ]; then

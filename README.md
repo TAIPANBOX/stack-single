@@ -253,6 +253,7 @@ names resolve the same way in both:
 | `scopyx` | none | **opt-in, off unless you ask for it.** Inside the compose network only. See below |
 | `typryx` | none | **opt-in, off unless you ask for it.** Inside the compose network only. See below |
 | `tokenfuse-mcp-broker` | 4200 | **opt-in, off unless you ask for it.** `GATEWAY_BIND` decides where, same as the gateway. See below |
+| `vouchryx` | none | **opt-in, off unless you ask for it.** Inside the compose network only. See "Delegation" below |
 
 The gateway's own observability and kill routes (`/v1/runs`, `/v1/keys` and
 three more) take a per-install admin key: `GATEWAY_ADMIN` in `.env`, minted
@@ -528,16 +529,74 @@ If the console source is not present it says so and installs the governed
 stack without it, which is a real deployment: the planes enforce with or
 without a UI in front of them.
 
-Two things it does not check, said here rather than found later. The
+One thing it does not check, said here rather than found later. The
 `events` volume is shared by every plane that writes the bus, group-writable
 so each can append its own file; a line's `source` is whatever the writer
 put there, and the notifier and the record plane take it as that plane's
 word. The containers sharing that volume trust each other as much as they
-trust the box. And delegation is verified nowhere on this box unless you
-set `TOKENFUSE_DELEGATION_ISSUER` and `TOKENFUSE_DELEGATION_JWKS` yourself:
-without them an agent's `on_behalf_of` is a claim the caller wrote, and a
-policy that asks for a proven chain refuses only callers honest enough to
-say they did not prove it.
+trust the box.
+
+The other thing this used to say here, delegation being verified nowhere on
+this box, is the gap the next section closes.
+
+## Delegation: a proved chain instead of a claimed one
+
+Off unless you ask for it, like the egress plane above.
+
+```bash
+WITH_DELEGATION=1 ./install.sh
+```
+
+Without this, an agent's `on_behalf_of` is a claim the caller wrote: nothing
+on this box checks it, and a policy that asks for a proven chain
+(`deny_if_chain_unproven`) refuses only callers honest enough to say they did
+not prove it. `vouchryx`, the delegation plane, exchanges a subject token, an
+actor token and a DPoP proof for a short-lived JWT the gateway can verify,
+and answers `GET /v1/revocations` so a delegation can be ended before it
+expires, not only recorded.
+
+**What turning this on buys, and what it does not.** The gateway starts
+verifying the `cnf.jkt`-bound chain a token actually proves, instead of
+trusting whatever `x-fuse-on-behalf-of` a caller sent. It does not mint
+tokens for you, and it does not pick your identity provider: vouchryx
+exchanges a subject and actor token it was handed, it does not issue the
+first one.
+
+**Enabling it needs a real trusted issuer.** `install.sh` refuses before
+anything starts, naming what is missing, unless one of these is true:
+
+- `VOUCHRYX_TRUSTED_ISSUERS` names the upstream identity provider your
+  agents actually get their subject and actor tokens from, one
+  `iss|aud|jwks-path` per line, the `jwks-path` a file readable inside
+  `./delegation` once the run finishes. There is no safe value to invent
+  here, so nothing does.
+- or `WITH_DELEGATION_DEMO_ISSUER=1`, a clearly-labelled, self-signed issuer
+  this installer mints for you to try the wiring with. **This is never a
+  production posture**: nothing verifies that a self-signed demo issuer is
+  who it says it is, because nothing can, by construction.
+
+**The signing key and the revocation key are generated once**, into
+`./delegation` (the directory 0700 and the keys 0600, owned by the uid
+vouchryx runs as, so no other container can enter it; the gateway reads only
+the public JWKS, from `./delegation-public`), and reused on
+every later run, exactly like every other credential `.env` holds. Neither
+is ever printed. Revocations persist on their own volume, not the shared
+`events` bus, so clearing the bus never quietly un-revokes a delegation, and
+a plain `docker compose down` never loses one either.
+
+**vouchryx is never published to the host**, the same posture as the money
+and policy planes: the gateway reaches it, and polls
+`GET /v1/revocations`, over the compose network only. `POST /v1/revoke`
+needs `VOUCHRYX_REVOKE_KEYS` from `.env` as a bearer key and is reached the
+same way, from a container on this compose network, not the host; this
+launcher does not yet wire the console's own revoke button
+(`GENARYX_VOUCHRYX_URL`, `GENARYX_VOUCHRYX_REVOKE_KEY_FILE`) the way
+`stack-up`'s does.
+
+**What this does not cover.** It verifies a chain a caller presents; it does
+not decide what a proven chain is allowed to do; that is `wardryx`'s policy,
+unchanged by this. It does not run the hand-off (delegate-of-a-delegate)
+path or Cross App Access; both exist in vouchryx and neither is wired here.
 
 ## The console
 
