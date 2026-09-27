@@ -577,6 +577,20 @@ run_case "delegation-dirs-are-split: a comment in the gateway block changes" pas
 	'./scripts/delegation-dirs-are-split.sh' \
 	"$(py 'edit("compose.yaml", "# ./delegation, which holds vouchryx", "# ./delegation, the directory that holds vouchryx")')"
 
+run_case "felyx-through-the-gateway: the base URL points past the gateway" fail \
+	'./scripts/felyx-through-the-gateway.sh' \
+	"$(py 'edit("compose.yaml", "      GENARYX_COPILOT_BASE_URL: http://tokenfuse-gateway:4100\n", "      GENARYX_COPILOT_BASE_URL: https://api.anthropic.com\n")')" \
+	"would not reach its model through this box's gateway"
+
+run_case "felyx-through-the-gateway: the remote opt-in comes back" fail \
+	'./scripts/felyx-through-the-gateway.sh' \
+	"$(py 'edit("compose.yaml", "      GENARYX_COPILOT_API_KEY_REF: env:GENARYX_COPILOT_KEY\n", "      GENARYX_COPILOT_API_KEY_REF: env:GENARYX_COPILOT_KEY\n      GENARYX_COPILOT_ALLOW_REMOTE: \"1\"\n")')" \
+	"would skip the residency check"
+
+run_case "felyx-through-the-gateway: a comment about Felyx changes" pass \
+	'./scripts/felyx-through-the-gateway.sh' \
+	"$(py 'edit("compose.yaml", "# Felyx, the console\x27s copilot, talks to its model THROUGH", "# Felyx, the console\x27s copilot, reaches its model THROUGH")')"
+
 run_case "delegation-key-reused-on-rerun: the reused-message wording changes" pass \
 	'./scripts/delegation-key-reused-on-rerun.sh' \
 	"$(py 'edit("install.sh", "vouchryx: signing key already present, reused", "vouchryx: signing key present already, reusing it")')"

@@ -322,6 +322,22 @@ an absent invariant.
     `scripts/delegation-key-reused-on-rerun.sh`, `scripts/delegation-dirs-are-split.sh`;
     teeth in `scripts/gates-have-teeth.sh`)*
 
+16. **Felyx, the console's copilot, reaches its model through this box's own
+    gateway, by default.** `@decided 2026-09-27`: the launchers route Felyx
+    through the stack's gateway by default, with its agent id in the trust
+    domain. The console points it at `http://tokenfuse-gateway:4100` by
+    service name, allow-lists that one name for its residency check
+    (`GENARYX_COPILOT_LOCAL_HOSTNAMES`, genaryx invariant 14, console v1.1.17
+    on), and names it `agent://${RECORD_TRUST_DOMAIN:-local}/genaryx/felyx`, so
+    its calls are priced, budgeted and policy-checked like any agent's. No key
+    ships: `GENARYX_COPILOT_KEY` in `.env` turns it on; without it Felyx says
+    it is not configured. Nothing sets `GENARYX_COPILOT_ALLOW_REMOTE`. Measured
+    2026-09-27 on a Linux Docker network with console v1.1.17 and a stub
+    gateway: Felyx reported `local: true` and its question reached the gateway;
+    without the allow-list it refused the endpoint.
+    *(gate: `scripts/felyx-through-the-gateway.sh`; teeth in
+    `scripts/gates-have-teeth.sh`)*
+
 ## Decisions that have no gate yet
 
 This list is debt, and it is here to stay visible rather than to be tidy.
