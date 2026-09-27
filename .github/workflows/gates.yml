@@ -44,6 +44,12 @@ jobs:
         run: ./scripts/apt-never-removes-docker.sh
       - name: the gateway's semantic cache is off
         run: ./scripts/gateway-cache-is-off.sh
+      - name: delegation is off by default
+        run: ./scripts/delegation-off-by-default.sh
+      - name: the delegation plane's keys are never printed
+        run: ./scripts/delegation-key-not-printed.sh
+      - name: the delegation plane's keys are reused on a re-run
+        run: ./scripts/delegation-key-reused-on-rerun.sh
 
       # Last, because it mutates tracked files and restores them. It needs a
       # clean tree and says so plainly, so it also reports any earlier step

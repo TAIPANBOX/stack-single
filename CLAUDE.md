@@ -47,6 +47,9 @@ change here is a change to something with root on somebody else's box.
 ./scripts/bind-is-honoured.sh
 ./scripts/apt-never-removes-docker.sh
 ./scripts/gateway-cache-is-off.sh
+./scripts/delegation-off-by-default.sh
+./scripts/delegation-key-not-printed.sh
+./scripts/delegation-key-reused-on-rerun.sh
 ./scripts/gates-have-teeth.sh   # invariant 8; needs a clean tree
 ```
 
@@ -294,6 +297,24 @@ an absent invariant.
     @measured live on this Mac, 2026-09-26, against the compose project with
     the broker's own network: green on typryx v0.2.0, red on v0.1.0, red with
     a wrong broker key, red with typryx stopped)*
+
+15. **The delegation plane is off by default, and enabling it needs a real
+    trusted issuer, never an invented one.** `@decided 2026-09-27`: the
+    launchers offer vouchryx as an opt-in delegation plane, off by default,
+    so a gateway can verify a proved delegation chain instead of trusting a
+    claimed one. A default install carries no `vouchryx` service and every
+    `TOKENFUSE_DELEGATION_*` variable on the always-on gateway defaults to
+    empty, which is the value tokenfuse's own chainproof reads as off.
+    `WITH_DELEGATION=1 ./install.sh` needs either the operator's own
+    `VOUCHRYX_TRUSTED_ISSUERS` or the explicit, clearly-labelled
+    `WITH_DELEGATION_DEMO_ISSUER=1` (never a production posture); with
+    neither, install.sh refuses before anything starts, naming what is
+    missing. The signing key and the revocation key are minted once, into
+    files this launcher owns, never printed, and reused on every later run.
+    vouchryx is never published to the host: the gateway reaches it, and
+    polls its revocations, over the compose network only.
+    *(gate: `scripts/delegation-off-by-default.sh`, `scripts/delegation-key-not-printed.sh`,
+    `scripts/delegation-key-reused-on-rerun.sh`; teeth in `scripts/gates-have-teeth.sh`)*
 
 ## Decisions that have no gate yet
 
