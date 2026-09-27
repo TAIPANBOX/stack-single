@@ -91,19 +91,19 @@
           "stack/wg:dev"
         ],
         "pulls_images": [
-          "ghcr.io/taipanbox/genaryx-console:v1.1.17",
+          "ghcr.io/taipanbox/genaryx-console:v1.1.19",
           "ghcr.io/taipanbox/heraldyx:v0.2.5",
           "ghcr.io/taipanbox/idryx:v1.0.0",
           "ghcr.io/taipanbox/scopyx:v1.0.0",
           "ghcr.io/taipanbox/scopyx:v1.0.0-chromium",
           "ghcr.io/taipanbox/stack-caddy:v1.0.0",
           "ghcr.io/taipanbox/stack-wg:v1.0.0",
-          "ghcr.io/taipanbox/tokenfuse-control-plane:v1.4.0",
-          "ghcr.io/taipanbox/tokenfuse:v1.4.0",
+          "ghcr.io/taipanbox/tokenfuse-control-plane:v1.4.1",
+          "ghcr.io/taipanbox/tokenfuse:v1.4.1",
           "ghcr.io/taipanbox/trailryx-node:v1.0.0",
           "ghcr.io/taipanbox/typryx:v0.2.0",
           "ghcr.io/taipanbox/vouchryx:v0.1.0",
-          "ghcr.io/taipanbox/wardryx:v1.1.1"
+          "ghcr.io/taipanbox/wardryx:v1.1.2"
         ]
       },
       "declared": {
