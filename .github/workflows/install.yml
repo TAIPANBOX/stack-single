@@ -1,0 +1,58 @@
+# Runs install.sh for real, twice, on a fresh Ubuntu runner.
+#
+# Every gate in scripts/ reads files. None of them ran the installer, and from
+# v1.1.9 to v1.1.12 every install stopped at `. ./.env` with exit 127 (an
+# unquoted `|` in a default) while every gate stayed green: nothing had run
+# install.sh on a real box since the line went in. This job is that run. The
+# second pass is the re-run an operator does after an upgrade, which is where
+# the installer's own second-run faults have shown up before.
+#
+# Public repo, so standard runners cost nothing.
+name: install
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [default, delegation]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: first install
+        run: |
+          extra=""
+          [ "${{ matrix.profile }}" = delegation ] && extra="WITH_DELEGATION=1 WITH_DELEGATION_DEMO_ISSUER=1"
+          sudo env STACK_DIR=/opt/agent-stack $extra ./install.sh 2>&1 | tee install-1.log
+          grep -q "every check passed" install-1.log || { echo "::error::the first install did not pass every check"; exit 1; }
+
+      - name: re-run over the same box
+        run: |
+          extra=""
+          [ "${{ matrix.profile }}" = delegation ] && extra="WITH_DELEGATION=1 WITH_DELEGATION_DEMO_ISSUER=1"
+          sudo env STACK_DIR=/opt/agent-stack $extra ./install.sh 2>&1 | tee install-2.log
+          grep -q "every check passed" install-2.log || { echo "::error::the re-run did not pass every check"; exit 1; }
+
+      - name: the delegation plane is up only when asked for
+        run: |
+          cd /opt/agent-stack
+          if sudo docker compose ps --services | grep -qx vouchryx; then running=yes; else running=no; fi
+          want=no; [ "${{ matrix.profile }}" = delegation ] && want=yes
+          echo "vouchryx running: $running (want $want)"
+          [ "$running" = "$want" ]
+
+      - name: state on failure
+        if: failure()
+        run: |
+          cd /opt/agent-stack 2>/dev/null && sudo docker compose ps -a || true
+          cd /opt/agent-stack 2>/dev/null && sudo docker compose logs --tail=40 || true
