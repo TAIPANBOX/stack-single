@@ -584,7 +584,7 @@ run_case "env-sources-cleanly: a default goes back to an unquoted pipe" fail \
 
 run_case "env-sources-cleanly: the repair stops quoting" fail \
 	'./scripts/env-sources-cleanly.sh' \
-	"$(py 'edit("install.sh", "print name \"=\\\\047\" val \"\\\\047\"; fixed++; next", "print name \"=\" val; fixed++; next")')" \
+	"$(py 'edit("install.sh", "print name \"=\\047\" val \"\\047\"; fixed++; next", "print name \"=\" val; fixed++; next")')" \
 	"does not source cleanly"
 
 run_case "env-sources-cleanly: the repair call removed" fail \
