@@ -338,6 +338,16 @@ an absent invariant.
     *(gate: `scripts/felyx-through-the-gateway.sh`; teeth in
     `scripts/gates-have-teeth.sh`)*
 
+17. **The installer is run for real on every change, first install and
+    re-run.** Every script gate here reads files; from v1.1.9 to v1.1.12 every
+    install stopped at `. ./.env` (exit 127, an unquoted `|` in a default)
+    while all of them stayed green, because nothing ran install.sh on a real
+    box after the line went in. `.github/workflows/install.yml` runs it twice
+    on a fresh Ubuntu runner, with and without the delegation profile, and
+    requires "every check passed" both times.
+    *(gate: `.github/workflows/install.yml`; red on a branch re-planting the
+    unquoted default, 2026-09-27)*
+
 ## Decisions that have no gate yet
 
 This list is debt, and it is here to stay visible rather than to be tidy.
