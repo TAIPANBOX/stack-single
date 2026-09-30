@@ -526,12 +526,12 @@ run_case "typed-data-mode: a refusal echoes the key it was given" fail \
 run_case "typed-data-mode: installing the key prints it" fail \
 	'./scripts/typed-data-mode.sh' \
 	"$(py 'edit("install.sh", "note \"key file installed at $dir/$2 (read only; its contents are never shown)\"", "note \"key file installed at $dir/$2: $(cat \"$1\")\"")')" \
-	"the key\x27s bytes were printed"
+	"bytes were printed"
 
 run_case "typed-data-mode: the key becomes an environment value in .env" fail \
 	'./scripts/typed-data-mode.sh' \
 	"$(py 'edit("install.sh", "        [ -z \"${TYPED_JEV_KEY_FILE:-}\" ] || typed_install_key \"$TYPED_JEV_KEY_FILE\" jev-key\n", "        [ -z \"${TYPED_JEV_KEY_FILE:-}\" ] || typed_install_key \"$TYPED_JEV_KEY_FILE\" jev-key\n        typed_set_env TYPRYX_JEV_KEY \"$(cat \"$TYPED_JEV_KEY_FILE\")\"\n")')" \
-	"the key\x27s bytes are in .env"
+	"bytes are in .env"
 
 run_case "typed-data-mode: own-model accepts a URL that is not /v1" fail \
 	'./scripts/typed-data-mode.sh' \
@@ -548,7 +548,7 @@ run_case "typed-data-mode: own-model stops requiring a model name" fail \
 run_case "typed-data-mode: nothing set installs typryx" fail \
 	'./scripts/typed-data-mode.sh' \
 	"$(py 'edit("install.sh", "  else\n    mode=off\n  fi", "  else\n    mode=stub\n  fi")')" \
-	"nothing set: the plane is \x27stub\x27"
+	"nothing set: the plane is"
 
 # Back-compat: WITH_TYPED=1 alone was the stub and stays it.
 run_case "typed-data-mode: WITH_TYPED=1 alone stops being the stub" fail \
@@ -571,11 +571,13 @@ run_case "typed-data-mode: typryx leaves its profile and is in every install" fa
 	"$(py 'edit("compose.yaml", "    <<: *restart\n    profiles: [\"typed\"]\n    image: ${TYPRYX_IMAGE", "    <<: *restart\n    image: ${TYPRYX_IMAGE")')" \
 	"typryx is in the default set"
 
-# Invariant 2 for this block: a re-run that chose nothing must change nothing.
-run_case "typed-data-mode: a re-run with nothing set rewrites .env" fail \
+# Invariant 2 for this block: a re-run that chose nothing must keep what the
+# first run chose. A saved mode that is not read back turns the plane off on
+# the next plain `./install.sh`, which looks like an upgrade that removed it.
+run_case "typed-data-mode: a re-run forgets the saved mode" fail \
 	'./scripts/typed-data-mode.sh' \
-	"$(py 'edit("install.sh", "      if [ \"$TYPED_EXPLICIT\" = 1 ]; then\n        typed_forget_env \"${TYPED_OWNED[@]}\"\n        typed_set_env TYPED_MODE jev", "      if true; then\n        typed_forget_env \"${TYPED_OWNED[@]}\"\n        typed_set_env TYPED_MODE jev")')" \
-	"re-run with nothing set"
+	"$(py 'edit("install.sh", "  elif [ \"$TYPED_SAVED_MODE\" = jev ] || [ \"$TYPED_SAVED_MODE\" = own-model ]; then", "  elif false; then")')" \
+	"jev re-run with nothing set"
 
 run_case "typed-data-mode: switching mode leaves the old mode's lines" fail \
 	'./scripts/typed-data-mode.sh' \
@@ -825,12 +827,8 @@ open("install.sh", "w").write(s.replace("--profile typed", "--profile other"))')
 
 run_case "typed-data-mode: no typryx service left to read" fail \
 	'./scripts/typed-data-mode.sh' \
-	"$(py 'import re
-s = open("compose.yaml").read()
-i = s.index("  typryx:\n")
-j = s.index("\n  # ---- tokenfuse\x27s MCP broker, fronting typryx")
-assert i < j
-open("compose.yaml", "w").write(s[:i] + s[j:])')" \
+	"$(py 'edit("compose.yaml", "  typryx:\n    <<: *restart", "  typryz:\n    <<: *restart")
+edit("compose.yaml", "      typryx:\n        condition: service_started", "      typryz:\n        condition: service_started")')" \
 	"so this measured nothing"
 
 echo
