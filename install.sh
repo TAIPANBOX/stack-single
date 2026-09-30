@@ -39,6 +39,8 @@
 #   TYPED_MODE=jev TYPED_JEV_KEY_FILE=/path/to/key ./install.sh
 #   TYPED_MODE=own-model TYPED_MODEL_URL=http://host.docker.internal:11434/v1 \
 #     TYPED_MODEL_NAME=qwen2.5:7b ./install.sh
+#   TYPED_TRAINING=1 (with any typed mode above) also switches on typryx's local
+#     training log, in a volume on this box; off unless you ask, 0 turns it off
 #   WITH_DELEGATION=1 ./install.sh        # pulls AND starts vouchryx
 #
 # The typed-answer plane (typryx) answers a typed question from one of the
@@ -165,6 +167,13 @@ esac
 # WITH_TYPED=1 with no TYPED_MODE is exactly what it was before this existed:
 # typryx on its stub backend, which makes no outbound call.
 #
+# TYPED_TRAINING=1 (@decided 2026-09-30, off by default) sets typryx's
+# TYPRYX_TRAINING_DIR to a directory inside the typryxdata volume, beside the
+# ledger, so the operator can fine-tune a model of their own. It needs typryx
+# installed (refused otherwise), it is independent of the mode and survives a
+# change of mode, and TYPED_TRAINING=0 turns it off. It writes no .env line
+# unless asked: off renders exactly what it rendered before.
+#
 # A key is only ever a FILE. It is copied into ./typed (0400, owned by the uid
 # typryx runs as), mounted read only, named in .env by its path inside the
 # container, and never expanded into a print call, an environment value or a
@@ -179,6 +188,7 @@ TYPED_SAVED_MODE=""    # what .env already holds for TYPED_MODE, if anything
 TYPED_URL=""
 TYPED_NAME=""
 TYPED_TIMEOUT=""
+TYPED_TRAIN=""         # "" (this run says nothing), 1 (log on) or 0 (log off)
 
 # The variables compose's typryx service reads that this block owns. Dropped as
 # a set when the mode changes, so a switch never leaves the old mode's lines
@@ -254,6 +264,17 @@ typed_resolve() {
     *) die "TYPED_MODE must be jev, own-model or off. Nothing was installed." ;;
   esac
 
+  # @decided 2026-09-30: typryx's local training log is opt-in and off by
+  # default. TYPED_TRAINING=1 turns it on, 0 turns it off again, and nothing
+  # set leaves a box as it is. It is read apart from TYPED_EXPLICIT on purpose:
+  # asking for the log is not choosing a mode, so it must not trip the "a
+  # setting with no mode" refusal below when WITH_TYPED=1 is the stub.
+  TYPED_TRAIN="${TYPED_TRAINING:-}"
+  case "$TYPED_TRAIN" in
+    ""|0|1) ;;
+    *) die "TYPED_TRAINING must be 1 (log on) or 0 (log off). Nothing was installed." ;;
+  esac
+
   TYPED_EXPLICIT=0
   if [ -n "$want" ] || [ -n "${TYPED_JEV_KEY_FILE:-}${TYPED_MODEL_URL:-}${TYPED_MODEL_NAME:-}${TYPED_MODEL_KEY_FILE:-}${TYPED_MODEL_TIMEOUT_MS:-}" ]; then
     TYPED_EXPLICIT=1
@@ -274,6 +295,9 @@ typed_resolve() {
   fi
   if [ "$TYPED_EXPLICIT" = 1 ] && [ -z "$want" ] && { [ "$mode" = off ] || [ "$mode" = stub ]; }; then
     die "a TYPED_* setting was given without TYPED_MODE, so it would be ignored. Set TYPED_MODE=jev or TYPED_MODE=own-model with it. Nothing was installed."
+  fi
+  if [ "$TYPED_TRAIN" = 1 ] && [ "$mode" = off ]; then
+    die "TYPED_TRAINING=1 has no typryx to log for: typed answers are off. Set WITH_TYPED=1 or TYPED_MODE=jev or TYPED_MODE=own-model with it. Nothing was installed."
   fi
 
   case "$mode" in
@@ -375,6 +399,17 @@ typed_apply() {
         note "typed answers: own-model. Questions go to $TYPED_URL and nowhere else"
       fi
       ;;
+  esac
+  # The training log, apart from the mode: it is the operator's own record and
+  # survives a change of mode. The path is inside the typryxdata volume, beside
+  # the ledger (compose.yaml sets TYPRYX_LEDGER_DIR there) that holds the human
+  # truths `typryx export --training` pairs the log with.
+  case "$TYPED_TRAIN" in
+    1)
+      typed_set_env TYPRYX_TRAINING_DIR /var/lib/typryx/training
+      note "typed answers: the local training log is ON (volume typryxdata, never leaves this box). Export it with the command in the README"
+      ;;
+    0) typed_forget_env TYPRYX_TRAINING_DIR ;;
   esac
 }
 # typed-mode: end
@@ -1656,6 +1691,10 @@ if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx tokenfuse-mcp-broker; th
     jev)       note "answers come from Jev: the fields each question names leave this box for api.typesafe.ai" ;;
     own-model) note "answers come from your own model at $TYPED_URL: nothing else leaves this box" ;;
   esac
+  if grep -q '^TYPRYX_TRAINING_DIR=' "$STACK_DIR/.env" 2>/dev/null; then
+    note "the local training log is on, on this box only: post a human truth for an answer to /v1/outcome,"
+    note "  then run typryx export --training in the typryx container (README: Your own model, on your own data)"
+  fi
 fi
 
 # The delegation plane's own checks, only when WITH_DELEGATION actually

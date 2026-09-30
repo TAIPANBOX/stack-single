@@ -167,11 +167,16 @@ run_case() {
 	rc=$?
 	restore
 
+	# The wording is looked up in a here-string, not `printf | grep -q`: with
+	# pipefail on, grep -q exits at its first match, printf can then die of
+	# SIGPIPE, and a gate that failed for the right reason is reported as
+	# failing for the wrong one (seen 2026-09-30, a pass and then a miss on the
+	# same unchanged case).
 	# Exit code first, then wording. Checking the needle before the expectation
 	# turns "it did not fail at all" into "it failed for the wrong reason",
 	# which sends the reader to look at prose when the gate is toothless.
 	if [ "$expect" = fail ] && [ "$rc" -ne 0 ] && [ -n "$needle" ] &&
-		! printf '%s' "$out" | grep -qF -- "$needle"; then
+		! grep -qF -- "$needle" <<<"$out"; then
 		printf 'WRONG REASON  %s\n              it failed, but not saying: %s\n' "$name" "$needle"
 		failures=$((failures + 1))
 		return
@@ -584,6 +589,68 @@ run_case "typed-data-mode: switching mode leaves the old mode's lines" fail \
 	"$(py 'edit("install.sh", "        typed_forget_env \"${TYPED_OWNED[@]}\"\n        typed_set_env TYPED_MODE jev", "        typed_set_env TYPED_MODE jev")')" \
 	"left the own-model lines"
 
+# The training log and the pin (typryx v0.3.0). Each case plants the fault the
+# matching check in scripts/typed-data-mode.sh exists for.
+run_case "typed-data-mode: the training log is on when nobody asked" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("install.sh", "  case \"$TYPED_TRAIN\" in\n    1)\n      typed_set_env TYPRYX_TRAINING_DIR", "  case \"$TYPED_TRAIN\" in\n    \"\"|1)\n      typed_set_env TYPRYX_TRAINING_DIR")')" \
+	"names a training log in .env"
+
+run_case "typed-data-mode: training is accepted with typryx off" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("install.sh", "  if [ \"$TYPED_TRAIN\" = 1 ] && [ \"$mode\" = off ]; then", "  if false; then")')" \
+	"it was accepted, and it must refuse"
+
+run_case "typed-data-mode: a value that is not a switch is believed" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("install.sh", "    *) die \"TYPED_TRAINING must be 1 (log on) or 0 (log off). Nothing was installed.\" ;;", "    *) ;;")')" \
+	"TYPED_TRAINING=yes"
+
+run_case "typed-data-mode: TYPED_TRAINING=0 does not turn the log off" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("install.sh", "    0) typed_forget_env TYPRYX_TRAINING_DIR ;;", "    0) : ;;")')" \
+	"left TYPRYX_TRAINING_DIR in .env"
+
+run_case "typed-data-mode: switching mode drops the training log" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("install.sh", "TYPRYX_OPENAI_KEY_FILE TYPRYX_TIMEOUT_MS)", "TYPRYX_OPENAI_KEY_FILE TYPRYX_TIMEOUT_MS TYPRYX_TRAINING_DIR)")')" \
+	"silently turned the training log off"
+
+run_case "typed-data-mode: compose stops passing the training dir to typryx" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("compose.yaml", "      TYPRYX_TRAINING_DIR: ${TYPRYX_TRAINING_DIR:-}\n", "")')" \
+	"would not reach typryx"
+
+run_case "typed-data-mode: the volume the training log sits on is read only" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("compose.yaml", "      - typryxdata:/var/lib/typryx\n      # The shared bus, read-write", "      - typryxdata:/var/lib/typryx:ro\n      # The shared bus, read-write")')" \
+	"not a writable volume"
+
+run_case "typed-data-mode: the installer points the training log outside the volume" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("install.sh", "typed_set_env TYPRYX_TRAINING_DIR /var/lib/typryx/training", "typed_set_env TYPRYX_TRAINING_DIR /srv/training")')" \
+	"did not write TYPRYX_TRAINING_DIR"
+
+run_case "typed-data-mode: no volume is mounted where the training log lives" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("compose.yaml", "      - typryxdata:/var/lib/typryx\n      # The shared bus, read-write", "      - typryxdata:/var/lib/typryx-data\n      # The shared bus, read-write")')" \
+	"no volume holds"
+
+run_case "typed-data-mode: compose still pins the typryx that has no training log" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/typryx:v0.3.0}", "ghcr.io/taipanbox/typryx:v0.2.0}")')" \
+	"compose.yaml pins typryx v0.2.0"
+
+run_case "typed-data-mode: components.json keeps the old typryx pin" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("components.json", "ghcr.io/taipanbox/typryx:v0.3.0", "ghcr.io/taipanbox/typryx:v0.2.0")')" \
+	"components.json names typryx:v0.2.0"
+
+run_case "typed-data-mode: the README names a typryx tag compose does not pin" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("README.md", "this launcher pins typryx v0.3.0, the first", "this launcher pins ghcr.io/taipanbox/typryx:v0.2.0, the first")')" \
+	"README.md names typryx:v0.2.0"
+
 echo
 echo "=== and what they must NOT catch ==="
 
@@ -697,6 +764,12 @@ run_case "delegation-key-reused-on-rerun: the reused-message wording changes" pa
 run_case "typed-data-mode: a comment inside the typed block is left alone" pass \
 	'./scripts/typed-data-mode.sh' \
 	"$(py 'edit("install.sh", "# typed-mode: begin\n", "# typed-mode: begin\n# a comment that changes no behaviour\n")')"
+
+# The training log's own path is the ONE value a pin-style edit must not trip:
+# moving the README's prose about the log around changes no behaviour.
+run_case "typed-data-mode: a wording change in the training paragraph is left alone" pass \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("README.md", "The log has no rotation or retention", "The log has no rotation and no retention")')"
 
 echo
 echo "=== and the one this estate learned the hard way ==="
@@ -830,6 +903,11 @@ run_case "typed-data-mode: no typryx service left to read" fail \
 	"$(py 'edit("compose.yaml", "  typryx:\n    <<: *restart", "  typryz:\n    <<: *restart")
 edit("compose.yaml", "      typryx:\n        condition: service_started", "      typryz:\n        condition: service_started")')" \
 	"so this measured nothing"
+
+run_case "typed-data-mode: compose names no typryx image to read a pin from" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("compose.yaml", "image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.3.0}", "image: ${TYPRYX_IMAGE:-registry.invalid/typryx}")')" \
+	"names no ghcr.io/taipanbox/typryx"
 
 echo
 if [ -n "$(git status --porcelain)" ]; then
