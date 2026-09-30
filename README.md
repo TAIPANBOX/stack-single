@@ -428,8 +428,8 @@ the caller ever sees:
 `install.sh` prints the URL and the header names at the end of a run with
 `WITH_TYPED=1`; it never prints a key's value.
 
-**Measured end to end on this launcher's pins** (typryx v0.2.0, tokenfuse
-v1.1.1), live on Docker Desktop on 2026-09-26: an `ask` whose typryx key
+**Measured end to end** (typryx v0.2.0, tokenfuse
+v1.1.1; this launcher now pins typryx v0.3.0), live on Docker Desktop on 2026-09-26: an `ask` whose typryx key
 travelled only as `{{secret:typryx_key}}` through the broker was answered,
 typryx wrote its `typed_answer` to the shared bus under the key's agent with
 the caller's `run_id`, the broker wrote its own `tool_call`, a wrong key was
@@ -530,9 +530,46 @@ Jev's answers are not training data: TypeSafe's terms forbid using Jev output
 to train another model, so what you fine-tune on is the truths your own people
 post, never what Jev said.
 
-**Planned, not shipped.** typryx will get an opt-in local training log
-(`TYPRYX_TRAINING_DIR`), off by default. It needs a new typryx release and this
-launcher pins v0.2.0, so nothing here passes it through yet.
+**The opt-in training log.** `@decided 2026-09-30`: typryx can keep a local
+training log, off by default, and this launcher pins typryx v0.3.0, the first
+release that has it. Switch it on with `TYPED_TRAINING=1` next to any typed mode
+(`WITH_TYPED=1`, `TYPED_MODE=jev` or `TYPED_MODE=own-model`):
+
+```bash
+TYPED_MODE=own-model TYPED_MODEL_URL=http://host.docker.internal:11434/v1 \
+  TYPED_MODEL_NAME=qwen2.5:7b TYPED_TRAINING=1 ./install.sh
+```
+
+The installer writes `TYPRYX_TRAINING_DIR=/var/lib/typryx/training` into `.env`:
+a private directory (mode 0700, its file 0600) inside the `typryxdata` volume,
+the same volume as typryx's ledger. The ledger is on in this launcher already,
+and it is where the human truths live, which the export needs. Without
+`TYPED_TRAINING=1` nothing names that variable, nothing is written, and `.env`
+is exactly what it was. A re-run with nothing set keeps the log on, a change of
+mode keeps it, and `TYPED_TRAINING=0` turns it off (the log already on disk
+stays until you delete it). It needs typryx installed: `TYPED_TRAINING=1` with
+typed answers off is refused before anything is touched.
+
+Each answered, templated question appends one line holding the state that
+actually went to the model (the fields the template names, never the rest) and
+the answer's identity. It holds neither the model's answer nor its
+probabilities. Post the truth a person decided for an answer to `/v1/outcome`,
+then export the pairs:
+
+```bash
+(umask 077; docker compose --profile typed exec -T typryx typryx export --training > train.jsonl)
+```
+
+Every row is `{"template","template_version","type","state","label"}`, and
+`label` is the human truth as posted. The counts of what was skipped (no truth
+yet, a changed template, a duplicate) go to stderr. The data stays on this box:
+the log lives in a Docker volume and the export is a file you write on the host.
+The export carries human truths only, never a model's answer, because TypeSafe's
+terms forbid using Jev output to train another model; what you fine-tune on is
+what your own people judged. Fine-tuning, serving the tuned model behind
+`TYPED_MODEL_URL`, and comparing it with `typryx calibration` are yours and
+happen outside this stack. The log has no rotation or retention: it grows until
+you remove it, and it holds your questions, so treat the volume as data you own.
 
 ## The appliance shape: a box at your premises, the agents in two clouds
 

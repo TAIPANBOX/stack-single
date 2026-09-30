@@ -435,7 +435,7 @@ services:
   typryx:
     <<: *restart
     profiles: ["typed"]
-    image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.2.0}
+    image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.3.0}
     # Group 10001, not 65532 alone, since 2026-09-26: the journal below moved
     # onto the shared `events` volume (root:10001 2775), the same group every
     # other Go plane's bus writer runs as. The ledger stays on typryxdata,
@@ -454,6 +454,13 @@ services:
       TYPRYX_OPENAI_MODEL: ${TYPRYX_OPENAI_MODEL:-}
       TYPRYX_OPENAI_KEY_FILE: ${TYPRYX_OPENAI_KEY_FILE:-}
       TYPRYX_TIMEOUT_MS: ${TYPRYX_TIMEOUT_MS:-}
+      # @decided 2026-09-30: typryx's opt-in local training log (typryx
+      # v0.3.0). Empty, which typryx reads as unset, unless TYPED_TRAINING=1
+      # put `/var/lib/typryx/training` in `.env`: a directory inside the
+      # typryxdata volume below, beside the ledger whose human truths the
+      # export (`typryx export --training`) pairs it with. Off, nothing is
+      # written and no directory is created.
+      TYPRYX_TRAINING_DIR: ${TYPRYX_TRAINING_DIR:-}
       # `:-` and NOT `:?`, for the same reason as scopyx's own key: compose
       # interpolates every service in this file, including one whose profile
       # is off, so a `:?` here would refuse the whole file on a box that never
@@ -492,7 +499,7 @@ services:
       TYPRYX_ACCEPT_KEY_IN_META: "1"
     volumes:
       # Its own ledger, deliberately not the shared bus (see TYPRYX_LEDGER_DIR
-      # above).
+      # above), and the training log when it is on (TYPRYX_TRAINING_DIR).
       - typryxdata:/var/lib/typryx
       # The shared bus, read-write, for the journal above.
       - events:/var/lib/stack/events

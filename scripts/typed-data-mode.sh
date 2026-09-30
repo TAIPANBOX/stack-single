@@ -36,6 +36,14 @@
 #      configuration.
 #   C. STATIC. install.sh passes `--profile typed` only on a line decided by
 #      TYPED_PLANE, so the profile is never brought up unconditionally.
+#   D. THE TRAINING LOG AND THE PIN. `TYPED_TRAINING=1` (off by default) is the
+#      one switch for typryx's opt-in local training log. Off, nothing names
+#      TYPRYX_TRAINING_DIR anywhere (.env, the resolved configuration). On, it
+#      names a directory inside the typryxdata volume, mounted writable, beside
+#      the ledger that holds the human truths the export needs; on with no
+#      typryx to log, or with a value that is not 1 or 0, it refuses before
+#      touching the box. And every typryx image pin is ONE tag, the one
+#      compose.yaml defaults to (v0.3.0, the first release with the log).
 #
 # AND IT REFUSES TO REPORT OK ON NOTHING
 #
@@ -210,6 +218,44 @@ else
   # the re-run that changes only the URL keeps the mode
   out="$(run "$d" TYPED_MODEL_URL=http://h:9000/v1)"
   [ "$(plane_of "$out")" = own-model ] && envhas "$d" "^TYPRYX_OPENAI_URL='http://h:9000/v1'" || fail "own-model re-run with a new URL: $out"
+
+  # 13. the training log (D). Off by default: no mode, good or stub, writes it.
+  d="$(mk)"
+  run "$d" WITH_TYPED=1 >/dev/null
+  if grep -q 'TRAINING' "$d/.env"; then fail "WITH_TYPED=1 alone names a training log in .env"; fi
+  d="$(mk)"
+  run "$d" TYPED_MODE=jev TYPED_JEV_KEY_FILE="$scratch/jev.key" >/dev/null
+  if grep -q 'TRAINING' "$d/.env"; then fail "jev with no TYPED_TRAINING names a training log in .env"; fi
+  d="$(mk)"
+  run "$d" TYPED_MODE=own-model TYPED_MODEL_URL=http://h:8000/v1 TYPED_MODEL_NAME=m >/dev/null
+  if grep -q 'TRAINING' "$d/.env"; then fail "own-model with no TYPED_TRAINING names a training log in .env"; fi
+  # on: a path inside the typryxdata volume (compose mounts it at /var/lib/typryx), for each mode
+  d="$(mk)"
+  out="$(run "$d" WITH_TYPED=1 TYPED_TRAINING=1)"
+  [ "$(rc_of "$out")" = 0 ] && [ "$(plane_of "$out")" = stub ] || fail "WITH_TYPED=1 TYPED_TRAINING=1: $out"
+  envhas "$d" "^TYPRYX_TRAINING_DIR='/var/lib/typryx/training'" || fail "TYPED_TRAINING=1 (stub) did not write TYPRYX_TRAINING_DIR"
+  d="$(mk)"
+  out="$(run "$d" TYPED_MODE=jev TYPED_JEV_KEY_FILE="$scratch/jev.key" TYPED_TRAINING=1)"
+  [ "$(rc_of "$out")" = 0 ] || fail "jev with TYPED_TRAINING=1 was refused: $out"
+  envhas "$d" "^TYPRYX_TRAINING_DIR='/var/lib/typryx/training'" || fail "TYPED_TRAINING=1 (jev) did not write TYPRYX_TRAINING_DIR"
+  if grep -qF -- "$FAKEKEY" "$d/.env"; then fail "jev with training: the key's bytes are in .env"; fi
+  before="$(cat "$d/.env")"
+  # a re-run with nothing set keeps the log on and changes nothing (invariant 2)
+  out="$(run "$d")"
+  [ "$(rc_of "$out")" = 0 ] && [ "$(cat "$d/.env")" = "$before" ] || fail "a re-run with nothing set changed a box that had training on: $out"
+  # switching mode keeps the log the operator asked for
+  out="$(run "$d" TYPED_MODE=own-model TYPED_MODEL_URL=http://h:8000/v1 TYPED_MODEL_NAME=m)"
+  [ "$(rc_of "$out")" = 0 ] || fail "own-model over a jev box with training on was refused: $out"
+  envhas "$d" "^TYPRYX_TRAINING_DIR='/var/lib/typryx/training'" || fail "switching mode silently turned the training log off"
+  # and TYPED_TRAINING=0 turns it off again, and only it
+  out="$(run "$d" TYPED_TRAINING=0)"
+  [ "$(rc_of "$out")" = 0 ] || fail "TYPED_TRAINING=0 was refused: $out"
+  if grep -q 'TRAINING' "$d/.env"; then fail "TYPED_TRAINING=0 left TYPRYX_TRAINING_DIR in .env"; fi
+  envhas "$d" "^TYPRYX_BACKEND='openai-logprobs'" || fail "TYPED_TRAINING=0 changed the mode's own lines"
+  # it refuses, before touching the box, when there is no typryx to log or the value is not a switch
+  refuses "training with no typryx" "$(mk)" "TYPED_TRAINING" TYPED_TRAINING=1
+  refuses "training with typryx explicitly off" "$(mk)" "TYPED_TRAINING" TYPED_MODE=off WITH_TYPED=1 TYPED_TRAINING=1
+  refuses "TYPED_TRAINING=yes" "$(mk)" "TYPED_TRAINING" WITH_TYPED=1 TYPED_TRAINING=yes
 fi
 
 # ---- C. static: the profile is never brought up unconditionally --------------
@@ -223,6 +269,22 @@ else
       *) fail "install.sh:${l%%:*} passes --profile typed on a line TYPED_PLANE does not decide: ${l#*:}" ;;
     esac
   done <<<"$hits"
+fi
+
+# ---- D. one typryx pin ---------------------------------------------------------
+# Every `typryx:vX.Y.Z` a live file names is the tag compose.yaml defaults to.
+# Release notes of earlier launcher versions are history and are not read.
+pin="$(sed -n 's/.*ghcr\.io\/taipanbox\/typryx:\(v[0-9][0-9.]*\).*/\1/p' compose.yaml | head -1)"
+if [ -z "$pin" ]; then
+  fail "compose.yaml names no ghcr.io/taipanbox/typryx:vX.Y.Z image, so this measured nothing about the pin"
+else
+  [ "$pin" = v0.3.0 ] || fail "compose.yaml pins typryx $pin; the training log needs v0.3.0 or later and this gate names v0.3.0"
+  for f in compose.yaml components.json README.md install.sh; do
+    while IFS= read -r t; do
+      [ "$t" = "$pin" ] || fail "$f names typryx:$t, but compose.yaml pins typryx:$pin"
+    done < <(grep -o 'typryx:v[0-9][0-9.]*' "$f" | sed 's/^typryx://' | sort -u)
+  done
+  grep -q "ghcr.io/taipanbox/typryx:$pin" components.json || fail "components.json does not list ghcr.io/taipanbox/typryx:$pin in pulls_images"
 fi
 
 # ---- B. compose --------------------------------------------------------------
@@ -270,7 +332,30 @@ assert 'typryx' in svc, 'no typryx service in the resolved configuration with --
 e = svc['typryx']['environment']
 assert e['TYPRYX_BACKEND'] == 'stub', 'backend is ' + e['TYPRYX_BACKEND']
 assert not e.get('TYPRYX_JEV_KEY_FILE'), 'a jev key file is named on the stub'
+assert not e.get('TYPRYX_TRAINING_DIR'), 'a training log is on by default: TYPRYX_TRAINING_DIR is ' + repr(e.get('TYPRYX_TRAINING_DIR'))
+assert svc['typryx']['image'].endswith('/typryx:v0.3.0'), 'the typryx pin is ' + svc['typryx']['image']
 " --profile typed </dev/null
+
+  check_cfg "training on names a directory inside a writable volume, beside the ledger" "
+assert 'typryx' in svc, 'no typryx service in the resolved configuration with --profile typed, so this measured nothing'
+e = svc['typryx']['environment']
+d = e.get('TYPRYX_TRAINING_DIR')
+assert d == '/var/lib/typryx/training', 'TYPRYX_TRAINING_DIR is ' + repr(d) + ', so the log would not reach typryx'
+led = e.get('TYPRYX_LEDGER_DIR')
+assert led, 'no ledger: the export needs the human truths that live there'
+vols = [v for v in svc['typryx'].get('volumes', []) if v.get('target') and (d + '/').startswith(v['target'].rstrip('/') + '/')]
+assert vols, 'no volume holds ' + d + ', so the log would live in the container and vanish with it'
+best = max(vols, key=lambda v: len(v['target']))
+assert best.get('type') == 'volume' and not best.get('read_only'), 'the training log sits on a mount that is not a writable volume: ' + str(best)
+assert best['target'] != '/run/typed', 'the training log is under the read-only key directory'
+assert (led + '/').startswith(best['target'].rstrip('/') + '/'), 'the ledger and the training log are on different volumes: ' + str(best['target'])
+" --profile typed <<'EOF'
+TYPED_MODE='own-model'
+TYPRYX_BACKEND='openai-logprobs'
+TYPRYX_OPENAI_URL='http://host.docker.internal:11434/v1'
+TYPRYX_OPENAI_MODEL='qwen2.5:7b'
+TYPRYX_TRAINING_DIR='/var/lib/typryx/training'
+EOF
 
   check_cfg "jev names the key FILE, mounts it read only, and carries no key value" "
 assert 'typryx' in svc, 'no typryx service in the resolved configuration with --profile typed, so this measured nothing'
@@ -313,6 +398,7 @@ if [ "$problems" -gt 0 ]; then
   echo "$problems problem(s). See CLAUDE.md invariant 18."
   exit 1
 fi
-echo "OK: typed answers are off unless chosen, WITH_TYPED=1 alone is still the stub, jev and"
+echo "OK: typed answers are off unless chosen, WITH_TYPED=1 alone is still the stub, the training log"
+echo "    is off unless TYPED_TRAINING=1 and lives beside the ledger, typryx is one pinned tag, jev and"
 echo "    own-model refuse before touching the box when their inputs are missing, a key is only"
 echo "    ever a file mounted read only (never a value, never printed), and a re-run changes nothing."

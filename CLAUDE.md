@@ -366,17 +366,43 @@ an absent invariant.
     run that sets a mode replaces the previous mode's lines rather than adding
     to them. `jev` is left unpriced because no prices are wired anywhere else
     here, and the installer's own ask-through-the-broker check is skipped in
-    `jev` mode because it would spend at TypeSafe on every run. typryx's planned
-    `TYPRYX_TRAINING_DIR` is not passed through: it needs a new typryx release
-    and this file pins v0.2.0.
+    `jev` mode because it would spend at TypeSafe on every run.
+
+    The local training log follows the same rule of nothing chosen for them.
+    `@decided 2026-09-30`: typryx v0.3.0 (the pin here since 2026-09-30) can
+    keep an opt-in training log, `TYPRYX_TRAINING_DIR`, and it is off by
+    default. `TYPED_TRAINING=1` writes `TYPRYX_TRAINING_DIR=/var/lib/typryx/training`
+    into `.env`: a directory inside the `typryxdata` volume, mounted writable,
+    on the same volume as the ledger (`TYPRYX_LEDGER_DIR`), because
+    `typryx export --training` pairs the log with the human truths the ledger
+    holds. Nothing set writes no line, so a default install's `.env` and its
+    resolved compose config are what they were (the typed profile's own render
+    gains one empty `TYPRYX_TRAINING_DIR: ""` line, which typryx reads as
+    unset). It is independent of the mode and survives a change of mode;
+    `TYPED_TRAINING=0` turns it off; `TYPED_TRAINING=1` with typed answers off,
+    or a value that is neither 1 nor 0, refuses before the box is touched. The
+    export carries human truths only, so a Jev answer cannot become a training
+    label (TypeSafe's terms), and the data stays in the volume on the box.
+    Every typryx image pin here is the one tag compose.yaml defaults to.
     *(gate: `scripts/typed-data-mode.sh`, which lifts the `# typed-mode:` block
     out of install.sh and runs it in a scratch directory for each case, reads
     `docker compose config` for the default, stub, jev and own-model, and
-    requires `--profile typed` only on a line `TYPED_PLANE` decides; it
-    refuses to report OK on no block, no profile line, or no Docker; teeth in
-    `scripts/gates-have-teeth.sh`. Not covered: a real `install.sh` run on
-    Debian in any typed mode, and the interactive prompt, which needs a
-    terminal and is read, not run.)*
+    requires `--profile typed` only on a line `TYPED_PLANE` decides, and, for
+    the training log, runs the block for off, on, re-run, mode switch, 0 and the
+    refusals, reads the resolved config for a writable volume under the
+    training dir beside the ledger, and requires every `typryx:vX.Y.Z` in
+    compose.yaml, components.json, README.md and install.sh to be v0.3.0; it
+    refuses to report OK on no block, no profile line, no typryx image or no
+    Docker; teeth in `scripts/gates-have-teeth.sh`. Not covered: a real
+    `install.sh` run on Debian in any typed mode, and the interactive prompt,
+    which needs a terminal and is read, not run. @measured live on this Mac,
+    2026-09-30 (Docker Desktop, compose project `typryxtrain`, the repo's own
+    compose.yaml and the installer block's `.env`, typryx
+    `ghcr.io/taipanbox/typryx:v0.3.0`, Ollama qwen2.5:7b): an ask carrying an
+    extra `user_email` was answered with `held_back_fields` 1, a truth posted
+    to `/v1/outcome`, and `docker compose exec -T typryx typryx export
+    --training` wrote one row with only the template's fields and the posted
+    label, no email; the training directory was 0700 and its file 0600.)*
 
 ## Decisions that have no gate yet
 
