@@ -50,6 +50,7 @@ change here is a change to something with root on somebody else's box.
 ./scripts/delegation-off-by-default.sh
 ./scripts/delegation-key-not-printed.sh
 ./scripts/delegation-key-reused-on-rerun.sh
+./scripts/typed-data-mode.sh
 ./scripts/gates-have-teeth.sh   # invariant 8; needs a clean tree
 ```
 
@@ -347,6 +348,35 @@ an absent invariant.
     requires "every check passed" both times.
     *(gate: `.github/workflows/install.yml`; red on a branch re-planting the
     unquoted default, 2026-09-27)*
+
+18. **Typed answers come from the place the operator chose, and nothing is
+    chosen for them.** `@decided 2026-09-30`: `TYPED_MODE` is `jev`,
+    `own-model` or `off`, and off is the default, so a default install has no
+    typryx, exactly as before. `WITH_TYPED=1` with no `TYPED_MODE` is unchanged:
+    typryx on its stub backend, which makes no outbound call. `jev` needs
+    `TYPED_JEV_KEY_FILE`, the PATH of a file holding the key; `own-model` needs
+    `TYPED_MODEL_URL` (ending in `/v1`) and `TYPED_MODEL_NAME`. A missing input
+    refuses in section 0b, before a package is installed or a file written, and
+    a refusal never echoes what it was given (a key pasted where the path goes
+    is not printed). A key is only ever a FILE: install.sh copies it into
+    `./typed` (0400, uid 65532), compose mounts that directory read only at
+    `/run/typed`, and `.env` and `docker compose config` name the path inside
+    the container, never the bytes. It is not an environment value, it is not
+    printed and it is not logged. A re-run with nothing set changes nothing; a
+    run that sets a mode replaces the previous mode's lines rather than adding
+    to them. `jev` is left unpriced because no prices are wired anywhere else
+    here, and the installer's own ask-through-the-broker check is skipped in
+    `jev` mode because it would spend at TypeSafe on every run. typryx's planned
+    `TYPRYX_TRAINING_DIR` is not passed through: it needs a new typryx release
+    and this file pins v0.2.0.
+    *(gate: `scripts/typed-data-mode.sh`, which lifts the `# typed-mode:` block
+    out of install.sh and runs it in a scratch directory for each case, reads
+    `docker compose config` for the default, stub, jev and own-model, and
+    requires `--profile typed` only on a line `TYPED_PLANE` decides; it
+    refuses to report OK on no block, no profile line, or no Docker; teeth in
+    `scripts/gates-have-teeth.sh`. Not covered: a real `install.sh` run on
+    Debian in any typed mode, and the interactive prompt, which needs a
+    terminal and is read, not run.)*
 
 ## Decisions that have no gate yet
 

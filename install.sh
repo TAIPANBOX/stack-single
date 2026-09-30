@@ -35,16 +35,30 @@
 #
 #   WITH_BROWSER=1 ./install.sh           # also builds stack/scopyx-browser:dev
 #   WITH_RECORD=1 ./install.sh            # also builds stack/trailryx:dev
-#   WITH_TYPED=1 ./install.sh             # pulls AND starts the typed plane
+#   WITH_TYPED=1 ./install.sh             # pulls AND starts the typed plane (stub backend)
+#   TYPED_MODE=jev TYPED_JEV_KEY_FILE=/path/to/key ./install.sh
+#   TYPED_MODE=own-model TYPED_MODEL_URL=http://host.docker.internal:11434/v1 \
+#     TYPED_MODEL_NAME=qwen2.5:7b ./install.sh
 #   WITH_DELEGATION=1 ./install.sh        # pulls AND starts vouchryx
 #
 # The typed-answer plane (typryx) answers a typed question from one of the
-# three templates baked into its image, with a probability for every option,
-# on a free, deterministic backend that makes no outbound call. An operator
-# who wants a real model instead sets TYPRYX_BACKEND=openai-logprobs plus
-# TYPRYX_OPENAI_URL and TYPRYX_OPENAI_MODEL (optionally TYPRYX_OPENAI_KEY_FILE)
-# in .env; a hosted endpoint there is metered, and `jev` is external and
-# metered. Neither is the default this launcher ships.
+# templates baked into its image, with a probability for every option. The
+# operator chooses where the answers come from, TYPED_MODE, and what leaves
+# the box depends on it (section 0b below, and README, "Typed answers: choose
+# where your data goes"):
+#
+#   TYPED_MODE=jev        the named fields of each question go to TypeSafe's
+#                         hosted API; needs TYPED_JEV_KEY_FILE, a PATH to a
+#                         file holding the key (metered, and never the default)
+#   TYPED_MODE=own-model  a model server you run (Ollama, vLLM); needs
+#                         TYPED_MODEL_URL (ending in /v1) and TYPED_MODEL_NAME,
+#                         optionally TYPED_MODEL_KEY_FILE; nothing leaves your
+#                         own hardware
+#   TYPED_MODE=off        typryx is not installed (the default)
+#
+# WITH_TYPED=1 with no TYPED_MODE is unchanged: typryx on its free, deterministic
+# stub backend, which makes no outbound call. With a terminal and nothing set,
+# the installer asks. Without one, the choice is the environment's alone.
 #
 # WITH_TYPED=1 also brings up tokenfuse's MCP broker in front of it
 # (tokenfuse-mcp-broker, same pinned image as the gateway, unchanged code,
@@ -134,6 +148,237 @@ case "${ID:-}${ID_LIKE:-}" in
   *debian*|*ubuntu*) ;;
   *) die "this expects Debian or Ubuntu; found ${PRETTY_NAME:-unknown}." ;;
 esac
+
+# ---- 0b. typed answers: where does the data go? ------------------------------
+# @decided 2026-09-30: an operator chooses where typed answers come from, one
+# of three, and the choice is made and checked HERE, before a package is
+# installed or a file is written (invariant 6, fail before doing half the job):
+#
+#   TYPED_MODE=jev        the named fields of each question go to TypeSafe's
+#                         hosted Jev API. Needs TYPED_JEV_KEY_FILE, the PATH of
+#                         a file holding the key (never the key itself).
+#   TYPED_MODE=own-model  a model server the operator runs (Ollama, vLLM).
+#                         Needs TYPED_MODEL_URL (ending in /v1) and
+#                         TYPED_MODEL_NAME; TYPED_MODEL_KEY_FILE is optional.
+#   TYPED_MODE=off        typryx is not installed. The default.
+#
+# WITH_TYPED=1 with no TYPED_MODE is exactly what it was before this existed:
+# typryx on its stub backend, which makes no outbound call.
+#
+# A key is only ever a FILE. It is copied into ./typed (0400, owned by the uid
+# typryx runs as), mounted read only, named in .env by its path inside the
+# container, and never expanded into a print call, an environment value or a
+# log line. (gate: scripts/typed-data-mode.sh lifts this block out and runs it.)
+#
+# The block is functions only, so the gate can run it on its own; the calls are
+# below: typed_resolve now, typed_apply once .env exists (section 3).
+# typed-mode: begin
+TYPED_PLANE=off        # off | stub | jev | own-model, what this run installs
+TYPED_EXPLICIT=0       # 1 when this run's environment chose or changed the mode
+TYPED_SAVED_MODE=""    # what .env already holds for TYPED_MODE, if anything
+TYPED_URL=""
+TYPED_NAME=""
+TYPED_TIMEOUT=""
+
+# The variables compose's typryx service reads that this block owns. Dropped as
+# a set when the mode changes, so a switch never leaves the old mode's lines
+# behind to be read by the new one.
+TYPED_OWNED=(TYPRYX_BACKEND TYPRYX_JEV_KEY_FILE TYPRYX_OPENAI_URL TYPRYX_OPENAI_MODEL TYPRYX_OPENAI_KEY_FILE TYPRYX_TIMEOUT_MS)
+
+typed_env_get() { # NAME: what .env holds for NAME, single quotes removed
+  local v
+  [ -f "$STACK_DIR/.env" ] || return 0
+  v="$(sed -n "/^$1=/{s///p;q;}" "$STACK_DIR/.env")"
+  v="${v#\'}"
+  v="${v%\'}"
+  printf '%s' "$v"
+}
+
+# A readable regular file with something other than whitespace in it. Prints
+# nothing: what is in the file is the one thing this block never shows.
+typed_file_ok() {
+  [ -n "$1" ] && [ -f "$1" ] && [ -r "$1" ] && LC_ALL=C grep -q '[^[:space:]]' "$1"
+}
+
+typed_url_ok() {
+  local re='^https?://[^[:space:]/?#@]+(/[^[:space:]?#@]*)?/v1$'
+  [[ "$1" =~ $re ]]
+}
+
+typed_set_env() { # NAME VALUE: replace or add NAME in .env, single-quoted
+  local tmp val
+  val="$(printf '%s' "$2" | sed "s/'/'\\\\''/g")"
+  tmp="$(mktemp)" || die "could not make a temporary file to update .env"
+  { grep -v "^$1=" "$STACK_DIR/.env" || true; } >"$tmp"
+  printf "%s='%s'\n" "$1" "$val" >>"$tmp"
+  cat "$tmp" >"$STACK_DIR/.env" || die "could not update $STACK_DIR/.env"
+  rm -f "$tmp"
+}
+
+typed_forget_env() { # NAME...: drop these lines from .env
+  local tmp pat
+  pat="^($(IFS='|'; printf '%s' "$*"))="
+  tmp="$(mktemp)" || die "could not make a temporary file to update .env"
+  { grep -Ev "$pat" "$STACK_DIR/.env" || true; } >"$tmp"
+  cat "$tmp" >"$STACK_DIR/.env" || die "could not update $STACK_DIR/.env"
+  rm -f "$tmp"
+}
+
+# SRC DST: a copy of a key file the container can read and nothing else can
+# change. A copy rather than a mount of the operator's own file, because a bind
+# mount keeps host ownership and a key the operator keeps 0600 for themselves
+# is unreadable by uid 65532.
+typed_install_key() {
+  local dir="$STACK_DIR/typed"
+  mkdir -p "$dir" || die "could not create $dir"
+  chmod 0755 "$dir" || die "could not set the mode of $dir"
+  ( umask 077; cat "$1" >"$dir/$2.tmp" ) || die "could not copy the key file into $dir"
+  chown 65532:65532 "$dir/$2.tmp" || die "could not hand the key file to the uid typryx runs as"
+  chmod 0400 "$dir/$2.tmp" || die "could not set the mode of the key file"
+  mv -f "$dir/$2.tmp" "$dir/$2" || die "could not put the key file in place"
+  note "key file installed at $dir/$2 (read only; its contents are never shown)"
+}
+
+# Decide what this run installs, and refuse, naming what is missing, before
+# anything has been touched. Sets TYPED_PLANE.
+typed_resolve() {
+  local want="${TYPED_MODE:-}" mode
+
+  TYPED_SAVED_MODE="$(typed_env_get TYPED_MODE)"
+  case "$TYPED_SAVED_MODE" in
+    ""|jev|own-model|off) ;;
+    *) die ".env holds an unknown TYPED_MODE; it must be jev, own-model or off. Nothing was changed." ;;
+  esac
+  case "$want" in
+    ""|jev|own-model|off) ;;
+    *) die "TYPED_MODE must be jev, own-model or off. Nothing was installed." ;;
+  esac
+
+  TYPED_EXPLICIT=0
+  if [ -n "$want" ] || [ -n "${TYPED_JEV_KEY_FILE:-}${TYPED_MODEL_URL:-}${TYPED_MODEL_NAME:-}${TYPED_MODEL_KEY_FILE:-}${TYPED_MODEL_TIMEOUT_MS:-}" ]; then
+    TYPED_EXPLICIT=1
+  fi
+
+  # The order: this run's TYPED_MODE, then a jev or own-model choice an earlier
+  # run saved, then WITH_TYPED=1 (the stub), then off. A saved `off` is the
+  # weakest of these on purpose: an explicit WITH_TYPED=1 is a newer, louder
+  # answer than "not asked for yet".
+  if [ -n "$want" ]; then
+    mode="$want"
+  elif [ "$TYPED_SAVED_MODE" = jev ] || [ "$TYPED_SAVED_MODE" = own-model ]; then
+    mode="$TYPED_SAVED_MODE"
+  elif [ -n "${WITH_TYPED:-}" ]; then
+    mode=stub
+  else
+    mode=off
+  fi
+  if [ "$TYPED_EXPLICIT" = 1 ] && [ -z "$want" ] && { [ "$mode" = off ] || [ "$mode" = stub ]; }; then
+    die "a TYPED_* setting was given without TYPED_MODE, so it would be ignored. Set TYPED_MODE=jev or TYPED_MODE=own-model with it. Nothing was installed."
+  fi
+
+  case "$mode" in
+    off)
+      if [ "$want" = off ] && [ -n "${WITH_TYPED:-}" ]; then
+        note "TYPED_MODE=off: typryx is not installed, and WITH_TYPED=1 does not override it"
+      fi
+      ;;
+    stub)
+      note "typed answers: WITH_TYPED=1 with no TYPED_MODE, so typryx runs on its stub backend (no outbound call), as before TYPED_MODE existed"
+      ;;
+    jev)
+      if [ -n "${TYPED_JEV_KEY_FILE:-}" ]; then
+        typed_file_ok "$TYPED_JEV_KEY_FILE" \
+          || die "TYPED_MODE=jev: TYPED_JEV_KEY_FILE does not name a readable, non-empty file. It must be the PATH of a file holding your Jev key, never the key itself. Nothing was installed."
+      elif typed_file_ok "$STACK_DIR/typed/jev-key"; then
+        note "typed answers (jev): using the key file an earlier run installed in $STACK_DIR/typed"
+      else
+        die "TYPED_MODE=jev needs TYPED_JEV_KEY_FILE=/path/to/a/file/holding/your/Jev/key (a file, not the key itself). Nothing was installed."
+      fi
+      ;;
+    own-model)
+      TYPED_URL="${TYPED_MODEL_URL:-}"
+      [ -n "$TYPED_URL" ] || TYPED_URL="$(typed_env_get TYPRYX_OPENAI_URL)"
+      TYPED_NAME="${TYPED_MODEL_NAME:-}"
+      [ -n "$TYPED_NAME" ] || TYPED_NAME="$(typed_env_get TYPRYX_OPENAI_MODEL)"
+      [ -n "$TYPED_URL" ] \
+        || die "TYPED_MODE=own-model needs TYPED_MODEL_URL, the base URL of an OpenAI-compatible server ending in /v1 (http://host.docker.internal:11434/v1 for an Ollama on this box). Nothing was installed."
+      typed_url_ok "$TYPED_URL" \
+        || die "TYPED_MODEL_URL must be an http or https URL with a host, no credentials, and ending in /v1 (an OpenAI-compatible base URL). Nothing was installed."
+      [ -n "$TYPED_NAME" ] \
+        || die "TYPED_MODE=own-model needs TYPED_MODEL_NAME, the model the server should run (qwen2.5:7b for an Ollama). Nothing was installed."
+      case "$TYPED_NAME" in
+        *[[:space:]]*) die "TYPED_MODEL_NAME must not contain whitespace. Nothing was installed." ;;
+      esac
+      if [ -n "${TYPED_MODEL_KEY_FILE:-}" ]; then
+        typed_file_ok "$TYPED_MODEL_KEY_FILE" \
+          || die "TYPED_MODEL_KEY_FILE does not name a readable, non-empty file. It must be the PATH of a file holding the server's key, never the key itself. Nothing was installed."
+      fi
+      # A model on a CPU answers in about two seconds (measured p50 2130 ms for
+      # qwen2.5:7b on 8 vCPUs) and typryx's own default bound is 2000 ms, so
+      # left alone most answers would be refused as timed out. Kept if an
+      # earlier run or the operator already set one.
+      TYPED_TIMEOUT="${TYPED_MODEL_TIMEOUT_MS:-}"
+      [ -n "$TYPED_TIMEOUT" ] || TYPED_TIMEOUT="$(typed_env_get TYPRYX_TIMEOUT_MS)"
+      [ -n "$TYPED_TIMEOUT" ] || TYPED_TIMEOUT=30000
+      case "$TYPED_TIMEOUT" in
+        *[!0-9]*) die "TYPED_MODEL_TIMEOUT_MS must be a whole number of milliseconds. Nothing was installed." ;;
+      esac
+      ;;
+  esac
+  if [ "$mode" != jev ] && [ -n "${TYPED_JEV_KEY_FILE:-}" ]; then
+    note "TYPED_JEV_KEY_FILE is ignored: TYPED_MODE is not jev"
+  fi
+  if [ "$mode" != own-model ] && [ -n "${TYPED_MODEL_URL:-}${TYPED_MODEL_NAME:-}${TYPED_MODEL_KEY_FILE:-}" ]; then
+    note "TYPED_MODEL_* is ignored: TYPED_MODE is not own-model"
+  fi
+  TYPED_PLANE="$mode"
+}
+
+# Write the decision where compose reads it. Called once .env exists. Touches
+# nothing when this run chose nothing: a re-run never changes a box (invariant 2).
+typed_apply() {
+  case "$TYPED_PLANE" in
+    off)
+      [ "$TYPED_EXPLICIT" = 0 ] || typed_set_env TYPED_MODE off
+      ;;
+    stub)
+      # A box whose mode this block has managed goes back to compose's own
+      # default, the stub. A box it never managed keeps what its operator
+      # wrote in .env, which is what WITH_TYPED=1 has always done.
+      [ -z "$TYPED_SAVED_MODE" ] || typed_forget_env "${TYPED_OWNED[@]}"
+      mkdir -p "$STACK_DIR/typed" || die "could not create $STACK_DIR/typed"
+      ;;
+    jev)
+      mkdir -p "$STACK_DIR/typed" || die "could not create $STACK_DIR/typed"
+      if [ "$TYPED_EXPLICIT" = 1 ]; then
+        typed_forget_env "${TYPED_OWNED[@]}"
+        typed_set_env TYPED_MODE jev
+        typed_set_env TYPRYX_BACKEND jev
+        typed_set_env TYPRYX_JEV_KEY_FILE /run/typed/jev-key
+        [ -z "${TYPED_JEV_KEY_FILE:-}" ] || typed_install_key "$TYPED_JEV_KEY_FILE" jev-key
+        note "typed answers: jev. The named fields of each question leave this box for TypeSafe's API"
+      fi
+      ;;
+    own-model)
+      mkdir -p "$STACK_DIR/typed" || die "could not create $STACK_DIR/typed"
+      if [ "$TYPED_EXPLICIT" = 1 ]; then
+        typed_forget_env "${TYPED_OWNED[@]}"
+        typed_set_env TYPED_MODE own-model
+        typed_set_env TYPRYX_BACKEND openai-logprobs
+        typed_set_env TYPRYX_OPENAI_URL "$TYPED_URL"
+        typed_set_env TYPRYX_OPENAI_MODEL "$TYPED_NAME"
+        [ -z "$TYPED_TIMEOUT" ] || typed_set_env TYPRYX_TIMEOUT_MS "$TYPED_TIMEOUT"
+        if [ -n "${TYPED_MODEL_KEY_FILE:-}" ]; then
+          typed_install_key "$TYPED_MODEL_KEY_FILE" model-key
+          typed_set_env TYPRYX_OPENAI_KEY_FILE /run/typed/model-key
+        fi
+        note "typed answers: own-model. Questions go to $TYPED_URL and nowhere else"
+      fi
+      ;;
+  esac
+}
+# typed-mode: end
+typed_resolve
 [ "$(uname -m)" = "x86_64" ] || note "architecture $(uname -m): the images build from source, so this should work, but it is untested off x86_64."
 
 say "installing docker and git"
@@ -264,6 +509,89 @@ TXT
 else
   note "no terminal to ask on: no notifications. Set ALERT_TO and SMTP_HOST in the"
   note "environment and re-run, or edit .env afterwards, to add them."
+fi
+
+# ---- 1c. typed answers, asked BEFORE anything long -----------------------------
+# Asked only when nothing has answered it: no TYPED_MODE or TYPED_* in the
+# environment, no WITH_TYPED=1 (that is the stub, unchanged, and is not
+# re-asked), and .env holds no TYPED_MODE from an earlier run. Blank is a real
+# answer, off, and it is written down so the next run does not ask again
+# (invariant 2). With no terminal it asks nothing, and the choice is the
+# environment's alone; see README, "Typed answers: choose where your data goes".
+if [ "$TYPED_PLANE" = off ] && [ "$TYPED_EXPLICIT" = 0 ] && [ -z "$TYPED_SAVED_MODE" ] \
+   && [ -z "${WITH_TYPED:-}" ]; then
+  if { exec 4<>/dev/tty; } 2>/dev/null; then
+    cat >&4 <<'TXT'
+
+   Typed answers. typryx answers a typed question (a choice, a score, a yes or
+   no) with a probability, so an agent can be checked against something other
+   than its own say-so. Where should the answers come from?
+
+     jev        a hosted service, TypeSafe's Jev. The fields each question names
+                (and its instructions) leave this box for api.typesafe.ai. Metered.
+     own-model  a model server you run, Ollama or vLLM. Questions go to that
+                server and nowhere else: nothing leaves your own hardware.
+     off        typryx is not installed. Nothing leaves. This is the default.
+
+TXT
+    tans=""
+    while [ -z "$tans" ]; do
+      printf '   Typed answers: jev / own-model / off [off]: ' >&4
+      IFS= read -r ans <&4 || ans=""
+      ans="$(printf '%s' "$ans" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+      case "$ans" in
+        ""|off) tans=off ;;
+        jev|own-model) tans="$ans" ;;
+        *) printf '   choose jev, own-model or off (or press enter for off).\n' >&4 ;;
+      esac
+    done
+    if [ "$tans" = jev ]; then
+      tpath=""
+      while [ -z "$tpath" ]; do
+        printf '   path of a file holding your Jev key (blank = off instead): ' >&4
+        IFS= read -r ans <&4 || ans=""
+        ans="$(printf '%s' "$ans" | tr -d '[:space:]')"
+        if [ -z "$ans" ]; then tans=off; break; fi
+        if typed_file_ok "$ans"; then tpath="$ans"; else printf '   that is not a readable, non-empty file. It has to be the path of a file, not the key itself.\n' >&4; fi
+      done
+      [ "$tans" != jev ] || TYPED_JEV_KEY_FILE="$tpath"
+    elif [ "$tans" = own-model ]; then
+      turl=""
+      while [ -z "$turl" ]; do
+        printf '   server URL ending in /v1, e.g. http://host.docker.internal:11434/v1 (blank = off instead): ' >&4
+        IFS= read -r ans <&4 || ans=""
+        ans="$(printf '%s' "$ans" | tr -d '[:space:]')"
+        if [ -z "$ans" ]; then tans=off; break; fi
+        if typed_url_ok "$ans"; then turl="$ans"; else printf '   needs an http or https URL, no credentials, ending in /v1.\n' >&4; fi
+      done
+      if [ "$tans" = own-model ]; then
+        tname=""
+        while [ -z "$tname" ]; do
+          printf '   model name, e.g. qwen2.5:7b (blank = off instead): ' >&4
+          IFS= read -r ans <&4 || ans=""
+          ans="$(printf '%s' "$ans" | tr -d '[:space:]')"
+          if [ -z "$ans" ]; then tans=off; break; fi
+          tname="$ans"
+        done
+      fi
+      if [ "$tans" = own-model ]; then
+        printf '   path of a file holding the server key (blank = the server needs none): ' >&4
+        IFS= read -r ans <&4 || ans=""
+        ans="$(printf '%s' "$ans" | tr -d '[:space:]')"
+        if [ -n "$ans" ]; then
+          if typed_file_ok "$ans"; then TYPED_MODEL_KEY_FILE="$ans"; else printf '   not a readable, non-empty file, so no key will be used.\n' >&4; fi
+        fi
+        TYPED_MODEL_URL="$turl"
+        TYPED_MODEL_NAME="$tname"
+      fi
+    fi
+    exec 4>&-
+    TYPED_MODE="$tans"
+    typed_resolve
+  else
+    note "no terminal to ask on: typed answers stay off. Set TYPED_MODE=jev or TYPED_MODE=own-model"
+    note "in the environment and re-run to choose where they come from (README has the variables)."
+  fi
 fi
 
 # ---- 2. images ---------------------------------------------------------------
@@ -590,6 +918,10 @@ add_env_default TOKENFUSE_MCP_SECRETS "typryx_key=$TYPRYX_KEY_BARE"
 # line ran `ask_freeform` and `list_questions` as commands and stopped every
 # install at `. ./.env` (v1.1.9 to v1.1.12, measured 2026-09-27 on Debian 13).
 add_env_default TOKENFUSE_MCP_SECRET_SCOPES "$(sq_ 'typryx_key=tools:ask|ask_freeform|list_questions')"
+# Where typed answers come from (section 0b): jev, own-model or off, written
+# into .env only when this run chose or changed it, and the key file, if any,
+# copied into ./typed. Refusals were made before anything was touched.
+typed_apply
 
 # The delegation plane's own door (profile delegation), handled like every
 # other opt-in plane's key above: generated whether or not WITH_DELEGATION is
@@ -798,7 +1130,7 @@ if [ -z "$BUILD_FROM_SOURCE" ]; then
   [ -z "${WITH_BROWSER:-}" ] || profiles+=(--profile egress-browser)
   [ -z "${WITH_RECORD:-}" ]  || profiles+=(--profile record)
   [ -z "${WITH_EGRESS:-}" ]  || profiles+=(--profile egress)
-  [ -z "${WITH_TYPED:-}" ]   || profiles+=(--profile typed)
+  [ "$TYPED_PLANE" = off ]   || profiles+=(--profile typed)
   [ -z "${WITH_DELEGATION:-}" ] || profiles+=(--profile delegation)
   pulled=0
   while read -r img; do
@@ -928,7 +1260,7 @@ UP_PROFILES=()
 # `egress` and `record` do. Section 8 below verifies the broker answers and
 # refuses a caller with no key, and a check that verifies a service nothing
 # started would be verifying nothing.
-[ -z "${WITH_TYPED:-}" ]      || UP_PROFILES+=(--profile typed)
+[ "$TYPED_PLANE" = off ]      || UP_PROFILES+=(--profile typed)
 [ -z "${WITH_DELEGATION:-}" ] || UP_PROFILES+=(--profile delegation)
 
 # Delegation needs a head start, the same reason `stack-up` starts vouchryx
@@ -1294,8 +1626,21 @@ if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx tokenfuse-mcp-broker; th
         --post-data='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ask","arguments":{"template":"eval.outcome_met","state":{"task":"2+2","final_answer":"4"}},"_meta":{"typryx/key":"{{secret:typryx_key}}"}}}' \
         "$1" 2>/dev/null | grep -q '"isError":false'
   }
-  check "typed plane: an ask through the broker is answered" \
-        "mcp_ask_answered http://tokenfuse-mcp-broker:4200/mcp '$MCP_BROKER_KEY'"
+  if [ "$TYPED_PLANE" = jev ]; then
+    # Not asked on purpose: this ask would go to TypeSafe's API, on every run
+    # of this installer, spending on the operator's account and sending them a
+    # question they did not write. typryx refuses to start on a missing or
+    # empty key file (exit 2), so "typryx is running" below is what a wrong
+    # key PATH looks like; a wrong key VALUE shows on the first real ask.
+    note "jev: the ask check is skipped, it would send a question to TypeSafe and spend on every run"
+  else
+    check "typed plane: an ask through the broker is answered" \
+          "mcp_ask_answered http://tokenfuse-mcp-broker:4200/mcp '$MCP_BROKER_KEY'"
+  fi
+  if [ "$TYPED_PLANE" = jev ] || [ "$TYPED_PLANE" = own-model ]; then
+    check_log "typed plane: typryx is running on its $TYPED_PLANE backend" \
+          "$DC ps --status running --services | grep -qx typryx"
+  fi
   # Must fail to pass, like the admin-key checks above: a call this broker
   # would forward with nobody's key on it is the same open door those checks
   # exist to catch on a different plane.
@@ -1306,6 +1651,11 @@ if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx tokenfuse-mcp-broker; th
   note "  with the header X-Fuse-Mcp-Upstream: typryx and its own client key in x-fuse-key"
   note "  a tools/call then carries the typed-plane credential as"
   note "  \"_meta\":{\"typryx/key\":\"{{secret:typryx_key}}\"}, never a real key value"
+  case "$TYPED_PLANE" in
+    stub)      note "answers come from the stub backend: nothing leaves this box" ;;
+    jev)       note "answers come from Jev: the fields each question names leave this box for api.typesafe.ai" ;;
+    own-model) note "answers come from your own model at $TYPED_URL: nothing else leaves this box" ;;
+  esac
 fi
 
 # The delegation plane's own checks, only when WITH_DELEGATION actually

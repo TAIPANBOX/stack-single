@@ -126,6 +126,10 @@
         "vouchryx_is_off_by_default": {
           "value": "profile delegation, WITH_DELEGATION=1 ./install.sh",
           "why": "@decided 2026-09-27: the launchers offer vouchryx as an opt-in delegation plane, off by default, so a gateway can verify a proved delegation chain instead of trusting a claimed one. Enabling it requires a trusted upstream issuer (VOUCHRYX_TRUSTED_ISSUERS) or an explicit, clearly-labelled demo issuer (WITH_DELEGATION_DEMO_ISSUER=1, never a production posture); install.sh refuses before anything starts if neither is given. Never published to the host: the gateway reaches it over the compose network only, and polls its revocations from there."
+        },
+        "typed_answers_come_from_the_operator_s_choice": {
+          "value": "TYPED_MODE=jev|own-model|off (default off); WITH_TYPED=1 alone is the stub backend",
+          "why": "@decided 2026-09-30: an operator chooses where typed answers come from. jev sends the fields each question names to TypeSafe's API and needs TYPED_JEV_KEY_FILE, the path of a file holding the key; own-model asks a server the operator runs and needs TYPED_MODEL_URL (ending in /v1) and TYPED_MODEL_NAME, optionally TYPED_MODEL_KEY_FILE; off installs no typryx. A key is only ever a file, copied into ./typed and mounted read only, never an environment value. jev is unpriced because no prices are wired here. Checked by scripts/typed-data-mode.sh, a statement about this repository's text and a scratch run, not about a live install."
         }
       }
     }

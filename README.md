@@ -389,13 +389,12 @@ option, and scores those probabilities against truths recorded later. `install.s
 on is the flag above and nothing else; without the credential it refuses to
 start, the same stance scopyx takes.
 
-**The default backend is `stub`**: free, deterministic, no outbound call.
-The image also carries `openai-logprobs`, which asks any OpenAI-compatible
-model server for its token probabilities and needs `TYPRYX_OPENAI_URL` and
-`TYPRYX_OPENAI_MODEL` (optionally `TYPRYX_OPENAI_KEY_FILE`) in `.env`, and
-`jev`, an external service. A hosted endpoint costs money and either one
-leaves this box; neither is what this launcher ships by default, so set
-`TYPRYX_BACKEND` yourself to use one.
+**`WITH_TYPED=1` on its own gives the `stub` backend**: free, deterministic,
+no outbound call, exactly as before `TYPED_MODE` existed. The image also
+carries `openai-logprobs`, which asks any OpenAI-compatible model server for
+its token probabilities, and `jev`, a hosted service. Choosing one of those is
+a decision about where your data goes, so it has its own section below:
+[Typed answers: choose where your data goes](#typed-answers-choose-where-your-data-goes).
 
 `@decided 2026-09-26`: the journal joins the shared `events` volume now that
 typryx's four event types (`typed_answer`, `typed_unanswered`,
@@ -438,6 +437,102 @@ refused `401`, and neither key appeared in either container's log. The same
 call against typryx v0.1.0 is refused `401`: reading the key from `_meta` is
 typryx#6, first released in v0.2.0. `install.sh`'s own check `an ask through
 the broker is answered` repeats this on every install.
+
+## Typed answers: choose where your data goes
+
+`@decided 2026-09-30`: typed answers come from exactly one of three places,
+and you pick which. The installer never picks for you, and a question's data
+only ever goes where the mode you chose says.
+
+| `TYPED_MODE` | Where the answer comes from | What leaves this box | What you must give it |
+|---|---|---|---|
+| `jev` | TypeSafe's hosted Jev API | The fields each question's template names, and the question's instructions, go to `api.typesafe.ai`. Nothing else in the state does. Metered by TypeSafe. | `TYPED_JEV_KEY_FILE`: the **path** of a file holding your Jev key |
+| `own-model` | A model server you run, Ollama or vLLM | Nothing leaves your own hardware. Questions go to the server you name and to no other address. | `TYPED_MODEL_URL` (an OpenAI-compatible base URL ending in `/v1`) and `TYPED_MODEL_NAME`; optionally `TYPED_MODEL_KEY_FILE` |
+| `off` | Nobody | Nothing. typryx is not installed and the stack is what it was without it. **This is the default.** | Nothing |
+
+`WITH_TYPED=1` with no `TYPED_MODE` keeps what it has always done: typryx on
+its stub backend, which makes no outbound call. That is the one path that does
+not ask you to choose, and it exists so nobody's existing install changes.
+
+```bash
+# your own model, here an Ollama on this box (nothing leaves the machine)
+TYPED_MODE=own-model TYPED_MODEL_URL=http://host.docker.internal:11434/v1 \
+  TYPED_MODEL_NAME=qwen2.5:7b ./install.sh
+
+# Jev, with the key in a file you keep yourself
+TYPED_MODE=jev TYPED_JEV_KEY_FILE=/root/jev.key ./install.sh
+
+# explicitly none
+TYPED_MODE=off ./install.sh
+```
+
+Run on a terminal with none of these set, the installer asks the same question
+(`jev / own-model / off`, one line on what leaves the box for each) and records
+the answer, so the next run does not ask again. With no terminal it asks
+nothing: the environment is the only way to choose. An existing box keeps its
+mode on a re-run; to change it, run the installer again with the new
+`TYPED_MODE` (and its variables), which replaces the old mode's settings rather
+than adding to them.
+
+**It refuses before it touches anything.** `jev` with no key file, a missing or
+empty one, or a key pasted where the path goes; `own-model` with no URL, a URL
+that does not end in `/v1`, or no model name: each stops the installer with a
+message naming what is missing, before a package is installed or a file is
+written. A refusal never echoes what you typed, so a key given in the wrong
+place is not printed.
+
+**A key is only ever a file.** The installer copies your key file into
+`./typed` (mode 0400, owned by the user typryx runs as), and compose mounts that
+directory read only at `/run/typed`. `.env` and `docker compose config` name the
+path inside the container and never carry the key: it is not an environment
+value, it is not printed, and it is not logged. To rotate a key, run the
+installer again with the new file.
+
+`own-model` also sets typryx's per-question time limit to 30 seconds
+(`TYPED_MODEL_TIMEOUT_MS` to change it). typryx's own default is 2 seconds, and a
+7B model on a CPU answers in about that long, so left at the default most
+answers would time out. On Linux the installer also makes `host.docker.internal`
+resolve inside the typryx container, so the URL above reaches a server on this
+same box.
+
+`jev` is left unpriced here: this launcher wires no prices anywhere else, so
+typryx's cost reporting for Jev stays at zero until you set
+`TYPRYX_JEV_PRICE_PER_MTOK_INPUT` in `.env` yourself (and add it to the
+`typryx` service's environment in `compose.yaml`; it is not passed through
+today). The installer's own end-of-run check skips the ask through the broker in
+`jev` mode, because that ask would go to TypeSafe, and spend, on every run.
+
+### What the choice costs in accuracy
+
+`@measured` 2026-09-30, one frozen 434-question test (typryx-evalset), each
+mode asked the same questions:
+
+| | Accuracy | Calibration error (ECE) | Median answer time |
+|---|---|---|---|
+| `jev` | 87.1% | 0.042 | 229 ms |
+| `own-model`, qwen2.5:7b through `openai-logprobs`, on an 8-vCPU CPU machine | 70.0% | 0.273 | 2130 ms |
+
+For scale, a constant default answer with no typryx at all scored 25.1% on the
+same test. `off` is today's behaviour: no typryx, nothing asked, nothing
+measured. The own-model row is one small model on a CPU, an example and not a
+ceiling: a larger model, a GPU, or a model fitted to your own questions moves
+it, and nothing here measured those.
+
+### Your own model, on your own data
+
+`@decided 2026-09-30`: this stack does not fine-tune or ship models for you. A
+customer can fine-tune and calibrate a model of their own on their own data,
+and typryx gives them what they need for it: every answer, and the truth
+recorded for it later, goes into typryx's ledger, and `typryx calibration`
+reports, per template and per model, how far its stated confidence is from how
+often it was right. See [typryx's README](https://github.com/TAIPANBOX/typryx#calibration).
+Jev's answers are not training data: TypeSafe's terms forbid using Jev output
+to train another model, so what you fine-tune on is the truths your own people
+post, never what Jev said.
+
+**Planned, not shipped.** typryx will get an opt-in local training log
+(`TYPRYX_TRAINING_DIR`), off by default. It needs a new typryx release and this
+launcher pins v0.2.0, so nothing here passes it through yet.
 
 ## The appliance shape: a box at your premises, the agents in two clouds
 
