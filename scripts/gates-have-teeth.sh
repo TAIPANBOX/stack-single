@@ -505,6 +505,85 @@ run_case "delegation-key-reused-on-rerun: the signing key is minted on every run
 	"$(py 'edit("install.sh", "if [ ! -f delegation/signing.pem ]; then", "if true; then")')" \
 	"regenerated the signing key"
 
+# invariant 18: typed answers come from the place the operator chose. Each
+# case below breaks one thing a wrong default or a careless edit would break,
+# and the gate has to say which.
+run_case "typed-data-mode: jev stops refusing when it has no key file" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("install.sh", "die \"TYPED_MODE=jev needs TYPED_JEV_KEY_FILE=", "note \"TYPED_MODE=jev needs TYPED_JEV_KEY_FILE=")')" \
+	"jev with no key file: it was accepted"
+
+run_case "typed-data-mode: a missing or empty key file is believed" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("install.sh", "  [ -n \"$1\" ] && [ -f \"$1\" ] && [ -r \"$1\" ] && LC_ALL=C grep -q \x27[^[:space:]]\x27 \"$1\"", "  true")')" \
+	"it was accepted"
+
+run_case "typed-data-mode: a refusal echoes the key it was given" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("install.sh", "die \"TYPED_MODE=jev: TYPED_JEV_KEY_FILE does not name", "die \"TYPED_MODE=jev: TYPED_JEV_KEY_FILE=$TYPED_JEV_KEY_FILE does not name")')" \
+	"echoed the key it was given"
+
+run_case "typed-data-mode: installing the key prints it" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("install.sh", "note \"key file installed at $dir/$2 (read only; its contents are never shown)\"", "note \"key file installed at $dir/$2: $(cat \"$1\")\"")')" \
+	"bytes were printed"
+
+run_case "typed-data-mode: the key becomes an environment value in .env" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("install.sh", "        [ -z \"${TYPED_JEV_KEY_FILE:-}\" ] || typed_install_key \"$TYPED_JEV_KEY_FILE\" jev-key\n", "        [ -z \"${TYPED_JEV_KEY_FILE:-}\" ] || typed_install_key \"$TYPED_JEV_KEY_FILE\" jev-key\n        typed_set_env TYPRYX_JEV_KEY \"$(cat \"$TYPED_JEV_KEY_FILE\")\"\n")')" \
+	"bytes are in .env"
+
+run_case "typed-data-mode: own-model accepts a URL that is not /v1" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("install.sh", "  [[ \"$1\" =~ $re ]]", "  true")')" \
+	"a URL not ending in /v1: it was accepted"
+
+run_case "typed-data-mode: own-model stops requiring a model name" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("install.sh", "|| die \"TYPED_MODE=own-model needs TYPED_MODEL_NAME", "|| note \"TYPED_MODE=own-model needs TYPED_MODEL_NAME")')" \
+	"own-model with no model name: it was accepted"
+
+# The default. A box that set nothing must not acquire a third-party-facing
+# service because a default moved.
+run_case "typed-data-mode: nothing set installs typryx" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("install.sh", "  else\n    mode=off\n  fi", "  else\n    mode=stub\n  fi")')" \
+	"nothing set: the plane is"
+
+# Back-compat: WITH_TYPED=1 alone was the stub and stays it.
+run_case "typed-data-mode: WITH_TYPED=1 alone stops being the stub" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("install.sh", "    mode=stub\n  else", "    mode=off\n  else")')" \
+	"WITH_TYPED=1 alone: the plane is"
+
+run_case "typed-data-mode: the typed profile is brought up unconditionally" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("install.sh", "[ \"$TYPED_PLANE\" = off ]      || UP_PROFILES+=(--profile typed)", "UP_PROFILES+=(--profile typed)")')" \
+	"TYPED_PLANE does not decide"
+
+run_case "typed-data-mode: the key directory is mounted writable" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("compose.yaml", "      - ./typed:/run/typed:ro", "      - ./typed:/run/typed")')" \
+	"not a read-only bind"
+
+run_case "typed-data-mode: typryx leaves its profile and is in every install" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("compose.yaml", "    <<: *restart\n    profiles: [\"typed\"]\n    image: ${TYPRYX_IMAGE", "    <<: *restart\n    image: ${TYPRYX_IMAGE")')" \
+	"typryx is in the default set"
+
+# Invariant 2 for this block: a re-run that chose nothing must keep what the
+# first run chose. A saved mode that is not read back turns the plane off on
+# the next plain `./install.sh`, which looks like an upgrade that removed it.
+run_case "typed-data-mode: a re-run forgets the saved mode" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("install.sh", "  elif [ \"$TYPED_SAVED_MODE\" = jev ] || [ \"$TYPED_SAVED_MODE\" = own-model ]; then", "  elif false; then")')" \
+	"jev re-run with nothing set"
+
+run_case "typed-data-mode: switching mode leaves the old mode's lines" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("install.sh", "        typed_forget_env \"${TYPED_OWNED[@]}\"\n        typed_set_env TYPED_MODE jev", "        typed_set_env TYPED_MODE jev")')" \
+	"left the own-model lines"
+
 echo
 echo "=== and what they must NOT catch ==="
 
@@ -613,6 +692,11 @@ run_case "felyx-through-the-gateway: a comment about Felyx changes" pass \
 run_case "delegation-key-reused-on-rerun: the reused-message wording changes" pass \
 	'./scripts/delegation-key-reused-on-rerun.sh' \
 	"$(py 'edit("install.sh", "vouchryx: signing key already present, reused", "vouchryx: signing key present already, reusing it")')"
+
+# A comment inside the block changes nothing the gate is about.
+run_case "typed-data-mode: a comment inside the typed block is left alone" pass \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("install.sh", "# typed-mode: begin\n", "# typed-mode: begin\n# a comment that changes no behaviour\n")')"
 
 echo
 echo "=== and the one this estate learned the hard way ==="
@@ -728,6 +812,24 @@ run_case "delegation-key-reused-on-rerun: both anchors are gone" fail \
 	'./scripts/delegation-key-reused-on-rerun.sh' \
 	"$(py 'edit("install.sh", "add_env_default VOUCHRYX_REVOKE_KEYS \"$(gen 40)\"", "VOUCHRYX_REVOKE_KEYS_LINE_REMOVED=1")')" \
 	"measured NOTHING"
+
+run_case "typed-data-mode: the typed-mode block is gone" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("install.sh", "# typed-mode: begin\n", "# typed-mode: start\n")')" \
+	"measured nothing about the typed data mode"
+
+run_case "typed-data-mode: install.sh passes no typed profile at all" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 's = open("install.sh").read()
+assert "--profile typed" in s
+open("install.sh", "w").write(s.replace("--profile typed", "--profile other"))')" \
+	"measured nothing about how it is gated"
+
+run_case "typed-data-mode: no typryx service left to read" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("compose.yaml", "  typryx:\n    <<: *restart", "  typryz:\n    <<: *restart")
+edit("compose.yaml", "      typryx:\n        condition: service_started", "      typryz:\n        condition: service_started")')" \
+	"so this measured nothing"
 
 echo
 if [ -n "$(git status --porcelain)" ]; then

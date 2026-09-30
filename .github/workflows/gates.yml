@@ -56,6 +56,8 @@ jobs:
         run: ./scripts/env-sources-cleanly.sh
       - name: the delegation plane's keys are reused on a re-run
         run: ./scripts/delegation-key-reused-on-rerun.sh
+      - name: typed answers go where the operator chose, and a key is only a file
+        run: ./scripts/typed-data-mode.sh
 
       # Last, because it mutates tracked files and restores them. It needs a
       # clean tree and says so plainly, so it also reports any earlier step

@@ -45,6 +45,7 @@ step "the delegation plane's directories stay apart" "./scripts/delegation-dirs-
 step "Felyx reaches its model through the gateway" "./scripts/felyx-through-the-gateway.sh"
 step ".env sources cleanly" "./scripts/env-sources-cleanly.sh"
 step "the delegation plane's keys are reused on a re-run" "./scripts/delegation-key-reused-on-rerun.sh"
+step "typed answers go where the operator chose" "./scripts/typed-data-mode.sh"
 # Reaches the network (a tarball from the sibling repo), which is why it is
 # last: everything that can be judged offline has already spoken by here.
 step "every image has the files it copies" "./scripts/build-context-complete.sh"

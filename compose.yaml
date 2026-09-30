@@ -415,12 +415,19 @@ services:
   # with a probability for every option, and scores those probabilities
   # against truths recorded later.
   #
-  # TYPRYX_BACKEND is pinned to `stub` here: free, deterministic, no outbound
+  # TYPRYX_BACKEND defaults to `stub` here: free, deterministic, no outbound
   # call. The image's other two backends are `openai-logprobs` (any
   # OpenAI-compatible model server, local or hosted, a hosted one metered;
   # needs TYPRYX_OPENAI_URL, TYPRYX_OPENAI_MODEL and optionally
-  # TYPRYX_OPENAI_KEY_FILE) and `jev` (external, metered). Neither is a default this launcher ships; an operator who
-  # wants one sets TYPRYX_BACKEND and the matching variables in `.env`.
+  # TYPRYX_OPENAI_KEY_FILE) and `jev` (external, metered). Neither is a
+  # default this launcher ships. @decided 2026-09-30: the operator chooses the
+  # data mode, `TYPED_MODE=jev|own-model|off`, and install.sh writes the
+  # variables below into `.env` for the one chosen (CLAUDE.md invariant 18).
+  #
+  # A key is only ever a FILE. install.sh copies the operator's key file into
+  # ./typed (0400, owned by the uid typryx runs as) and this service mounts
+  # that directory read only at /run/typed, so the environment below names a
+  # path and never carries a key's bytes.
   #
   # It refuses to start without TYPRYX_KEYS, the same door scopyx has: a wide
   # bind with no credential is an unauthenticated typed-answer service, and
@@ -437,6 +444,16 @@ services:
     user: "65532:10001"
     environment:
       TYPRYX_BACKEND: ${TYPRYX_BACKEND:-stub}
+      # All empty unless TYPED_MODE put something in `.env`, and empty is what
+      # typryx reads as unset for each of them (`:-` for the reason below).
+      # Named here because compose passes a container ONLY what its
+      # `environment:` names: a `.env` line for one of these, absent here,
+      # never reached typryx.
+      TYPRYX_JEV_KEY_FILE: ${TYPRYX_JEV_KEY_FILE:-}
+      TYPRYX_OPENAI_URL: ${TYPRYX_OPENAI_URL:-}
+      TYPRYX_OPENAI_MODEL: ${TYPRYX_OPENAI_MODEL:-}
+      TYPRYX_OPENAI_KEY_FILE: ${TYPRYX_OPENAI_KEY_FILE:-}
+      TYPRYX_TIMEOUT_MS: ${TYPRYX_TIMEOUT_MS:-}
       # `:-` and NOT `:?`, for the same reason as scopyx's own key: compose
       # interpolates every service in this file, including one whose profile
       # is off, so a `:?` here would refuse the whole file on a box that never
@@ -479,6 +496,15 @@ services:
       - typryxdata:/var/lib/typryx
       # The shared bus, read-write, for the journal above.
       - events:/var/lib/stack/events
+      # The key files TYPED_MODE installed (jev-key, model-key): read only, a
+      # directory rather than a file so a box with no key has an empty mount
+      # instead of Docker inventing a directory where a file was expected.
+      - ./typed:/run/typed:ro
+    # `host.docker.internal` is defined by Docker Desktop and NOT by Docker
+    # Engine on Linux. own-model's usual server is an Ollama or vLLM on this
+    # same box, so without this line its documented URL does not resolve.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       init-volumes:
         condition: service_completed_successfully
