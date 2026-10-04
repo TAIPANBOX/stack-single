@@ -41,6 +41,7 @@
       "class": "launcher",
       "checked": {
         "installs_services": [
+          "agent-conform",
           "caddy",
           "console",
           "focus-export",
@@ -56,6 +57,7 @@
           "tokenfuse-gateway",
           "tokenfuse-mcp-broker",
           "typryx",
+          "typryx-wardryx-proxy",
           "verdryx-drift",
           "vouchryx",
           "wardryx",
@@ -76,7 +78,8 @@
           "manual",
           "record",
           "routines",
-          "typed"
+          "typed",
+          "typed-risk-signal"
         ],
         "builds_images": [
           "stack/caddy:dev",
@@ -91,19 +94,20 @@
           "stack/wg:dev"
         ],
         "pulls_images": [
+          "ghcr.io/taipanbox/agent-conform:v1.1.0",
           "ghcr.io/taipanbox/genaryx-console:v1.1.19",
-          "ghcr.io/taipanbox/heraldyx:v0.2.5",
-          "ghcr.io/taipanbox/idryx:v1.0.0",
+          "ghcr.io/taipanbox/heraldyx:v0.3.0",
+          "ghcr.io/taipanbox/idryx:v1.1.0",
           "ghcr.io/taipanbox/scopyx:v1.0.0",
           "ghcr.io/taipanbox/scopyx:v1.0.0-chromium",
           "ghcr.io/taipanbox/stack-caddy:v1.0.0",
           "ghcr.io/taipanbox/stack-wg:v1.0.0",
-          "ghcr.io/taipanbox/tokenfuse-control-plane:v1.4.1",
-          "ghcr.io/taipanbox/tokenfuse:v1.4.1",
+          "ghcr.io/taipanbox/tokenfuse-control-plane:v1.5.0",
+          "ghcr.io/taipanbox/tokenfuse:v1.5.0",
           "ghcr.io/taipanbox/trailryx-node:v1.0.0",
-          "ghcr.io/taipanbox/typryx:v0.3.0",
-          "ghcr.io/taipanbox/vouchryx:v0.1.0",
-          "ghcr.io/taipanbox/wardryx:v1.1.3"
+          "ghcr.io/taipanbox/typryx:v0.4.0",
+          "ghcr.io/taipanbox/vouchryx:v0.2.0",
+          "ghcr.io/taipanbox/wardryx:v1.2.0"
         ]
       },
       "declared": {
@@ -134,6 +138,14 @@
         "typed_training_log_is_opt_in": {
           "value": "TYPED_TRAINING=1 ./install.sh (default off); TYPRYX_TRAINING_DIR=/var/lib/typryx/training inside the typryxdata volume",
           "why": "@decided 2026-09-30: typryx keeps an opt-in local training log so a customer can fine-tune a model of their own on their own data. Off by default: nothing names TYPRYX_TRAINING_DIR and nothing is written. On, the directory sits in the typryxdata volume beside the ledger that holds the human truths, and `typryx export --training` (run with docker compose exec) writes only rows whose label is a human-posted truth, never a backend answer, so Jev output cannot become a training label. The data stays on the box. Needs typryx v0.3.0, which is what compose.yaml pins. Checked by scripts/typed-data-mode.sh, a statement about this repository's text and a scratch run, plus one live run on a Mac recorded in the pull request, not about a Debian install."
+        },
+        "typed_risk_signal_is_opt_in_and_mcp_path_only": {
+          "value": "TYPED_RISK_SIGNAL=1 ./install.sh with typed answers on (default off); profile typed-risk-signal",
+          "why": "@claude 2026-10-04, from the estate audit's launcher spec (its J2 design records as decided that a signal may hold a call and never deny it): typryx's wardryx-proxy puts a typed risk class (action.risk_class) on a tool call's policy decision so a hold_if_signal rule in wardryx can hold it for a person, never deny it. Off by default, refused when typed answers are off. Only the MCP broker's policy client (TOKENFUSE_WARDRYX_URL) is pointed at the proxy; the LLM gateway keeps asking wardryx directly, because a model call has no pending tool call to classify and the proxy's ask would add latency to a path with a 250 ms deadline. The proxy runs without a credential (the broker cannot send one) and is held by a network: the risk-signal network holds the proxy, the broker and wardryx, the proxy is on no other network and publishes nothing. No hold_if_signal policy is seeded. Checked by scripts/typed-risk-signal.sh, a statement about this repository's text and a scratch run, not about a live install."
+        },
+        "the_chain_verifier_is_on_by_default": {
+          "value": "agent-conform watch-dir -every 5m, no profile",
+          "why": "agent-stack-go#66: nothing on a box verified the hash chain of the shared bus until this. It reads every stream and appends chain_broken (high) to its own stream, agent-conform.ndjson, where heraldyx already reads. It runs as 10002:10002, outside the bus group, so the only bus file it can write is the one init-volumes gave it; its state is on its own volume. It is not an estate routine in the sense this file's schedules_routines means (it is a long-running service, like record-seal), so it is listed only in installs_services. Checked by scripts/chain-verifier-is-contained.sh."
         }
       }
     }

@@ -528,7 +528,7 @@ run_case "manifest-is-true: a routine arrives and the manifest does not claim it
 # is one character in one tag, which is exactly how it would arrive.
 run_case "manifest-is-true: a pulled tag moves in compose and not in the manifest" fail \
 	'./scripts/manifest-is-true.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v1.1.3", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v1.2.0", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
 	"an image it pulls"
 
 # invariant 15: the delegation plane's default is byte-for-byte what it was
@@ -636,7 +636,8 @@ run_case "typed-data-mode: switching mode leaves the old mode's lines" fail \
 	"$(py 'edit("install.sh", "        typed_forget_env \"${TYPED_OWNED[@]}\"\n        typed_set_env TYPED_MODE jev", "        typed_set_env TYPED_MODE jev")')" \
 	"left the own-model lines"
 
-# The training log and the pin (typryx v0.3.0). Each case plants the fault the
+# The training log and the pin (typryx; the log needs v0.3.0 or later, and the
+# risk-signal proxy v0.4.0, which is the pin now). Each case plants the fault the
 # matching check in scripts/typed-data-mode.sh exists for.
 run_case "typed-data-mode: the training log is on when nobody asked" fail \
 	'./scripts/typed-data-mode.sh' \
@@ -683,20 +684,337 @@ run_case "typed-data-mode: no volume is mounted where the training log lives" fa
 	"$(py 'edit("compose.yaml", "      - typryxdata:/var/lib/typryx\n      # The shared bus, read-write", "      - typryxdata:/var/lib/typryx-data\n      # The shared bus, read-write")')" \
 	"no volume holds"
 
-run_case "typed-data-mode: compose still pins the typryx that has no training log" fail \
+run_case "typed-data-mode: compose still pins a typryx older than the pin" fail \
 	'./scripts/typed-data-mode.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/typryx:v0.3.0}", "ghcr.io/taipanbox/typryx:v0.2.0}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/typryx:v0.4.0}", "ghcr.io/taipanbox/typryx:v0.2.0}")')" \
 	"compose.yaml pins typryx v0.2.0"
 
 run_case "typed-data-mode: components.json keeps the old typryx pin" fail \
 	'./scripts/typed-data-mode.sh' \
-	"$(py 'edit("components.json", "ghcr.io/taipanbox/typryx:v0.3.0", "ghcr.io/taipanbox/typryx:v0.2.0")')" \
+	"$(py 'edit("components.json", "ghcr.io/taipanbox/typryx:v0.4.0", "ghcr.io/taipanbox/typryx:v0.2.0")')" \
 	"components.json names typryx:v0.2.0"
 
 run_case "typed-data-mode: the README names a typryx tag compose does not pin" fail \
 	'./scripts/typed-data-mode.sh' \
-	"$(py 'edit("README.md", "this launcher pins typryx v0.3.0, the first", "this launcher pins ghcr.io/taipanbox/typryx:v0.2.0, the first")')" \
+	"$(py 'edit("README.md", "this launcher pins typryx v0.4.0, so it is there", "this launcher pins ghcr.io/taipanbox/typryx:v0.2.0, so it is there")')" \
 	"README.md names typryx:v0.2.0"
+
+# ---- run-budget-ceiling (invariant 20): tokenfuse 1.5.0's ceiling is OFF unless
+# every gateway sets it, and nothing on a box says so when it is not set.
+run_case "run-budget-ceiling: the gateway loses its ceiling" fail \
+	'./scripts/run-budget-ceiling.sh' \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_MAX_RUN_BUDGET_USD: ${RUN_BUDGET_CEILING_USD:-5.00}\n", "")')" \
+	"sets no TOKENFUSE_MAX_RUN_BUDGET_USD"
+
+run_case "run-budget-ceiling: the ceiling becomes a literal" fail \
+	'./scripts/run-budget-ceiling.sh' \
+	"$(py 'edit("compose.yaml", "TOKENFUSE_MAX_RUN_BUDGET_USD: ${RUN_BUDGET_CEILING_USD:-5.00}", "TOKENFUSE_MAX_RUN_BUDGET_USD: \"5.00\"")')" \
+	"A literal cannot be moved by the"
+
+run_case "run-budget-ceiling: the ceiling reads a variable the installer does not set" fail \
+	'./scripts/run-budget-ceiling.sh' \
+	"$(py 'edit("compose.yaml", "TOKENFUSE_MAX_RUN_BUDGET_USD: ${RUN_BUDGET_CEILING_USD:-5.00}", "TOKENFUSE_MAX_RUN_BUDGET_USD: ${BUDGET_CEILING:-5.00}")')" \
+	"A literal cannot be moved by the"
+
+run_case "run-budget-ceiling: the default ceiling drifts" fail \
+	'./scripts/run-budget-ceiling.sh' \
+	"$(py 'edit("compose.yaml", "${RUN_BUDGET_CEILING_USD:-5.00}", "${RUN_BUDGET_CEILING_USD:-50.00}")')" \
+	"defaults the ceiling to 50.00"
+
+# Zero is a valid-looking default that tokenfuse refuses to start on.
+run_case "run-budget-ceiling: the default ceiling is zero" fail \
+	'./scripts/run-budget-ceiling.sh' \
+	"$(py 'edit("compose.yaml", "${RUN_BUDGET_CEILING_USD:-5.00}", "${RUN_BUDGET_CEILING_USD:-0}")')" \
+	"defaults the ceiling to 0"
+
+run_case "run-budget-ceiling: the installer accepts zero" fail \
+	'./scripts/run-budget-ceiling.sh' \
+	"$(py 'edit("install.sh", " && [[ \"$1\" =~ [1-9] ]]\n", "\n")')" \
+	"was accepted, and tokenfuse would exit 2 on it"
+
+# No brace in the pattern: macOS bash 3.2 brace-expands a `{1,12}` inside
+# "$(py '...')", the pattern is then not found and the case reads BROKEN.
+run_case "run-budget-ceiling: the installer accepts an exponent" fail \
+	'./scripts/run-budget-ceiling.sh' \
+	"$(py 'edit("install.sh", "  [[ \"$1\" =~ ^[0-9]", "  [[ \"$1\" =~ ^[0-9eE.+-]+$ ]] && return 0\n  [[ \"$1\" =~ ^[0-9]")')" \
+	"was accepted, and tokenfuse would exit 2 on it"
+
+run_case "run-budget-ceiling: the refusal echoes the value" fail \
+	'./scripts/run-budget-ceiling.sh' \
+	"$(py 'edit("install.sh", "die \"RUN_BUDGET_CEILING_USD must be a positive number", "die \"RUN_BUDGET_CEILING_USD=$CEILING_SET must be a positive number")')" \
+	"echoed the value"
+
+run_case "run-budget-ceiling: a second figure is appended instead of replacing the first" fail \
+	'./scripts/run-budget-ceiling.sh' \
+	"$(py 'edit("install.sh", "  { grep -v \"^RUN_BUDGET_CEILING_USD=\" \"$STACK_DIR/.env\" || true; } >\"$tmp\"", "  cat \"$STACK_DIR/.env\" >\"$tmp\"")')" \
+	"did not replace the first"
+
+run_case "run-budget-ceiling: a bad ceiling left in .env is accepted" fail \
+	'./scripts/run-budget-ceiling.sh' \
+	"$(py 'edit("install.sh", "  if [ -n \"$saved\" ] && ! ceiling_valid \"$saved\"; then", "  if false; then")')" \
+	"left in .env was accepted"
+
+run_case "run-budget-ceiling: the installer never writes the figure" fail \
+	'./scripts/run-budget-ceiling.sh' \
+	"$(py 'edit("install.sh", "# The ceiling on a run budget (section 0c): written only when this run set it.\nceiling_apply\n", "# The ceiling on a run budget (section 0c): written only when this run set it.\n")')" \
+	"never calls ceiling_resolve and ceiling_apply"
+
+run_case "run-budget-ceiling: no gateway service left to judge" fail \
+	'./scripts/run-budget-ceiling.sh' \
+	"$(py 'edit("compose.yaml", "    command: [\"/usr/local/bin/tokenfuse\"]\n    environment:\n      TOKENFUSE_ADDR", "    command: [\"/usr/local/bin/tokenfuse\", \"serve\"]\n    environment:\n      TOKENFUSE_ADDR")')" \
+	"measured NOTHING about the run-budget"
+
+run_case "run-budget-ceiling: the installer block is gone" fail \
+	'./scripts/run-budget-ceiling.sh' \
+	"$(py 'edit("install.sh", "# run-budget-ceiling: begin\n", "# run-budget-ceiling: start\n")')" \
+	"measured nothing about the installer's half"
+
+# ---- chain-verifier (invariant 21): the account is the whole containment.
+run_case "chain-verifier: the verifier gets a group_add" fail \
+	'./scripts/chain-verifier-is-contained.sh' \
+	"$(py 'edit("compose.yaml", "    user: \"10002:10002\"\n    command:\n      - watch-dir", "    user: \"10002:10002\"\n    group_add:\n      - \"10001\"\n    command:\n      - watch-dir")')" \
+	"has group_add"
+
+run_case "chain-verifier: the verifier joins the bus group" fail \
+	'./scripts/chain-verifier-is-contained.sh' \
+	"$(py 'edit("compose.yaml", "    user: \"10002:10002\"", "    user: \"10002:10001\"")')" \
+	"is the bus group"
+
+run_case "chain-verifier: the verifier takes a plane's uid" fail \
+	'./scripts/chain-verifier-is-contained.sh' \
+	"$(py 'edit("compose.yaml", "    user: \"10002:10002\"", "    user: \"65532:10002\"")')" \
+	"one of the bus's writer uids"
+
+run_case "chain-verifier: its state moves onto the bus" fail \
+	'./scripts/chain-verifier-is-contained.sh' \
+	"$(py 'edit("compose.yaml", "      - /var/lib/agent-conform/state.json\n", "      - /var/lib/stack/events/state.json\n")')" \
+	"is inside the bus directory"
+
+run_case "chain-verifier: its stream is named for something else" fail \
+	'./scripts/chain-verifier-is-contained.sh' \
+	"$(py 'edit("compose.yaml", "      - /var/lib/stack/events/agent-conform.ndjson\n", "      - /var/lib/stack/events/verifier.ndjson\n")')" \
+	"it must be a file named agent-conform.ndjson"
+
+run_case "chain-verifier: init-volumes stops pre-creating its stream" fail \
+	'./scripts/chain-verifier-is-contained.sh' \
+	"$(py 'edit("compose.yaml", "        [ -e /vol/events/agent-conform.ndjson ] || : > /vol/events/agent-conform.ndjson\n", "")')" \
+	"does not pre-create agent-conform.ndjson"
+
+run_case "chain-verifier: its stream becomes group-writable" fail \
+	'./scripts/chain-verifier-is-contained.sh' \
+	"$(py 'edit("compose.yaml", "chmod 0644 /vol/events/agent-conform.ndjson", "chmod 0664 /vol/events/agent-conform.ndjson")')" \
+	"writable by group or other"
+
+run_case "chain-verifier: its stream is given to another uid" fail \
+	'./scripts/chain-verifier-is-contained.sh' \
+	"$(py 'edit("compose.yaml", "chown 10002:10002 /vol/events/agent-conform.ndjson", "chown 10001:10001 /vol/events/agent-conform.ndjson")')" \
+	"gives agent-conform.ndjson to 10001:10001"
+
+run_case "chain-verifier: its state volume has no owner" fail \
+	'./scripts/chain-verifier-is-contained.sh' \
+	"$(py 'edit("compose.yaml", "        chown 10002:10002 /vol/conform && chmod 0775 /vol/conform\n", "")')" \
+	"does not chown /vol/conform"
+
+run_case "chain-verifier: another plane is told to write its stream" fail \
+	'./scripts/chain-verifier-is-contained.sh' \
+	"$(py 'edit("compose.yaml", "TYPRYX_EVENTS: /var/lib/stack/events/typryx.ndjson", "TYPRYX_EVENTS: /var/lib/stack/events/agent-conform.ndjson")')" \
+	"names agent-conform.ndjson"
+
+run_case "chain-verifier: its root filesystem becomes writable" fail \
+	'./scripts/chain-verifier-is-contained.sh' \
+	"$(py 'edit("compose.yaml", "    read_only: true\n    cap_drop:\n      - ALL\n    security_opt:\n      - no-new-privileges:true\n    volumes:\n      - events:/var/lib/stack/events\n      - conformstate", "    cap_drop:\n      - ALL\n    security_opt:\n      - no-new-privileges:true\n    volumes:\n      - events:/var/lib/stack/events\n      - conformstate")')" \
+	"root filesystem is not read_only"
+
+run_case "chain-verifier: its image is unpinned" fail \
+	'./scripts/chain-verifier-is-contained.sh' \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/agent-conform:v1.1.0}", "ghcr.io/taipanbox/agent-conform:latest}")')" \
+	"is not pinned to a released"
+
+run_case "chain-verifier: its loop is removed" fail \
+	'./scripts/chain-verifier-is-contained.sh' \
+	"$(py 'edit("compose.yaml", "      - -every\n      - 5m\n", "")')" \
+	"-every is missing"
+
+run_case "chain-verifier: no verifier service left to judge" fail \
+	'./scripts/chain-verifier-is-contained.sh' \
+	"$(py 'edit("compose.yaml", "${AGENT_CONFORM_IMAGE:-ghcr.io/taipanbox/agent-conform:v1.1.0}", "${AGENT_CONFORM_IMAGE:-registry.invalid/agent-conform}")')" \
+	"measured NOTHING about the chain verifier"
+
+# The bus gate's own half: a shared volume is written through ONE FILE a service
+# owns, so a file given to nobody it runs as is a volume nobody can write.
+run_case "bus-has-a-writer: the verifier's stream is given to no one it runs as" fail \
+	'./scripts/bus-has-a-writer.sh' \
+	"$(py 'edit("compose.yaml", "chown 10002:10002 /vol/events/agent-conform.ndjson", "chown 10003:10003 /vol/events/agent-conform.ndjson")')" \
+	"no file under it is given to 10002"
+
+# ---- typed-risk-signal (invariant 22).
+run_case "typed-risk-signal: the signal is on when nobody asked" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 'edit("install.sh", "  TYPED_RISK=\"${TYPED_RISK_SIGNAL:-}\"", "  TYPED_RISK=\"${TYPED_RISK_SIGNAL:-1}\"")')" \
+	"without the flag was refused"
+
+run_case "typed-risk-signal: the flag is accepted with typed answers off" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 'edit("install.sh", "  if [ \"$TYPED_RISK\" = 1 ] && [ \"$mode\" = off ]; then", "  if false; then")')" \
+	"it was accepted, and it must refuse"
+
+run_case "typed-risk-signal: a value that is not a switch is believed" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 'edit("install.sh", "    *) die \"TYPED_RISK_SIGNAL must be 1 (signal on) or 0 (signal off). Nothing was installed.\" ;;", "    *) ;;")')" \
+	"TYPED_RISK_SIGNAL=yes"
+
+run_case "typed-risk-signal: TYPED_RISK_SIGNAL=0 does not turn it off" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 'edit("install.sh", "    0) typed_forget_env \"${TYPED_RISK_OWNED[@]}\" ;;", "    0) : ;;")')" \
+	"did not remove the three lines"
+
+run_case "typed-risk-signal: switching mode drops the signal" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 'edit("install.sh", "TYPRYX_OPENAI_KEY_FILE TYPRYX_TIMEOUT_MS)", "TYPRYX_OPENAI_KEY_FILE TYPRYX_TIMEOUT_MS TYPED_RISK_SIGNAL TYPED_RISK_WARDRYX_MODE TYPED_RISK_WARDRYX_URL)")')" \
+	"switching mode lost the signal"
+
+run_case "typed-risk-signal: the broker is pointed past the proxy" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 'edit("install.sh", "typed_set_env TYPED_RISK_WARDRYX_URL http://typryx-wardryx-proxy:4330", "typed_set_env TYPED_RISK_WARDRYX_URL http://wardryx:8090")')" \
+	"does not point at the proxy"
+
+run_case "typed-risk-signal: the proxy joins the default network" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 'edit("compose.yaml", "    networks:\n      - risk-signal\n    read_only: true", "    networks:\n      - default\n      - risk-signal\n    read_only: true")')" \
+	"it must be on risk-signal and nowhere else"
+
+run_case "typed-risk-signal: the proxy publishes a port" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 'edit("compose.yaml", "    command: [\"wardryx-proxy\"]\n", "    command: [\"wardryx-proxy\"]\n    ports:\n      - \"4330:4330\"\n")')" \
+	"publishes a port"
+
+run_case "typed-risk-signal: the proxy is given a key" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 'edit("compose.yaml", "      TYPRYX_ALLOW_OPEN_BIND: \"1\"\n", "      TYPRYX_ALLOW_OPEN_BIND: \"1\"\n      TYPRYX_KEYS: ${TYPRYX_KEYS:-}\n")')" \
+	"has TYPRYX_KEYS"
+
+run_case "typed-risk-signal: the LLM gateway is pointed at the proxy" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_WARDRYX_URL: http://wardryx:8090\n", "      TOKENFUSE_WARDRYX_URL: http://typryx-wardryx-proxy:4330\n")')" \
+	"no longer asks wardryx directly"
+
+run_case "typed-risk-signal: another service is pointed at the proxy" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 'edit("compose.yaml", "      WARDRYX_URL: http://wardryx:8090\n", "      WARDRYX_URL: http://typryx-wardryx-proxy:4330\n")')" \
+	"names the proxy"
+
+run_case "typed-risk-signal: a fourth service joins the proxy's network" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 'edit("compose.yaml", "      - heraldyxstate:/var/lib/stack/heraldyx\n", "      - heraldyxstate:/var/lib/stack/heraldyx\n    networks:\n      - default\n      - risk-signal\n")')" \
+	"the risk-signal network has members"
+
+# No brace in the inserted text: macOS bash 3.2 expands `{name: a, values: [b]}`
+# inside "$(py '...')" into several words and shifts the arguments.
+run_case "typed-risk-signal: a hold_if_signal policy is seeded" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 'edit("install.sh", "  deny_tool:\n    - shell_exec\nEOF", "  deny_tool:\n    - shell_exec\n- name: x\n  target: agent://*\n  hold_if_signal:\n    name: a\n    values: [b]\n    min_probability: 0.5\nEOF")')" \
+	"seeds a hold_if_signal policy"
+
+run_case "typed-risk-signal: the README loses its example policy" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 's = open("README.md").read()
+assert "hold_if_signal" in s
+open("README.md", "w").write(s.replace("hold_if_signal", "hold_if_a_signal"))')" \
+	"shows no hold_if_signal example"
+
+run_case "typed-risk-signal: typryx is pinned before the proxy existed" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/typryx:v0.4.0}", "ghcr.io/taipanbox/typryx:v0.3.0}")')" \
+	"the proxy (wardryx-proxy) does not exist before it"
+
+run_case "typed-risk-signal: wardryx is pinned before it read signals" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v1.2.0}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
+	"hold_if_signal and signals on /v1/decide do not exist before it"
+
+run_case "typed-risk-signal: tokenfuse is pinned before it sent the tool call" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/tokenfuse:v1.5.0}", "ghcr.io/taipanbox/tokenfuse:v1.4.1}")')" \
+	"the broker sends no tool_call to the policy plane before it"
+
+run_case "typed-risk-signal: install.sh starts the proxy profile unconditionally" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 'edit("install.sh", "if [ \"$TYPED_PLANE\" != off ] && [ \"$TYPED_RISK_ON\" = 1 ]; then UP_PROFILES+=(--profile typed-risk-signal); fi", "UP_PROFILES+=(--profile typed-risk-signal)")')" \
+	"not decided by both TYPED_PLANE and TYPED_RISK_ON"
+
+run_case "typed-risk-signal: the broker's decide deadline is shorter than the proxy's ask" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 'edit("compose.yaml", "TOKENFUSE_MCP_WARDRYX_TIMEOUT_MS: \"7000\"", "TOKENFUSE_MCP_WARDRYX_TIMEOUT_MS: \"250\"")')" \
+	"decide deadline is shorter"
+
+run_case "typed-risk-signal: the broker fails open" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_WARDRYX_FAILMODE: closed\n      # A decide that carries", "      TOKENFUSE_WARDRYX_FAILMODE: open\n      # A decide that carries")')" \
+	"the broker fails open"
+
+run_case "typed-risk-signal: no proxy service left to judge" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 'edit("compose.yaml", "  typryx-wardryx-proxy:\n    <<: *restart", "  typryx-wardryx-prox:\n    <<: *restart")')" \
+	"so this measured nothing"
+
+run_case "typed-risk-signal: the typed-mode block never reads the flag" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 's = open("install.sh").read()
+b0, b1 = s.index("# typed-mode: begin\n"), s.index("# typed-mode: end\n")
+blk = s[b0:b1]
+assert "TYPED_RISK_SIGNAL" in blk
+open("install.sh", "w").write(s[:b0] + blk.replace("TYPED_RISK_SIGNAL", "TYPED_RISK_FLAG") + s[b1:])')" \
+	"never reads TYPED_RISK_SIGNAL"
+
+# ---- bus-names (invariant 23).
+run_case "bus-names: a writer's file is renamed to nothing anyone reads" fail \
+	'./scripts/bus-names-match-their-source.sh' \
+	"$(py 'edit("compose.yaml", "TOKENFUSE_EVENTS_PATH: /var/lib/stack/events/tokenfuse-mcp.ndjson", "TOKENFUSE_EVENTS_PATH: /var/lib/stack/events/mcp-events.ndjson")')" \
+	"is not a stream name heraldyx 0.3.0 or idryx 1.1.0 know"
+
+run_case "bus-names: wardryx writes a file named for another plane" fail \
+	'./scripts/bus-names-match-their-source.sh' \
+	"$(py 'edit("compose.yaml", "      - /var/lib/stack/events/wardryx.ndjson\n", "      - /var/lib/stack/events/typryx.ndjson\n")')" \
+	"claiming source \`wardryx\`, and that file may carry only ['typryx']"
+
+run_case "bus-names: idryx loads a file for a source it does not carry" fail \
+	'./scripts/bus-names-match-their-source.sh' \
+	"$(py 'edit("compose.yaml", "      - tokenfuse:/var/lib/stack/events/tokenfuse.ndjson", "      - wardryx:/var/lib/stack/events/tokenfuse.ndjson")')" \
+	"loads wardryx:/var/lib/stack/events/tokenfuse.ndjson"
+
+run_case "bus-names: init-volumes pre-creates a stream nobody accepts" fail \
+	'./scripts/bus-names-match-their-source.sh' \
+	"$(py 'edit("compose.yaml", "        for f in tokenfuse.ndjson", "        for f in events.ndjson tokenfuse.ndjson")')" \
+	"pre-creates events.ndjson on the bus"
+
+run_case "bus-names: a declaration widens the rule" fail \
+	'./scripts/bus-names-match-their-source.sh' \
+	"$(py 'edit("compose.yaml", "      HERALDYX_STATE: /var/lib/stack/heraldyx/state.json\n", "      HERALDYX_STATE: /var/lib/stack/heraldyx/state.json\n      HERALDYX_STREAMS: events=tokenfuse|wardryx\n")')" \
+	"sets HERALDYX_STREAMS"
+
+run_case "bus-names: nothing loads a stream any more" fail \
+	'./scripts/bus-names-match-their-source.sh' \
+	"$(py 's = open("compose.yaml").read()
+assert "tokenfuse:/var/lib/stack/events/tokenfuse.ndjson" in s
+open("compose.yaml", "w").write(s.replace("tokenfuse:/var/lib/stack/events/tokenfuse.ndjson", "/var/lib/stack/events/tokenfuse.ndjson"))')" \
+	"measured NOTHING about idryx"
+
+# ---- features-are-bound: the binding is held both ways.
+run_case "features-are-bound: a binding names a case that was renamed" fail \
+	'./scripts/features-are-bound.sh' \
+	"$(py 'edit("features/the-declassify-key-is-minted.feature", "declassify-is-keyed: install.sh stops minting the key\"", "declassify-is-keyed: install.sh stopped minting the key\"")')" \
+	"has no such run_case"
+
+run_case "features-are-bound: a scenario has no binding" fail \
+	'./scripts/features-are-bound.sh' \
+	"$(py 'open("features/the-declassify-key-is-minted.feature", "a").write("\n  Scenario: a promise with no test\n    Given a gate\n    When nothing runs it\n    Then nothing fails\n")')" \
+	"is bound to no test"
+
+run_case "features-are-bound: the feature files are gone" fail \
+	'./scripts/features-are-bound.sh' \
+	"$(py 'import os
+os.rename("features", "feature-files")')" \
+	"there is no features/*.feature"
 
 echo
 echo "=== and what they must NOT catch ==="
@@ -829,6 +1147,34 @@ run_case "typed-data-mode: a comment inside the typed block is left alone" pass 
 run_case "typed-data-mode: a wording change in the training paragraph is left alone" pass \
 	'./scripts/typed-data-mode.sh' \
 	"$(py 'edit("README.md", "The log has no rotation or retention", "The log has no rotation and no retention")')"
+
+run_case "run-budget-ceiling: the refusal is reworded" pass \
+	'./scripts/run-budget-ceiling.sh' \
+	"$(py 'edit("install.sh", "RUN_BUDGET_CEILING_USD must be a positive number of US dollars with at most six decimals (5 or 2.50", "RUN_BUDGET_CEILING_USD has to be a positive number of US dollars with at most six decimals (5 or 2.50")')"
+
+run_case "run-budget-ceiling: the broker's configuration changes" pass \
+	'./scripts/run-budget-ceiling.sh' \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_MCP_ADDR: 0.0.0.0:4200", "      TOKENFUSE_MCP_ADDR: 0.0.0.0:4201")')"
+
+run_case "chain-verifier: the interval changes" pass \
+	'./scripts/chain-verifier-is-contained.sh' \
+	"$(py 'edit("compose.yaml", "      - -every\n      - 5m\n", "      - -every\n      - 10m\n")')"
+
+run_case "chain-verifier: the state file is renamed" pass \
+	'./scripts/chain-verifier-is-contained.sh' \
+	"$(py 'edit("compose.yaml", "      - /var/lib/agent-conform/state.json\n", "      - /var/lib/agent-conform/memory.json\n")')"
+
+run_case "typed-risk-signal: the broker's deadline is raised" pass \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 'edit("compose.yaml", "TOKENFUSE_MCP_WARDRYX_TIMEOUT_MS: \"7000\"", "TOKENFUSE_MCP_WARDRYX_TIMEOUT_MS: \"9000\"")')"
+
+run_case "typed-risk-signal: the proxy's ask deadline default moves" pass \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 'edit("compose.yaml", "${TYPED_RISK_ASK_TIMEOUT_MS:-3000}", "${TYPED_RISK_ASK_TIMEOUT_MS:-2000}")')"
+
+run_case "bus-names: a comment in init-volumes changes" pass \
+	'./scripts/bus-names-match-their-source.sh' \
+	"$(py 'edit("compose.yaml", "# The chain verifier (agent-conform) runs 10002:10002, NEITHER of the", "# The chain verifier (agent-conform) runs as 10002:10002, NEITHER of the")')"
 
 echo
 echo "=== and the one this estate learned the hard way ==="
@@ -965,7 +1311,10 @@ edit("compose.yaml", "      typryx:\n        condition: service_started", "     
 
 run_case "typed-data-mode: compose names no typryx image to read a pin from" fail \
 	'./scripts/typed-data-mode.sh' \
-	"$(py 'edit("compose.yaml", "image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.3.0}", "image: ${TYPRYX_IMAGE:-registry.invalid/typryx}")')" \
+	"$(py 's = open("compose.yaml").read()
+a = "image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.4.0}"
+assert s.count(a) == 2, "expected the typryx service and the risk-signal proxy to name the image"
+open("compose.yaml", "w").write(s.replace(a, "image: ${TYPRYX_IMAGE:-registry.invalid/typryx}"))')" \
 	"names no ghcr.io/taipanbox/typryx"
 
 echo

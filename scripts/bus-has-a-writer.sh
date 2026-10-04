@@ -211,7 +211,16 @@ for name, block in blocks.items():
             continue
         cuid, cgid = owned.group(1), owned.group(2)
         if cuid != uid and cgid != gid:
-            note(f"{name} runs as {user} but init-volumes gives {vol} ({path}) to {cuid}:{cgid}: neither the uid nor the gid matches")
+            # A shared bus volume can also be written through ONE FILE a
+            # service owns: init-volumes pre-creates it and chowns it to that
+            # service's uid, and the directory stays someone else's. That is
+            # how the chain verifier (agent-conform) is held to writing its own
+            # stream and nothing else, so a file chowned to this uid under the
+            # volume's path counts as an owner. `chain-verifier-is-contained.sh`
+            # holds the rest of that shape.
+            if re.search(r"chown\s+" + re.escape(uid) + r":[0-9]+\s+\"?" + re.escape(path.rstrip("/")) + r"/\S", init_text):
+                continue
+            note(f"{name} runs as {user} but init-volumes gives {vol} ({path}) to {cuid}:{cgid}: neither the uid nor the gid matches, and no file under it is given to {uid}")
 if judged == 0:
     note("no non-root service with a writable named volume was found: the owner half of this gate measured nothing")
 

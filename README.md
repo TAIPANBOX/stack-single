@@ -235,7 +235,7 @@ breaks passkeys again. If you set it, leave it.
 
 ## What comes up
 
-Nine containers on one Docker network, plus a one-shot `init-volumes` that
+Ten containers on one Docker network, plus a one-shot `init-volumes` that
 exits, wired exactly as the Kubernetes deployment wires them, because service
 names resolve the same way in both:
 
@@ -250,9 +250,11 @@ names resolve the same way in both:
 | `caddy` | 443 | no, it is reached over the tunnel, on the name in `CONSOLE_DOMAIN` |
 | `wg` | 51820/udp | **yes**, and it is the one port here that has to be |
 | `heraldyx` | none | it has none. It reads the event volume read-only and dials your mail server, so nothing ever calls it |
+| `agent-conform` | none | it has none. It re-checks the hash chain of every event stream every five minutes and writes one file of its own on the bus. See "The chain verifier" below |
 | `scopyx` | none | **opt-in, off unless you ask for it.** Inside the compose network only. See below |
 | `typryx` | none | **opt-in, off unless you ask for it.** Inside the compose network only. See below |
 | `tokenfuse-mcp-broker` | 4200 | **opt-in, off unless you ask for it.** `GATEWAY_BIND` decides where, same as the gateway. See below |
+| `typryx-wardryx-proxy` | none | **opt-in twice, off unless you ask for it** (typed answers on, and `TYPED_RISK_SIGNAL=1`). Reachable only from the broker and wardryx. See "A risk signal on tool calls" below |
 | `vouchryx` | none | **opt-in, off unless you ask for it.** Inside the compose network only. See "Delegation" below |
 
 The gateway's own observability and kill routes (`/v1/runs`, `/v1/keys` and
@@ -273,6 +275,57 @@ Nothing in this stack calls the endpoint. To clear a run, read the key from
 `.env` and send it in that header; a call with no key or the wrong one is
 refused. An install from before this release gets the key on its next run of
 the installer, which adds it without touching any credential already there.
+
+### The most one run can be allowed to spend
+
+A run's budget used to be whatever the agent said: it sends
+`x-fuse-budget-usd`, and its next call could widen it again. The gateway
+(tokenfuse 1.5.0) now clamps a budget that came from that header, from a policy
+default or from its own built-in default to one figure, on every call, and
+tells the caller when it did by adding `x-fuse-budget-clamped: <figure>` to the
+answer. The figure is **5.00 USD** unless you say otherwise, which is
+tokenfuse's own default run budget, so an ordinary run is untouched and only an
+agent that declares more is lowered. A budget you set in the Cloud is your own
+word and is never clamped, and a caller may always ask for less.
+
+```bash
+RUN_BUDGET_CEILING_USD=25 ./install.sh      # a positive number of dollars, at most six decimals
+```
+
+On an installed box, set `RUN_BUDGET_CEILING_USD` in `/opt/agent-stack/.env` and
+`docker compose up -d`. The installer refuses a value the gateway would refuse
+to start on (zero, a sign, an exponent, a seventh decimal), before it touches
+the box, and also one already left in `.env`. It bounds one run, not an agent:
+an agent that opens a new run id gets a new run's worth, which only unit caps
+or a budget tied to an identity close. `install.sh` checks the gateway's own
+start-up line to see the clamp is armed, so a gateway older than 1.5.0 turns
+that check red instead of reading as bounded.
+
+### The chain verifier
+
+Every writer on the shared events bus chains its lines (`prev_hash`) so a
+rewritten line shows. Until `agent-conform watch-dir` nothing on a box ever
+looked: on the 2026-09-17 appliance run one byte flipped on a sealed line of the
+bus was seen by nothing. The `agent-conform` service now re-verifies every
+stream every five minutes, and for a break it has not announced it appends one
+`chain_broken` event (high) to its own stream, `agent-conform.ndjson`, which the
+notifier already reads. A stream with no chain at all is reported once as low
+(`chain_unchained`), never as a break.
+
+It runs as its own account, outside the group every plane writes the bus in, so
+it can read every stream and write exactly one file, the one the installer made
+for it; it cannot append to another plane's stream or create a file there. Its
+memory of what it already announced is on a volume of its own, so clearing the
+bus does not re-send old alerts. If it cannot do its job (an unreadable bus) it
+exits and compose restarts it, which is how a verifier that is not verifying
+shows.
+
+What it does not do: it cannot tell a forged but well-chained line from a real
+one, it does not see truncation from the end of a file, and what the notifier
+mails for a `chain_broken` today is neutral (the agent, "an event this build
+has no description for", the kind `prev_hash_mismatch`): it does not name the
+stream or the line, which are in `agent-conform.ndjson` and in the verifier's
+own log (`docker compose logs agent-conform`).
 
 "Not published" is not a firewall rule that might be misread: those services
 have no host port at all, so nothing outside this machine can address them.
@@ -441,7 +494,7 @@ the caller ever sees:
 `WITH_TYPED=1`; it never prints a key's value.
 
 **Measured end to end** (typryx v0.2.0, tokenfuse
-v1.1.1; this launcher now pins typryx v0.3.0), live on Docker Desktop on 2026-09-26: an `ask` whose typryx key
+v1.1.1; this launcher now pins typryx v0.4.0), live on Docker Desktop on 2026-09-26: an `ask` whose typryx key
 travelled only as `{{secret:typryx_key}}` through the broker was answered,
 typryx wrote its `typed_answer` to the shared bus under the key's agent with
 the caller's `run_id`, the broker wrote its own `tool_call`, a wrong key was
@@ -449,6 +502,82 @@ refused `401`, and neither key appeared in either container's log. The same
 call against typryx v0.1.0 is refused `401`: reading the key from `_meta` is
 typryx#6, first released in v0.2.0. `install.sh`'s own check `an ask through
 the broker is answered` repeats this on every install.
+
+### A risk signal on tool calls (opt-in, off by default)
+
+`@claude` 2026-10-04, from the estate audit's launcher spec: wardryx 1.2.0 can
+hold a tool call for a person when a typed fact about it says so (a signal may
+hold a call and never deny it), and typryx 0.4.0 can supply the fact. With typed
+answers on, one more word turns it on:
+
+```bash
+WITH_TYPED=1 TYPED_RISK_SIGNAL=1 ./install.sh            # the stub backend: shows the wiring, classifies nothing
+TYPED_MODE=own-model TYPED_MODEL_URL=http://host.docker.internal:11434/v1 \
+  TYPED_MODEL_NAME=qwen2.5:7b TYPED_RISK_SIGNAL=1 ./install.sh
+```
+
+`TYPED_RISK_SIGNAL=0` turns it off again; with typed answers off the flag is
+refused, naming what to set, before anything is installed. What it starts:
+`typryx wardryx-proxy`, in front of wardryx, for the MCP broker alone. The
+broker asks wardryx about every `tools/call` before it injects a secret; the
+proxy asks typryx `action.risk_class` about that call (from the tool, its
+arguments and its target, nothing else) and adds the answer to the request as a
+signal. The LLM gateway keeps asking wardryx directly: a model call has no
+pending tool call to classify, and typryx's latency does not belong in front of
+a path with a 250 ms deadline.
+
+**Nothing holds a call until you write the rule.** This launcher seeds no
+`hold_if_signal` policy. To hold the calls typryx is at least 80% sure are
+destructive, an external send or a payment, add this to `/opt/agent-stack/policy.yaml`
+(your own trust domain in `target`) and `docker compose restart wardryx`:
+
+```yaml
+- name: hold-risky-tool-calls
+  target: "agent://<your trust domain>/*"
+  hold_if_signal:
+    name: action.risk_class
+    values: [destructive, external_send, financial]
+    min_probability: 0.8
+```
+
+A signal can add a hold and nothing else: wardryx refuses a rule that would deny
+on one, and no answer in time, an unanswered or a refusal sends the call on
+untouched. A held call returns an approval id and is released by the person who
+approves it in the console.
+
+What turning it on changes, so nobody is surprised:
+
+- **The broker becomes a policy enforcement point.** It was not one: on this
+  launcher it never asked wardryx anything. Now every tool call is decided
+  under your whole `policy.yaml`, a call with no `x-fuse-agent-id` header is
+  refused (it cannot be judged), and with wardryx or the proxy unreachable the
+  call is refused (fail closed, like the gateway).
+- **A paid backend is asked once per tool call**, whatever your policy reads.
+  typryx caps its own calls per hour (1000 by default); a spent cap just stops
+  signals being added. With `jev` that is metered at TypeSafe.
+- **Each ask waits at most 3 seconds** (`TYPED_RISK_ASK_TIMEOUT_MS` in `.env`,
+  1 to 5000). typryx's own default of 150 ms is shorter than a hosted model
+  answers (about 230 ms measured for Jev) and far shorter than a model on a CPU
+  (about 2100 ms), so at that default a real backend would almost never be heard.
+  A late answer is dropped, so a slow model means no signal, not a slow call.
+- **The proxy is open on purpose, and a network is what closes it.** The broker
+  cannot send it a credential, so it runs without one, on a Docker network
+  (`risk-signal`) that holds only the proxy, the broker and wardryx, with no
+  published port. It must never be put on the default network: every container
+  there could then spend your ask budget. `scripts/typed-risk-signal.sh` holds
+  that, and `install.sh` checks it from both sides (reachable from its own
+  network, not from the default one, not on the host).
+- **The stub backend's answer is a fixed pick, not a classification.** It proves
+  the wiring end to end, and holds a call only if you write a rule for the value
+  it picks.
+
+Measured, live, on Docker Desktop 2026-10-04 through this repository's own
+`compose.yaml` and the `.env` this installer writes, stub backend: a tool call
+through the broker carried an `action.risk_class` signal from typryx into
+wardryx and into the decision event on the bus; with a `hold_if_signal` rule
+for the value the stub picks, the same call was held with an approval id. Not
+measured: a real backend, the signal under load, or `install.sh` itself on
+Debian (CI runs it, with the stub, on every change).
 
 ## Typed answers: choose where your data goes
 
@@ -543,8 +672,8 @@ to train another model, so what you fine-tune on is the truths your own people
 post, never what Jev said.
 
 **The opt-in training log.** `@decided 2026-09-30`: typryx can keep a local
-training log, off by default, and this launcher pins typryx v0.3.0, the first
-release that has it. Switch it on with `TYPED_TRAINING=1` next to any typed mode
+training log, off by default. typryx v0.3.0 is the first release that has it and
+this launcher pins typryx v0.4.0, so it is there. Switch it on with `TYPED_TRAINING=1` next to any typed mode
 (`WITH_TYPED=1`, `TYPED_MODE=jev` or `TYPED_MODE=own-model`):
 
 ```bash
@@ -675,10 +804,15 @@ without a UI in front of them.
 
 One thing it does not check, said here rather than found later. The
 `events` volume is shared by every plane that writes the bus, group-writable
-so each can append its own file; a line's `source` is whatever the writer
-put there, and the notifier and the record plane take it as that plane's
-word. The containers sharing that volume trust each other as much as they
-trust the box.
+so each can append its own file. Since heraldyx 0.3.0 and idryx 1.1.0 a line is
+read as the source its FILE may carry (`wardryx.ndjson` carries `wardryx`,
+`tokenfuse-cloud.ndjson` and `tokenfuse-mcp.ndjson` carry `tokenfuse`), so a
+line claiming another plane inside the wrong file is refused and said once; the
+file names this installer writes are held to that by `scripts/bus-names-match-their-source.sh`.
+What is still open: any writer in the bus group can append to any other plane's
+file under that file's own source, and the record plane takes a line as that
+plane's word. The containers sharing that volume trust each other as much as
+they trust the box.
 
 The other thing this used to say here, delegation being verified nowhere on
 this box, is the gap the next section closes.
