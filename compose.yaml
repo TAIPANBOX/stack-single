@@ -50,7 +50,7 @@ services:
       - sh
       - -euc
       - |
-        mkdir -p /vol/events /vol/traces /vol/cloud /vol/heraldyx /vol/records /vol/scopyx /vol/focus /vol/typryx /vol/vouchryx
+        mkdir -p /vol/events /vol/traces /vol/cloud /vol/heraldyx /vol/records /vol/scopyx /vol/focus /vol/typryx /vol/vouchryx /vol/conform
         chown 0:10001 /vol/events && chmod 2775 /vol/events
         chown 10001:10001 /vol/traces /vol/cloud && chmod 0775 /vol/traces /vol/cloud
         # The notifier runs 65532:10001 like the Go planes, and writes exactly
@@ -125,6 +125,20 @@ services:
           [ -e "/vol/events/$$f" ] || : > "/vol/events/$$f"
           chown 10001:10001 "/vol/events/$$f" && chmod 0664 "/vol/events/$$f"
         done
+        # The chain verifier (agent-conform) runs 10002:10002, NEITHER of the
+        # bus's uid families and NOT in the bus group on purpose: this
+        # directory is root:10001 2775, so a process outside group 10001 cannot
+        # create a file here and cannot write any other plane's (they are 0664
+        # owned by 10001). The one file it may write is its own stream, so it
+        # is created here, empty, and given to it alone. Its memory (which
+        # breaks it has already announced) is on its own volume, not on the
+        # bus: a state file inside the directory it verifies would be read as
+        # a stream, and an operator clearing the bus would delete it and
+        # re-send every alert. `chain-verifier-is-contained.sh` holds all of
+        # this.
+        [ -e /vol/events/agent-conform.ndjson ] || : > /vol/events/agent-conform.ndjson
+        chown 10002:10002 /vol/events/agent-conform.ndjson && chmod 0644 /vol/events/agent-conform.ndjson
+        chown 10002:10002 /vol/conform && chmod 0775 /vol/conform
         echo "volumes ready"
     volumes:
       - events:/vol/events
@@ -136,6 +150,7 @@ services:
       - focus:/vol/focus
       - typryxdata:/vol/typryx
       - vouchryxdata:/vol/vouchryx
+      - conformstate:/vol/conform
     restart: "no"
 
   # ---- the policy plane's durable store ------------------------------------
@@ -160,7 +175,7 @@ services:
   # ---- policy --------------------------------------------------------------
   wardryx:
     <<: *restart
-    image: ${WARDRYX_IMAGE:-ghcr.io/taipanbox/wardryx:v1.1.3}
+    image: ${WARDRYX_IMAGE:-ghcr.io/taipanbox/wardryx:v1.2.0}
     # The image's own 65532:65532, with the GID moved to the one that owns the
     # shared event directory. The binary is a static Go binary and reads no
     # /etc/passwd, so a numeric pair it was not built with is fine.
@@ -201,6 +216,12 @@ services:
     volumes:
       - events:/var/lib/stack/events
       - ./policy.yaml:/etc/wardryx/policy.yaml:ro
+    # `default` as before, plus the one extra network the typed risk signal
+    # uses (see `typryx-wardryx-proxy` below). Joining it costs nothing while
+    # the proxy is not running: the network then holds wardryx alone.
+    networks:
+      - default
+      - risk-signal
     depends_on:
       policy-db:
         condition: service_healthy
@@ -212,7 +233,7 @@ services:
   # writes, and the mount says so.
   idryx:
     <<: *restart
-    image: ${IDRYX_IMAGE:-ghcr.io/taipanbox/idryx:v1.0.0}
+    image: ${IDRYX_IMAGE:-ghcr.io/taipanbox/idryx:v1.1.0}
     user: "65532:10001"
     command:
       - serve
@@ -242,7 +263,7 @@ services:
   # real and is not hidden: on one machine the boundary is the machine.
   heraldyx:
     <<: *restart
-    image: ${HERALDYX_IMAGE:-ghcr.io/taipanbox/heraldyx:v0.2.5}
+    image: ${HERALDYX_IMAGE:-ghcr.io/taipanbox/heraldyx:v0.3.0}
     user: "65532:10001"
     environment:
       HERALDYX_EVENTS: /var/lib/stack/events
@@ -281,6 +302,64 @@ services:
     volumes:
       - events:/var/lib/stack/events:ro
       - heraldyxstate:/var/lib/stack/heraldyx
+    depends_on:
+      init-volumes:
+        condition: service_completed_successfully
+
+  # ---- the chain verifier: the part that reads the bus back -----------------
+  #
+  # Every writer on the bus chains its lines (`prev_hash`), and until
+  # agent-stack-go#66 nothing on a box ever checked. On the 2026-09-17
+  # appliance run one byte flipped on a sealed line of this bus was seen by
+  # nothing: the tool that finds it existed as source and release archives and
+  # no launcher ran it. `agent-conform watch-dir` is that tool as a loop: every
+  # five minutes it verifies the `prev_hash` chain of every `*.ndjson` in this
+  # directory and, for a break it has not announced, appends ONE `chain_broken`
+  # (high) event to its own stream, `agent-conform.ndjson`, where heraldyx
+  # already reads. It is distroless with no shell, which is why `-every` exists
+  # and why this is one container and not a script.
+  #
+  # ON BY DEFAULT, and that is a choice: it reads and writes only what is
+  # named below, costs nothing metered, and a bus nobody verifies is the fault
+  # this closes. A verifier that cannot do its job exits 2 and compose restarts
+  # it, so a broken one shows as a restart count and not as a quiet box.
+  #
+  # WHAT IT MAY WRITE, AND HOW THAT IS ENFORCED. The bus is mounted read-write
+  # because its own stream has to be on the bus for heraldyx to see it, and
+  # compose cannot mount one file of a named volume. So the limit is the
+  # account it runs as, not the mount: 10002:10002 is outside the bus group
+  # (10001), the directory is root:10001 2775, and the other planes' files are
+  # 0664 owned by 10001, so this uid can READ every stream through the "other"
+  # bits and WRITE exactly one file, the one init-volumes pre-created and gave
+  # it. No `group_add`, ever: the bus group would let it write every plane's
+  # file. `-out` must be a file named agent-conform.ndjson (the tool refuses
+  # any other name: that name is the source its events claim), and `-state` is
+  # on its own volume, outside the directory it walks.
+  #
+  # NOT PROVEN BY THIS FILE: that a break on a LIVE bus is announced (the
+  # first pass on a fresh box has only empty streams), and that record-seal,
+  # which reads this stream too, has anything to say about its schema.
+  agent-conform:
+    <<: *restart
+    image: ${AGENT_CONFORM_IMAGE:-ghcr.io/taipanbox/agent-conform:v1.1.0}
+    user: "10002:10002"
+    command:
+      - watch-dir
+      - -every
+      - 5m
+      - -out
+      - /var/lib/stack/events/agent-conform.ndjson
+      - -state
+      - /var/lib/agent-conform/state.json
+      - /var/lib/stack/events
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - events:/var/lib/stack/events
+      - conformstate:/var/lib/agent-conform
     depends_on:
       init-volumes:
         condition: service_completed_successfully
@@ -435,7 +514,7 @@ services:
   typryx:
     <<: *restart
     profiles: ["typed"]
-    image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.3.0}
+    image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.4.0}
     # Group 10001, not 65532 alone, since 2026-09-26: the journal below moved
     # onto the shared `events` volume (root:10001 2775), the same group every
     # other Go plane's bus writer runs as. The ledger stays on typryxdata,
@@ -533,7 +612,7 @@ services:
   tokenfuse-mcp-broker:
     <<: *restart
     profiles: ["typed"]
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.4.1}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.5.0}
     # Just the subcommand, not the full binary path: the image's own
     # ENTRYPOINT is already the tokenfuse binary (@measured `docker inspect
     # ghcr.io/taipanbox/tokenfuse:v1.1.1`, 2026-09-26), so this `command:`
@@ -568,14 +647,126 @@ services:
       # typryx's own: two appenders on one file is a race with no lock, the
       # same reason the money plane's two writers each name their own file.
       TOKENFUSE_EVENTS_PATH: /var/lib/stack/events/tokenfuse-mcp.ndjson
+      # The typed risk signal (TYPED_RISK_SIGNAL=1, opt-in, off by default).
+      # The broker has no policy plane of its own: it asks wardryx about each
+      # tools/call only when TOKENFUSE_WARDRYX_MODE and _URL are both set, and
+      # on this launcher neither was, so a tool call was never judged. All
+      # three values below are empty, which is that hook off, unless
+      # install.sh wrote them into .env for a box that asked for the signal;
+      # then the URL is the typryx wardryx-proxy (never wardryx itself) and
+      # the mode is `enforce`. ONLY the broker is pointed there: the LLM
+      # gateway keeps asking wardryx directly, because a model call has no
+      # pending tool call to classify and the proxy's ask would add latency to
+      # a path with a 250 ms deadline (J2-DESIGN). The key is the gateway's
+      # own viewer key, which may call /v1/decide and nothing else, and the
+      # proxy forwards it to wardryx unchanged.
+      TOKENFUSE_WARDRYX_MODE: ${TYPED_RISK_WARDRYX_MODE:-off}
+      TOKENFUSE_WARDRYX_URL: ${TYPED_RISK_WARDRYX_URL:-}
+      TOKENFUSE_WARDRYX_KEY: ${WARDRYX_GATEWAY:-}
+      # closed, like the gateway: with the signal on, a broker that cannot
+      # reach the policy plane refuses the call rather than waving it through.
+      TOKENFUSE_WARDRYX_FAILMODE: closed
+      # A decide that carries a tool call waits this long (tokenfuse 1.5.0),
+      # more than the shared 250 ms, because the proxy asks a typed backend
+      # first and its own deadline (TYPED_RISK_ASK_TIMEOUT_MS, at most 5000)
+      # must fit inside this one or the call is refused for being slow.
+      TOKENFUSE_MCP_WARDRYX_TIMEOUT_MS: "7000"
     ports:
       - "${GATEWAY_BIND:-127.0.0.1}:4200:4200"
     volumes:
       - events:/var/lib/stack/events
+    # `default` as before, plus the network the risk-signal proxy is on, so the
+    # broker can reach it and nothing else outside the broker can.
+    networks:
+      - default
+      - risk-signal
     depends_on:
       init-volumes:
         condition: service_completed_successfully
       typryx:
+        condition: service_started
+
+  # ---- the typed risk signal: typryx in front of wardryx, MCP path only ----
+  #
+  # OPT-IN TWICE. It runs only with the `typed-risk-signal` profile, which
+  # install.sh passes only when the typed plane is on (any mode but off) AND
+  # the operator set TYPED_RISK_SIGNAL=1; with typed answers off the flag is
+  # refused. Off, a default box has none of this, and the broker's wardryx hook
+  # (above) is off with it.
+  #
+  # What it is: `typryx wardryx-proxy` (typryx v0.4.0, same image as typryx).
+  # It forwards every request to wardryx unchanged, and for a `POST /v1/decide`
+  # that carries a `tool_call` it first asks typryx `action.risk_class` about
+  # that call and appends the answer to the request's `signals`. Wardryx (v1.2.0)
+  # can turn a signal into a HOLD through a `hold_if_signal` policy rule and
+  # into nothing else, never a deny. No answer in time, an unanswered, a
+  # refusal, or truncated arguments forwards the request untouched, so a
+  # missing signal costs a person nothing. This launcher seeds NO
+  # `hold_if_signal` policy: the signal does nothing until the operator writes
+  # one (the README has an example).
+  #
+  # WHY IT RUNS WITHOUT A KEY, AND WHAT THAT ASKS OF THE NETWORK. A non-loopback
+  # bind with no TYPRYX_KEYS is refused unless TYPRYX_ALLOW_OPEN_BIND=1; with
+  # TYPRYX_KEYS the proxy demands an X-Typryx-Key header on every request, and
+  # the broker cannot add one to its calls to wardryx. So it is open, and what
+  # keeps it closed is who can reach it: it is on the `risk-signal` network
+  # alone, publishes no port, and the only other members are the broker (its
+  # one caller) and wardryx (its upstream). `typed-risk-signal.sh` holds all of
+  # that. Anything that could reach it could spend this box's ask budget, which
+  # is why it must never join `default`.
+  #
+  # NO JOURNAL, NO LEDGER here. typryx.ndjson belongs to the `typryx` service
+  # (one appender per bus file, no lock) and the source rule heraldyx 0.3.0 and
+  # idryx 1.1.0 apply allows only `<source>.ndjson`, so a second typryx file
+  # would be refused anyway; the ledger is the typed plane's own record of
+  # answers and truths, which a proxy's asks are not. Without TYPRYX_KEYS the
+  # journal would skip these asks regardless (no agent identity).
+  #
+  # WHAT IT COSTS ON A PAID BACKEND: every tool call through the broker is one
+  # ask, whatever the policy reads. typryx's hourly cap (1000 by default) is the
+  # limit; a spent cap just stops signals being added.
+  typryx-wardryx-proxy:
+    <<: *restart
+    profiles: ["typed-risk-signal"]
+    image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.4.0}
+    user: "65532:65532"
+    command: ["wardryx-proxy"]
+    environment:
+      TYPRYX_PROXY_ADDR: 0.0.0.0:4330
+      # wardryx by service name, on the `risk-signal` network. The proxy
+      # forwards the caller's Authorization header as received, so wardryx
+      # authenticates the broker exactly as it would directly.
+      TYPRYX_PROXY_UPSTREAM: http://wardryx:8090
+      TYPRYX_ALLOW_OPEN_BIND: "1"
+      # The one deadline an operator may want to move: the most a slow backend
+      # may add to one tool call. typryx's own default (150) is shorter than a
+      # hosted model answers (about 230 ms measured for Jev) and far shorter
+      # than a model on a CPU (about 2100 ms), so at the default most real
+      # asks would be dropped as late and the signal would almost never appear.
+      TYPRYX_PROXY_ASK_TIMEOUT_MS: ${TYPED_RISK_ASK_TIMEOUT_MS:-3000}
+      # The backend config the typed plane already passes, identical to the
+      # typryx service above and for the same reasons (empty reads as unset).
+      TYPRYX_BACKEND: ${TYPRYX_BACKEND:-stub}
+      TYPRYX_JEV_KEY_FILE: ${TYPRYX_JEV_KEY_FILE:-}
+      TYPRYX_OPENAI_URL: ${TYPRYX_OPENAI_URL:-}
+      TYPRYX_OPENAI_MODEL: ${TYPRYX_OPENAI_MODEL:-}
+      TYPRYX_OPENAI_KEY_FILE: ${TYPRYX_OPENAI_KEY_FILE:-}
+      TYPRYX_TIMEOUT_MS: ${TYPRYX_TIMEOUT_MS:-}
+    volumes:
+      # The key files TYPED_MODE installed, read only, the same mount typryx has.
+      - ./typed:/run/typed:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # On the risk-signal network and NOWHERE else. Never `default`.
+    networks:
+      - risk-signal
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      wardryx:
         condition: service_started
 
   # ---- delegation: a proved chain instead of a claimed one -----------------
@@ -604,7 +795,7 @@ services:
   vouchryx:
     <<: *restart
     profiles: ["delegation"]
-    image: ${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.1.0}
+    image: ${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.2.0}
     # Group 10001, the same pair typryx and the money plane's writers use: its
     # journal (VOUCHRYX_EVENTS_PATH) lands on the shared `events` volume,
     # root:10001 2775, and this is how it can append there.
@@ -651,7 +842,7 @@ services:
   # ---- money: the control API ----------------------------------------------
   tokenfuse-cloud:
     <<: *restart
-    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v1.4.1}
+    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v1.5.0}
     command: ["/usr/local/bin/tokenfuse-cloud"]
     environment:
       PORT: "8080"
@@ -684,7 +875,7 @@ services:
   # gets a hard refusal rather than a log line.
   tokenfuse-gateway:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.4.1}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.5.0}
     command: ["/usr/local/bin/tokenfuse"]
     environment:
       TOKENFUSE_ADDR: 0.0.0.0:4100
@@ -707,6 +898,18 @@ services:
       # `declassify-is-keyed.sh` holds it, and a literal here is a failure.
       TOKENFUSE_DECLASSIFY_KEY: ${GATEWAY_DECLASSIFY_KEY:?set by install.sh}
       TOKENFUSE_MODE: enforce
+      # The most a caller can make one run's budget. A run's budget used to be
+      # whatever the agent said in `x-fuse-budget-usd`, and its next call could
+      # widen it; tokenfuse 1.5.0 (invariant 73) clamps a budget that came
+      # from that header, a policy default or its built-in default to this
+      # figure on every call. 5.00 is tokenfuse's own default run budget, so an
+      # ordinary run is unchanged and only a larger declared budget is clamped.
+      # A budget set in the Cloud is the operator's own word and is never
+      # clamped. One installer variable moves it (RUN_BUDGET_CEILING_USD, a
+      # positive number of dollars with at most six decimals); tokenfuse exits
+      # 2 on anything else, which `run-budget-ceiling.sh` and install.sh both
+      # refuse first. `run-budget-ceiling.sh` holds that every gateway sets it.
+      TOKENFUSE_MAX_RUN_BUDGET_USD: ${RUN_BUDGET_CEILING_USD:-5.00}
       TOKENFUSE_DATA_DIR: /var/lib/stack/traces/gateway
       # With this unset, the gateway defaults its semantic response cache to
       # `shadow`: every call takes one global mutex, walks up to 10,000 cached
@@ -1080,7 +1283,7 @@ services:
   # The sixth, trailryx-seal, is the `record` profile above.
   focus-export:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.4.1}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.5.0}
     user: "10001:10001"
     profiles: ["routines"]
     environment:
@@ -1156,7 +1359,7 @@ services:
   # on the console, and both of those have a shell.
   idryx-detect:
     restart: "no"
-    image: ${IDRYX_IMAGE:-ghcr.io/taipanbox/idryx:v1.0.0}
+    image: ${IDRYX_IMAGE:-ghcr.io/taipanbox/idryx:v1.1.0}
     user: "65532:10001"
     profiles: ["manual"]
     # The entrypoint by its real path, and the arguments straight to it, which
@@ -1237,6 +1440,11 @@ volumes:
   # un-revokes a delegation.
   vouchryxdata:
   heraldyxstate:
+  # The chain verifier's memory (which breaks it has already announced), on its
+  # own volume and not on the bus it walks: inside the bus directory it would be
+  # read as a stream, and an operator clearing the bus would delete it and
+  # re-send every alert.
+  conformstate:
   # The record plane's store, deliberately NOT the shared `events` volume:
   # a hash-chained record kept inside the volume its own inputs live in is
   # evidence an operator can delete while clearing space on the bus.
@@ -1255,3 +1463,17 @@ volumes:
   # privilege boundary: the tunnel and NET_ADMIN live in the `wg` container,
   # and the console reaches them through one group-readable unix socket.
   wgapi:
+
+networks:
+  # Compose's own network, named so a service can be on it AND on another.
+  default:
+  # The typed risk signal's one door, and the reason the proxy can run open.
+  # `typryx wardryx-proxy` asks the typed backend about every tool call it
+  # forwards, so anything that can reach it can spend this box's ask budget,
+  # and the only caller that cannot present a credential to it is tokenfuse's
+  # MCP broker (it has no way to add the header). So the proxy runs without
+  # `TYPRYX_KEYS` and its only protection is who can reach it: this network
+  # holds the proxy, the broker, and wardryx (the proxy's upstream), and the
+  # proxy is on no other network and publishes no port. Only a service listed
+  # here can address it, and `typed-risk-signal.sh` holds that list.
+  risk-signal:

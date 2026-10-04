@@ -40,6 +40,9 @@ step "the operator's bind is honoured end to end" "./scripts/bind-is-honoured.sh
 step "the package step never takes Docker away" "./scripts/apt-never-removes-docker.sh"
 step "the gateway's semantic cache is off" "./scripts/gateway-cache-is-off.sh"
 step "the gateway's declassify key is minted per install" "./scripts/declassify-is-keyed.sh"
+step "every gateway clamps a run's budget" "./scripts/run-budget-ceiling.sh"
+step "the chain verifier writes only its own stream" "./scripts/chain-verifier-is-contained.sh"
+step "every stream file is one the readers accept" "./scripts/bus-names-match-their-source.sh"
 step "delegation is off by default" "./scripts/delegation-off-by-default.sh"
 step "the delegation plane's keys are never printed" "./scripts/delegation-key-not-printed.sh"
 step "the delegation plane's directories stay apart" "./scripts/delegation-dirs-are-split.sh"
@@ -47,6 +50,8 @@ step "Felyx reaches its model through the gateway" "./scripts/felyx-through-the-
 step ".env sources cleanly" "./scripts/env-sources-cleanly.sh"
 step "the delegation plane's keys are reused on a re-run" "./scripts/delegation-key-reused-on-rerun.sh"
 step "typed answers go where the operator chose" "./scripts/typed-data-mode.sh"
+step "the typed risk signal is off unless asked" "./scripts/typed-risk-signal.sh"
+step "every scenario is bound to a test" "./scripts/features-are-bound.sh"
 # Reaches the network (a tarball from the sibling repo), which is why it is
 # last: everything that can be judged offline has already spoken by here.
 step "every image has the files it copies" "./scripts/build-context-complete.sh"

@@ -42,6 +42,12 @@
 #   TYPED_TRAINING=1 (with any typed mode above) also switches on typryx's local
 #     training log, in a volume on this box; off unless you ask, 0 turns it off
 #   WITH_DELEGATION=1 ./install.sh        # pulls AND starts vouchryx
+#   TYPED_RISK_SIGNAL=1 (with any typed answers above, never with them off) also
+#     starts typryx's wardryx-proxy and points ONLY the MCP broker's policy
+#     client at it, so a tool call carries typryx's risk class to wardryx; it
+#     is off unless you ask, 0 turns it off. See section 0b and the README.
+#   RUN_BUDGET_CEILING_USD=2.50 ./install.sh   # the most a caller can make one
+#     run's budget (tokenfuse 1.5.0), 5.00 unless you say otherwise
 #
 # The typed-answer plane (typryx) answers a typed question from one of the
 # templates baked into its image, with a probability for every option. The
@@ -174,6 +180,19 @@ esac
 # change of mode, and TYPED_TRAINING=0 turns it off. It writes no .env line
 # unless asked: off renders exactly what it rendered before.
 #
+# TYPED_RISK_SIGNAL=1 (@claude 2026-10-04, from the estate audit's launcher spec; off
+# by default) puts typryx in front
+# of wardryx on the MCP path only: `typryx wardryx-proxy` asks typryx
+# `action.risk_class` about each tool call the broker is about to make and adds
+# the answer as a signal, which a `hold_if_signal` policy rule can turn into a
+# hold for a person, never a deny. It needs typryx installed (refused
+# otherwise, naming what to set), it is independent of the mode and survives a
+# change of mode, and TYPED_RISK_SIGNAL=0 turns it off. It writes three .env
+# lines only when asked: off renders exactly what it rendered before. Nothing
+# seeds a policy that reads the signal; until the operator writes one the
+# signal changes nothing. (gate: scripts/typed-risk-signal.sh lifts this block
+# too.)
+#
 # A key is only ever a FILE. It is copied into ./typed (0400, owned by the uid
 # typryx runs as), mounted read only, named in .env by its path inside the
 # container, and never expanded into a print call, an environment value or a
@@ -189,11 +208,18 @@ TYPED_URL=""
 TYPED_NAME=""
 TYPED_TIMEOUT=""
 TYPED_TRAIN=""         # "" (this run says nothing), 1 (log on) or 0 (log off)
+TYPED_RISK=""          # "" (this run says nothing), 1 (signal on) or 0 (signal off)
+TYPED_RISK_ON=0        # 1 when this box runs the risk-signal proxy after this run
 
 # The variables compose's typryx service reads that this block owns. Dropped as
 # a set when the mode changes, so a switch never leaves the old mode's lines
 # behind to be read by the new one.
 TYPED_OWNED=(TYPRYX_BACKEND TYPRYX_JEV_KEY_FILE TYPRYX_OPENAI_URL TYPRYX_OPENAI_MODEL TYPRYX_OPENAI_KEY_FILE TYPRYX_TIMEOUT_MS)
+# The risk signal's own three lines: the flag itself, and the two values compose
+# hands the MCP broker's wardryx client (mode `enforce`, URL the proxy). Apart
+# from TYPED_OWNED on purpose: the signal is the operator's own choice and
+# survives a change of mode, like the training log.
+TYPED_RISK_OWNED=(TYPED_RISK_SIGNAL TYPED_RISK_WARDRYX_MODE TYPED_RISK_WARDRYX_URL)
 
 typed_env_get() { # NAME: what .env holds for NAME, single quotes removed
   local v
@@ -275,6 +301,15 @@ typed_resolve() {
     *) die "TYPED_TRAINING must be 1 (log on) or 0 (log off). Nothing was installed." ;;
   esac
 
+  # @claude 2026-10-04: the typed risk signal is opt-in and off by default,
+  # read apart from TYPED_EXPLICIT for the training log's reason: asking for it
+  # is not choosing a mode.
+  TYPED_RISK="${TYPED_RISK_SIGNAL:-}"
+  case "$TYPED_RISK" in
+    ""|0|1) ;;
+    *) die "TYPED_RISK_SIGNAL must be 1 (signal on) or 0 (signal off). Nothing was installed." ;;
+  esac
+
   TYPED_EXPLICIT=0
   if [ -n "$want" ] || [ -n "${TYPED_JEV_KEY_FILE:-}${TYPED_MODEL_URL:-}${TYPED_MODEL_NAME:-}${TYPED_MODEL_KEY_FILE:-}${TYPED_MODEL_TIMEOUT_MS:-}" ]; then
     TYPED_EXPLICIT=1
@@ -298,6 +333,23 @@ typed_resolve() {
   fi
   if [ "$TYPED_TRAIN" = 1 ] && [ "$mode" = off ]; then
     die "TYPED_TRAINING=1 has no typryx to log for: typed answers are off. Set WITH_TYPED=1 or TYPED_MODE=jev or TYPED_MODE=own-model with it. Nothing was installed."
+  fi
+
+  if [ "$TYPED_RISK" = 1 ] && [ "$mode" = off ]; then
+    die "TYPED_RISK_SIGNAL=1 has no typryx to ask: typed answers are off. Set WITH_TYPED=1 or TYPED_MODE=jev or TYPED_MODE=own-model with it. Nothing was installed."
+  fi
+  # What this box runs once the run is over: this run's word if it said one,
+  # else what an earlier run saved, and never with typryx off.
+  case "$TYPED_RISK" in
+    1) TYPED_RISK_ON=1 ;;
+    0) TYPED_RISK_ON=0 ;;
+    *) if [ "$(typed_env_get TYPED_RISK_SIGNAL)" = 1 ]; then TYPED_RISK_ON=1; else TYPED_RISK_ON=0; fi ;;
+  esac
+  if [ "$mode" = off ]; then
+    if [ "$TYPED_RISK_ON" = 1 ]; then
+      note "TYPED_RISK_SIGNAL is saved in .env and does nothing while typed answers are off"
+    fi
+    TYPED_RISK_ON=0
   fi
 
   case "$mode" in
@@ -411,9 +463,83 @@ typed_apply() {
       ;;
     0) typed_forget_env TYPRYX_TRAINING_DIR ;;
   esac
+  # The risk signal, apart from the mode like the log above. On: the flag and
+  # the two values compose reads for the MCP broker's policy client. The URL is
+  # the proxy, never wardryx itself; the LLM gateway keeps its own direct URL.
+  case "$TYPED_RISK" in
+    1)
+      typed_set_env TYPED_RISK_SIGNAL 1
+      typed_set_env TYPED_RISK_WARDRYX_MODE enforce
+      typed_set_env TYPED_RISK_WARDRYX_URL http://typryx-wardryx-proxy:4330
+      note "typed risk signal: ON. The MCP broker now asks wardryx about every tool call through typryx's proxy, enforces what wardryx decides, and needs x-fuse-agent-id on each call"
+      case "$TYPED_PLANE" in
+        stub) note "  the backend is the stub: its answer is a fixed pick, not a classification, so this only shows the wiring" ;;
+        jev)  note "  the backend is Jev: every tool call through the broker is one metered ask at TypeSafe, capped per hour by typryx" ;;
+      esac
+      note "  nothing seeds a hold_if_signal policy: until you write one, the signal changes no decision (README has an example)"
+      ;;
+    0) typed_forget_env "${TYPED_RISK_OWNED[@]}" ;;
+  esac
 }
 # typed-mode: end
 typed_resolve
+
+# ---- 0c. the run-budget ceiling --------------------------------------------
+# tokenfuse 1.5.0 (invariant 73) can clamp the budget a caller declares for a
+# run. A run's budget used to be whatever the agent said in x-fuse-budget-usd,
+# and the next call of an open run could widen it, so on a box with no client
+# keys and no identity map the per-run ceiling was the agent's own word. The
+# gateway reads TOKENFUSE_MAX_RUN_BUDGET_USD; compose.yaml sets it from
+# RUN_BUDGET_CEILING_USD with a default of 5.00, which is tokenfuse's own
+# default run budget, so an ordinary run is unchanged and only a caller-declared
+# larger budget is clamped. A budget set in the Cloud is never clamped.
+#
+# One variable moves it: RUN_BUDGET_CEILING_USD, a positive number of dollars
+# with at most six decimals, the one form tokenfuse reads (it exits 2 on
+# anything else, and a gateway that exits at start is a stack that does not
+# come up). So the value is checked HERE, before a package is installed or a
+# file written, whether it came from this run's environment or was left in
+# .env by a hand edit; a refusal never echoes what it was given. Nothing set
+# writes nothing: a default box carries no line and compose supplies 5.00. A
+# run that sets it replaces the .env line. (gate: scripts/run-budget-ceiling.sh
+# lifts this block out and runs it.)
+# run-budget-ceiling: begin
+CEILING_SET=""   # what this run puts in .env, "" when it says nothing
+
+ceiling_valid() { # VALUE: digits, optionally a point and 1-6 digits, above zero
+  local LC_ALL=C   # [0-9] means ASCII digits here, as it does to tokenfuse
+  [[ "$1" =~ ^[0-9]{1,12}(\.[0-9]{1,6})?$ ]] && [[ "$1" =~ [1-9] ]]
+}
+
+ceiling_resolve() {
+  local saved=""
+  CEILING_SET="${RUN_BUDGET_CEILING_USD:-}"
+  if [ -n "$CEILING_SET" ] && ! ceiling_valid "$CEILING_SET"; then
+    die "RUN_BUDGET_CEILING_USD must be a positive number of US dollars with at most six decimals (5 or 2.50, never 0, a sign or an exponent): tokenfuse refuses to start on anything else. Nothing was installed."
+  fi
+  if [ -f "$STACK_DIR/.env" ]; then
+    saved="$(sed -n "/^RUN_BUDGET_CEILING_USD=/{s///p;q;}" "$STACK_DIR/.env")"
+    saved="${saved#\'}"
+    saved="${saved%\'}"
+  fi
+  if [ -n "$saved" ] && ! ceiling_valid "$saved"; then
+    die ".env holds a RUN_BUDGET_CEILING_USD that is not a positive number of dollars with at most six decimals, so the gateway would refuse to start. Fix or remove that line. Nothing was changed."
+  fi
+}
+
+# Write the decision where compose reads it. Called once .env exists.
+ceiling_apply() {
+  local tmp
+  [ -n "$CEILING_SET" ] || return 0
+  tmp="$(mktemp)" || die "could not make a temporary file to update .env"
+  { grep -v "^RUN_BUDGET_CEILING_USD=" "$STACK_DIR/.env" || true; } >"$tmp"
+  printf 'RUN_BUDGET_CEILING_USD=%s\n' "$CEILING_SET" >>"$tmp"
+  cat "$tmp" >"$STACK_DIR/.env" || die "could not update $STACK_DIR/.env"
+  rm -f "$tmp"
+  note "run-budget ceiling: $CEILING_SET USD per run (a caller-declared budget above it is clamped; a Cloud budget is not)"
+}
+# run-budget-ceiling: end
+ceiling_resolve
 [ "$(uname -m)" = "x86_64" ] || note "architecture $(uname -m): the images build from source, so this should work, but it is untested off x86_64."
 
 say "installing docker and git"
@@ -968,6 +1094,8 @@ add_env_default TOKENFUSE_MCP_SECRET_SCOPES "$(sq_ 'typryx_key=tools:ask|ask_fre
 # into .env only when this run chose or changed it, and the key file, if any,
 # copied into ./typed. Refusals were made before anything was touched.
 typed_apply
+# The ceiling on a run budget (section 0c): written only when this run set it.
+ceiling_apply
 
 # The delegation plane's own door (profile delegation), handled like every
 # other opt-in plane's key above: generated whether or not WITH_DELEGATION is
@@ -1110,7 +1238,7 @@ posture and README says so."
   if [ ! -f delegation/signing.pem ]; then
     note "vouchryx: minting a signing key"
     docker run --rm --user 0:0 -v "$STACK_DIR/delegation:/out" \
-        --entrypoint vouchryx-demo "${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.1.0}" \
+        --entrypoint vouchryx-demo "${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.2.0}" \
         keygen -out /out/signing >/dev/null \
       || die "could not mint vouchryx's signing key"
     chown 65532:65532 delegation/signing.pem delegation/signing.jwks.json
@@ -1127,7 +1255,7 @@ posture and README says so."
     if [ ! -f delegation/idp.pem ]; then
       note "vouchryx: minting a demo issuer (WITH_DELEGATION_DEMO_ISSUER=1, never for production)"
       docker run --rm --user 0:0 -v "$STACK_DIR/delegation:/out" \
-          --entrypoint vouchryx-demo "${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.1.0}" \
+          --entrypoint vouchryx-demo "${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.2.0}" \
           keygen -out /out/idp -kid stack-single-demo-idp >/dev/null \
         || die "could not mint the demo issuer key"
       chown 65532:65532 delegation/idp.pem delegation/idp.jwks.json
@@ -1177,6 +1305,10 @@ if [ -z "$BUILD_FROM_SOURCE" ]; then
   [ -z "${WITH_RECORD:-}" ]  || profiles+=(--profile record)
   [ -z "${WITH_EGRESS:-}" ]  || profiles+=(--profile egress)
   [ "$TYPED_PLANE" = off ]   || profiles+=(--profile typed)
+  # The risk-signal proxy's image is the typryx image already pulled for the
+  # typed profile, so this adds nothing to pull; it is named so that
+  # `config --images` resolves the same set docker will run.
+  if [ "$TYPED_PLANE" != off ] && [ "$TYPED_RISK_ON" = 1 ]; then profiles+=(--profile typed-risk-signal); fi
   [ -z "${WITH_DELEGATION:-}" ] || profiles+=(--profile delegation)
   pulled=0
   while read -r img; do
@@ -1307,6 +1439,10 @@ UP_PROFILES=()
 # refuses a caller with no key, and a check that verifies a service nothing
 # started would be verifying nothing.
 [ "$TYPED_PLANE" = off ]      || UP_PROFILES+=(--profile typed)
+# The typed risk signal (TYPED_RISK_SIGNAL=1) starts the proxy beside the broker
+# it serves, and only with typed answers on: a flag with no typryx was refused
+# in section 0b, and a saved flag is inert while typed answers are off.
+if [ "$TYPED_PLANE" != off ] && [ "$TYPED_RISK_ON" = 1 ]; then UP_PROFILES+=(--profile typed-risk-signal); fi
 [ -z "${WITH_DELEGATION:-}" ] || UP_PROFILES+=(--profile delegation)
 
 # Delegation needs a head start, the same reason `stack-up` starts vouchryx
@@ -1357,6 +1493,13 @@ verified chain and nothing came up to verify it against. Check: ${COMPOSE[*]} lo
 fi
 
 "${COMPOSE[@]}" "${UP_PROFILES[@]}" up -d --remove-orphans
+# `up --remove-orphans` does not remove a container whose profile this run does
+# not name (measured 2026-10-04 on Docker Desktop's compose v2: a proxy started
+# under typed-risk-signal kept running through an `up` without it). So turning
+# the signal off, or typed answers off, has to remove the proxy by name, or "off"
+# would leave it running beside a broker that no longer points at it. A box that
+# never had one has nothing to remove, which is why the failure is ignored.
+if [ "$TYPED_PLANE" = off ] || [ "$TYPED_RISK_ON" != 1 ]; then "${COMPOSE[@]}" --profile typed-risk-signal rm -sf typryx-wardryx-proxy >/dev/null 2>&1 || true; fi
 sleep 8
 
 # ---- 6. the firewall ---------------------------------------------------------
@@ -1472,6 +1615,13 @@ check "gateway answers on $GATEWAY_PROBE:4100" "curl -fsS -m5 -o /dev/null http:
 # gateway's own log rather than the file: a fresh box has served no traffic,
 # so the file is legitimately empty and its size proves nothing yet.
 check_log "gateway exports agent events" "$DC logs tokenfuse-gateway 2>&1 | grep -q 'NDJSON export enabled'"
+# The run-budget ceiling (section 0c) is read from the gateway's own start-up
+# line, not from the variable: tokenfuse 1.5.0 logs it once when the clamp is
+# armed, so a gateway older than 1.5.0, or one that read no ceiling, has no such
+# line and this goes red. Reading compose's environment instead would call a
+# box green whose gateway ignored the setting.
+check_log "gateway clamps a run budget to a ceiling" \
+      "$DC logs tokenfuse-gateway 2>&1 | grep -q 'run budget ceiling: a caller-declared or default budget is clamped to it'"
 check "cloud answers inside"         "probe http://tokenfuse-cloud:8080/healthz"
 check "wardryx answers inside"       "probe http://wardryx:8090/healthz"
 check "idryx answers inside"         "probe http://idryx:8081/healthz"
@@ -1525,6 +1675,24 @@ check "gateway has a port mapping" \
 # all, because the banner then tells you the box is closed while it is open.
 check "gateway published on $GATEWAY_BIND only" \
       "$DC port tokenfuse-gateway 4100 | grep -q '^${GATEWAY_BIND}:'"
+
+# The chain verifier (agent-conform watch-dir). Two questions, because "running"
+# is not "verifying". It has to be up and its first pass must have printed a line
+# for a stream (PASS, or NOTE for an empty one: a fresh box has served no traffic
+# and only empty streams): a verifier that exited 2 on a bus it could not read
+# is restarting and prints errors instead. And its account must be able to write
+# its own stream and nothing else on the bus, which is the only thing that
+# contains it (compose cannot mount one file of a volume): both are asked of a
+# throwaway busybox run as the verifier's own uid against the live volume, the
+# second one a check that must fail to pass.
+check_log "chain verifier is running and has read the bus" \
+      "$DC ps --status running --services | grep -qx agent-conform && $DC logs agent-conform 2>&1 | grep -qE '(PASS|NOTE) [a-z-]+\\.ndjson'"
+check "chain verifier can write its own stream" \
+      "docker run --rm --user 10002:10002 -v agent-stack_events:/e busybox:1.36 sh -c ': >> /e/agent-conform.ndjson'"
+check "chain verifier cannot write another plane's stream" \
+      "! docker run --rm --user 10002:10002 -v agent-stack_events:/e busybox:1.36 sh -c ': >> /e/wardryx.ndjson'"
+check "chain verifier cannot create a file on the bus" \
+      "! docker run --rm --user 10002:10002 -v agent-stack_events:/e busybox:1.36 sh -c ': > /e/not-its-own.ndjson'"
 
 # The operator's tunnel. Checked from the CONSOLE's side rather than the wg
 # container's: what matters is not that a socket exists somewhere, it is that
@@ -1666,9 +1834,14 @@ if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx tokenfuse-mcp-broker; th
   # _meta credential reading is typryx#6, not in v0.1.0.
   # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
   mcp_ask_answered() { # url, key
+    local hdrs=(--header="Content-Type: application/json" --header="X-Fuse-Mcp-Upstream: typryx" --header="x-fuse-key: $2")
+    # With the typed risk signal on, the broker is a policy enforcement point
+    # and judges only a call it can attribute: without x-fuse-agent-id it
+    # refuses, which is the right answer for an unattributed call and the wrong
+    # one for this check. Off, the request is byte for byte what it always was.
+    if [ "$TYPED_RISK_ON" = 1 ]; then hdrs+=(--header="x-fuse-agent-id: agent://local.invalid/install-check"); fi
     docker run --rm --network "$NET" busybox:1.36 wget -q -T5 -O - \
-        --header="Content-Type: application/json" --header="X-Fuse-Mcp-Upstream: typryx" \
-        --header="x-fuse-key: $2" \
+        "${hdrs[@]}" \
         --post-data='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ask","arguments":{"template":"eval.outcome_met","state":{"task":"2+2","final_answer":"4"}},"_meta":{"typryx/key":"{{secret:typryx_key}}"}}}' \
         "$1" 2>/dev/null | grep -q '"isError":false'
   }
@@ -1687,6 +1860,37 @@ if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx tokenfuse-mcp-broker; th
     check_log "typed plane: typryx is running on its $TYPED_PLANE backend" \
           "$DC ps --status running --services | grep -qx typryx"
   fi
+  # The typed risk signal (TYPED_RISK_SIGNAL=1), only when its proxy actually
+  # came up. Three things are asked, none of which the broker's own checks
+  # above can see. The proxy answers on the network it is meant to be on
+  # (through it, wardryx's /healthz: a 200 here is the proxy AND its upstream).
+  # It does NOT answer from the default network and is not on the host: both
+  # must fail to pass, because the proxy runs without a credential and who can
+  # reach it is its only protection. And only the broker's policy client was
+  # pointed at it: the LLM gateway keeps asking wardryx directly.
+  if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx typryx-wardryx-proxy; then
+    # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
+    risk_probe() { docker run --rm --network agent-stack_risk-signal busybox:1.36 wget -q -T5 -O /dev/null "$1"; }
+    check "typed risk signal: the proxy answers on its own network" \
+          "risk_probe http://typryx-wardryx-proxy:4330/healthz"
+    check "typed risk signal: the proxy is NOT reachable from the default network" \
+          "! probe http://typryx-wardryx-proxy:4330/healthz"
+    check "typed risk signal: the proxy is NOT on the host" \
+          "! curl -fsS -m3 -o /dev/null http://127.0.0.1:4330/healthz"
+    check "typed risk signal: only the broker's policy client points at the proxy" \
+          "[ \"\$($DC exec -T tokenfuse-mcp-broker printenv TOKENFUSE_WARDRYX_URL)\" = http://typryx-wardryx-proxy:4330 ] && [ \"\$($DC exec -T tokenfuse-gateway printenv TOKENFUSE_WARDRYX_URL)\" = http://wardryx:8090 ]"
+    if [ "$TYPED_PLANE" = stub ]; then
+      # The whole path, read off the bus: the ask check above made the broker
+      # call wardryx through the proxy, and a decision wardryx recorded carries
+      # the signal typryx added. Only on the stub, whose answer is immediate:
+      # a real backend can miss the proxy's deadline, and a missing signal is
+      # then correct, so the same read would fail a healthy box.
+      check_log "typed risk signal: a tool call's decision carries typryx's signal" \
+            "docker run --rm -v agent-stack_events:/e:ro busybox:1.36 grep -q action.risk_class /e/wardryx.ndjson"
+    else
+      note "$TYPED_PLANE: whether a signal arrives is not checked, it depends on the backend answering inside the proxy's deadline"
+    fi
+  fi
   # Must fail to pass, like the admin-key checks above: a call this broker
   # would forward with nobody's key on it is the same open door those checks
   # exist to catch on a different plane.
@@ -1697,6 +1901,11 @@ if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx tokenfuse-mcp-broker; th
   note "  with the header X-Fuse-Mcp-Upstream: typryx and its own client key in x-fuse-key"
   note "  a tools/call then carries the typed-plane credential as"
   note "  \"_meta\":{\"typryx/key\":\"{{secret:typryx_key}}\"}, never a real key value"
+  if [ "$TYPED_RISK_ON" = 1 ]; then
+    note "the typed risk signal is ON: each tools/call also needs the header x-fuse-agent-id, because the"
+    note "  broker now asks wardryx about it (through typryx's proxy) and refuses a call it cannot attribute."
+    note "  Nothing holds a call for a person until you add a hold_if_signal rule to policy.yaml (README)."
+  fi
   case "$TYPED_PLANE" in
     stub)      note "answers come from the stub backend: nothing leaves this box" ;;
     jev)       note "answers come from Jev: the fields each question names leave this box for api.typesafe.ai" ;;
@@ -1839,6 +2048,18 @@ $CONSOLE_ACCESS_NOTE
   its own key, GATEWAY_DECLASSIFY_KEY in $STACK_DIR/.env, sent as the
   x-fuse-declassify-key header. It is not the console or admin key, and it is
   not printed here.
+
+  The gateway clamps the budget a caller declares for one run (the
+  x-fuse-budget-usd header, or a policy's default) to ${RUN_BUDGET_CEILING_USD:-5.00} USD,
+  so an agent cannot give its own run a bigger one. A budget set in the Cloud
+  is yours and is never clamped. To move it, set RUN_BUDGET_CEILING_USD in
+  $STACK_DIR/.env (a positive number of dollars, at most six decimals) and run
+  ${COMPOSE[*]} up -d. It bounds one run, not an agent: a new run id starts a new one.
+
+  A chain verifier (agent-conform) re-checks the hash chain of every event
+  stream on this box every five minutes. A break becomes a high alert on the
+  same bus your notifier already reads. It can write one file, its own, and
+  nothing else on the bus.
 
   Killing a run, setting a budget, deciding an approval, and issuing or
   revoking a device all need a passkey: a road into the control plane is not

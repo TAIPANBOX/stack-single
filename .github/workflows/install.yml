@@ -25,7 +25,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        profile: [default, delegation]
+        profile: [default, delegation, typed-risk]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -33,13 +33,18 @@ jobs:
         run: |
           extra=""
           [ "${{ matrix.profile }}" = delegation ] && extra="WITH_DELEGATION=1 WITH_DELEGATION_DEMO_ISSUER=1"
+          [ "${{ matrix.profile }}" = typed-risk ] && extra="WITH_TYPED=1 TYPED_RISK_SIGNAL=1"
           sudo env STACK_DIR=/opt/agent-stack $extra ./install.sh 2>&1 | tee install-1.log
           grep -q "every check passed" install-1.log || { echo "::error::the first install did not pass every check"; exit 1; }
 
       - name: re-run over the same box
         run: |
+          # The re-run says nothing about the risk signal: it must stay on from
+          # what the first run saved in .env. The stub is not saved, so it is
+          # asked for again, exactly as an operator does.
           extra=""
           [ "${{ matrix.profile }}" = delegation ] && extra="WITH_DELEGATION=1 WITH_DELEGATION_DEMO_ISSUER=1"
+          [ "${{ matrix.profile }}" = typed-risk ] && extra="WITH_TYPED=1"
           sudo env STACK_DIR=/opt/agent-stack $extra ./install.sh 2>&1 | tee install-2.log
           grep -q "every check passed" install-2.log || { echo "::error::the re-run did not pass every check"; exit 1; }
 
@@ -50,6 +55,31 @@ jobs:
           want=no; [ "${{ matrix.profile }}" = delegation ] && want=yes
           echo "vouchryx running: $running (want $want)"
           [ "$running" = "$want" ]
+
+      - name: the typed risk signal is up only when asked for
+        run: |
+          cd /opt/agent-stack
+          if sudo docker compose ps --services | grep -qx typryx-wardryx-proxy; then running=yes; else running=no; fi
+          want=no; [ "${{ matrix.profile }}" = typed-risk ] && want=yes
+          echo "typryx-wardryx-proxy running: $running (want $want)"
+          [ "$running" = "$want" ]
+          # nothing seeds a rule that reads the signal. An explicit if: a bare
+          # `! grep` is exempt from errexit and could never fail this step.
+          if grep -q hold_if_signal policy.yaml; then echo "::error::policy.yaml carries a hold_if_signal rule nobody wrote"; exit 1; fi
+
+      - name: the chain verifier is up on every profile
+        run: |
+          cd /opt/agent-stack
+          sudo docker compose ps --status running --services | grep -qx agent-conform
+
+      - name: turning the typed risk signal off removes its proxy
+        if: matrix.profile == 'typed-risk'
+        run: |
+          sudo env STACK_DIR=/opt/agent-stack WITH_TYPED=1 TYPED_RISK_SIGNAL=0 ./install.sh 2>&1 | tee install-3.log
+          grep -q "every check passed" install-3.log || { echo "::error::the install that turned the signal off did not pass every check"; exit 1; }
+          cd /opt/agent-stack
+          if sudo docker compose ps --services | grep -qx typryx-wardryx-proxy; then echo "::error::the proxy is still running after TYPED_RISK_SIGNAL=0"; exit 1; fi
+          if sudo grep -q '^TYPED_RISK_' .env; then echo "::error::TYPED_RISK_ lines are still in .env after TYPED_RISK_SIGNAL=0"; exit 1; fi
 
       - name: state on failure
         if: failure()

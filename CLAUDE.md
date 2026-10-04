@@ -48,6 +48,9 @@ change here is a change to something with root on somebody else's box.
 ./scripts/apt-never-removes-docker.sh
 ./scripts/gateway-cache-is-off.sh
 ./scripts/declassify-is-keyed.sh
+./scripts/run-budget-ceiling.sh
+./scripts/chain-verifier-is-contained.sh
+./scripts/bus-names-match-their-source.sh
 ./scripts/delegation-off-by-default.sh
 ./scripts/delegation-key-not-printed.sh
 ./scripts/delegation-dirs-are-split.sh
@@ -55,6 +58,8 @@ change here is a change to something with root on somebody else's box.
 ./scripts/env-sources-cleanly.sh
 ./scripts/delegation-key-reused-on-rerun.sh
 ./scripts/typed-data-mode.sh
+./scripts/typed-risk-signal.sh
+./scripts/features-are-bound.sh
 ./scripts/gates-have-teeth.sh   # invariant 8; needs a clean tree
 ```
 
@@ -140,8 +145,12 @@ an absent invariant.
    None of the four gates here said anything about measuring nothing before
    2026-08-09, which is why all four were checked by hand for that property
    rather than trusted.
-   *(gate: `scripts/gates-have-teeth.sh`, 11 cases: six real faults, one
-   non-fault, and four subjects taken away. Two cases mutate the stack-k8s TREE
+   *(gate: `scripts/gates-have-teeth.sh`, 176 cases (`@measured SRC=~/Development/stack-k8s
+   ./scripts/gates-have-teeth.sh` in a clean checkout of this branch 2026-10-04,
+   `OK: 176 cases`, exit 0; this line said 11 for a long time after that stopped
+   being true, so the last line the script prints is the figure to trust). The
+   first eleven were six real faults, one non-fault and four subjects taken
+   away. Two cases mutate the stack-k8s TREE
    rather than this repo, because that is what the gate reads; the tree is
    resolved once per run, the same three ways the gate resolves it, so a run
    costs at most one fetch. Verified on both paths: with a sibling checkout,
@@ -348,8 +357,9 @@ an absent invariant.
     install stopped at `. ./.env` (exit 127, an unquoted `|` in a default)
     while all of them stayed green, because nothing ran install.sh on a real
     box after the line went in. `.github/workflows/install.yml` runs it twice
-    on a fresh Ubuntu runner, with and without the delegation profile, and
-    requires "every check passed" both times.
+    on a fresh Ubuntu runner, with the default profile, with the delegation
+    profile and with the typed risk signal on (the stub backend), and requires
+    "every check passed" both times.
     *(gate: `.github/workflows/install.yml`; red on a branch re-planting the
     unquoted default, 2026-09-27)*
 
@@ -395,7 +405,9 @@ an absent invariant.
     the training log, runs the block for off, on, re-run, mode switch, 0 and the
     refusals, reads the resolved config for a writable volume under the
     training dir beside the ledger, and requires every `typryx:vX.Y.Z` in
-    compose.yaml, components.json, README.md and install.sh to be v0.3.0; it
+    compose.yaml, components.json, README.md and install.sh to be the one pin (v0.4.0
+    since 2026-10-04, the release the risk-signal proxy needs; v0.3.0 was the first
+    with the training log); it
     refuses to report OK on no block, no profile line, no typryx image or no
     Docker; teeth in `scripts/gates-have-teeth.sh`. Not covered: a real
     `install.sh` run on Debian in any typed mode, and the interactive prompt,
@@ -433,6 +445,157 @@ an absent invariant.
     `scripts/gates-have-teeth.sh`. Not covered: that a running gateway actually
     refuses a call with no key, which needs a live install, and that the key is
     kept from the agent, which is the operator's own custody of `.env`.)*
+
+20. **A run's budget has an operator's ceiling, on every gateway.**
+    `@claude 2026-10-04`, from the estate audit's launcher spec (wave 1): a run's
+    budget used to be whatever the agent said in `x-fuse-budget-usd`, widened
+    again by its next call, so on a box with no client keys and no identity map
+    the per-run limit was the agent's own word. tokenfuse 1.5.0 (its invariant
+    73) clamps a budget that came from that header, a policy default or its
+    built-in default to `TOKENFUSE_MAX_RUN_BUDGET_USD`, and is OFF unless that is
+    set; its release notes say the launchers do not set it yet. Every compose
+    service that runs the gateway binary with no subcommand sets it from one
+    installer variable, `${RUN_BUDGET_CEILING_USD:-5.00}`. `@claude 2026-10-04`:
+    the default 5.00 equals tokenfuse's own `DEFAULT_RUN_BUDGET`
+    (`crates/gateway/src/proxy.rs`), so an ordinary run is unchanged and only a
+    caller-declared larger budget is clamped. It is not on the Cloud budget:
+    tokenfuse does not clamp a budget the Cloud sets, which is the operator's own
+    word. It bounds one run, not an agent: a new run id gets a new ceiling's
+    worth. `install.sh` checks a figure (a positive number of dollars, at most six
+    decimals, the one form tokenfuse reads; it exits 2 on anything else) before a
+    package is installed, whether it came from the run's environment or was left
+    in `.env`, never echoes a refused value, and replaces the `.env` line rather
+    than adding a second; section 8 reads the gateway's own start-up line, so a
+    gateway older than 1.5.0 turns the check red. @measured `scratch compose
+    project from this compose.yaml on Docker Desktop, TOKENFUSE_UPSTREAM pointed
+    at a local python stub, wget with x-fuse-budget-usd` 2026-10-04: a declared
+    budget of 100 came back with `x-fuse-budget-clamped: 5.00`, a declared 1 and 5
+    without the header, and with `RUN_BUDGET_CEILING_USD=2.50` in `.env` a
+    declared 5 came back `2.50`.
+    *(gate: `scripts/run-budget-ceiling.sh`, subjects derived from compose.yaml's
+    own image and command lines like invariant 13's; it lifts the
+    `# run-budget-ceiling:` block out of install.sh and runs it per case, reads
+    `docker compose config` for 5.00 and for 2.50, and refuses to report OK on no
+    gateway, no block or no Docker; scenarios in
+    `features/the-run-budget-ceiling.feature`; teeth in
+    `scripts/gates-have-teeth.sh`. Not covered: a live call against a real model
+    provider, and the clamp on the `cluster` feature.)*
+
+21. **The on-box chain verifier reads every stream and writes exactly one file.**
+    `@claude 2026-10-04`, from the estate audit's launcher spec (wave 1): until
+    agent-stack-go#66 nothing on a box checked the `prev_hash` chain of the
+    shared bus, and a flipped byte went unseen on the 2026-09-17 appliance run.
+    `agent-conform watch-dir -every 5m` is a compose service, on by default (it
+    spends nothing and a bus nobody verifies is the fault). Its stream
+    `agent-conform.ndjson` has to be on the bus for heraldyx to read, so the bus
+    is mounted read-write, and compose cannot mount one file of a named volume:
+    the account is the whole containment. It runs `10002:10002`, outside both uid
+    families (10001, 65532) and outside the bus group (10001), with no
+    `group_add` ever; the bus directory is `root:10001 2775` and the other
+    planes' files are 0664 owned by 10001, so it reads through the "other" bits
+    and can write nothing it does not own and create nothing. `init-volumes`
+    pre-creates its stream and gives it to that uid alone, 0644; its state file
+    is on its own volume, `conformstate`, never inside the directory it walks
+    (it would be read as a stream and an operator clearing the bus would
+    delete it and re-send every alert). It is read-only, drops every capability
+    and runs one pinned tag. section 8 asks a throwaway busybox run as that uid
+    that it CAN append to its own stream and CANNOT write another plane's or
+    create a file (the last two must fail to pass), and that the verifier is
+    running and has read the bus. @measured `scratch compose project, the
+    verifier as 10002:10002 against the live volume` 2026-10-04: its first pass
+    printed a line for each of seven streams; busybox as 10002 appended to
+    `agent-conform.ndjson`, was refused on `wardryx.ndjson` and refused creating
+    a file; one byte flipped in `wardryx.ndjson` produced `FAIL wardryx.ndjson:2:
+    chain break` and one `chain_broken` (high) line in `agent-conform.ndjson`
+    written by that uid; heraldyx v0.3.0 with file delivery mailed it as `[box]
+    agent://agent-conform.internal/verifier: chain_broken`, body "raised an event
+    this build does not have a description for", kind `prev_hash_mismatch`:
+    neutral wording that names neither the stream nor the line (a finding for
+    heraldyx, not fixed here).
+    *(gate: `scripts/chain-verifier-is-contained.sh`, subject derived from the
+    image name; `scripts/bus-has-a-writer.sh` treats a file `init-volumes` gives
+    to a service's uid as an owner of that volume for it; scenarios in
+    `features/the-chain-verifier-is-contained.feature`; teeth in
+    `scripts/gates-have-teeth.sh`. Not covered: a break on a long-running live
+    bus, a forged line that chains correctly, truncation from the end of a file,
+    and what `record-seal` makes of the verifier's schema.)*
+
+22. **The typed risk signal is off unless asked, and the network holds its proxy.**
+    `@claude 2026-10-04`, from the estate audit's launcher spec (wave 1), whose
+    J2 design records as decided that a signal may hold a tool call for a person
+    and never deny it: wardryx 1.2.0 reads typed signals on `/v1/decide` and its
+    `hold_if_signal` rule can turn an allow into a hold; typryx 0.4.0's
+    `wardryx-proxy` asks `action.risk_class` about a tool call and adds the
+    answer. `TYPED_RISK_SIGNAL=1` turns it on, only with typed answers on (any
+    mode but off, the stub included) and refused otherwise, naming what to set,
+    before the box is touched; it is independent of the mode and survives a
+    change of mode; `TYPED_RISK_SIGNAL=0` removes its three `.env` lines. On, it
+    starts `typryx-wardryx-proxy` (profile `typed-risk-signal`, the typryx image
+    the typed plane pins) and points ONLY the MCP broker's policy client
+    (`TOKENFUSE_WARDRYX_URL`, mode `enforce`, fail `closed`) at it; the LLM
+    gateway keeps asking wardryx directly, because a model call has no pending
+    tool call and typryx's latency does not belong in front of a 250 ms
+    deadline. The broker's decide deadline is 7000 ms and the proxy's ask
+    deadline 3000 ms (`TYPED_RISK_ASK_TIMEOUT_MS`, at most 5000): typryx's own
+    150 ms default is shorter than a hosted model answers and the signal would
+    almost never arrive. Nothing seeds a `hold_if_signal` policy. `@claude`: the
+    broker was NOT a policy enforcement point on this launcher before (it never
+    set `TOKENFUSE_WARDRYX_URL`), so turning the signal on makes every tool call
+    subject to the operator's whole `policy.yaml`, requires `x-fuse-agent-id`
+    (@measured `wget` through the broker of a scratch compose project with the signal on, 2026-10-04: no header came back `400 Bad Request`, with the header the call was answered) and fails closed. The proxy
+    runs open on purpose: with `TYPRYX_KEYS` it demands an `X-Typryx-Key` the
+    broker cannot send. So its protection is the network: `risk-signal` holds the
+    proxy, the broker and wardryx and nobody else, the proxy is on that network
+    alone and publishes nothing, and install.sh checks it is reachable from there
+    and from nowhere else (the last two must fail to pass). It names no journal
+    or ledger (a second typryx appender, and a file name the source rule would
+    refuse). @measured `scratch compose project from this compose.yaml, stub
+    backend, busybox on each network` 2026-10-04: the proxy answered `/healthz`
+    from `risk-signal` (wardryx's, forwarded) and was a bad address from
+    `default`; an MCP `tools/call` with `x-fuse-agent-id` through the broker was
+    answered and wardryx's `policy_allow` event carried
+    `signals:[{name:action.risk_class,source:typryx,value:read_only,...}]`; with
+    a `hold_if_signal` rule for the stub's value the same call was refused
+    `requires approval (approval ap_...)` and wardryx wrote `approval_requested`.
+    *(gate: `scripts/typed-risk-signal.sh`, which lifts the `# typed-mode:` block
+    and runs it per case, reads `docker compose config` for the proxy's
+    network, ports, key, upstream and members, the broker's and the gateway's
+    URLs, requires typryx 0.4.0, wardryx 1.2.0 and tokenfuse 1.5.0 or later, no
+    seeded `hold_if_signal` and one in the README, and refuses to report OK on no
+    block, no proxy or no Docker; scenarios in
+    `features/the-typed-risk-signal.feature`; teeth in
+    `scripts/gates-have-teeth.sh`; CI's third install leg runs it for real on
+    the stub. Not covered: a real backend (no signal measured from Jev or an own
+    model), the signal under load, and `install.sh` on Debian by hand.)*
+
+23. **Every stream file on the bus is one heraldyx and idryx accept for its
+    writer's source.** `@claude 2026-10-04`, from the estate audit's launcher
+    spec (wave 1): heraldyx 0.3.0 and idryx 1.1.0 refuse an event whose `source`
+    the file it came from may not carry, and say so once; nothing fails loudly
+    and a plane's alerts just stop. The default is `<source>.ndjson` carries
+    `<source>` for the fourteen registered sources, plus `tokenfuse-cloud.ndjson`
+    and `tokenfuse-mcp.ndjson` carrying `tokenfuse`. Every file this launcher
+    writes already matches, so no stream was renamed and `HERALDYX_STREAMS` and
+    `IDRYX_STREAMS` stay unset: the repair for a mismatch is a rename, and a
+    declaration widens what the box takes from anything that can create a file
+    in the bus directory. @measured `heraldyx v0.3.0 -once over a scratch bus, file
+    delivery` 2026-10-04: with real events on `tokenfuse.ndjson`,
+    `tokenfuse-cloud.ndjson`, `tokenfuse-mcp.ndjson`, `typryx.ndjson`,
+    `wardryx.ndjson` and (an earlier run) `agent-conform.ndjson` it raised the
+    expected notices and no `foreign_source` or `unknown_stream`, and idryx v1.1.0
+    logged `prev_hash chain intact: 2 event(s) chained` for `tokenfuse.ndjson`;
+    `vouchryx.ndjson` was not exercised. The pairs, derived from compose.yaml: `tokenfuse.ndjson`
+    (gateway), `tokenfuse-cloud.ndjson` (control plane) and `tokenfuse-mcp.ndjson`
+    (broker) carry `tokenfuse`; `wardryx.ndjson`, `typryx.ndjson`,
+    `vouchryx.ndjson` and `agent-conform.ndjson` carry their own name; idryx and
+    `idryx-detect` load `tokenfuse:` from `tokenfuse.ndjson`.
+    *(gate: `scripts/bus-names-match-their-source.sh`, which prints the table it
+    judged; scenarios in `features/stream-files-match-their-source.feature`;
+    teeth in `scripts/gates-have-teeth.sh`. The allowed table and the source each
+    image claims are copies of what heraldyx, idryx and each producer carry, and
+    nothing holds them equal: the claimed sources were read from each producer's
+    source constant, not from a run of every plane, and a stream a plane
+    writes that this launcher does not configure is not seen.)*
 
 ## Decisions that have no gate yet
 
