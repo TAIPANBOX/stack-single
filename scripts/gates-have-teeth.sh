@@ -439,6 +439,53 @@ run_case "gateway-cache-is-off: no gateway service left to judge" fail \
 	"$(py 'edit("compose.yaml", "command: [\"/usr/local/bin/tokenfuse\"]", "command: [\"/usr/local/bin/tokenfuse\", \"serve\"]")')" \
 	"measured NOTHING"
 
+# invariant 19: the gateway's declassify key is minted per install and reaches
+# the container from .env. Unset, POST /v1/fuse/declassify is open to anything
+# that reaches the port and records only `authenticated: false`.
+run_case "declassify-is-keyed: TOKENFUSE_DECLASSIFY_KEY goes missing" fail \
+	'./scripts/declassify-is-keyed.sh' \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_DECLASSIFY_KEY: ${GATEWAY_DECLASSIFY_KEY:?set by install.sh}\n", "")')" \
+	"sets no TOKENFUSE_DECLASSIFY_KEY"
+
+# A literal in the compose file: a key committed to a public repository.
+run_case "declassify-is-keyed: the key becomes a literal" fail \
+	'./scripts/declassify-is-keyed.sh' \
+	"$(py 'edit("compose.yaml", "TOKENFUSE_DECLASSIFY_KEY: ${GATEWAY_DECLASSIFY_KEY:?set by install.sh}", "TOKENFUSE_DECLASSIFY_KEY: change-me")')" \
+	"which is not a"
+
+# An empty default: the gateway starts with the endpoint open on any box whose
+# .env lacks the variable, which is the fault the key exists to close.
+run_case "declassify-is-keyed: the key gets an empty default" fail \
+	'./scripts/declassify-is-keyed.sh' \
+	"$(py 'edit("compose.yaml", "${GATEWAY_DECLASSIFY_KEY:?set by install.sh}", "${GATEWAY_DECLASSIFY_KEY:-}")')" \
+	"which is not a"
+
+# The other half: compose reads a variable nothing mints.
+run_case "declassify-is-keyed: install.sh stops minting the key" fail \
+	'./scripts/declassify-is-keyed.sh' \
+	"$(py 'edit("install.sh", "add_env_default GATEWAY_DECLASSIFY_KEY \"$(gen 40)\"\n", "")')" \
+	"never mints it"
+
+# Minted, but not random: one key for every install is a published key.
+run_case "declassify-is-keyed: install.sh mints a fixed key" fail \
+	'./scripts/declassify-is-keyed.sh' \
+	"$(py 'edit("install.sh", "add_env_default GATEWAY_DECLASSIFY_KEY \"$(gen 40)\"", "add_env_default GATEWAY_DECLASSIFY_KEY \"fixed-key\"")')" \
+	"not with the gen helper"
+
+# The subject taken away: the gateway service no longer has the shape the gate
+# finds it by, and it must say it measured nothing, never OK.
+run_case "declassify-is-keyed: no gateway service left to judge" fail \
+	'./scripts/declassify-is-keyed.sh' \
+	"$(py 'edit("compose.yaml", "command: [\"/usr/local/bin/tokenfuse\"]", "command: [\"/usr/local/bin/tokenfuse\", \"serve\"]")')" \
+	"measured NOTHING"
+
+# The second subject taken away: no installer to read the mint from.
+run_case "declassify-is-keyed: no install.sh left to read" fail \
+	'./scripts/declassify-is-keyed.sh' \
+	"$(py 'import os
+os.rename("install.sh", "install.sh.gone")')" \
+	"measured NOTHING about"
+
 # invariant: components.json says what this launcher actually installs.
 #
 # The compose half of the same idea stack-up carries. Two cases: ordinary drift,
@@ -692,6 +739,18 @@ run_case "gateway-cache-is-off: focus-export's command changes" pass \
 run_case "gateway-cache-is-off: the mcp broker's configuration changes" pass \
 	'./scripts/gateway-cache-is-off.sh' \
 	"$(py 'edit("compose.yaml", "TOKENFUSE_MCP_ADDR: 0.0.0.0:4200", "TOKENFUSE_MCP_ADDR: 0.0.0.0:4201")')"
+
+# The declassify gate's subject is the serve-mode gateway only: the broker
+# runs the same image on a subcommand and never serves that route.
+run_case "declassify-is-keyed: the mcp broker's configuration changes" pass \
+	'./scripts/declassify-is-keyed.sh' \
+	"$(py 'edit("compose.yaml", "TOKENFUSE_MCP_ADDR: 0.0.0.0:4200", "TOKENFUSE_MCP_ADDR: 0.0.0.0:4201")')"
+
+# The message after `:?` is wording, not the rule. A gate that fired on it
+# would be edited out by whoever hit it.
+run_case "declassify-is-keyed: the required-variable message is reworded" pass \
+	'./scripts/declassify-is-keyed.sh' \
+	"$(py 'edit("compose.yaml", "${GATEWAY_DECLASSIFY_KEY:?set by install.sh}", "${GATEWAY_DECLASSIFY_KEY:?run install.sh first}")')"
 
 # A wording change beside the delegation section is not a change to whether
 # the profile is off by default, whether a secret is printed, or whether a

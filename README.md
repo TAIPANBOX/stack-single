@@ -262,6 +262,18 @@ A request with no key, or the wrong one, is refused. Widening `GATEWAY_BIND`
 no longer widens those routes to anyone without the key: it decides who can
 reach the port, the key decides who those five routes answer once reached.
 
+Clearing a run's taint label is a sixth door with a key of its own. The
+gateway's `POST /v1/fuse/declassify` (the release valve for its agent firewall:
+a person reviews a run and the label comes off it) is not behind the admin key.
+It takes `x-fuse-declassify-key`, and `install.sh` mints that key into `.env` as
+`GATEWAY_DECLASSIFY_KEY`, handed to the gateway as `TOKENFUSE_DECLASSIFY_KEY`.
+Without a key configured, the gateway lets anything that reaches the port clear
+a run, so this is set by default and only whoever can read `.env` holds it.
+Nothing in this stack calls the endpoint. To clear a run, read the key from
+`.env` and send it in that header; a call with no key or the wrong one is
+refused. An install from before this release gets the key on its next run of
+the installer, which adds it without touching any credential already there.
+
 "Not published" is not a firewall rule that might be misread: those services
 have no host port at all, so nothing outside this machine can address them.
 
