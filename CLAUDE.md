@@ -47,8 +47,12 @@ change here is a change to something with root on somebody else's box.
 ./scripts/bind-is-honoured.sh
 ./scripts/apt-never-removes-docker.sh
 ./scripts/gateway-cache-is-off.sh
+./scripts/declassify-is-keyed.sh
 ./scripts/delegation-off-by-default.sh
 ./scripts/delegation-key-not-printed.sh
+./scripts/delegation-dirs-are-split.sh
+./scripts/felyx-through-the-gateway.sh
+./scripts/env-sources-cleanly.sh
 ./scripts/delegation-key-reused-on-rerun.sh
 ./scripts/typed-data-mode.sh
 ./scripts/gates-have-teeth.sh   # invariant 8; needs a clean tree
@@ -403,6 +407,32 @@ an absent invariant.
     to `/v1/outcome`, and `docker compose exec -T typryx typryx export
     --training` wrote one row with only the template's fields and the posted
     label, no email; the training directory was 0700 and its file 0600.)*
+
+19. **The gateway's declassify key is minted per install, and only the operator
+    holds it.** `@decided 2026-10-04` (estate audit, wave 1): the tokenfuse
+    gateway's `POST /v1/fuse/declassify` lifts a run's taint label, the release
+    valve for its agent firewall. It is not behind `TOKENFUSE_ADMIN_KEYS`; its
+    own credential, `TOKENFUSE_DECLASSIFY_KEY` (presented as
+    `x-fuse-declassify-key`), is optional in the gateway, and with it unset
+    anything that can reach the gateway port can clear a run, recorded only as
+    `authenticated: false`. This launcher publishes that port on the operator's
+    chosen bind and set no key. `install.sh` now mints `GATEWAY_DECLASSIFY_KEY`
+    with `gen 40` into `.env` (0600, added by `add_env_default`, so an existing
+    install gets it on the next run and a credential already there is never
+    rewritten), compose passes it to the gateway as `TOKENFUSE_DECLASSIFY_KEY:
+    ${GATEWAY_DECLASSIFY_KEY:?...}`, and the closing report says the key lives
+    in `.env` and that clearing a run needs it, never printing the value. Nothing
+    in this estate calls the endpoint, so minting a key closes it by default and
+    breaks nothing. The reader of the variable is tokenfuse's `declassify.rs`,
+    declared in its `components.json`.
+    *(gate: `scripts/declassify-is-keyed.sh`, subjects derived from compose.yaml's
+    own image and command lines like invariant 13's; it requires the value to be
+    a `${VAR:?...}` interpolation (a literal or a `:-` default fails) and
+    install.sh to mint that same VAR with `gen`; refuses to report OK with no
+    gateway service or no install.sh to read; teeth in
+    `scripts/gates-have-teeth.sh`. Not covered: that a running gateway actually
+    refuses a call with no key, which needs a live install, and that the key is
+    kept from the agent, which is the operator's own custody of `.env`.)*
 
 ## Decisions that have no gate yet
 

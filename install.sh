@@ -854,6 +854,17 @@ add_env_default CONSOLE_DOMAIN console.genaryx.internal
 # left to fall back to.
 add_env_default GATEWAY_ADMIN "$(gen 40)"
 
+# The gateway's declassify key. `POST /v1/fuse/declassify` lifts a run's taint
+# label (tokenfuse docs/07 B.4, the release valve) and is NOT behind the admin
+# key above: it has a credential of its own, `TOKENFUSE_DECLASSIFY_KEY`, which
+# the gateway reads from `x-fuse-declassify-key`. When that variable is unset
+# the endpoint is open to anything that reaches the port, and a clearance is
+# recorded only as `authenticated: false`. Nothing in this stack calls the
+# endpoint, so minting a key that only the operator holds closes it by
+# default and breaks nothing. Generated like every other key here, once, into
+# .env (0600), read back from there and never printed; clearing a run needs it.
+add_env_default GATEWAY_DECLASSIFY_KEY "$(gen 40)"
+
 # Notifications, from the answers given before the build.
 #
 # Single-quoted, and this is not fussiness. `.env` has TWO readers: compose
@@ -1823,6 +1834,11 @@ ${CONSOLE_PASSWORD:+  Console sign-in, shown once and stored nowhere:
       console  https://$CONSOLE_DOMAIN   (once your tunnel is up)
       tunnel   $WG_ENDPOINT_HOST:${WG_LISTEN_PORT:-51820}/udp
 $CONSOLE_ACCESS_NOTE
+
+  Clearing a run's taint label (POST /v1/fuse/declassify on the gateway) needs
+  its own key, GATEWAY_DECLASSIFY_KEY in $STACK_DIR/.env, sent as the
+  x-fuse-declassify-key header. It is not the console or admin key, and it is
+  not printed here.
 
   Killing a run, setting a budget, deciding an approval, and issuing or
   revoking a device all need a passkey: a road into the control plane is not

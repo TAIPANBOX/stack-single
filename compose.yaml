@@ -698,6 +698,14 @@ services:
       # only door now, and widening GATEWAY_BIND no longer widens these
       # routes to anyone without it.
       TOKENFUSE_ADMIN_KEYS: ${GATEWAY_ADMIN:?set by install.sh}
+      # POST /v1/fuse/declassify lifts a run's taint label and is not behind
+      # the admin key: it takes its own credential, presented as
+      # `x-fuse-declassify-key`. Unset, the gateway lets anything that reaches
+      # the port clear a run and records only `authenticated: false`. Set from
+      # .env (GATEWAY_DECLASSIFY_KEY, minted once by install.sh), so only the
+      # operator holds it; nothing in this stack calls the endpoint.
+      # `declassify-is-keyed.sh` holds it, and a literal here is a failure.
+      TOKENFUSE_DECLASSIFY_KEY: ${GATEWAY_DECLASSIFY_KEY:?set by install.sh}
       TOKENFUSE_MODE: enforce
       TOKENFUSE_DATA_DIR: /var/lib/stack/traces/gateway
       # With this unset, the gateway defaults its semantic response cache to

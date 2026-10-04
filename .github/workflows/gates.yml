@@ -44,6 +44,8 @@ jobs:
         run: ./scripts/apt-never-removes-docker.sh
       - name: the gateway's semantic cache is off
         run: ./scripts/gateway-cache-is-off.sh
+      - name: the gateway's declassify key is minted per install, never a literal
+        run: ./scripts/declassify-is-keyed.sh
       - name: delegation is off by default
         run: ./scripts/delegation-off-by-default.sh
       - name: the delegation plane's keys are never printed

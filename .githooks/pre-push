@@ -39,6 +39,7 @@ step "the bus has a writer, every volume an owner" "./scripts/bus-has-a-writer.s
 step "the operator's bind is honoured end to end" "./scripts/bind-is-honoured.sh"
 step "the package step never takes Docker away" "./scripts/apt-never-removes-docker.sh"
 step "the gateway's semantic cache is off" "./scripts/gateway-cache-is-off.sh"
+step "the gateway's declassify key is minted per install" "./scripts/declassify-is-keyed.sh"
 step "delegation is off by default" "./scripts/delegation-off-by-default.sh"
 step "the delegation plane's keys are never printed" "./scripts/delegation-key-not-printed.sh"
 step "the delegation plane's directories stay apart" "./scripts/delegation-dirs-are-split.sh"
