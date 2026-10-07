@@ -51,6 +51,7 @@ step ".env sources cleanly" "./scripts/env-sources-cleanly.sh"
 step "the delegation plane's keys are reused on a re-run" "./scripts/delegation-key-reused-on-rerun.sh"
 step "typed answers go where the operator chose" "./scripts/typed-data-mode.sh"
 step "the typed risk signal is off unless asked" "./scripts/typed-risk-signal.sh"
+step "the FinOps console is an add-on, core unchanged" "./scripts/finops-is-opt-in.sh"
 step "every scenario is bound to a test" "./scripts/features-are-bound.sh"
 # Reaches the network (a tarball from the sibling repo), which is why it is
 # last: everything that can be judged offline has already spoken by here.

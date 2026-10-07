@@ -44,6 +44,8 @@
 #   B. Every named volume that a service running as a non-root `user:` mounts
 #      read-write is mounted by `init-volumes` and given to that uid or gid by
 #      a `chown` line there. Root services are skipped: root writes anything.
+#      A `<name>-init` one-shot (costcrew-init, the optional FinOps console's)
+#      counts as a preparer too, so an add-on need not edit init-volumes.
 #
 # typryx (profile typed) joined the same bus 2026-09-26, once agent-passport
 # registered its four event types: it names its own file, TYPRYX_EVENTS, so
@@ -123,8 +125,17 @@ def volume_mounts(block):
 
 # ---- A. the bus has a writer ------------------------------------------------
 init = blocks.get("init-volumes")
-init_mounts = {n: t for n, t, ro in (volume_mounts(init) if init else [])}
-init_text = "\n".join(init or [])
+# The one-shot preparers: init-volumes, and a `<name>-init` an OPTIONAL add-on
+# brings for its own volumes (costcrew-init, profile finops). An add-on may not
+# edit init-volumes, which every install runs, so it prepares what it writes
+# itself, and this gate reads that preparer the same way: a volume or a bus
+# file counts as prepared if init-volumes or such a one-shot mounts and owns it.
+preparers = [n for n in blocks if n == "init-volumes" or n.endswith("-init")]
+init_mounts = {}
+for pn in preparers:
+    for n, t, ro in volume_mounts(blocks[pn]):
+        init_mounts.setdefault(n, t)
+init_text = "\n".join("\n".join(blocks[pn]) for pn in preparers)
 
 
 def precreated(dirpath):

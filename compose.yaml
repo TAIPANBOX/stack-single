@@ -1412,6 +1412,129 @@ services:
       init-volumes:
         condition: service_completed_successfully
 
+  # ---- finops: the CostCrew console, an optional add-on ---------------------
+  #
+  # OFF, and install.sh does not know it exists. `docker compose up -d` does not
+  # start it and neither does any install.sh run, with or without a flag; an
+  # operator turns it on by hand, once:
+  #
+  #   docker compose --profile finops up -d costcrew
+  #
+  # That is the same way `routines`, `manual` and the second half of `record`
+  # and `egress` are started here, and it is the right one for this add-on:
+  # install.sh brings up on its own only the planes its own end-of-run checks
+  # verify (typed, delegation), and a flag here would be a change to a script
+  # that runs as root on somebody else's box for a console that has nothing
+  # to verify. Nothing in the core mentions this service: init-volumes, the
+  # bus gates, the default `docker compose config` and the images install.sh
+  # pulls are what they were without it. `finops-is-opt-in.sh` holds that.
+  #
+  # WHAT IT IS. The FinOps console: cloud and AI spend, a crew of agents that
+  # triages it, and a person who reviews what they wrote. It enforces nothing
+  # (no gateway, no refusal path) and, started as it is here, CANNOT SPEND:
+  # no -gateway flag is passed, and the console's own words for that are
+  # "empty means the console cannot spend at all". Letting its planning calls
+  # go through this box's gateway is a spending decision, taken separately and
+  # by the operator, and the crew runner (costcrew-run, the other binary in
+  # the image) is not started here at all.
+  #
+  # TWO WIRINGS THAT FAIL SILENTLY WHEN WRONG, lifted from stack-k8s's
+  # 49-costcrew.yaml, which learned them first:
+  #
+  #   The file name IS the integration. genaryx tails the bus directory and
+  #   keys each source's read offset off the file STEM, so the stream has to be
+  #   `costcrew.ndjson` and nothing else. The console's own default is empty,
+  #   so one started by hand looks healthy and puts nothing on the bus.
+  #
+  #   The host has to be the trust domain the record plane is given. trailryx
+  #   takes an event only if its agent id begins `agent://<domain>/`, matched
+  #   against exactly ONE value, so the console takes RECORD_TRUST_DOMAIN, the
+  #   variable record-seal reads, with the same deliberately-invalid default.
+  #   A console minting under its own default would have every line it emits
+  #   counted foreign by the seal, which reads as a quiet night.
+  #
+  # PASSPORTS AND OWNER ARE A PAIR. The console refuses to start with
+  # -stack-passports and no -stack-owner (a passport with no owner is not a
+  # valid document). This stack has no passports location of its own, so they
+  # go inside the console's own data volume, and the owner is COSTCREW_OWNER
+  # from .env, else the address alerts go to (ALERT_TO). With neither set the
+  # console exits at start and says so; that is the failure staying inside the
+  # service that was opted into, the way scopyx and typryx treat their keys
+  # (`:-` and not `:?`, because compose interpolates every service, including
+  # one whose profile is off). The notifier here mounts no passports directory,
+  # so an alert about a CostCrew agent names the agent and not the owner.
+  #
+  # NO UI BEHIND CADDY. stack-caddy serves one site, the console, and its
+  # Caddyfile is baked into that image in another repository, so a second site
+  # would be a change to the core. The console is published on loopback only
+  # and reached the way the main console is before a tunnel exists
+  # (`ssh -L 8321:127.0.0.1:8321`). No -behind-tls for the same reason: nothing
+  # terminates TLS in front of it, so this process sees the browser directly.
+  #
+  # ITS ACCOUNT. 10003:10003 is outside both bus uid families (10001, 65532),
+  # outside the bus group and with no group_add, the shape agent-conform takes
+  # at 10002: the bus directory is root:10001 2775, so this account can create
+  # nothing there and can write exactly one file, the one costcrew-init made
+  # and gave it. Its stream is 0644, readable by agent-conform through the
+  # "other" bits (a stream it could not read would make the verifier exit and
+  # restart on every box that enabled this).
+  costcrew-init:
+    profiles: ["finops"]
+    image: busybox:1.36
+    user: "0:0"
+    command:
+      - sh
+      - -euc
+      - |
+        mkdir -p /vol/costcrew
+        chown 10003:10003 /vol/costcrew && chmod 0750 /vol/costcrew
+        [ -e /vol/events/costcrew.ndjson ] || : > /vol/events/costcrew.ndjson
+        chown 10003:10003 /vol/events/costcrew.ndjson && chmod 0644 /vol/events/costcrew.ndjson
+        echo "costcrew volumes ready"
+    volumes:
+      - events:/vol/events
+      - costcrewdata:/vol/costcrew
+    restart: "no"
+    depends_on:
+      init-volumes:
+        condition: service_completed_successfully
+
+  costcrew:
+    <<: *restart
+    profiles: ["finops"]
+    image: ${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.3.0}
+    user: "10003:10003"
+    # The image's ENTRYPOINT is the console, so this is its argv.
+    command:
+      - -addr
+      # The container's own address: the binary binds loopback by default,
+      # which inside a container nothing else can reach, the published port
+      # included. What reaches the host is decided by `ports:` below.
+      - 0.0.0.0:8321
+      - -data
+      - /var/lib/costcrew
+      - -stack-events
+      - /var/lib/stack/events/costcrew.ndjson
+      - -stack-passports
+      - /var/lib/costcrew/passports
+      - -stack-host
+      - ${RECORD_TRUST_DOMAIN:-set-me.invalid}
+      - -stack-owner
+      - ${COSTCREW_OWNER:-${ALERT_TO:-}}
+    ports:
+      - "127.0.0.1:8321:8321"
+    volumes:
+      - events:/var/lib/stack/events
+      - costcrewdata:/var/lib/costcrew
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      costcrew-init:
+        condition: service_completed_successfully
+
 volumes:
   # The shared event log the planes couple through. One machine, so this is
   # simply a volume: the cluster needed a ReadWriteMany class and a storage
@@ -1440,6 +1563,11 @@ volumes:
   # un-revokes a delegation.
   vouchryxdata:
   heraldyxstate:
+  # The FinOps console's database, journal, signing key and passports (profile
+  # finops). Named here and used by no service of the default set, so a box that
+  # never enables the profile never creates it, and the default rendering of
+  # this file does not list it.
+  costcrewdata:
   # The chain verifier's memory (which breaks it has already announced), on its
   # own volume and not on the bus it walks: inside the bus directory it would be
   # read as a stream, and an operator clearing the bus would delete it and

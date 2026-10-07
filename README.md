@@ -256,6 +256,7 @@ names resolve the same way in both:
 | `tokenfuse-mcp-broker` | 4200 | **opt-in, off unless you ask for it.** `GATEWAY_BIND` decides where, same as the gateway. See below |
 | `typryx-wardryx-proxy` | none | **opt-in twice, off unless you ask for it** (typed answers on, and `TYPED_RISK_SIGNAL=1`). Reachable only from the broker and wardryx. See "A risk signal on tool calls" below |
 | `vouchryx` | none | **opt-in, off unless you ask for it.** Inside the compose network only. See "Delegation" below |
+| `costcrew` | 8321 | **opt-in, off unless you ask for it** (profile `finops`; `install.sh` never starts it). Loopback only. See "The FinOps console" below |
 
 The gateway's own observability and kill routes (`/v1/runs`, `/v1/keys` and
 three more) take a per-install admin key: `GATEWAY_ADMIN` in `.env`, minted
@@ -875,6 +876,68 @@ launcher does not yet wire the console's own revoke button
 not decide what a proven chain is allowed to do; that is `wardryx`'s policy,
 unchanged by this. It does not run the hand-off (delegate-of-a-delegate)
 path or Cross App Access; both exist in vouchryx and neither is wired here.
+
+## The FinOps console (CostCrew), optional
+
+Off, and nothing here turns it on for you. `install.sh` does not know it exists:
+no flag, no profile, no line. A box that never enables it runs exactly what it
+ran without it, and `scripts/finops-is-opt-in.sh` holds that. To turn it on,
+once, on a box that is already installed:
+
+```bash
+cd /opt/agent-stack
+docker compose --profile finops up -d costcrew
+```
+
+That pulls one image, `ghcr.io/taipanbox/costcrew`, and starts it beside a small
+one-shot that prepares its volume. It is the FinOps console: cloud and AI spend,
+a crew of agents that triages it, and a person who reviews what the crew wrote.
+
+**Before it starts, it wants a name.** The console writes an Agent Passport for
+each of its agents, and a passport needs an owner, so it refuses to start
+without one and says so in its log. The owner is `COSTCREW_OWNER` in `.env`,
+and if that is not set, the address your alerts go to (`ALERT_TO`). Set one
+before the command above, or the container will restart and complain. Its
+agents also mint their ids under `RECORD_TRUST_DOMAIN`, the same value the
+record plane takes (see "The record" above), so that the seal accepts what the
+console reports instead of counting it foreign.
+
+**Reaching it.** The console is on `127.0.0.1:8321` of the box and nowhere else.
+It is not behind the tunnel and not behind Caddy, which serves one site, the
+main console. Reach it the way you reach that one before a tunnel exists:
+
+```bash
+ssh -L 8321:127.0.0.1:8321 root@<your box>
+open http://localhost:8321
+```
+
+Give yourself a password first, from the box, before you open it:
+
+```bash
+docker compose --profile finops exec costcrew /usr/local/bin/costcrew \
+  -data /var/lib/costcrew -set-password ops:<a real password>
+```
+
+The password is visible in your shell history and in the process list for as
+long as that command runs. The first start also fills the console with a
+generated estate so there is something to look at; it is not a bill of yours.
+It answers `/healthz` with 200 and no redirect; from the compose network that
+is `docker run --rm --network agent-stack_default busybox:1.36 wget -q -O - http://costcrew:8321/healthz`.
+
+**What it does here.** Its events go to the shared bus as `costcrew.ndjson`, so
+the notifier can mail about them and the chain verifier checks them. It runs as
+a user of its own that can write that one file on the bus and nothing else
+there, with a read-only root filesystem and no capabilities.
+
+**What it does not do.** As shipped it cannot spend: no gateway is wired to it,
+which is what lets its planning calls reach a model, and the crew runner in the
+same image is not started. Sending its calls through this box's gateway is a
+decision about money and is yours to take, separately. The notifier does not
+read its passports, so an alert about one of its agents names the agent and not
+the person who answers for it.
+
+Turn it off with `docker compose --profile finops stop costcrew`. Its data stays
+in the `costcrewdata` volume until you remove that volume yourself.
 
 ## The console
 
