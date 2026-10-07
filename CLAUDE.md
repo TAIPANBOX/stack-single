@@ -59,6 +59,7 @@ change here is a change to something with root on somebody else's box.
 ./scripts/delegation-key-reused-on-rerun.sh
 ./scripts/typed-data-mode.sh
 ./scripts/typed-risk-signal.sh
+./scripts/finops-is-opt-in.sh
 ./scripts/features-are-bound.sh
 ./scripts/gates-have-teeth.sh   # invariant 8; needs a clean tree
 ```
@@ -596,6 +597,67 @@ an absent invariant.
     nothing holds them equal: the claimed sources were read from each producer's
     source constant, not from a run of every plane, and a stream a plane
     writes that this launcher does not configure is not seen.)*
+
+24. **The FinOps console is an optional add-on: the core stays the core, as
+    shipped it cannot spend, and it can write exactly one file on the bus.**
+    `@decided 2026-09-25` (paraphrased): an optional add-on joins the core by
+    configuration alone and leaves the core unchanged, so a box that never
+    enables it runs what it ran without it. `@claude 2026-10-07`: CostCrew, the
+    FinOps console, is such an add-on. `costcrew` and its one-shot
+    `costcrew-init` sit behind the `finops` profile and nothing else; the only
+    way to start it is `docker compose --profile finops up -d costcrew`, typed
+    by a person. `install.sh` has no flag for it and no line that names it,
+    because the other ways of switching a profile on (`--profile`,
+    `COMPOSE_PROFILES`) are each one line in a script that runs as root on
+    somebody else's box, for a console that script has nothing to verify about.
+    Nothing outside the add-on names it: it has its own one-shot rather than a
+    mount in `init-volumes`, which every install runs, and a default and a
+    `--profile finops` rendering of `compose.yaml` differ by exactly those two
+    services and the `costcrewdata` volume.
+    It cannot spend as shipped: no `-gateway`, `-gateway-openai` or
+    `COSTCREW_GATEWAY*` is named, which the console itself reports as "cannot
+    spend at all", and the crew runner in the same image is not started. Letting
+    its planning calls through this box's gateway is the operator's separate
+    decision. Its stream is `/var/lib/stack/events/costcrew.ndjson` (genaryx keys
+    its read offset off the stem) under `-stack-host ${RECORD_TRUST_DOMAIN}`,
+    the one trust domain the record plane takes; `-stack-passports` (inside its
+    own data volume, nothing here has a passports location) and `-stack-owner`
+    (`COSTCREW_OWNER`, else `ALERT_TO`) are the pair the console refuses to start
+    without, and with neither set it exits at start naming the owner. It runs as
+    `10003:10003`, outside both bus uid families and the bus group, with no
+    `group_add`, read-only, no capabilities, one pinned tag, so on a
+    `root:10001 2775` bus it can create nothing and write the one 0644 file
+    `costcrew-init` gave it, which the chain verifier reads through the "other"
+    bits. Published on `127.0.0.1:8321` only, written as a literal: stack-caddy
+    serves one site, baked into an image in another repository, so a second
+    would change the core; no `-behind-tls` for the same reason. @measured
+    `docker compose config` of origin/main's compose.yaml against this one,
+    same fake `.env`, project path normalised, 2026-10-07: the default rendering
+    is identical. @measured scratch compose project `finopstest` on Docker
+    Desktop (arm64), `ghcr.io/taipanbox/costcrew:v0.3.0`, 2026-10-07: with no
+    owner the console exits "a passport with no owner is not a valid document";
+    with `ALERT_TO` set it served `/healthz` 200 with no redirect on
+    `127.0.0.1:8321` and from a busybox on the compose network, published 39
+    passports and wrote 26 lines to `costcrew.ndjson` (owned
+    10003:10003, 0644); a busybox as 10003 could append to that file and was
+    refused on `wardryx.ndjson`, on `agent-conform.ndjson` and on creating a
+    file; `agent-conform:v1.1.0` as 10002 printed `PASS costcrew.ndjson (hash
+    chain: 25 chained, 1 head(s))`; after `down` and `up` it published the
+    passports again, logged `9 anomalies, 0 of them new` and left the file untouched.
+    *(gate: `scripts/finops-is-opt-in.sh`, subjects derived from the image name
+    and from what the console waits for; `scripts/manifest-is-true.sh` lists the
+    two services under `optional_addons` and requires the profile, an
+    `install.sh` that never passes it and no `COMPOSE_PROFILES` line naming it;
+    `scripts/bus-has-a-writer.sh` and `scripts/bus-names-match-their-source.sh`
+    judge the add-on's volume and stream, reading `costcrew-init` as a preparer
+    beside `init-volumes`; scenarios in
+    `features/the-finops-console-is-an-optional-addon.feature`; teeth in
+    `scripts/gates-have-teeth.sh`. Not covered: an `install.sh` run on Debian
+    with the profile enabled afterwards, the console under a reboot, the UI in
+    a browser, and anything on this box reading the passports it writes (the
+    notifier mounts no passports directory, so an alert about a CostCrew agent
+    names the agent and not the owner). The first start seeds a generated
+    estate, not a bill of yours.)*
 
 ## Decisions that have no gate yet
 

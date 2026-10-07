@@ -31,7 +31,8 @@
 # each carry (`internal/stream/stream.go` and idryx's own); nothing holds the
 # three equal. The claimed source per image is read from each producer's own
 # constant (tokenfuse `agent_event.rs` SOURCE, wardryx `api.go`, typryx
-# `record.go`, vouchryx `api.go`, agent-conform `watchdir.go`), which this gate
+# `record.go`, vouchryx `api.go`, agent-conform `watchdir.go`, costcrew
+# `internal/stack`), which this gate
 # cannot see, so it is a table here too.
 #
 # AND IT REFUSES TO REPORT OK ON NOTHING
@@ -68,6 +69,9 @@ CLAIMS = {
     "typryx": "typryx",
     "vouchryx": "vouchryx",
     "agent-conform": "agent-conform",
+    # The optional FinOps console (profile finops). Its stream is named by a
+    # command argument, `-stack-events`.
+    "costcrew": "costcrew",
 }
 
 blocks, section, current = {}, None, None
@@ -144,20 +148,24 @@ for name in sorted(blocks):
         if stem not in ALLOWED or src not in ALLOWED[stem]:
             note(f"{name} loads {src}:{fpath}, but {stem}.ndjson may carry only {sorted(ALLOWED.get(stem, []))}: idryx refuses every line it would ingest")
 
-# every file init-volumes pre-creates
-pre = set()
-init = "\n".join(blocks.get("init-volumes", []))
-for m in re.finditer(r"for\s+\w+\s+in\s+([^;\n]+);\s*do", init):
-    for item in m.group(1).split():
-        if item.endswith(".ndjson"):
-            pre.add(item)
-for m in re.finditer(r":\s*>\s*\"?/vol/events/([A-Za-z0-9._-]+\.ndjson)", init):
-    pre.add(m.group(1))
+# every file a one-shot preparer pre-creates: init-volumes, and a `<name>-init`
+# an optional add-on brings for its own stream (costcrew-init).
+pre = {}
+for pn, pb in sorted(blocks.items()):
+    if pn != "init-volumes" and not pn.endswith("-init"):
+        continue
+    init = "\n".join(pb)
+    for m in re.finditer(r"for\s+\w+\s+in\s+([^;\n]+);\s*do", init):
+        for item in m.group(1).split():
+            if item.endswith(".ndjson"):
+                pre.setdefault(item, pn)
+    for m in re.finditer(r":\s*>\s*\"?/vol/events/([A-Za-z0-9._-]+\.ndjson)", init):
+        pre.setdefault(m.group(1), pn)
 for f in sorted(pre):
     stem = f.removesuffix(".ndjson")
-    rows.append(("init-volumes", f, "-", "pre-creates"))
+    rows.append((pre[f], f, "-", "pre-creates"))
     if stem not in ALLOWED:
-        note(f"init-volumes pre-creates {f} on the bus, and `{stem}` is a stream name nothing accepts by default: a reader would call it unknown")
+        note(f"{pre[f]} pre-creates {f} on the bus, and `{stem}` is a stream name nothing accepts by default: a reader would call it unknown")
 
 # nothing widens the rule
 for m in re.finditer(r"\b(HERALDYX_STREAMS|IDRYX_STREAMS)\b", "\n".join(l for l in text.split("\n") if not l.lstrip().startswith("#"))):

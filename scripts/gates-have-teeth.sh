@@ -1318,6 +1318,243 @@ open("compose.yaml", "w").write(s.replace(a, "image: ${TYPRYX_IMAGE:-registry.in
 	"names no ghcr.io/taipanbox/typryx"
 
 echo
+echo "=== the FinOps console (invariant 24): an add-on that leaves the core unchanged ==="
+
+# A profile line alone holds none of the three things this add-on promises:
+# that a box which never enables it runs what it ran without it, that as
+# shipped it cannot spend, and that it can write exactly one file on the bus.
+run_case "finops: the console leaves its profile" fail \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("compose.yaml", "    profiles: [\"finops\"]\n    image: ${COSTCREW_IMAGE", "    image: ${COSTCREW_IMAGE")')" \
+	"is not behind"
+
+run_case "finops: the one-shot leaves its profile" fail \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("compose.yaml", "  costcrew-init:\n    profiles: [\"finops\"]\n", "  costcrew-init:\n")')" \
+	"is not behind"
+
+run_case "finops: a second profile starts the console too" fail \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("compose.yaml", "    profiles: [\"finops\"]\n    image: ${COSTCREW_IMAGE", "    profiles: [\"finops\", \"routines\"]\n    image: ${COSTCREW_IMAGE")')" \
+	"is not behind"
+
+# The easy excuse to touch the core: one volume mounted in the one-shot every
+# install runs.
+run_case "finops: init-volumes learns the add-on" fail \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("compose.yaml", "      - conformstate:/vol/conform\n    restart: \"no\"", "      - conformstate:/vol/conform\n      - costcrewdata:/vol/costcrew\n    restart: \"no\"")')" \
+	"names the add-on"
+
+run_case "finops: a core service waits for the console" fail \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("compose.yaml", "      - heraldyxstate:/var/lib/stack/heraldyx\n    depends_on:\n      init-volumes:\n        condition: service_completed_successfully\n", "      - heraldyxstate:/var/lib/stack/heraldyx\n    depends_on:\n      init-volumes:\n        condition: service_completed_successfully\n      costcrew:\n        condition: service_started\n")')" \
+	"names the add-on"
+
+# The half of the opt-in that lives in install.sh, and the case the task named:
+# an install that passes the profile starts the console on every box.
+run_case "finops: install.sh passes the profile" fail \
+	'./scripts/manifest-is-true.sh' \
+	"$(py 'edit("install.sh", "say \"pulling published images\"", "say \"pulling images\" --profile finops")')" \
+	"An optional add-on an install starts is not one"
+
+run_case "finops: install.sh passes the profile (the add-on gate)" fail \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("install.sh", "say \"pulling published images\"", "say \"pulling images\" --profile finops")')" \
+	"an install must not know about it"
+
+run_case "finops: install.sh switches the profile on by environment" fail \
+	'./scripts/manifest-is-true.sh' \
+	"$(py 'edit("install.sh", "export DEBIAN_FRONTEND=noninteractive\n", "export DEBIAN_FRONTEND=noninteractive\nexport COMPOSE_PROFILES=finops\n")')" \
+	"sets COMPOSE_PROFILES"
+
+run_case "finops: install.sh names the console" fail \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("install.sh", "say \"starting the stack\"", "say \"starting the stack and costcrew\"")')" \
+	"names the add-on"
+
+# It cannot spend as shipped. A gateway is the operator's decision.
+run_case "finops: the console is given a gateway" fail \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("compose.yaml", "      - -data\n      - /var/lib/costcrew\n", "      - -data\n      - /var/lib/costcrew\n      - -gateway\n      - http://tokenfuse-gateway:4100\n")')" \
+	"the console would be able to spend"
+
+run_case "finops: the console is given a gateway by environment" fail \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("compose.yaml", "    ports:\n      - \"127.0.0.1:8321:8321\"\n", "    environment:\n      COSTCREW_GATEWAY: http://tokenfuse-gateway:4100\n    ports:\n      - \"127.0.0.1:8321:8321\"\n")')" \
+	"the console would be able to spend"
+
+# The wiring that fails silently.
+run_case "finops: its stream is named for something else" fail \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("compose.yaml", "      - -stack-events\n      - /var/lib/stack/events/costcrew.ndjson\n", "      - -stack-events\n      - /var/lib/stack/events/finops.ndjson\n")')" \
+	"must be named costcrew.ndjson"
+
+run_case "finops: passports come without an owner" fail \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("compose.yaml", "      - -stack-owner\n      - ${COSTCREW_OWNER:-${ALERT_TO:-}}\n", "")')" \
+	"come as a pair"
+
+run_case "finops: the host is not the record plane's trust domain" fail \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("compose.yaml", "      - -stack-host\n      - ${RECORD_TRUST_DOMAIN:-set-me.invalid}\n", "      - -stack-host\n      - costcrew.local\n")')" \
+	"not RECORD_TRUST_DOMAIN"
+
+run_case "finops: its passports go outside its data volume" fail \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("compose.yaml", "      - /var/lib/costcrew/passports\n", "      - /tmp/passports\n")')" \
+	"outside its data volume"
+
+# Its account is its containment.
+run_case "finops: the console joins the bus group" fail \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("compose.yaml", "    user: \"10003:10003\"\n    # The image", "    user: \"10003:10001\"\n    # The image")')" \
+	"is the bus group"
+
+run_case "finops: the console takes a plane's uid" fail \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("compose.yaml", "    user: \"10003:10003\"\n    # The image", "    user: \"65532:10003\"\n    # The image")')" \
+	"belongs to a plane that writes the bus"
+
+run_case "finops: the console runs as root" fail \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("compose.yaml", "    user: \"10003:10003\"\n    # The image", "    user: \"0:0\"\n    # The image")')" \
+	"root writes anything on the bus"
+
+run_case "finops: the console gets a group_add" fail \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("compose.yaml", "    user: \"10003:10003\"\n    # The image", "    user: \"10003:10003\"\n    group_add:\n      - \"10001\"\n    # The image")')" \
+	"has group_add"
+
+run_case "finops: its root filesystem becomes writable" fail \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("compose.yaml", "    read_only: true\n    cap_drop:\n      - ALL\n    security_opt:\n      - no-new-privileges:true\n    depends_on:\n      costcrew-init:", "    cap_drop:\n      - ALL\n    security_opt:\n      - no-new-privileges:true\n    depends_on:\n      costcrew-init:")')" \
+	"root filesystem is not read_only"
+
+run_case "finops: its image is unpinned" fail \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.3.0}", "ghcr.io/taipanbox/costcrew:latest}")')" \
+	"is not the pinned"
+
+run_case "finops: it is published on every address" fail \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("compose.yaml", "      - \"127.0.0.1:8321:8321\"", "      - \"8321:8321\"")')" \
+	"reached on loopback only"
+
+run_case "finops: it is published on the gateway's bind variable" fail \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("compose.yaml", "      - \"127.0.0.1:8321:8321\"", "      - \"${GATEWAY_BIND:-127.0.0.1}:8321:8321\"")')" \
+	"reached on loopback only"
+
+# The one-shot prepares exactly its stream and its volume.
+run_case "finops: its stream is no longer created" fail \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("compose.yaml", "        [ -e /vol/events/costcrew.ndjson ] || : > /vol/events/costcrew.ndjson\n", "")')" \
+	"does not create costcrew.ndjson"
+
+run_case "finops: its stream is given to another uid" fail \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("compose.yaml", "chown 10003:10003 /vol/events/costcrew.ndjson", "chown 10001:10001 /vol/events/costcrew.ndjson")')" \
+	"gives costcrew.ndjson to 10001:10001"
+
+run_case "finops: its stream becomes group-writable" fail \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("compose.yaml", "chmod 0644 /vol/events/costcrew.ndjson", "chmod 0664 /vol/events/costcrew.ndjson")')" \
+	"writable by group or other"
+
+run_case "finops: its stream cannot be read by the chain verifier" fail \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("compose.yaml", "chmod 0644 /vol/events/costcrew.ndjson", "chmod 0640 /vol/events/costcrew.ndjson")')" \
+	"not readable by other"
+
+run_case "finops: its data volume has no owner" fail \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("compose.yaml", "        chown 10003:10003 /vol/costcrew && chmod 0750 /vol/costcrew\n", "")')" \
+	"does not chown /vol/costcrew"
+
+run_case "finops: the one-shot stops waiting for init-volumes" fail \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("compose.yaml", "    restart: \"no\"\n    depends_on:\n      init-volumes:\n        condition: service_completed_successfully\n\n  costcrew:", "    restart: \"no\"\n\n  costcrew:")')" \
+	"does not wait for init-volumes"
+
+run_case "finops: the console stops waiting for its one-shot" fail \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("compose.yaml", "    depends_on:\n      costcrew-init:\n        condition: service_completed_successfully\n", "")')" \
+	"waits for no one-shot"
+
+run_case "finops: no console left to judge" fail \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("compose.yaml", "${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.3.0}", "${COSTCREW_IMAGE:-registry.invalid/costcrew}")')" \
+	"measured NOTHING about the FinOps console"
+
+# The rendering half: text a parser accepts and compose does not.
+run_case "finops: compose refuses what the text read as fine" fail \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("compose.yaml", "    ports:\n      - \"127.0.0.1:8321:8321\"\n", "    bogus_key: 1\n    ports:\n      - \"127.0.0.1:8321:8321\"\n")')" \
+	"docker compose config failed"
+
+# The inventory half, in the manifest.
+run_case "manifest-is-true: an add-on service stops sitting behind a profile" fail \
+	'./scripts/manifest-is-true.sh' \
+	"$(py 'edit("compose.yaml", "  costcrew-init:\n    profiles: [\"finops\"]\n", "  costcrew-init:\n")')" \
+	"sits behind no profile"
+
+run_case "manifest-is-true: an add-on service with no reason beside it" fail \
+	'./scripts/manifest-is-true.sh' \
+	"$(py 'import json, collections
+p = "components.json"
+d = json.load(open(p), object_pairs_hook=collections.OrderedDict)
+d["components"][0]["checked"]["optional_addons"]["costcrew"] = ""
+json.dump(d, open(p, "w"), indent=2)')" \
+	"gives no reason"
+
+run_case "manifest-is-true: the add-on list is emptied" fail \
+	'./scripts/manifest-is-true.sh' \
+	"$(py 'import json, collections
+p = "components.json"
+d = json.load(open(p), object_pairs_hook=collections.OrderedDict)
+d["components"][0]["checked"]["optional_addons"] = {}
+json.dump(d, open(p, "w"), indent=2)')" \
+	"measured NOTHING about what no install may start"
+
+# The bus gates see the add-on's preparer as a preparer, and still judge it.
+run_case "bus-has-a-writer: the add-on's data volume is prepared by nobody" fail \
+	'./scripts/bus-has-a-writer.sh' \
+	"$(py 'edit("compose.yaml", "        chown 10003:10003 /vol/costcrew && chmod 0750 /vol/costcrew\n", "")')" \
+	"no chown line there names /vol/costcrew"
+
+run_case "bus-has-a-writer: the add-on's stream is given to no one it runs as" fail \
+	'./scripts/bus-has-a-writer.sh' \
+	"$(py 'edit("compose.yaml", "chown 10003:10003 /vol/events/costcrew.ndjson", "chown 10001:10001 /vol/events/costcrew.ndjson")')" \
+	"neither the uid nor the gid matches"
+
+run_case "bus-names: the console writes a stream no reader knows" fail \
+	'./scripts/bus-names-match-their-source.sh' \
+	"$(py 'edit("compose.yaml", "      - -stack-events\n      - /var/lib/stack/events/costcrew.ndjson\n", "      - -stack-events\n      - /var/lib/stack/events/finops.ndjson\n")')" \
+	"is not a stream name heraldyx"
+
+run_case "bus-names: the console is told to write another plane's file" fail \
+	'./scripts/bus-names-match-their-source.sh' \
+	"$(py 'edit("compose.yaml", "      - -stack-events\n      - /var/lib/stack/events/costcrew.ndjson\n", "      - -stack-events\n      - /var/lib/stack/events/wardryx.ndjson\n")')" \
+	"refuse every line of it"
+
+# ...and what none of them may mind.
+run_case "finops: the owner default changes" pass \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("compose.yaml", "${COSTCREW_OWNER:-${ALERT_TO:-}}", "${COSTCREW_OWNER:-${ALERT_TO:-nobody}}")')"
+
+run_case "finops: the pinned tag moves" pass \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.3.0}", "ghcr.io/taipanbox/costcrew:v0.3.1}")')"
+
+run_case "finops: the loopback port moves" pass \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("compose.yaml", "      - \"127.0.0.1:8321:8321\"", "      - \"127.0.0.1:18321:8321\"")')"
+
+run_case "finops: a comment in the core mentions the console" pass \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("compose.yaml", "  # Kubernetes has `fsGroup` for exactly this", "  # costcrew is not here; Kubernetes has `fsGroup` for exactly this")')"
+
+echo
 if [ -n "$(git status --porcelain)" ]; then
 	printf 'FAIL: this script left the tree dirty, so it cannot be trusted about anything above\n'
 	git status --porcelain | head -5

@@ -29,7 +29,13 @@
     "THREE PROFILES, AND TWO OF THEM ARE ALTERNATIVES. `egress` and",
     "`egress-browser` must not both be started: compose.yaml says so in its own",
     "comment. That is a constraint between profiles rather than a fact about any",
-    "one of them, so it is declared rather than checked."
+    "one of them, so it is declared rather than checked.",
+    "",
+    "AN OPTIONAL ADD-ON IS LISTED APART FROM WHAT `up` STARTS. `optional_addons`",
+    "names the services of the `finops` profile, the FinOps console and its",
+    "one-shot. Like `manual_jobs` they are compose services no install may start,",
+    "and manifest-is-true.sh holds the same two halves for them: a profile, and",
+    "install.sh never passing it."
   ],
   "schema": "taipanbox.dev/components/v1",
   "repo": "TAIPANBOX/stack-single",
@@ -71,10 +77,15 @@
         "manual_jobs": {
           "idryx-detect": "A TEMPLATE a person runs, not a schedule, and not by preference. Measured 2026-09-01 on the published image: `go-service.Dockerfile` builds on distroless, so there is no /bin/sh for a loop, the binary is `/usr/local/bin/service` rather than `idryx`, and `detect` has no --interval or --watch. A loop is impossible here rather than unwanted. Publishing a shell-bearing idryx would put a shell back into a governance plane to buy a scheduler, which is a security property traded for a convenience.\\n\\nSo it takes the shape the estate already has for exactly this: stack-k8s ships `costcrew-crew` as a suspended CronJob a person runs, and this is the compose equivalent, behind a profile no install enables. Run it with `docker compose run --rm idryx-detect`.\\n\\nVerified rather than asserted: manifest-is-true.sh requires the service to exist, to sit behind a profile, and requires install.sh never to pass that profile. That is this file's answer to the `suspend: true` stack-k8s's own gate checks."
         },
+        "optional_addons": {
+          "costcrew": "The FinOps console (CostCrew), an optional add-on in the `finops` profile. Started only by hand, `docker compose --profile finops up -d costcrew`; install.sh never passes that profile and never names the service. As shipped it cannot spend: no gateway is wired to it.",
+          "costcrew-init": "The one-shot that prepares costcrew's own volume and its one stream on the bus, in the same `finops` profile. It exists so the add-on does not have to edit init-volumes, which every install runs."
+        },
         "profiles": [
           "delegation",
           "egress",
           "egress-browser",
+          "finops",
           "manual",
           "record",
           "routines",
@@ -95,6 +106,7 @@
         ],
         "pulls_images": [
           "ghcr.io/taipanbox/agent-conform:v1.1.0",
+          "ghcr.io/taipanbox/costcrew:v0.3.0",
           "ghcr.io/taipanbox/genaryx-console:v1.1.25",
           "ghcr.io/taipanbox/heraldyx:v0.3.0",
           "ghcr.io/taipanbox/idryx:v1.1.0",
@@ -142,6 +154,10 @@
         "typed_risk_signal_is_opt_in_and_mcp_path_only": {
           "value": "TYPED_RISK_SIGNAL=1 ./install.sh with typed answers on (default off); profile typed-risk-signal",
           "why": "@claude 2026-10-04, from the estate audit's launcher spec (its J2 design records as decided that a signal may hold a call and never deny it): typryx's wardryx-proxy puts a typed risk class (action.risk_class) on a tool call's policy decision so a hold_if_signal rule in wardryx can hold it for a person, never deny it. Off by default, refused when typed answers are off. Only the MCP broker's policy client (TOKENFUSE_WARDRYX_URL) is pointed at the proxy; the LLM gateway keeps asking wardryx directly, because a model call has no pending tool call to classify and the proxy's ask would add latency to a path with a 250 ms deadline. The proxy runs without a credential (the broker cannot send one) and is held by a network: the risk-signal network holds the proxy, the broker and wardryx, the proxy is on no other network and publishes nothing. No hold_if_signal policy is seeded. Checked by scripts/typed-risk-signal.sh, a statement about this repository's text and a scratch run, not about a live install."
+        },
+        "the_finops_console_is_an_optional_addon": {
+          "value": "docker compose --profile finops up -d costcrew (profile finops, never passed by install.sh)",
+          "why": "@decided 2026-09-25 (paraphrased): an optional add-on joins the core by configuration alone and leaves the core unchanged, so a box that never enables it runs exactly what it ran without it. @claude 2026-10-07: that is why the add-on has its own one-shot (costcrew-init) rather than a line in init-volumes, why install.sh has no flag for it, and why it is published on loopback only instead of behind stack-caddy (whose single site is baked into an image in another repository). @measured `docker compose config` of origin/main's compose.yaml against this one, same fake .env, project path normalised, 2026-10-07: identical (the unused costcrewdata volume is pruned from the rendering). It runs as 10003:10003, outside the bus group, and can write exactly one file on the bus, costcrew.ndjson, which costcrew-init creates (0644, so agent-conform can read it). The file's name is the integration: genaryx keys its read offset off the stem. -stack-host is RECORD_TRUST_DOMAIN, the value record-seal is given, because trailryx takes one trust domain. -stack-passports and -stack-owner are a pair the console refuses to start without; the owner is COSTCREW_OWNER, else ALERT_TO, and with neither the console exits at start naming the owner. No -gateway is passed, so the console cannot spend; the crew runner in the same image is not started. Checked by scripts/finops-is-opt-in.sh, a statement about this repository's text and a scratch compose project, not about a Debian install."
         },
         "the_chain_verifier_is_on_by_default": {
           "value": "agent-conform watch-dir -every 5m, no profile",

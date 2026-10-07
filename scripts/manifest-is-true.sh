@@ -23,6 +23,10 @@
 #   schedules_routines  the loops this launcher runs, mapped to estate names
 #   manual_jobs         services a PERSON runs, never started by an install,
 #                       and the check that holds it is below
+#   optional_addons     services of an optional add-on (the FinOps console and
+#                       its one-shot, profile `finops`): the same two halves as
+#                       a manual job, a profile and an install.sh that never
+#                       passes it, plus no COMPOSE_PROFILES line naming it
 #   profiles            the opt-in sets, from `profiles: ["name"]`
 #   builds_images       the `stack/*:dev` tags install.sh builds, from BOTH the
 #                       explicit `-t` lines and the `<service>:<repo>` loop
@@ -98,9 +102,19 @@ if not isinstance(manual, dict):
     problems += 1
     manual = {}
 
+# An optional add-on's services are compose services too, listed apart for the
+# same reason: `installs_services` is what `up` starts, and these are what no
+# install may start. Same shape as manual_jobs, a map of name to reason.
+addons = checked.get("optional_addons", {})
+if not isinstance(addons, dict) or not addons:
+    print("FAIL: components.json's optional_addons is not a non-empty map of service name to")
+    print("      reason, so this measured NOTHING about what no install may start.")
+    problems += 1
+    addons = {}
+
 compare(
     "a compose service",
-    list(checked.get("installs_services", [])) + sorted(manual),
+    list(checked.get("installs_services", [])) + sorted(manual) + sorted(addons),
     services,
     "no two-space-indented service key in compose.yaml",
 )
@@ -117,29 +131,40 @@ compare(
 # The one here cannot even run as a loop: idryx's image is distroless, so a
 # shell loop in it never starts, which is how a service nothing could launch sat
 # in this file unnoticed behind a profile install.sh never enabled.
-for name, reason in sorted(manual.items()):
+for name, reason, kind in ([(n, r, "manual job") for n, r in sorted(manual.items())]
+                           + [(n, r, "optional add-on") for n, r in sorted(addons.items())]):
     if not str(reason).strip():
-        print(f"FAIL: components.json calls {name!r} a manual job and gives no reason.")
+        print(f"FAIL: components.json calls {name!r} a {kind} and gives no reason.")
         print("      A category with no reason beside it is a label.")
         problems += 1
     block = re.search(rf"^  {re.escape(name)}:\n(.*?)(?=^  [a-z0-9-]+:\s*$|\Z)",
                       compose, re.M | re.S)
     if not block:
-        print(f"FAIL: components.json calls {name!r} a manual job and compose.yaml")
+        print(f"FAIL: components.json calls {name!r} a {kind} and compose.yaml")
         print("      has no such service, so this measured NOTHING about it.")
         problems += 1
         continue
     prof = re.search(r'profiles:\s*\["([a-z-]+)"\]', block.group(1))
     if not prof:
-        print(f"FAIL: {name!r} is declared a manual job and sits behind no profile,")
+        print(f"FAIL: {name!r} is declared a {kind} and sits behind no profile,")
         print("      so `docker compose up` starts it like any other service.")
         problems += 1
         continue
     if f"--profile {prof.group(1)}" in install:
-        print(f"FAIL: {name!r} is declared a manual job behind the {prof.group(1)!r}")
+        print(f"FAIL: {name!r} is declared a {kind} behind the {prof.group(1)!r}")
         print(f"      profile, and install.sh passes --profile {prof.group(1)}, so an")
-        print("      install starts it. A manual job an install starts is not one.")
+        art = "An" if kind[0] in "aeiou" else "A"
+        print(f"      install starts it. {art} {kind} an install starts is not one.")
         problems += 1
+    # The other way to switch a profile on, which `--profile` does not see:
+    # COMPOSE_PROFILES, on a line of install.sh (or written into .env) that names
+    # it. Comment text is stripped first, so this file's own prose cannot trip it.
+    for ln, line in enumerate(install.split("\n"), 1):
+        code = line.split("#", 1)[0]
+        if "COMPOSE_PROFILES" in code and re.search(rf"\b{re.escape(prof.group(1))}\b", code):
+            print(f"FAIL: install.sh:{ln} sets COMPOSE_PROFILES with {prof.group(1)!r}, the profile of the")
+            print(f"      {kind} {name!r}, so an install starts it.")
+            problems += 1
 
 compare(
     "an opt-in profile",
@@ -250,6 +275,8 @@ else:
     print("    It schedules nothing, which is checked rather than assumed.")
 if manual:
     print(f"    Started by a person, never by an install: {', '.join(sorted(manual))}.")
+if addons:
+    print(f"    An optional add-on, in a profile no install passes: {', '.join(sorted(addons))}.")
 not_here = sorted(set(ROUTINES) - set(declared_routines) - set(manual))
 if not_here:
     print(f"    Not run here: {', '.join(not_here)}. estate-gates is where that is judged.")
