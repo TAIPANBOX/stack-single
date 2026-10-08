@@ -936,6 +936,21 @@ decision about money and is yours to take, separately. The notifier does not
 read its passports, so an alert about one of its agents names the agent and not
 the person who answers for it.
 
+**Moving to a newer console.** The pin is `ghcr.io/taipanbox/costcrew:v0.4.0`.
+On a box that already ran the earlier pin, the same `up -d costcrew` picks it
+up, and four things change. Everybody signs in again once, because sessions
+are now stored hashed and the old ones are ended at the first start. The
+console's database (with its `-wal` and `-shm`) and its journal become 0600;
+the volume's directory keeps the 0750 the one-shot gave it, and
+`costcrew.ndjson` on the bus stays 0644 so the chain verifier can still read
+it. A request body over 1 MiB is refused with 413. The image now carries five
+binaries (`costcrew-usage` is new); none of the new flags is required and none
+is passed here. If you later wire it to a gateway, give every analyst an owner
+first: behind a gateway, an analyst with no owner is refused before the call.
+The first start after the upgrade also logs one warning that the database
+could not be vacuumed, because its root filesystem is read-only and has no
+temporary directory; the old session rows are erased anyway.
+
 Turn it off with `docker compose --profile finops stop costcrew`. Its data stays
 in the `costcrewdata` volume until you remove that volume yourself.
 
