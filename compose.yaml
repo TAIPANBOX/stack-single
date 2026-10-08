@@ -1502,7 +1502,7 @@ services:
   costcrew:
     <<: *restart
     profiles: ["finops"]
-    image: ${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.4.0}
+    image: ${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.5.0}
     user: "10003:10003"
     # The image's ENTRYPOINT is the console, so this is its argv.
     command:
