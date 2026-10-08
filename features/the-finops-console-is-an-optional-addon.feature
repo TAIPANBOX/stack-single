@@ -101,6 +101,21 @@ Feature: the FinOps console is an optional add-on that leaves the core unchanged
     # -> gates-have-teeth.sh "finops: no console left to judge"
     # -> gates-have-teeth.sh "finops: compose refuses what the text read as fine"
 
+  Scenario: the console's read-only root leaves SQLite no temp directory
+    Given the console runs with a read-only root filesystem
+    When nothing writable is mounted at /tmp, the tmpfs there has no size limit, or TMPDIR points into the read-only root
+    Then finops-is-opt-in.sh fails, because SQLite cannot VACUUM or spill a sort and says disk I/O error (6410)
+    # -> gates-have-teeth.sh "finops: the console loses its writable temp"
+    # -> gates-have-teeth.sh "finops: its temp has no size limit"
+    # -> gates-have-teeth.sh "finops: TMPDIR points into the read-only root"
+
+  Scenario: a temp inside the console's own data volume, or a different size, is still a writable temp
+    Given the console needs somewhere writable for temp files
+    When TMPDIR points inside the data volume it mounts read-write, or the tmpfs size changes
+    Then finops-is-opt-in.sh still passes
+    # -> gates-have-teeth.sh "finops: TMPDIR inside its data volume instead of a tmpfs"
+    # -> gates-have-teeth.sh "finops: the temp size changes"
+
   Scenario: a different owner default, a newer tag, another port and a comment are not this gate's business
     Given the gate judges the profile, the account, the files and the address
     When the owner's fallback changes, the tag moves within the pin form, the loopback port moves, or a comment in the core mentions the console

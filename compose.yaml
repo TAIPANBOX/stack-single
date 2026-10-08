@@ -1523,6 +1523,19 @@ services:
       - ${COSTCREW_OWNER:-${ALERT_TO:-}}
     ports:
       - "127.0.0.1:8321:8321"
+    # A writable temp, because the root is read-only. SQLite writes a VACUUM's
+    # working copy and a sort too big for memory to a temp file, and Go spools
+    # a large upload to one; with no writable directory to put it in, SQLite
+    # answers `disk I/O error (6410)` (no temp path). Measured 2026-10-08 on
+    # the first start of v0.4.0 over a v0.3.0 volume: the session migration
+    # dropped the clear-text tokens and then could not VACUUM them out of the
+    # file's free pages, and said so as a WARNING. A tmpfs is memory, used only
+    # while a temp file exists; at the size limit SQLite gets "database or disk
+    # is full" for that one statement, not an outage. The seeded estate's
+    # database is 3.4 MB, so 128m covers a VACUUM of a database many times
+    # that. (CLAUDE.md invariant 24.)
+    tmpfs:
+      - /tmp:size=128m
     volumes:
       - events:/var/lib/stack/events
       - costcrewdata:/var/lib/costcrew

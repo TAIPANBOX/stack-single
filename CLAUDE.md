@@ -60,6 +60,7 @@ change here is a change to something with root on somebody else's box.
 ./scripts/typed-data-mode.sh
 ./scripts/typed-risk-signal.sh
 ./scripts/finops-is-opt-in.sh
+./scripts/no-owner-quotes.sh
 ./scripts/features-are-bound.sh
 ./scripts/gates-have-teeth.sh   # invariant 8; needs a clean tree
 ```
@@ -644,6 +645,23 @@ an absent invariant.
     file; `agent-conform:v1.1.0` as 10002 printed `PASS costcrew.ndjson (hash
     chain: 25 chained, 1 head(s))`; after `down` and `up` it published the
     passports again, logged `9 anomalies, 0 of them new` and left the file untouched.
+
+    Its read-only root has a writable temp: a 128 MB tmpfs at `/tmp`. SQLite
+    writes a VACUUM's working copy and a sort too big for memory to a temp
+    file, and Go spools a large upload to one; with no writable directory
+    SQLite answers `disk I/O error (6410)`, its "no temp path" error. Found by
+    the v0.4.0 pin (#93): the first start over a v0.3.0 volume dropped the
+    clear-text session tokens and then could not VACUUM their bytes out of the
+    file, and said so only as a WARNING, so nothing went red. The gate takes a
+    TMPDIR inside a volume mounted read-write as equally good. @measured
+    `scratch compose projects on Docker Desktop (arm64), costcrew v0.3.0 with
+    one signed-in session, then v0.4.0 on the same volume, origin/main's
+    compose.yaml against this one` 2026-10-08: without the tmpfs, `WARNING: old
+    session tokens were dropped but the database could not be vacuumed ...
+    disk I/O error (6410)` and app.db 3,444,736 bytes; with it, no warning,
+    `sessions_reset` journaled with `ended: 1`, app.db 3,284,992 bytes, the old
+    cookie's 43 bytes found 0 times in app.db and in app.db-wal, the old cookie
+    sent back to `/login` and a fresh sign-in served.
     *(gate: `scripts/finops-is-opt-in.sh`, subjects derived from the image name
     and from what the console waits for; `scripts/manifest-is-true.sh` lists the
     two services under `optional_addons` and requires the profile, an
@@ -657,7 +675,28 @@ an absent invariant.
     a browser, and anything on this box reading the passports it writes (the
     notifier mounts no passports directory, so an alert about a CostCrew agent
     names the agent and not the owner). The first start seeds a generated
-    estate, not a bill of yours.)*
+    estate, not a bill of yours. Nor whether 128 MB is enough for the database
+    a real box grows: at the limit one statement fails "database or disk is
+    full", the console carries on.)*
+
+25. **A public repository carries no quote of the owner.** `@decided
+    2026-09-09` (paraphrased): in a public repository there is no verbatim
+    quote of the owner, no provenance marker naming the owner and no sentence
+    attributing a decision to the owner by name. A decision is still recorded,
+    so a later reader does not re-derive it: `@decided YYYY-MM-DD` and a
+    paraphrase in our own words, not edited afterwards. The verbatim words live
+    in private places only. The owner's name as copyright holder or author is
+    ownership, not a quote. This tree was already clean when the gate arrived
+    (@measured `git grep` for the marker, Cyrillic and guillemets, 2026-10-08:
+    none); the sibling stack-k8s was not, and the same script is its gate.
+    *(gate: `scripts/no-owner-quotes.sh`, over every tracked text file: the
+    owner's marker, any Cyrillic, any guillemet, and the owner's first name or
+    surname outside a copyright, author or maintainer line; it refuses to report
+    OK on no tracked text file; scenarios in
+    `features/public-text-carries-no-owner-quotes.feature`; teeth in
+    `scripts/gates-have-teeth.sh`, including a pass case for the owner as
+    copyright holder. Not covered: a quote in English with no name beside it,
+    and git history, which keeps whatever an earlier commit said.)*
 
 ## Decisions that have no gate yet
 
