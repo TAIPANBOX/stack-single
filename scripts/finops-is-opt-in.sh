@@ -26,6 +26,15 @@
 #   or variable here names a gateway, and the crew runner in the same image is
 #   not started.
 #
+#   ITS READ-ONLY ROOT NEEDS A WRITABLE TEMP. SQLite writes a VACUUM's working
+#   copy and a sort too big for memory to a temp file, and Go spools a large
+#   upload to one. With `read_only: true` and nothing writable at /tmp, SQLite
+#   answers `disk I/O error (6410)`, no temp path. Found by the v0.4.0 pin
+#   (#93): the first start over a v0.3.0 volume dropped the clear-text session
+#   tokens and could not VACUUM them out of the file, and said so only as a
+#   WARNING. So a read-only console has a size-limited tmpfs at /tmp, or a
+#   TMPDIR inside a volume it mounts read-write.
+#
 #   ITS ACCOUNT IS ITS CONTAINMENT. The bus is mounted read-write because its
 #   stream has to be on the bus for the notifier to read, and compose cannot
 #   mount one file of a volume. So it runs as a uid of its own (10003), outside
@@ -41,7 +50,7 @@
 #      that; nothing else names them; nothing depends on them; no gateway; the
 #      stream is `costcrew.ndjson` inside a bus volume mounted read-write;
 #      passports and owner come as a pair; the host is RECORD_TRUST_DOMAIN; the
-#      account, the hardening, the
+#      account, the hardening, a writable temp under the read-only root, the
 #      pin; every published port is a literal loopback address; the one-shot
 #      creates the stream (0644, the console's uid) and owns the data volume.
 #   B. install.sh, by text: no non-comment line names the add-on at all.
@@ -127,6 +136,24 @@ def volume_mounts(block):
         m = re.match(r"^([A-Za-z0-9_-]+):(/[^:\s]+)(?::(ro|rw))?$", item)
         if m:
             out.append((m.group(1), m.group(2), m.group(3) == "ro"))
+    return out
+
+
+def environment(block):
+    """KEY -> value, for both the mapping and the list form of environment:."""
+    out, on = {}, False
+    for line in block:
+        if re.match(r"^    environment:\s*$", line):
+            on = True
+            continue
+        if on:
+            m = re.match(r"^      - ([A-Za-z_][A-Za-z0-9_]*)=(.*?)\s*$", line) or \
+                re.match(r"^      ([A-Za-z_][A-Za-z0-9_]*):\s*(.*?)\s*$", line)
+            if m:
+                out[m.group(1)] = m.group(2).strip().strip('"').strip("'")
+                continue
+            if re.match(r"^    \S", line) or line.strip() == "":
+                on = False
     return out
 
 
@@ -271,6 +298,25 @@ for n in sorted(subjects):
         note(f"{n}: has group_add, which can put it in the bus group")
     if field(b, "read_only") != "true":
         note(f"{n}: root filesystem is not read_only")
+    else:
+        # a writable temp under the read-only root
+        tmpfs = listing(b, "tmpfs") or ([field(b, "tmpfs")] if field(b, "tmpfs") else [])
+        tmpdir = environment(b).get("TMPDIR")
+        target = tmpdir or "/tmp"
+        under = lambda path, mount: path == mount or path.startswith(mount.rstrip("/") + "/")
+        tmp_hit = [t for t in tmpfs if under(target, t.split(":", 1)[0])]
+        vol_hit = [(v, t, ro) for v, t, ro in mounts if under(target, t)]
+        if tmp_hit:
+            opts = tmp_hit[0].split(":", 1)[1] if ":" in tmp_hit[0] else ""
+            if not re.search(r"(^|,)size=[0-9]", opts):
+                note(f"{n}: its tmpfs {tmp_hit[0]!r} has no size= limit; an unbounded temp is the box's memory, not the console's")
+        elif vol_hit:
+            if vol_hit[0][2]:
+                note(f"{n}: its temp {target} is on {vol_hit[0][0]}, mounted read-only")
+        else:
+            note(f"{n}: the root is read-only and nothing writable is mounted at {target}"
+                 f"{' (TMPDIR)' if tmpdir else ''}: SQLite has no temp path, so a VACUUM, a big sort or a large "
+                 "upload fails with disk I/O error (6410)")
     if "ALL" not in listing(b, "cap_drop"):
         note(f"{n}: does not cap_drop ALL")
     if "no-new-privileges:true" not in listing(b, "security_opt"):

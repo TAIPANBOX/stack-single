@@ -927,7 +927,9 @@ is `docker run --rm --network agent-stack_default busybox:1.36 wget -q -O - http
 **What it does here.** Its events go to the shared bus as `costcrew.ndjson`, so
 the notifier can mail about them and the chain verifier checks them. It runs as
 a user of its own that can write that one file on the bus and nothing else
-there, with a read-only root filesystem and no capabilities.
+there, with a read-only root filesystem, a 128 MB temporary directory in
+memory at `/tmp` (SQLite needs one to compact its database), and no
+capabilities.
 
 **What it does not do.** As shipped it cannot spend: no gateway is wired to it,
 which is what lets its planning calls reach a model, and the crew runner in the
@@ -947,9 +949,11 @@ it. A request body over 1 MiB is refused with 413. The image now carries five
 binaries (`costcrew-usage` is new); none of the new flags is required and none
 is passed here. If you later wire it to a gateway, give every analyst an owner
 first: behind a gateway, an analyst with no owner is refused before the call.
-The first start after the upgrade also logs one warning that the database
-could not be vacuumed, because its root filesystem is read-only and has no
-temporary directory; the old session rows are erased anyway.
+The first start after the upgrade also compacts the database so the old
+session tokens leave the file, which needs that temporary directory. With a
+`compose.yaml` older than the one that added it, the console instead logs one
+warning that the database could not be vacuumed: the old session rows are gone
+from the table, but their bytes may remain in the file's free space.
 
 Turn it off with `docker compose --profile finops stop costcrew`. Its data stays
 in the `costcrewdata` volume until you remove that volume yourself.
