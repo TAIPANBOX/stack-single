@@ -889,9 +889,10 @@ cd /opt/agent-stack
 docker compose --profile finops up -d costcrew
 ```
 
-That pulls one image, `ghcr.io/taipanbox/costcrew`, and starts it beside a small
-one-shot that prepares its volume. It is the FinOps console: cloud and AI spend,
-a crew of agents that triages it, and a person who reviews what the crew wrote.
+That pulls one image, `ghcr.io/taipanbox/costcrew:v0.4.0`, and starts it beside
+a small one-shot that prepares its volume. It is the FinOps console: cloud and
+AI spend, a crew of agents that triages it, and a person who reviews what the
+crew wrote.
 
 **Before it starts, it wants a name.** The console writes an Agent Passport for
 each of its agents, and a passport needs an owner, so it refuses to start
