@@ -1432,7 +1432,7 @@ run_case "finops: its root filesystem becomes writable" fail \
 
 run_case "finops: its image is unpinned" fail \
 	'./scripts/finops-is-opt-in.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.3.0}", "ghcr.io/taipanbox/costcrew:latest}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.4.0}", "ghcr.io/taipanbox/costcrew:latest}")')" \
 	"is not the pinned"
 
 run_case "finops: it is published on every address" fail \
@@ -1483,7 +1483,7 @@ run_case "finops: the console stops waiting for its one-shot" fail \
 
 run_case "finops: no console left to judge" fail \
 	'./scripts/finops-is-opt-in.sh' \
-	"$(py 'edit("compose.yaml", "${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.3.0}", "${COSTCREW_IMAGE:-registry.invalid/costcrew}")')" \
+	"$(py 'edit("compose.yaml", "${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.4.0}", "${COSTCREW_IMAGE:-registry.invalid/costcrew}")')" \
 	"measured NOTHING about the FinOps console"
 
 # The rendering half: text a parser accepts and compose does not.
@@ -1544,7 +1544,7 @@ run_case "finops: the owner default changes" pass \
 
 run_case "finops: the pinned tag moves" pass \
 	'./scripts/finops-is-opt-in.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.3.0}", "ghcr.io/taipanbox/costcrew:v0.3.1}")')"
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.4.0}", "ghcr.io/taipanbox/costcrew:v0.4.1}")')"
 
 run_case "finops: the loopback port moves" pass \
 	'./scripts/finops-is-opt-in.sh' \
