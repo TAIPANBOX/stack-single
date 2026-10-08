@@ -889,7 +889,7 @@ cd /opt/agent-stack
 docker compose --profile finops up -d costcrew
 ```
 
-That pulls one image, `ghcr.io/taipanbox/costcrew:v0.4.0`, and starts it beside
+That pulls one image, `ghcr.io/taipanbox/costcrew:v0.5.0`, and starts it beside
 a small one-shot that prepares its volume. It is the FinOps console: cloud and
 AI spend, a crew of agents that triages it, and a person who reviews what the
 crew wrote.
@@ -939,9 +939,19 @@ decision about money and is yours to take, separately. The notifier does not
 read its passports, so an alert about one of its agents names the agent and not
 the person who answers for it.
 
-**Moving to a newer console.** The pin is `ghcr.io/taipanbox/costcrew:v0.4.0`.
-On a box that already ran the earlier pin, the same `up -d costcrew` picks it
-up, and four things change. Everybody signs in again once, because sessions
+**Moving to a newer console.** The pin is `ghcr.io/taipanbox/costcrew:v0.5.0`.
+On a box that already ran an earlier pin, the same `up -d costcrew` picks it
+up. From v0.4.0, little changes for this launcher: the console adds a few
+columns to its database at start and rewrites no data, no console flag was
+added or removed, and the crew runner (not started here) gained
+`-local-parallel`. If you import TokenFuse exports into it, import the gateway
+folder once after the upgrade: a store that already holds two exports of the
+same trace counts those calls twice until its next import, which keeps each
+call once. Several pages now say what is so (what a model is sent, whether a
+refused plan request was paid for, which business unit a customer unit is
+charged under); the console's release notes list them.
+
+Coming from v0.3.0, four more things change, from v0.4.0. Everybody signs in again once, because sessions
 are now stored hashed and the old ones are ended at the first start. The
 console's database (with its `-wal` and `-shm`) and its journal become 0600;
 the volume's directory keeps the 0750 the one-shot gave it, and
