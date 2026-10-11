@@ -1,0 +1,13 @@
+# Hardened example policy. NOT written by install.sh: the launcher's own
+# policy.yaml stays as it is. Copy it next to your policy.yaml (or merge the
+# rule into it) when the stack should refuse the exec tool for every agent.
+#
+# deny_tool is an exact, case-insensitive tool-name match, checked before any
+# risk signal, so a missing or failed AI signal cannot turn this refusal into
+# an allow. exec is a root shell on the router when its grant is broad, which
+# is why it is denied here for every agent. Narrow the target to your own
+# agent identities once you know them.
+- name: hardened-deny-exec
+  target: agent://*
+  deny_tool:
+    - exec
