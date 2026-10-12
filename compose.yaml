@@ -902,6 +902,13 @@ services:
       # writes it into .env. Invariant 26.
       TOKENFUSE_CLOSURE_SECRET: ${CLOSURE_SECRET:-}
       TOKENFUSE_MODE: enforce
+      # The agent firewall: what a run may do after it has read untrusted input
+      # (taint tracking, the enforcement it judges). Enforce by default, a
+      # decision made for every box (CLAUDE.md invariant 27). One installer
+      # variable moves it to shadow or off. tokenfuse reads any other value as
+      # its default and says nothing, so install.sh refuses one before anything
+      # is installed. `firewall-is-enforce.sh` holds that every gateway sets it.
+      TOKENFUSE_FIREWALL: ${TOKENFUSE_FIREWALL:-enforce}
       # The most a caller can make one run's budget. A run's budget used to be
       # whatever the agent said in `x-fuse-budget-usd`, and its next call could
       # widen it; tokenfuse 1.5.0 (invariant 73) clamps a budget that came

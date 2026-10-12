@@ -51,6 +51,8 @@
 #     is off unless you ask, 0 turns it off. See section 0b and the README.
 #   RUN_BUDGET_CEILING_USD=2.50 ./install.sh   # the most a caller can make one
 #     run's budget (tokenfuse 1.5.0), 5.00 unless you say otherwise
+#   TOKENFUSE_FIREWALL=shadow ./install.sh     # the agent firewall: enforce (the
+#     default), shadow or off; see section 0d and the README
 #
 # The typed-answer plane (typryx) answers a typed question from one of the
 # templates baked into its image, with a probability for every option. The
@@ -544,6 +546,61 @@ ceiling_apply() {
 # run-budget-ceiling: end
 ceiling_resolve
 [ "$(uname -m)" = "x86_64" ] || note "architecture $(uname -m): the images build from source, so this should work, but it is untested off x86_64."
+
+# ---- 0d. the agent firewall's mode -----------------------------------------
+# tokenfuse runs an agent firewall: taint tracking that judges what a run may do
+# after it has read untrusted input. Its mode is TOKENFUSE_FIREWALL, one of
+# enforce, shadow or off. This launcher runs it in enforce by default, from
+# compose.yaml (`${TOKENFUSE_FIREWALL:-enforce}`), a decision made for every box
+# (CLAUDE.md invariant 27). The one switch back is this variable.
+#
+# tokenfuse reads any other value as its default and says nothing about it
+# (crates/gateway/src/firewall.rs, from_env), so a misspelling would silently run
+# shadow while the box looked enforced. The value is checked HERE, before a
+# package is installed or a file written, whether it came from this run's
+# environment or was left in .env; a refusal never echoes what it was given.
+# Nothing set writes nothing: a default box carries no line and compose supplies
+# enforce. A run that sets it replaces the .env line. (gate:
+# scripts/firewall-is-enforce.sh lifts this block out and runs it.)
+# firewall-mode: begin
+FIREWALL_SET=""   # what this run puts in .env, "" when it says nothing
+
+firewall_valid() { # VALUE: exactly one of the three modes tokenfuse reads
+  case "$1" in
+    off|shadow|enforce) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+firewall_resolve() {
+  local saved=""
+  FIREWALL_SET="${TOKENFUSE_FIREWALL:-}"
+  if [ -n "$FIREWALL_SET" ] && ! firewall_valid "$FIREWALL_SET"; then
+    die "TOKENFUSE_FIREWALL must be enforce, shadow or off. tokenfuse ignores any other value and runs its default, so a misspelling would run the wrong mode. Nothing was installed."
+  fi
+  if [ -f "$STACK_DIR/.env" ]; then
+    saved="$(sed -n "/^TOKENFUSE_FIREWALL=/{s///p;q;}" "$STACK_DIR/.env")"
+    saved="${saved#\'}"
+    saved="${saved%\'}"
+  fi
+  if [ -n "$saved" ] && ! firewall_valid "$saved"; then
+    die ".env holds a TOKENFUSE_FIREWALL that is not enforce, shadow or off, which tokenfuse would ignore. Fix or remove that line. Nothing was changed."
+  fi
+}
+
+# Write the decision where compose reads it. Called once .env exists.
+firewall_apply() {
+  local tmp
+  [ -n "$FIREWALL_SET" ] || return 0
+  tmp="$(mktemp)" || die "could not make a temporary file to update .env"
+  { grep -v "^TOKENFUSE_FIREWALL=" "$STACK_DIR/.env" || true; } >"$tmp"
+  printf 'TOKENFUSE_FIREWALL=%s\n' "$FIREWALL_SET" >>"$tmp"
+  cat "$tmp" >"$STACK_DIR/.env" || die "could not update $STACK_DIR/.env"
+  rm -f "$tmp"
+  note "agent firewall: $FIREWALL_SET (enforce is the default; shadow and off are the way back)"
+}
+# firewall-mode: end
+firewall_resolve
 
 say "installing docker and git"
 export DEBIAN_FRONTEND=noninteractive
@@ -1099,6 +1156,8 @@ add_env_default TOKENFUSE_MCP_SECRET_SCOPES "$(sq_ 'typryx_key=tools:ask|ask_fre
 typed_apply
 # The ceiling on a run budget (section 0c): written only when this run set it.
 ceiling_apply
+# The agent firewall's mode (section 0d): written only when this run set it.
+firewall_apply
 
 # The delegation plane's own door (profile delegation), handled like every
 # other opt-in plane's key above: generated whether or not WITH_DELEGATION is
@@ -2102,6 +2161,13 @@ $CONSOLE_ACCESS_NOTE
   is yours and is never clamped. To move it, set RUN_BUDGET_CEILING_USD in
   $STACK_DIR/.env (a positive number of dollars, at most six decimals) and run
   ${COMPOSE[*]} up -d. It bounds one run, not an agent: a new run id starts a new one.
+
+  The gateway's agent firewall runs in enforce: when a run has read untrusted
+  input and the model then asks for an exec, write or network-egress action, the
+  answer is withheld (HTTP 403, taint_blocked). To run it in shadow (record only)
+  or off instead, set TOKENFUSE_FIREWALL to shadow or off in $STACK_DIR/.env and
+  run ${COMPOSE[*]} up -d tokenfuse-gateway. Running ./install.sh with the same
+  variable checks the value before it writes it.
 
   A chain verifier (agent-conform) re-checks the hash chain of every event
   stream on this box every five minutes. A break becomes a high alert on the
