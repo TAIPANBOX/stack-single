@@ -1059,7 +1059,7 @@ services:
 
   console:
     <<: *restart
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.1.34}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.1.36}
     environment:
       HOME: /var/lib/stack
       TAIPAN_HOME: /etc/genaryx/taipan
@@ -1388,7 +1388,7 @@ services:
 
   verdryx-drift:
     <<: *restart
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.1.34}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.1.36}
     user: "10001:10001"
     profiles: ["routines"]
     environment:
