@@ -987,9 +987,8 @@ into `./closure/secret`, readable only by the console. Nothing prints it, and a
 re-run keeps it. To turn closing off again, remove `CLOSURE_SECRET` and
 `CLOSURE_SECRET_FILE` from `.env` and run `docker compose up -d`.
 
-It needs a tokenfuse gateway and a console image that include this feature. The
-images pinned here are older and ignore the setting, so until the pins move the
-route and the command stay off.
+It needs tokenfuse v1.9.0 or later and console v1.1.34 or later, which are the
+images pinned here; an older image ignores the setting.
 
 ## The console
 
