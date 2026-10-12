@@ -1570,6 +1570,12 @@ if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx console; then
     if printf '%s\n' "$CONSOLE_PASSWORD" | "${COMPOSE[@]}" exec -T console \
          /usr/local/bin/genaryx-web set-password --username "$CONSOLE_USER" >/dev/null 2>&1; then
       note "created operator '$CONSOLE_USER'"
+      # The console reads whether it has an operator once, at startup
+      # (stack-k8s GOTCHAS 50), and it is already running here, so until it
+      # restarts it refuses the password printed below with 503. The cluster
+      # deploy scripts restart it at this point for the same reason.
+      "${COMPOSE[@]}" restart console >/dev/null \
+        || die "could not restart the console after creating its operator"
     else
       CONSOLE_PASSWORD=""
       note "could not set the password automatically; the command is printed below"
