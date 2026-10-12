@@ -717,14 +717,17 @@ an absent invariant.
     A re-run keeps it; turning closing off is removing `CLOSURE_SECRET` and
     `CLOSURE_SECRET_FILE` from `.env`. It takes effect only with a tokenfuse
     image that serves `POST /v1/retained/close` and a console image that has the
-    close command; the pins here predate both, and an older image ignores the
-    variable.
+    close command: tokenfuse v1.9.0 and console v1.1.34, pinned here since
+    1.1.24, are the first that do, and an older image ignores the variable.
     *(gate: `scripts/closure-off-by-default.sh`, which refuses to report OK on
     no gateway, no console, no variable, no guarded mint or no write of the
     file; scenarios in `features/closing-is-off-by-default.feature`; teeth in
-    `scripts/gates-have-teeth.sh`. Not covered: a live install with
-    `WITH_CLOSURE=1`, a token minted by a real console and verified by a real
-    gateway, and a re-run that turns closing off.)*
+    `scripts/gates-have-teeth.sh`. A token minted by a real console and
+    verified by a real gateway: @measured stack-k8s
+    `evidence/closure-e2e/run.sh` (this compose file's wiring of the gateway,
+    the control plane and the console, tokenfuse v1.9.0, console v1.1.34)
+    2026-10-12, 29 of 29 twice. Not covered: a live install with
+    `WITH_CLOSURE=1`, and a re-run that turns closing off.)*
 
 ## Decisions that have no gate yet
 
