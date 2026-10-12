@@ -969,6 +969,28 @@ from the table, but their bytes may remain in the file's free space.
 Turn it off with `docker compose --profile finops stop costcrew`. Its data stays
 in the `costcrewdata` volume until you remove that volume yourself.
 
+## Closing a retained reservation (opt-in, off by default)
+
+When a call reaches the model provider and the answer never comes back, the
+gateway cannot know whether the provider billed it. It keeps that money
+reserved, on purpose, until a person closes it with evidence: the usage the
+provider reported, or its confirmation that nothing was billed. The console
+asks for a passkey, then mints a short-lived token the gateway checks. Both
+sides use one secret.
+
+```sh
+WITH_CLOSURE=1 ./install.sh
+```
+
+This writes the secret once into `.env` as `CLOSURE_SECRET`, and the same bytes
+into `./closure/secret`, readable only by the console. Nothing prints it, and a
+re-run keeps it. To turn closing off again, remove `CLOSURE_SECRET` and
+`CLOSURE_SECRET_FILE` from `.env` and run `docker compose up -d`.
+
+It needs a tokenfuse gateway and a console image that include this feature. The
+images pinned here are older and ignore the setting, so until the pins move the
+route and the command stay off.
+
 ## The console
 
 All of it is Apache-2.0 and public, the console included: Genaryx went open on
