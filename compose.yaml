@@ -1165,7 +1165,7 @@ services:
   # a promise.
   record-seal:
     <<: *restart
-    image: ${TRAILRYX_IMAGE:-ghcr.io/taipanbox/trailryx-node:v1.0.0}
+    image: ${TRAILRYX_IMAGE:-ghcr.io/taipanbox/trailryx-node:v1.2.0}
     user: "10001:10001"
     profiles: ["record"]
     environment:
