@@ -60,6 +60,7 @@ change here is a change to something with root on somebody else's box.
 ./scripts/typed-data-mode.sh
 ./scripts/typed-risk-signal.sh
 ./scripts/finops-is-opt-in.sh
+./scripts/closure-off-by-default.sh
 ./scripts/no-owner-quotes.sh
 ./scripts/features-are-bound.sh
 ./scripts/gates-have-teeth.sh   # invariant 8; needs a clean tree
@@ -697,6 +698,33 @@ an absent invariant.
     `scripts/gates-have-teeth.sh`, including a pass case for the owner as
     copyright holder. Not covered: a quote in English with no name beside it,
     and git history, which keeps whatever an earlier commit said.)*
+
+26. **Closing a retained reservation is off by default, and when it is on the
+    gateway and the console hold the same secret.** `@decided 2026-10-11`
+    (paraphrased, recorded in tokenfuse): a retained reservation is closed by a
+    person after a passkey assertion in the console, which mints a short-lived
+    token the gateway verifies; both are keyed by one shared secret.
+    `@claude 2026-10-12`: on this box that secret is the operator's choice. A
+    default install leaves both sides off: compose hands the gateway
+    `TOKENFUSE_CLOSURE_SECRET: ${CLOSURE_SECRET:-}` and the console
+    `GENARYX_CLOSURE_SECRET_FILE: ${CLOSURE_SECRET_FILE:-}`, and each reads an
+    empty value as off. `WITH_CLOSURE=1 ./install.sh` mints the secret once with
+    `gen 48` into `.env` and writes the same bytes to `./closure/secret` (0400,
+    uid 10001, the console's), which the console mounts read only at
+    `/run/closure`. The file is written with `printf '%s'`: the console trims
+    whitespace from it and the gateway reads its variable as given, so a
+    trailing newline would make every token fail. The secret is never printed.
+    A re-run keeps it; turning closing off is removing `CLOSURE_SECRET` and
+    `CLOSURE_SECRET_FILE` from `.env`. It takes effect only with a tokenfuse
+    image that serves `POST /v1/retained/close` and a console image that has the
+    close command; the pins here predate both, and an older image ignores the
+    variable.
+    *(gate: `scripts/closure-off-by-default.sh`, which refuses to report OK on
+    no gateway, no console, no variable, no guarded mint or no write of the
+    file; scenarios in `features/closing-is-off-by-default.feature`; teeth in
+    `scripts/gates-have-teeth.sh`. Not covered: a live install with
+    `WITH_CLOSURE=1`, a token minted by a real console and verified by a real
+    gateway, and a re-run that turns closing off.)*
 
 ## Decisions that have no gate yet
 

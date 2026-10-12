@@ -544,6 +544,42 @@ run_case "delegation-off-by-default: install.sh starts the profile unconditional
 	"$(py 'edit("install.sh", "[ -z \"${WITH_DELEGATION:-}\" ] || UP_PROFILES+=(--profile delegation)", "UP_PROFILES+=(--profile delegation)")')" \
 	"no WITH_DELEGATION guard"
 
+# invariant 26: closing a retained reservation is off by default, and on, the
+# gateway and the console hold the same secret bytes, never printed.
+run_case "closure-off-by-default: the gateway's secret gets a required form" fail \
+	'./scripts/closure-off-by-default.sh' \
+	"$(py 'edit("compose.yaml", "TOKENFUSE_CLOSURE_SECRET: ${CLOSURE_SECRET:-}", "TOKENFUSE_CLOSURE_SECRET: ${CLOSURE_SECRET:?set by install.sh}")')" \
+	"not the empty-default form"
+
+run_case "closure-off-by-default: the console's file gets a literal" fail \
+	'./scripts/closure-off-by-default.sh' \
+	"$(py 'edit("compose.yaml", "GENARYX_CLOSURE_SECRET_FILE: ${CLOSURE_SECRET_FILE:-}", "GENARYX_CLOSURE_SECRET_FILE: /run/closure/secret")')" \
+	"not the empty-default"
+
+run_case "closure-off-by-default: install.sh mints the secret unconditionally" fail \
+	'./scripts/closure-off-by-default.sh' \
+	"$(py 'edit("install.sh", "if [ \"${WITH_CLOSURE:-}\" = \"1\" ]; then", "if true; then")')" \
+	"no WITH_CLOSURE guard"
+
+run_case "closure-off-by-default: the console's copy gets a trailing newline" fail \
+	'./scripts/closure-off-by-default.sh' \
+	"$(py 'edit("install.sh", "printf \x27%s\x27 \"$closure_secret\" >closure/secret.tmp", "printf \x27%s\\n\x27 \"$closure_secret\" >closure/secret.tmp")')" \
+	"other than printf"
+
+run_case "closure-off-by-default: the secret is printed" fail \
+	'./scripts/closure-off-by-default.sh' \
+	"$(py 'edit("install.sh", "  note \"closing retained reservations is on: one secret, in .env and in ./closure/secret\"", "  note \"closing retained reservations is on: one secret, in .env and in ./closure/secret\"\n  note \"the secret is $closure_secret\"")')" \
+	"which can print it"
+
+run_case "closure-off-by-default: a comment near it is reworded" pass \
+	'./scripts/closure-off-by-default.sh' \
+	"$(py 'edit("install.sh", "# the console, with no trailing newline:", "# the console, without a trailing newline:")')"
+
+run_case "closure-off-by-default: no console variable left to judge" fail \
+	'./scripts/closure-off-by-default.sh' \
+	"$(py 'edit("compose.yaml", "      GENARYX_CLOSURE_SECRET_FILE: ${CLOSURE_SECRET_FILE:-}\n", "")')" \
+	"measured nothing"
+
 # The signing key and the revoke key never reach a printed line.
 run_case "delegation-key-not-printed: the revoke key is expanded into a print call" fail \
 	'./scripts/delegation-key-not-printed.sh' \

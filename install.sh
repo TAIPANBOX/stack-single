@@ -42,6 +42,9 @@
 #   TYPED_TRAINING=1 (with any typed mode above) also switches on typryx's local
 #     training log, in a volume on this box; off unless you ask, 0 turns it off
 #   WITH_DELEGATION=1 ./install.sh        # pulls AND starts vouchryx
+#   WITH_CLOSURE=1 ./install.sh           # one secret the gateway and the console
+#     share, so a person can close a retained reservation with evidence; off
+#     unless asked. See section 3d and the README.
 #   TYPED_RISK_SIGNAL=1 (with any typed answers above, never with them off) also
 #     starts typryx's wardryx-proxy and points ONLY the MCP broker's policy
 #     client at it, so a tool call carries typryx's risk class to wardryx; it
@@ -1326,6 +1329,34 @@ if [ -z "$BUILD_FROM_SOURCE" ]; then
   # while every line above still reads as success.
   [ "$pulled" -gt 0 ] || die "no ghcr.io image was pulled; compose named none. Is compose.yaml the one this installer shipped?"
   note "pulled $pulled published image(s); nothing was compiled"
+fi
+
+# ---- 3d. closing a retained reservation, opt-in ------------------------------
+# A retained reservation is a call the provider may have billed that the
+# gateway could not settle (tokenfuse invariant 50). A person closes one with
+# evidence: the console mints a short-lived token after a passkey assertion,
+# and the gateway verifies it. Both are keyed by ONE shared secret.
+# WITH_CLOSURE=1 mints that secret once into .env as CLOSURE_SECRET, and writes
+# the same bytes to ./closure/secret, readable by uid 10001 alone, for
+# the console, with no trailing newline: the console trims whitespace from the
+# file and the gateway reads its variable as given, so a newline on one side
+# would make every token fail. Off by default: with no CLOSURE_SECRET in .env,
+# compose hands both sides an empty value, which each reads as off. A re-run
+# keeps the secret; turning closing off is removing CLOSURE_SECRET and
+# CLOSURE_SECRET_FILE from .env. Invariant 26.
+mkdir -p closure || die "could not create ./closure"
+if [ "${WITH_CLOSURE:-}" = "1" ]; then
+  add_env_default CLOSURE_SECRET "$(gen 48)"
+  add_env_default CLOSURE_SECRET_FILE /run/closure/secret
+  closure_secret="$(sed -n 's/^CLOSURE_SECRET=//p' .env | tail -n 1)"
+  [ "${#closure_secret}" -ge 32 ] \
+    || die "CLOSURE_SECRET in .env is shorter than 32 characters; remove that line and re-run with WITH_CLOSURE=1"
+  ( umask 077; printf '%s' "$closure_secret" >closure/secret.tmp ) \
+    || die "could not write the closure secret for the console"
+  chown 10001:10001 closure/secret.tmp || die "could not hand the closure secret to the uid the console runs as"
+  chmod 0400 closure/secret.tmp || die "could not set the mode of the closure secret"
+  mv -f closure/secret.tmp closure/secret || die "could not move the closure secret into place"
+  note "closing retained reservations is on: one secret, in .env and in ./closure/secret"
 fi
 
 # ---- 4. the files the services read -----------------------------------------

@@ -897,6 +897,10 @@ services:
       # operator holds it; nothing in this stack calls the endpoint.
       # `declassify-is-keyed.sh` holds it, and a literal here is a failure.
       TOKENFUSE_DECLASSIFY_KEY: ${GATEWAY_DECLASSIFY_KEY:?set by install.sh}
+      # D8: the secret this gateway verifies closure tokens with. Empty, the
+      # default, turns its closure routes off; WITH_CLOSURE=1 ./install.sh
+      # writes it into .env. Invariant 26.
+      TOKENFUSE_CLOSURE_SECRET: ${CLOSURE_SECRET:-}
       TOKENFUSE_MODE: enforce
       # The most a caller can make one run's budget. A run's budget used to be
       # whatever the agent said in `x-fuse-budget-usd`, and its next call could
@@ -1118,12 +1122,17 @@ services:
       # the browser, because the browser cannot reach that domain before a
       # tunnel exists.
       GENARYX_WEB_REQUIRE_PASSKEY: "1"
+      # D8: the file holding the same secret, which the console mints closure
+      # tokens with after a passkey assertion. Empty, the default, leaves its
+      # close command off. Invariant 26.
+      GENARYX_CLOSURE_SECRET_FILE: ${CLOSURE_SECRET_FILE:-}
     ports:
       - "127.0.0.1:7420:7420"
     volumes:
       - consolestate:/var/lib/stack
       - events:/var/lib/stack/events
       - ./environments:/etc/genaryx/taipan/environments:ro
+      - ./closure:/run/closure:ro
       - wgapi:/var/run/wireguard
     depends_on:
       init-volumes:
