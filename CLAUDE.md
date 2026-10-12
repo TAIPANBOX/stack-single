@@ -62,6 +62,7 @@ change here is a change to something with root on somebody else's box.
 ./scripts/finops-is-opt-in.sh
 ./scripts/closure-off-by-default.sh
 ./scripts/no-owner-quotes.sh
+./scripts/firewall-is-enforce.sh
 ./scripts/features-are-bound.sh
 ./scripts/gates-have-teeth.sh   # invariant 8; needs a clean tree
 ```
@@ -728,6 +729,37 @@ an absent invariant.
     the control plane and the console, tokenfuse v1.9.0, console v1.1.34)
     2026-10-12, 29 of 29 twice. Not covered: a live install with
     `WITH_CLOSURE=1`, and a re-run that turns closing off.)*
+
+27. **The gateway's agent firewall runs in enforce on every box, and one
+    installer variable is the only way back.** `@decided 2026-10-13`
+    (paraphrased): the launcher runs tokenfuse's agent firewall in enforce by
+    default, shipped as its own change after a test stack; an operator keeps
+    one switch to run it in shadow or off. `@claude 2026-10-13`: tokenfuse reads
+    `TOKENFUSE_FIREWALL` as `enforce`, `shadow` or `off`, and reads any other
+    value as its default, shadow, without a word
+    (`crates/gateway/src/firewall.rs`, `from_env`, at tokenfuse v1.11.0), so a
+    misspelt value would run shadow on a box that looked enforced. So every
+    gateway service sets `${TOKENFUSE_FIREWALL:-enforce}` in `compose.yaml`, and
+    `install.sh` refuses any value other than the three before it installs
+    anything, writes a usable one to `.env`, and replaces the line an earlier run
+    wrote. In enforce, tokenfuse withholds a model answer that asks a run for
+    exec, write or network egress once the run carries an untrusted label, a
+    secrets label with network egress, or the suspected-injection label
+    (tokenfuse invariants 25 to 27 and 93). The model call has already happened
+    and been billed by then, and the response-side judgment does not run on a
+    streamed answer. The MCP broker, `focus-export` and the control plane are not
+    gateways and do not read the switch.
+    *(gate: `scripts/firewall-is-enforce.sh`, subjects derived from compose.yaml's
+    own image and command lines like invariant 13's; it requires the default to
+    be exactly `${TOKENFUSE_FIREWALL:-enforce}`, lifts the `# firewall-mode:`
+    block out of install.sh and runs it per case, and reads `docker compose
+    config` for enforce, shadow and off; it refuses to report OK on no gateway
+    service, no installer block or no Docker; scenarios in
+    `features/the-agent-firewall-is-enforce-by-default.feature`; teeth in
+    `scripts/gates-have-teeth.sh`. Not covered: that a running gateway withholds
+    a call under enforce, which needs a live stack; the streamed path; the
+    broker's own taint decisions under enforce; and whether an operator keeps the
+    switch set.)*
 
 ## Decisions that have no gate yet
 

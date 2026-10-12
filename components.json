@@ -166,6 +166,10 @@
         "the_chain_verifier_is_on_by_default": {
           "value": "agent-conform watch-dir -every 5m, no profile",
           "why": "agent-stack-go#66: nothing on a box verified the hash chain of the shared bus until this. It reads every stream and appends chain_broken (high) to its own stream, agent-conform.ndjson, where heraldyx already reads. It runs as 10002:10002, outside the bus group, so the only bus file it can write is the one init-volumes gave it; its state is on its own volume. It is not an estate routine in the sense this file's schedules_routines means (it is a long-running service, like record-seal), so it is listed only in installs_services. Checked by scripts/chain-verifier-is-contained.sh."
+        },
+        "the_agent_firewall_is_enforce_by_default": {
+          "value": "TOKENFUSE_FIREWALL=enforce by default (compose.yaml, every gateway); shadow or off set in .env through install.sh, or set in the shell, to switch",
+          "why": "@decided 2026-10-13: the launcher runs the gateway's agent firewall in enforce by default, shipped as its own change after a test stack; an operator keeps one switch to run it in shadow or off. install.sh validates the switch because tokenfuse runs its default on any value it does not know, and that default is shadow, which refuses nothing. Checked by scripts/firewall-is-enforce.sh, invariant 27 in CLAUDE.md."
         }
       }
     }

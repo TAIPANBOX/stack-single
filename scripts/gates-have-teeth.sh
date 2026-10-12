@@ -805,6 +805,81 @@ run_case "run-budget-ceiling: the installer block is gone" fail \
 	"$(py 'edit("install.sh", "# run-budget-ceiling: begin\n", "# run-budget-ceiling: start\n")')" \
 	"measured nothing about the installer's half"
 
+# ---- firewall-is-enforce (invariant 27): tokenfuse ignores a mode it does not
+# know and runs shadow, which refuses nothing. Every gateway defaults the
+# firewall to enforce, one installer value moves it, and nothing else may.
+run_case "firewall-is-enforce: the gateway loses its firewall setting" fail \
+	'./scripts/firewall-is-enforce.sh' \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_FIREWALL: ${TOKENFUSE_FIREWALL:-enforce}\n", "")')" \
+	"sets no TOKENFUSE_FIREWALL"
+
+run_case "firewall-is-enforce: the default becomes shadow" fail \
+	'./scripts/firewall-is-enforce.sh' \
+	"$(py 'edit("compose.yaml", "${TOKENFUSE_FIREWALL:-enforce}", "${TOKENFUSE_FIREWALL:-shadow}")')" \
+	"defaults the agent firewall to shadow"
+
+run_case "firewall-is-enforce: the default becomes off" fail \
+	'./scripts/firewall-is-enforce.sh' \
+	"$(py 'edit("compose.yaml", "${TOKENFUSE_FIREWALL:-enforce}", "${TOKENFUSE_FIREWALL:-off}")')" \
+	"defaults the agent firewall to off"
+
+run_case "firewall-is-enforce: the setting becomes a literal" fail \
+	'./scripts/firewall-is-enforce.sh' \
+	"$(py 'edit("compose.yaml", "TOKENFUSE_FIREWALL: ${TOKENFUSE_FIREWALL:-enforce}", "TOKENFUSE_FIREWALL: enforce")')" \
+	"A literal cannot be moved by the one installer switch"
+
+run_case "firewall-is-enforce: the setting reads another variable" fail \
+	'./scripts/firewall-is-enforce.sh' \
+	"$(py 'edit("compose.yaml", "TOKENFUSE_FIREWALL: ${TOKENFUSE_FIREWALL:-enforce}", "TOKENFUSE_FIREWALL: ${FIREWALL_MODE:-enforce}")')" \
+	"A literal cannot be moved by the one installer switch"
+
+# A second start is the case a hard-coded name would miss: the subjects come
+# from the file, so a new gateway service that defaults to shadow is judged.
+run_case "firewall-is-enforce: a second gateway start defaults to shadow" fail \
+	'./scripts/firewall-is-enforce.sh' \
+	"$(py 'edit("compose.yaml", "  tokenfuse-gateway:\n    <<: *restart\n", "  tokenfuse-gateway-canary:\n    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.11.0}\n    command: [\"/usr/local/bin/tokenfuse\"]\n    environment:\n      TOKENFUSE_FIREWALL: ${TOKENFUSE_FIREWALL:-shadow}\n  tokenfuse-gateway:\n    <<: *restart\n")')" \
+	"defaults the agent firewall to shadow"
+
+run_case "firewall-is-enforce: no gateway service left to judge" fail \
+	'./scripts/firewall-is-enforce.sh' \
+	"$(py 'edit("compose.yaml", "    command: [\"/usr/local/bin/tokenfuse\"]\n    environment:\n      TOKENFUSE_ADDR", "    command: [\"/usr/local/bin/tokenfuse\", \"serve\"]\n    environment:\n      TOKENFUSE_ADDR")')" \
+	"measured NOTHING about the agent"
+
+run_case "firewall-is-enforce: the installer accepts a value tokenfuse ignores" fail \
+	'./scripts/firewall-is-enforce.sh' \
+	"$(py 'edit("install.sh", "off|shadow|enforce) return 0 ;;\n    *) return 1 ;;", "off|shadow|enforce) return 0 ;;\n    *) return 0 ;;")')" \
+	"was accepted, and tokenfuse would ignore it"
+
+run_case "firewall-is-enforce: the installer writes a second line instead of replacing" fail \
+	'./scripts/firewall-is-enforce.sh' \
+	"$(py 'edit("install.sh", "  { grep -v \"^TOKENFUSE_FIREWALL=\" \"$STACK_DIR/.env\" || true; } >\"$tmp\"", "  cat \"$STACK_DIR/.env\" >\"$tmp\"")')" \
+	"did not replace the first"
+
+run_case "firewall-is-enforce: a bad mode left in .env is accepted" fail \
+	'./scripts/firewall-is-enforce.sh' \
+	"$(py 'edit("install.sh", "  if [ -n \"$saved\" ] && ! firewall_valid \"$saved\"; then", "  if false; then")')" \
+	"left in .env was accepted"
+
+run_case "firewall-is-enforce: the refusal echoes the value" fail \
+	'./scripts/firewall-is-enforce.sh' \
+	"$(py 'edit("install.sh", "die \"TOKENFUSE_FIREWALL must be enforce", "die \"TOKENFUSE_FIREWALL=$FIREWALL_SET must be enforce")')" \
+	"echoed the value"
+
+run_case "firewall-is-enforce: the installer block is gone" fail \
+	'./scripts/firewall-is-enforce.sh' \
+	"$(py 'edit("install.sh", "# firewall-mode: begin\n", "# firewall-mode: start\n")')" \
+	"measured nothing about the installer's half"
+
+run_case "firewall-is-enforce: the installer never writes the mode" fail \
+	'./scripts/firewall-is-enforce.sh' \
+	"$(py 'edit("install.sh", "(section 0d): written only when this run set it.\nfirewall_apply\n", "(section 0d): written only when this run set it.\n")')" \
+	"never calls firewall_resolve and firewall_apply"
+
+# A comment that names the setting and a mode is not the setting.
+run_case "firewall-is-enforce: a comment that names shadow is not the setting" pass \
+	'./scripts/firewall-is-enforce.sh' \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_FIREWALL: ${TOKENFUSE_FIREWALL:-enforce}\n", "      # e.g. TOKENFUSE_FIREWALL: shadow in .env, see the README.\n      TOKENFUSE_FIREWALL: ${TOKENFUSE_FIREWALL:-enforce}\n")')"
+
 # ---- chain-verifier (invariant 21): the account is the whole containment.
 run_case "chain-verifier: the verifier gets a group_add" fail \
 	'./scripts/chain-verifier-is-contained.sh' \

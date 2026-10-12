@@ -302,6 +302,33 @@ or a budget tied to an identity close. `install.sh` checks the gateway's own
 start-up line to see the clamp is armed, so a gateway older than 1.5.0 turns
 that check red instead of reading as bounded.
 
+### The agent firewall runs in enforce
+
+The gateway's agent firewall judges what a run may do after it has read
+untrusted input: it has read a web page, an email or a file, and the model then
+asks for a command, a write or a send to the network. On this box it runs in
+**enforce**, the default on every install. When a run has read untrusted input
+and the model asks for one of those actions, the gateway withholds the answer:
+the caller gets HTTP 403 with `taint_blocked`. The model call itself has already
+happened, so it is still recorded and billed. A run that holds a secret and asks
+to send data out is refused the same way.
+
+Enforce judges the buffered answer. A streamed answer is not judged by this
+firewall in this release, so a tool use inside a stream is not withheld.
+
+To run it in **shadow** (it records what it would refuse and refuses nothing) or
+**off** instead, set the switch and run the installer, which checks the value
+before it touches the box:
+
+```bash
+TOKENFUSE_FIREWALL=shadow ./install.sh      # or off; enforce is the default
+```
+
+On an installed box, set `TOKENFUSE_FIREWALL` in `/opt/agent-stack/.env` and run
+`docker compose up -d tokenfuse-gateway`. The installer refuses any other value
+and one already left in `.env`, because tokenfuse would ignore a misspelling and
+run shadow without a word.
+
 ### The chain verifier
 
 Every writer on the shared events bus chains its lines (`prev_hash`) so a
