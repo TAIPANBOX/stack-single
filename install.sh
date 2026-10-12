@@ -1831,6 +1831,14 @@ if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx console; then
   # #49). The console's own startup line is the only place this shows.
   check_log "console's bus is live" \
         "$DC logs console 2>&1 | grep -q 'bus LIVE' && ! $DC logs console 2>&1 | grep -q 'bus startup failed'"
+  # The password section 7 printed has to work. The console reads whether it
+  # has an operator once, at startup (stack-k8s GOTCHAS 50), and section 7 sets
+  # one on a console that is already running, so a fresh box answered
+  # `"configured":false` here and refused every sign-in with 503 while the
+  # password was still on the screen. Retried like a log check: the console
+  # was restarted moments ago.
+  check_log "console knows its operator" \
+        "curl -fsS -m5 http://127.0.0.1:7420/api/auth/session | grep -q '\"configured\":true'"
 fi
 
 # The typed plane's own door, only when WITH_TYPED actually brought it up
