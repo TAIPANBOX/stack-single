@@ -430,14 +430,19 @@ authenticated and their spend attributed by key id, with no agent binding. A
 map with only units and `prefixes[]` and no keys attributes spend by agent id
 and authenticates nobody.
 
-Felyx, the console's copilot, calls this gateway and sends no `x-fuse-key`, so
-while client keys are on, its calls are refused 401. The installer says so at
-the end of the run when `GENARYX_COPILOT_KEY` is set.
+Felyx, the console's copilot, calls this gateway like any agent, so while client
+keys are on it needs a key of its own. It has none by default: with
+`GENARYX_COPILOT_FUSE_KEY` empty, Felyx sends no `x-fuse-key` and its calls are
+refused 401. The installer says which of the two your box has at the end of the
+run, when `GENARYX_COPILOT_KEY` is set.
 
 A console that carries genaryx invariant 24 can present a key of its own:
 `compose.yaml` already hands it `GENARYX_COPILOT_FUSE_KEY_REF`, which points at
 `GENARYX_COPILOT_FUSE_KEY` in `.env`, and such a console sends that key as
-`x-fuse-key`. The console pinned here (v1.1.44) carries it. To use it:
+`x-fuse-key`. The console pinned here (v1.1.44) carries it; an older one ignores
+the setting. Measured 2026-10-13 with two throwaway v1.1.44 consoles against a
+gateway holding client keys: with the key set, a question to Felyx was answered;
+with it empty, the gateway answered 401. To give Felyx a key:
 
 1. Give Felyx its own line in the keys file, such as `gx_7d42e1...:felyx`.
 2. If you use an identity map, bind that key id in `keys[]` with `agents`
@@ -450,7 +455,8 @@ A console that carries genaryx invariant 24 can present a key of its own:
    `GENARYX_COPILOT_FUSE_KEY='gx_7d42e1...'`, and run
    `docker compose up -d console`.
 
-Left empty, the default, Felyx sends no key, as before.
+Left empty, the default, Felyx sends no key, as before, and with client keys on
+its calls are refused 401.
 
 ### The chain verifier
 

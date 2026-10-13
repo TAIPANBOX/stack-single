@@ -50,19 +50,40 @@
 #      the container; the mapping is Docker's word for the port, and on that
 #      box the two disagreed.
 #
+#   6. The probe follows the bind the box HAS, not the bind this run was given.
+#      On a re-run `.env` is sourced over the run's own default, and the README's
+#      way to change the bind on an installed box is to edit GATEWAY_BIND there.
+#      GATEWAY_PROBE was worked out once, at the top, before `.env` was read, so
+#      on a box whose gateway is published on 192.168.1.10 only and a re-run with
+#      nothing in the environment, `gateway answers on 127.0.0.1:4100` read FAIL
+#      on a healthy box (measured 2026-10-13 on Debian 13, `curl
+#      http://192.168.1.10:4100/healthz` 200 throughout; ok with GATEWAY_BIND
+#      exported), and the delegation plane's TOKENFUSE_DELEGATION_URL would have
+#      been minted from the same stale address. So GATEWAY_PROBE is assigned in
+#      exactly one place, the function `gateway_probe_resolve`; it is called
+#      before the first use; and every read of `.env` is followed, on the next
+#      line of code, by a call to it, so nothing can use the stale value between
+#      the two. The function itself is lifted out and run: every bind maps to
+#      the address a URL needs, and after a `.env` that names another bind it
+#      follows that one.
+#
 # AND IT REFUSES TO REPORT OK ON NOTHING
 #
-# No "gateway answers" check left, or no `case "$GATEWAY_BIND"` block left to
-# judge: each is reported and fails. A gate whose subject has been deleted
-# must not read as a clean bill of health.
+# No "gateway answers" check left, no `case "$GATEWAY_BIND"` block left to
+# judge, no gateway_probe_resolve to run, or no read of `.env` to follow: each is
+# reported and fails. A gate whose subject has been deleted must not read as a
+# clean bill of health.
 #
 # This file is the ONE copy of this check. CI and the pre-push hook call it.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 python3 - install.sh <<'PY'
+import os
 import re
+import subprocess
 import sys
+import tempfile
 
 lines = open(sys.argv[1]).read().split("\n")
 problems = []
@@ -178,6 +199,90 @@ elif "docker port" not in command_at(mapping):
 if find(r'^\s*case "\$GATEWAY_BIND" in\s*$') is None:
     note('no `case "$GATEWAY_BIND" in` block in install.sh at all: nothing branches on the operator\'s bind, so this gate measured nothing')
 
+# ---- 6. the probe follows the bind the box has ----------------------------------
+def is_comment(i):
+    return lines[i].lstrip().startswith("#")
+
+
+def next_code(i):
+    """Index of the first line after i that is neither blank nor a comment."""
+    for j in range(i + 1, len(lines)):
+        if lines[j].strip() and not is_comment(j):
+            return j
+    return None
+
+
+func = find(r"^gateway_probe_resolve\(\) \{\s*$")
+if func is None:
+    note("install.sh has no gateway_probe_resolve(): nothing derives GATEWAY_PROBE from GATEWAY_BIND in one place that can be called again, so a probe worked out before .env is read goes stale on a re-run, and this gate measured nothing about it")
+else:
+    func_end = find(r"^\}\s*$", func)
+    if func_end is None:
+        func_end = len(lines)
+    for i in range(len(lines)):
+        if is_comment(i) or func <= i <= func_end:
+            continue
+        if re.search(r"\bGATEWAY_PROBE=", lines[i]):
+            note(f"install.sh:{i + 1} assigns GATEWAY_PROBE outside gateway_probe_resolve: a second copy of the mapping that nothing re-runs after .env is read")
+    first_call = find(r"^gateway_probe_resolve\s*$", func_end)
+    first_use = next((i for i in range(func_end + 1, len(lines))
+                      if not is_comment(i) and re.search(r"\$\{?GATEWAY_PROBE\b", lines[i])), None)
+    if first_call is None:
+        note("install.sh never calls gateway_probe_resolve: GATEWAY_PROBE is never set")
+    elif first_use is not None and first_call > first_use:
+        note(f"install.sh:{first_use + 1} uses $GATEWAY_PROBE before gateway_probe_resolve is called (line {first_call + 1})")
+    sources = [i for i in range(len(lines)) if not is_comment(i)
+               and re.match(r"^\s*(?:\.|source)\s+\S*\.env\S*\s*$", lines[i])]
+    if not sources:
+        note("install.sh never sources .env, so this gate measured nothing about a re-run: if the box's bind is now read some other way, teach this gate that way")
+    elif first_call is not None and first_call > sources[0]:
+        note(f"install.sh reads .env (line {sources[0] + 1}) before gateway_probe_resolve has ever been called (line {first_call + 1}): until then GATEWAY_PROBE is unset, and under `set -u` any use in between stops the run")
+    for i in sources:
+        nxt = next_code(i)
+        if nxt is None or lines[nxt].strip() != "gateway_probe_resolve":
+            note(f"install.sh:{i + 1} reads .env and is not followed by gateway_probe_resolve: GATEWAY_BIND may have changed, and the probe (the gateway check, TOKENFUSE_DELEGATION_URL) would still follow the one this run started with")
+
+    # The function, run: lifted by its markers, as the other gates lift a block.
+    block = []
+    inside = False
+    for ln in lines:
+        if ln == "# gateway-probe: begin":
+            inside = True
+            continue
+        if ln == "# gateway-probe: end":
+            inside = False
+            continue
+        if inside:
+            block.append(ln)
+    if not block:
+        note("install.sh has no '# gateway-probe: begin' .. 'end' block around gateway_probe_resolve, so the function cannot be run on its own and this gate measured nothing about what it returns")
+    else:
+        code = "\n".join(block)
+
+        def probe(bind, dotenv=None):
+            script = "set -euo pipefail\n" + code + "\n"
+            script += f"GATEWAY_BIND='{bind}'\ngateway_probe_resolve\n"
+            if dotenv is not None:
+                script += "first=$GATEWAY_PROBE\n. ./.env\ngateway_probe_resolve\nprintf '%s %s' \"$first\" \"$GATEWAY_PROBE\"\n"
+            else:
+                script += "printf '%s' \"$GATEWAY_PROBE\"\n"
+            with tempfile.TemporaryDirectory() as d:
+                if dotenv is not None:
+                    open(os.path.join(d, ".env"), "w").write(dotenv)
+                r = subprocess.run(["bash", "-c", script], cwd=d, capture_output=True, text=True,
+                                   env={"PATH": os.environ.get("PATH", "")})
+            return r.stdout if r.returncode == 0 else f"(exit {r.returncode}: {r.stderr.strip()})"
+
+        for bind, want in (("127.0.0.1", "127.0.0.1"), ("0.0.0.0", "127.0.0.1"),
+                           ("192.168.1.10", "192.168.1.10"), ("::1", "[::1]"),
+                           ("fd7a:115c:a1e0::1", "[fd7a:115c:a1e0::1]")):
+            got = probe(bind)
+            if got != want:
+                note(f"gateway_probe_resolve gave {got!r} for GATEWAY_BIND={bind}, not {want!r}")
+        got = probe("127.0.0.1", "GATEWAY_BIND=192.168.1.10\n")
+        if got != "127.0.0.1 192.168.1.10":
+            note(f"a run given loopback on a box whose .env says 192.168.1.10 probed {got!r} (before and after .env), not '127.0.0.1 192.168.1.10': the probe does not follow the bind the box has")
+
 if problems:
     print(f"{len(problems)} problem(s)")
     print()
@@ -185,7 +290,8 @@ if problems:
     print("loopback reads a healthy appliance as broken. See CLAUDE.md invariant 11.")
     sys.exit(1)
 
-print("OK: the gateway is probed on $GATEWAY_PROBE (0.0.0.0 mapped to loopback), a bind")
-print("    on one address is shown to refuse loopback, gets ip_nonlocal_bind and a docker")
+print("OK: the gateway is probed on $GATEWAY_PROBE (0.0.0.0 mapped to loopback), worked out by one")
+print("    function that runs again after every read of .env, so it follows the bind the box has;")
+print("    a bind on one address is shown to refuse loopback, gets ip_nonlocal_bind and a docker")
 print("    drop-in after tailscaled or a refusal, and the port mapping is read from docker.")
 PY

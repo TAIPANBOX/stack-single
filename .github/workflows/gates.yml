@@ -80,6 +80,8 @@ jobs:
         run: ./scripts/pii-is-shadow.sh
       - name: client keys and the identity map are files, read by the gateway image before anything restarts
         run: ./scripts/identity-files-are-checked.sh
+      - name: a check reports the box, not which of a producer and its reader finished first
+        run: ./scripts/checks-survive-a-closed-pipe.sh
       - name: every scenario is bound to a test that exists, and every binding to a scenario
         run: ./scripts/features-are-bound.sh
 

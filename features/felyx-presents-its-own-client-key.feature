@@ -26,3 +26,28 @@ Feature: the console is handed Felyx's own gateway client key, read from .env
     Then felyx-through-the-gateway.sh fails without printing the value it found
     # -> gates-have-teeth.sh "felyx-through-the-gateway: Felyx's client key is written into compose.yaml"
     # -> gates-have-teeth.sh "felyx-through-the-gateway: Felyx's client key becomes required"
+
+  Scenario: an operator who gave Felyx a key is told Felyx presents it
+    Given client keys are on, GENARYX_COPILOT_KEY is set and GENARYX_COPILOT_FUSE_KEY holds a key
+    When the closing report says Felyx sends no x-fuse-key, or that its calls are refused 401
+    Then felyx-through-the-gateway.sh fails, because the report would contradict the box it describes
+    # -> gates-have-teeth.sh "felyx-through-the-gateway: the closing report says Felyx sends no key though it has one"
+
+  Scenario: an operator who gave Felyx no key is told its calls are refused, and how to give it one
+    Given client keys are on, GENARYX_COPILOT_KEY is set and GENARYX_COPILOT_FUSE_KEY is empty
+    When the closing report stops saying Felyx's calls are refused 401
+    Then felyx-through-the-gateway.sh fails, because a refusal the operator was not told about is a Felyx that quietly does not answer
+    # -> gates-have-teeth.sh "felyx-through-the-gateway: the closing report stops saying a keyless Felyx is refused"
+
+  Scenario: the report never prints Felyx's key, and says nothing when there is nothing to refuse
+    Given Felyx has a gateway key, or has no provider key and so makes no call
+    When the closing report prints the key's value, or speaks of Felyx's calls with no provider key set
+    Then felyx-through-the-gateway.sh fails
+    # -> gates-have-teeth.sh "felyx-through-the-gateway: the closing report prints Felyx's key"
+    # -> gates-have-teeth.sh "felyx-through-the-gateway: the closing report speaks of Felyx though it has no provider key"
+
+  Scenario: the note about Felyx is part of the closing report
+    Given an operator who reads the report at the end of a run
+    When install.sh stops adding the note about Felyx to it
+    Then felyx-through-the-gateway.sh fails, because the function would be text nobody reads
+    # -> gates-have-teeth.sh "felyx-through-the-gateway: the closing report never calls the note"

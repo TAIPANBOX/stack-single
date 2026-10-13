@@ -394,6 +394,50 @@ run_case "bind-is-honoured: Started is believed about the port" fail \
 	"$(py 'edit("install.sh", "check \"gateway has a port mapping\"", "check \"gateway has a port\"")')" \
 	"is believed"
 
+# invariant 11, the probe follows the bind the box HAS (2026-10-13): GATEWAY_PROBE
+# was worked out once, before .env was read, so a re-run with GATEWAY_BIND only in
+# .env probed loopback on a healthy box published on one other address and
+# minted TOKENFUSE_DELEGATION_URL from the same stale value.
+run_case "bind-is-honoured: the probe is not recomputed after .env is first read" fail \
+	'./scripts/bind-is-honoured.sh' \
+	"$(py 'edit("install.sh", "# given (see gateway_probe_resolve at the top).\ngateway_probe_resolve\n", "# given (see gateway_probe_resolve at the top).\n")')" \
+	"reads .env and is not followed by gateway_probe_resolve"
+
+run_case "bind-is-honoured: the probe is not recomputed after .env is read again" fail \
+	'./scripts/bind-is-honoured.sh' \
+	"$(py 'edit("install.sh", "  . ./.env\n  gateway_probe_resolve\nfi\n", "  . ./.env\nfi\n")')" \
+	"reads .env and is not followed by gateway_probe_resolve"
+
+run_case "bind-is-honoured: the probe is never worked out before .env is read" fail \
+	'./scripts/bind-is-honoured.sh' \
+	"$(py 'edit("install.sh", "# gateway-probe: end\ngateway_probe_resolve\n", "# gateway-probe: end\n")')" \
+	"before gateway_probe_resolve has ever been called"
+
+run_case "bind-is-honoured: a second copy of the probe mapping appears" fail \
+	'./scripts/bind-is-honoured.sh' \
+	"$(py 'edit("install.sh", "say()  {", "GATEWAY_PROBE=127.0.0.1\nsay()  {")')" \
+	"assigns GATEWAY_PROBE outside gateway_probe_resolve"
+
+run_case "bind-is-honoured: the probe function maps every bind to loopback" fail \
+	'./scripts/bind-is-honoured.sh' \
+	"$(py 'edit("install.sh", "    *)       GATEWAY_PROBE=\"$GATEWAY_BIND\" ;;", "    *)       GATEWAY_PROBE=127.0.0.1 ;;")')" \
+	"gateway_probe_resolve gave"
+
+run_case "bind-is-honoured: the probe function keeps the first bind it saw" fail \
+	'./scripts/bind-is-honoured.sh' \
+	"$(py 'edit("install.sh", "    *)       GATEWAY_PROBE=\"$GATEWAY_BIND\" ;;", "    *)       GATEWAY_PROBE=\"${GATEWAY_PROBE:-$GATEWAY_BIND}\" ;;")')" \
+	"does not follow the bind the box has"
+
+run_case "bind-is-honoured: the probe function is renamed away" fail \
+	'./scripts/bind-is-honoured.sh' \
+	"$(py 'edit("install.sh", "gateway_probe_resolve() {", "gateway_probe_pick() {")')" \
+	"install.sh has no gateway_probe_resolve()"
+
+run_case "bind-is-honoured: the probe function has no markers to lift it by" fail \
+	'./scripts/bind-is-honoured.sh' \
+	"$(py 'edit("install.sh", "# gateway-probe: begin\n", "# gateway-probe: start\n")')" \
+	"no '# gateway-probe: begin'"
+
 # invariant 12: the package step never takes Docker away, and never asks apt
 # for what the box already has. On Debian 13 with Docker CE, the distro's
 # docker-buildx resolves to `Remv docker-ce` (#55, measured 2026-09-17).
@@ -592,6 +636,13 @@ run_case "delegation-key-reused-on-rerun: the signing key is minted on every run
 	'./scripts/delegation-key-reused-on-rerun.sh' \
 	"$(py 'edit("install.sh", "if [ ! -f delegation/signing.pem ]; then", "if true; then")')" \
 	"regenerated the signing key"
+
+# The origin the delegation plane is told to check a hand-off proof against has
+# to follow the bind in .env on a re-run, not the one the run started with.
+run_case "delegation-key-reused-on-rerun: the delegation origin is minted from a stale probe" fail \
+	'./scripts/delegation-key-reused-on-rerun.sh' \
+	"$(py 'edit("install.sh", "# given (see gateway_probe_resolve at the top).\ngateway_probe_resolve\n", "# given (see gateway_probe_resolve at the top).\n")')" \
+	"TOKENFUSE_DELEGATION_URL was minted as http://127.0.0.1:4100"
 
 # invariant 18: typed answers come from the place the operator chose. Each
 # case below breaks one thing a wrong default or a careless edit would break,
@@ -1156,6 +1207,63 @@ run_case "identity-files: a reworded refusal still refuses" pass \
 	'./scripts/identity-files-are-checked.sh' \
 	"$(py 'edit("install.sh", "Each line is secret:key_id. Nothing was installed.", "Each line holds one secret:key_id. Nothing was installed.")')"
 
+# invariant 30: a check reports the box, not which of a producer and its reader
+# finished first. `grep -q` exits at its first match, `docker compose logs` is
+# still writing, exits 255 on the closed pipe, and under pipefail a healthy box
+# read FAIL (measured 2026-10-13) and a negated check read ok with the bad line
+# present. Each case breaks one thing a careless edit would break.
+run_case "checks-survive-a-closed-pipe: check() counts a producer's broken pipe again" fail \
+	'./scripts/checks-survive-a-closed-pipe.sh' \
+	"$(py 'edit("install.sh", "( set +o pipefail; eval \"$2\" ) >/dev/null 2>&1; then printf \x27   ok    %s\\n\x27 \"$1\"; else", "eval \"$2\" >/dev/null 2>&1; then printf \x27   ok    %s\\n\x27 \"$1\"; else")')" \
+	"reported ok although the log holds the line the install must refuse"
+
+run_case "checks-survive-a-closed-pipe: check_log() counts a producer's broken pipe again" fail \
+	'./scripts/checks-survive-a-closed-pipe.sh' \
+	"$(py 'edit("install.sh", "( set +o pipefail; eval \"$2\" ) >/dev/null 2>&1; then printf \x27   ok    %s\\n\x27 \"$1\"; return 0; fi", "eval \"$2\" >/dev/null 2>&1; then printf \x27   ok    %s\\n\x27 \"$1\"; return 0; fi")')" \
+	"reported FAIL although its line is there"
+
+# The over-correction: a "fix" that makes every check ok would pass a gate that
+# only looked at healthy boxes.
+run_case "checks-survive-a-closed-pipe: check() reports ok on anything" fail \
+	'./scripts/checks-survive-a-closed-pipe.sh' \
+	"$(py 'edit("install.sh", "( set +o pipefail; eval \"$2\" ) >/dev/null 2>&1; then printf \x27   ok    %s\\n\x27 \"$1\"; else", "( set +o pipefail; eval \"$2\" || true ) >/dev/null 2>&1; then printf \x27   ok    %s\\n\x27 \"$1\"; else")')" \
+	"reported ok although the log holds the line the install must refuse"
+
+run_case "checks-survive-a-closed-pipe: check_log() reports ok on anything" fail \
+	'./scripts/checks-survive-a-closed-pipe.sh' \
+	"$(py 'edit("install.sh", "( set +o pipefail; eval \"$2\" ) >/dev/null 2>&1; then printf \x27   ok    %s\\n\x27 \"$1\"; return 0; fi", "( set +o pipefail; eval \"$2\" || true ) >/dev/null 2>&1; then printf \x27   ok    %s\\n\x27 \"$1\"; return 0; fi")')" \
+	"reported ok although the log holds nothing it looks for"
+
+run_case "checks-survive-a-closed-pipe: compose_has pipes the list into grep again" fail \
+	'./scripts/checks-survive-a-closed-pipe.sh' \
+	"$(py 'edit("install.sh", "  local out\n  out=\"$(\"${COMPOSE[@]}\" ps --services 2>/dev/null)\" || return 1\n  grep -qx -- \"$1\" <<<\"$out\"\n", "  \"${COMPOSE[@]}\" ps --services 2>/dev/null | grep -qx -- \"$1\"\n")')" \
+	"compose_has console said"
+
+run_case "checks-survive-a-closed-pipe: a service test goes back to the pipe" fail \
+	'./scripts/checks-survive-a-closed-pipe.sh' \
+	"$(py 'edit("install.sh", "if compose_has tokenfuse-mcp-broker; then", "if \"${COMPOSE[@]}\" ps --services 2>/dev/null | grep -qx tokenfuse-mcp-broker; then")')" \
+	"pipes \`compose logs\` or \`compose ps\` into an early-exit reader"
+
+run_case "checks-survive-a-closed-pipe: a log check is added with no case" fail \
+	'./scripts/checks-survive-a-closed-pipe.sh' \
+	"$(py 'edit("install.sh", "check \"cloud answers inside\"", "check_log \"extra log check\" \"$DC logs wardryx 2>&1 | grep -q x\"\ncheck \"cloud answers inside\"")')" \
+	"has no case in this gate"
+
+run_case "checks-survive-a-closed-pipe: a log check is renamed" fail \
+	'./scripts/checks-survive-a-closed-pipe.sh' \
+	"$(py 'edit("install.sh", "check_log \"gateway exports agent events\"", "check_log \"gateway exports events\"")')" \
+	"install.sh has no check named that any more"
+
+run_case "checks-survive-a-closed-pipe: the check helpers have no markers to lift them by" fail \
+	'./scripts/checks-survive-a-closed-pipe.sh' \
+	"$(py 'edit("install.sh", "# check-helpers: begin\n", "# check-helpers: start\n")')" \
+	"measured nothing"
+
+run_case "checks-survive-a-closed-pipe: compose_has has no markers to lift it by" fail \
+	'./scripts/checks-survive-a-closed-pipe.sh' \
+	"$(py 'edit("install.sh", "# compose-has: begin\n", "# compose-has: start\n")')" \
+	"measured nothing"
+
 # ---- chain-verifier (invariant 21): the account is the whole containment.
 run_case "chain-verifier: the verifier gets a group_add" fail \
 	'./scripts/chain-verifier-is-contained.sh' \
@@ -1530,6 +1638,33 @@ run_case "felyx-through-the-gateway: Felyx's client key becomes required" fail \
 	'./scripts/felyx-through-the-gateway.sh' \
 	"$(py 'edit("compose.yaml", "      GENARYX_COPILOT_FUSE_KEY: ${GENARYX_COPILOT_FUSE_KEY:-}\n", "      GENARYX_COPILOT_FUSE_KEY: ${GENARYX_COPILOT_FUSE_KEY:?set it in .env}\n")')" \
 	"must be read from .env and empty by default"
+
+# The closing report's note about Felyx. It said "sends no x-fuse-key" whatever
+# the box held, including on a box that had given Felyx a key.
+run_case "felyx-through-the-gateway: the closing report says Felyx sends no key though it has one" fail \
+	'./scripts/felyx-through-the-gateway.sh' \
+	"$(py 'edit("install.sh", "  if [ -n \"${GENARYX_COPILOT_FUSE_KEY:-}\" ]; then\n    printf \x27\\n  Felyx", "  if false; then\n    printf \x27\\n  Felyx")')" \
+	"although GENARYX_COPILOT_FUSE_KEY is set"
+
+run_case "felyx-through-the-gateway: the closing report stops saying a keyless Felyx is refused" fail \
+	'./scripts/felyx-through-the-gateway.sh' \
+	"$(py 'edit("install.sh", "  are refused 401. To give it a key of its own", "  are turned away. To give it a key of its own")')" \
+	"no longer says its calls are refused 401"
+
+run_case "felyx-through-the-gateway: the closing report prints Felyx's key" fail \
+	'./scripts/felyx-through-the-gateway.sh' \
+	"$(py 'edit("install.sh", "    printf \x27  (README, \"Client keys and the identity map\").\x27\n  else", "    printf \x27  (README, \"Client keys and the identity map\"). key=%s\x27 \"$GENARYX_COPILOT_FUSE_KEY\"\n  else")')" \
+	"printed the value of GENARYX_COPILOT_FUSE_KEY"
+
+run_case "felyx-through-the-gateway: the closing report speaks of Felyx though it has no provider key" fail \
+	'./scripts/felyx-through-the-gateway.sh' \
+	"$(py 'edit("install.sh", "[ \"$IDENTITY_KEYS_COUNT\" -gt 0 ] && [ -n \"${GENARYX_COPILOT_KEY:-}\" ] || return 0", "[ \"$IDENTITY_KEYS_COUNT\" -gt 0 ] || return 0")')" \
+	"when it has no provider key"
+
+run_case "felyx-through-the-gateway: the closing report never calls the note" fail \
+	'./scripts/felyx-through-the-gateway.sh' \
+	"$(py 'edit("install.sh", "IDENTITY_REACH=\"$IDENTITY_REACH$(felyx_gateway_note)\"", "IDENTITY_REACH=\"$IDENTITY_REACH\"")')" \
+	"does not call felyx_gateway_note exactly once"
 
 run_case "felyx-through-the-gateway: a comment about Felyx changes" pass \
 	'./scripts/felyx-through-the-gateway.sh' \
@@ -2021,6 +2156,40 @@ run_case "no-owner-quotes: the owner as copyright holder" pass \
 run_case "no-owner-quotes: a decision recorded as @decided and a paraphrase" pass \
 	'./scripts/no-owner-quotes.sh' \
 	"$(py 'open("README.md", "a").write("\n`@decided 2026-10-08`: the console keeps a writable temp.\n")')"
+
+# Rewording a comment, or adding a statement after the call, changes nothing the
+# gate is about.
+run_case "bind-is-honoured: the probe function's comment is reworded" pass \
+	'./scripts/bind-is-honoured.sh' \
+	"$(py 'edit("install.sh", "# A function, called again after every", "# It is a function, called again after every")')"
+
+run_case "bind-is-honoured: another statement follows the probe call" pass \
+	'./scripts/bind-is-honoured.sh' \
+	"$(py 'edit("install.sh", "# gateway-probe: end\ngateway_probe_resolve\n", "# gateway-probe: end\ngateway_probe_resolve\n: the probe is set\n")')"
+
+# A longer wait between a check_log's tries is a tuning, not a change of what it
+# reports.
+run_case "checks-survive-a-closed-pipe: the retry count changes" pass \
+	'./scripts/checks-survive-a-closed-pipe.sh' \
+	"$(py 'edit("install.sh", "local left=10", "local left=12")')"
+
+# A check that reads no log and pipes nothing is outside this gate's subject.
+run_case "checks-survive-a-closed-pipe: a check that reads no log is added" pass \
+	'./scripts/checks-survive-a-closed-pipe.sh' \
+	"$(py 'edit("install.sh", "check \"cloud answers inside\"", "check \"extra: nothing to read\" \"true\"\ncheck \"cloud answers inside\"")')"
+
+# Matching without regard to case still finds the line and still misses its absence.
+run_case "checks-survive-a-closed-pipe: a log check matches case-insensitively" pass \
+	'./scripts/checks-survive-a-closed-pipe.sh' \
+	"$(py 'edit("install.sh", "grep -q \x27NDJSON export enabled\x27", "grep -qi \x27NDJSON export enabled\x27")')"
+
+run_case "checks-survive-a-closed-pipe: a comment is added inside the helpers" pass \
+	'./scripts/checks-survive-a-closed-pipe.sh' \
+	"$(py 'edit("install.sh", "# check-helpers: begin\n", "# check-helpers: begin\n# a comment that changes no behaviour\n")')"
+
+run_case "felyx-through-the-gateway: the closing report's note is reworded" pass \
+	'./scripts/felyx-through-the-gateway.sh' \
+	"$(py 'edit("install.sh", "calls this gateway too. GENARYX_COPILOT_FUSE_KEY is", "also calls this gateway. GENARYX_COPILOT_FUSE_KEY is")')"
 
 echo
 if [ -n "$(git status --porcelain)" ]; then
