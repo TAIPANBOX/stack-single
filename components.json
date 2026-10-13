@@ -119,7 +119,7 @@
           "ghcr.io/taipanbox/trailryx-node:v1.2.0",
           "ghcr.io/taipanbox/typryx:v0.4.0",
           "ghcr.io/taipanbox/vouchryx:v0.2.0",
-          "ghcr.io/taipanbox/wardryx:v1.2.0"
+          "ghcr.io/taipanbox/wardryx:v1.3.0"
         ]
       },
       "declared": {
