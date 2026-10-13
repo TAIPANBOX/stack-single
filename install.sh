@@ -53,6 +53,10 @@
 #     run's budget (tokenfuse 1.5.0), 5.00 unless you say otherwise
 #   TOKENFUSE_FIREWALL=shadow ./install.sh     # the agent firewall: enforce (the
 #     default), shadow or off; see section 0d and the README
+#   CLIENT_KEYS_FILE=/path/keys.txt IDENTITY_MAP_FILE=/path/identity.json ./install.sh
+#     # who may call the gateway (secret:key_id lines) and which agent ids and
+#     # unit each key speaks for; off unless given, kept on a re-run, checked by
+#     # the gateway image itself before anything restarts. See section 0f.
 #
 # The typed-answer plane (typryx) answers a typed question from one of the
 # templates baked into its image, with a probability for every option. The
@@ -657,6 +661,291 @@ pii_apply() {
 }
 # pii-mode: end
 pii_resolve
+
+# ---- 0f. client keys and the identity map ------------------------------------
+# Who may call the gateway, which agent ids each caller may speak as, and which
+# business unit its spend lands in (tokenfuse docs/20). Off by default: with no
+# client key and no map the gateway answers any caller, exactly as before.
+#
+# @decided 2026-10-13 (paraphrased): the installer takes the identity map and the
+# client keys as FILES that a person or an onboarding agent prepares, keeps them
+# across re-runs, checks them before anything restarts, mounts the map read only
+# into the gateway, and says at the end which header an agent sends. CLAUDE.md
+# invariant 29.
+#
+#   CLIENT_KEYS_FILE=/path/keys.txt       one secret:key_id per line, the line the
+#                                         console's Onboard tab prints; blank lines
+#                                         and # comments are ignored
+#   IDENTITY_MAP_FILE=/path/identity.json tokenfuse's identity map, JSON: units[],
+#                                         keys[] and prefixes[] (docs/20)
+#
+# The keys go into .env (0600) as GATEWAY_CLIENT_KEYS, single-quoted, and are never
+# printed. The map is copied to ./identity/identity.json, 0444 like policy.yaml:
+# it names units, owners, key ids and agent patterns, and holds no secret, so any
+# uid the gateway runs as can read it through the bind mount, which keeps host
+# ownership. Compose mounts ./identity read only at /etc/tokenfuse/identity.
+#
+# Checked twice, and neither check changes the running stack:
+#   here, before a package is installed: each file is a readable regular file with
+#     something in it and no NUL byte; each key line is secret:key_id, split on the
+#     LAST colon as tokenfuse splits it, with a secret of 24 to 256 of
+#     A-Z a-z 0-9 . _ ~ + / = @ : - and a key id of 1 to 128 of A-Z a-z 0-9 . _ -
+#     (no comma, quote, dollar or space can reach .env or the spec), and no secret
+#     given twice; the map starts with {. A value an earlier run left in .env is
+#     held to the same grammar.
+#   in section 3e, after the images are there and before anything restarts: the
+#     gateway image this box runs reads the pair itself, in a throwaway container
+#     with no network, as the uid it runs as, so its own parser is the judge, not a
+#     copy of it here. Anything it refuses to start on is refused, and so are three
+#     things it only warns about: a map that configures nothing (an empty file and
+#     {} read as no map at all), a map key_id no client key carries, and a client
+#     key the map does not bind (under strict=enforce, which this box runs, every
+#     call with it is refused 403).
+# Only then is anything written. A re-run that names neither file keeps both and
+# checks them again; one that names a file replaces what it names, and a changed
+# map restarts the gateway, which reads the map only at start. To turn either off,
+# remove its line from .env (GATEWAY_CLIENT_KEYS, GATEWAY_IDENTITY_MAP) and run
+# docker compose up -d tokenfuse-gateway. (gate: scripts/identity-files-are-checked.sh
+# lifts this block out and runs it.)
+# identity-files: begin
+IDENTITY_MAP_PATH=/etc/tokenfuse/identity/identity.json  # where the gateway reads it
+IDENTITY_KEYS_GIVEN=0    # 1 when this run named CLIENT_KEYS_FILE
+IDENTITY_KEYS_NEW=""     # the spec this run's file gives, comma-joined; never printed
+IDENTITY_MAP_SRC=""      # the absolute path of the map this run was given
+IDENTITY_KEYS_COUNT=0    # client keys the gateway holds after this run (0 = off)
+IDENTITY_MAP_ON=0        # 1 when the gateway reads an identity map after this run
+IDENTITY_MAP_CHANGED=0   # 1 when this run installed a different map
+IDENTITY_STAGE=""        # this run's staging directory, from identity_check to identity_apply
+
+identity_env_get() { # NAME: what .env holds for NAME, single quotes removed
+  local v
+  [ -f "$STACK_DIR/.env" ] || return 0
+  v="$(sed -n "/^$1=/{s///p;q;}" "$STACK_DIR/.env")"
+  v="${v#\'}"
+  v="${v%\'}"
+  printf '%s' "$v"
+}
+
+identity_env_set() { # NAME VALUE: replace or add NAME in .env, single-quoted
+  local tmp
+  tmp="$(mktemp)" || die "could not make a temporary file to update .env"
+  { grep -v "^$1=" "$STACK_DIR/.env" || true; } >"$tmp"
+  printf "%s='%s'\n" "$1" "$2" >>"$tmp"
+  cat "$tmp" >"$STACK_DIR/.env" || die "could not update $STACK_DIR/.env"
+  rm -f "$tmp"
+}
+
+# FILE MAXBYTES: prints why FILE cannot be read as an input, nothing when it can.
+identity_file_why() {
+  local f="$1" size
+  if [ ! -e "$f" ]; then printf 'names nothing that exists'; return 0; fi
+  if [ ! -f "$f" ]; then printf 'does not name a regular file'; return 0; fi
+  if [ ! -r "$f" ]; then printf 'names a file this script cannot read'; return 0; fi
+  size=$(( $(wc -c <"$f") ))
+  if [ "$size" -gt "$2" ]; then printf 'names a file larger than %s bytes' "$2"; return 0; fi
+  if [ "$(( $(tr -d '\000' <"$f" | wc -c) ))" != "$size" ]; then printf 'names a file holding a NUL byte'; return 0; fi
+  if ! LC_ALL=C grep -q '[^[:space:]]' "$f"; then printf 'names an empty file'; return 0; fi
+}
+
+# ENTRY: prints why ENTRY is not a usable secret:key_id, nothing when it is. Never
+# prints the entry: the secret is the one thing this block does not show.
+identity_entry_why() {
+  local LC_ALL=C secret key_id re_id='^[A-Za-z0-9._-]{1,128}$' re_chars='^[A-Za-z0-9._~+/=@:-]+$'
+  case "$1" in
+    *:*) ;;
+    *) printf 'is not secret:key_id (it has no colon)'; return 0 ;;
+  esac
+  secret="${1%:*}"
+  key_id="${1##*:}"
+  if [[ ! "$key_id" =~ $re_id ]]; then
+    printf 'has a key id (after its last colon) that is not 1 to 128 of A-Z a-z 0-9 . _ -'
+  elif [ "${#secret}" -lt 24 ] || [ "${#secret}" -gt 256 ]; then
+    printf 'has a secret that is not 24 to 256 characters long'
+  elif [[ ! "$secret" =~ $re_chars ]]; then
+    printf 'has a secret with a character outside A-Z a-z 0-9 . _ ~ + / = @ : -'
+  fi
+}
+
+# Decide what this run was given, and refuse, naming what is wrong and never what
+# a secret is, before anything has been touched.
+identity_resolve() {
+  local f why line secret n=0 count=0 spec="" seen=$'\n' kept first
+  if [ -n "${CLIENT_KEYS_FILE:-}" ]; then
+    f="$CLIENT_KEYS_FILE"
+    why="$(identity_file_why "$f" 262144)"
+    [ -z "$why" ] || die "CLIENT_KEYS_FILE $why. It must name a file of secret:key_id lines (README, \"Client keys and the identity map\"). Nothing was installed."
+    while IFS= read -r line || [ -n "$line" ]; do
+      n=$((n + 1))
+      line="${line%$'\r'}"
+      line="${line#"${line%%[![:space:]]*}"}"
+      line="${line%"${line##*[![:space:]]}"}"
+      case "$line" in ""|"#"*) continue ;; esac
+      why="$(identity_entry_why "$line")"
+      [ -z "$why" ] || die "CLIENT_KEYS_FILE: line $n $why. Each line is secret:key_id. Nothing was installed."
+      secret="${line%:*}"
+      case "$seen" in
+        *$'\n'"$secret"$'\n'*) die "CLIENT_KEYS_FILE: line $n gives a secret an earlier line already gave, and the gateway would keep only one of the two. Nothing was installed." ;;
+      esac
+      seen="$seen$secret"$'\n'
+      spec="${spec:+$spec,}$line"
+      count=$((count + 1))
+    done <"$f"
+    [ "$count" -gt 0 ] || die "CLIENT_KEYS_FILE names no key: every line in it is blank or a comment. Nothing was installed."
+    [ "${#spec}" -le 65536 ] || die "CLIENT_KEYS_FILE gives more keys than fit in one environment value (65536 bytes). Nothing was installed."
+    IDENTITY_KEYS_NEW="$spec"
+    IDENTITY_KEYS_GIVEN=1
+  else
+    kept="$(identity_env_get GATEWAY_CLIENT_KEYS)"
+    if [ -n "$kept" ]; then
+      while IFS= read -r -d ',' line; do
+        n=$((n + 1))
+        why="$(identity_entry_why "$line")"
+        [ -z "$why" ] || die ".env holds a GATEWAY_CLIENT_KEYS whose entry $n $why. Give CLIENT_KEYS_FILE again, or remove that line. Nothing was changed."
+      done <<<"$kept,"
+    fi
+  fi
+
+  if [ -n "${IDENTITY_MAP_FILE:-}" ]; then
+    f="$IDENTITY_MAP_FILE"
+    why="$(identity_file_why "$f" 1048576)"
+    [ -z "$why" ] || die "IDENTITY_MAP_FILE $why. It must name tokenfuse's identity map, a JSON file (README, \"Client keys and the identity map\"). Nothing was installed."
+    first="$(sed -n '/[^[:space:]]/{s/^[[:space:]]*//;s/^\(.\).*/\1/p;q;}' "$f")"
+    [ "$first" = "{" ] || die "IDENTITY_MAP_FILE is not a JSON object: an identity map starts with {. Nothing was installed."
+    IDENTITY_MAP_SRC="$(readlink -f -- "$f")" || die "could not resolve the path IDENTITY_MAP_FILE names. Nothing was installed."
+  else
+    kept="$(identity_env_get GATEWAY_IDENTITY_MAP)"
+    if [ -n "$kept" ]; then
+      [ "$kept" = "$IDENTITY_MAP_PATH" ] \
+        || die ".env holds a GATEWAY_IDENTITY_MAP other than $IDENTITY_MAP_PATH, the one place this installer keeps the map. Fix or remove that line. Nothing was changed."
+      [ -s "$STACK_DIR/identity/identity.json" ] \
+        || die ".env names an identity map and $STACK_DIR/identity/identity.json is missing or empty, so the gateway would refuse to start. Give IDENTITY_MAP_FILE again, or remove GATEWAY_IDENTITY_MAP from .env. Nothing was changed."
+    fi
+  fi
+}
+
+# IMAGE: the gateway image this box runs reads the pair this run will leave, the
+# new file where one was given and the kept one where not, and the answer is read
+# from what it prints. Called once the image is on the box and before anything
+# restarts. Writes nothing outside the staging directory, which identity_apply
+# moves into place or removes.
+identity_check() {
+  local img="$1" spec map="" stage name
+  local logs="" status="" left=40 orphans unbound
+  # One name per STACK_DIR: a run cut short leaves its container behind, and the
+  # next run on the same box removes it by this name before starting its own.
+  name="agent-stack-identity-check-$(printf '%s' "$STACK_DIR" | cksum | cut -d' ' -f1)"
+  spec="$IDENTITY_KEYS_NEW"
+  [ "$IDENTITY_KEYS_GIVEN" = 1 ] || spec="$(identity_env_get GATEWAY_CLIENT_KEYS)"
+  if [ -n "$IDENTITY_MAP_SRC" ]; then
+    map="$IDENTITY_MAP_SRC"
+  elif [ -n "$(identity_env_get GATEWAY_IDENTITY_MAP)" ]; then
+    map="$STACK_DIR/identity/identity.json"
+  fi
+  # What a run cut short left behind.
+  rm -rf -- "${STACK_DIR:?}"/identity.check.*
+  IDENTITY_STAGE=""
+  IDENTITY_KEYS_COUNT=0
+  IDENTITY_MAP_ON=0
+  [ -n "$spec$map" ] || return 0
+  [ -n "$img" ] || die "could not tell which gateway image this box runs, so the identity files cannot be checked. Nothing was changed."
+
+  # A new directory every run, never a path an earlier run removed: Docker
+  # Desktop's file sharing has shown a container a re-created path as it was
+  # before, an empty directory, and the gateway then reported the map missing
+  # (measured 2026-10-13 on macOS; a Linux bind mount reads the path at start).
+  stage="$(mktemp -d "${STACK_DIR:?}/identity.check.XXXXXX")" || die "could not create a staging directory in $STACK_DIR"
+  IDENTITY_STAGE="$stage"
+  chmod 0755 "$stage" || die "could not set the mode of $stage"
+  if [ -n "$map" ]; then
+    cat "$map" >"$stage/identity.json" || die "could not stage the identity map"
+    chmod 0444 "$stage/identity.json" || die "could not set the mode of the identity map"
+  fi
+
+  docker rm -f "$name" >/dev/null 2>&1 || true
+  # The keys travel in this command's environment and `-e NAME` with no value,
+  # never on a command line.
+  TOKENFUSE_CLIENT_KEYS="$spec" docker run -d --name "$name" --network none \
+      -e TOKENFUSE_UPSTREAM=https://api.anthropic.com/v1/messages \
+      -e TOKENFUSE_CLIENT_KEYS \
+      -e "TOKENFUSE_IDENTITY_MAP=${map:+$IDENTITY_MAP_PATH}" \
+      -v "$stage:/etc/tokenfuse/identity:ro" \
+      "$img" >/dev/null \
+    || die "could not start $img to check the identity files. Nothing was changed."
+  while [ "$left" -gt 0 ]; do
+    logs="$(docker logs "$name" 2>&1)"
+    case "$logs" in *"tokenfuse gateway listening"*) break ;; esac
+    status="$(docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null || true)"
+    [ "$status" = running ] || [ "$status" = created ] || break
+    sleep 0.5
+    left=$((left - 1))
+  done
+  logs="$(docker logs "$name" 2>&1)"
+  docker rm -f "$name" >/dev/null 2>&1 || true
+
+  case "$logs" in
+    *"tokenfuse gateway listening"*) ;;
+    *)
+      rm -rf -- "$stage"
+      printf '%s\n' "$logs" | grep '^tokenfuse: ' | sed 's/^/   /' >&2 || true
+      die "the gateway image ($img) would not start with these identity files (its own words are above). Nothing was changed, and the running stack is as it was."
+      ;;
+  esac
+  if [ -n "$spec" ]; then
+    IDENTITY_KEYS_COUNT=$(( $(printf '%s' "$spec" | tr -cd ',' | wc -c) + 1 ))
+    grep -qF "client auth: ON ($IDENTITY_KEYS_COUNT key(s))" <<<"$logs" || {
+      rm -rf -- "$stage"
+      die "the gateway did not take all $IDENTITY_KEYS_COUNT client key(s) it was given. Nothing was changed."
+    }
+  fi
+  if [ -n "$map" ]; then
+    grep -qF 'identity map: ON (' <<<"$logs" || {
+      rm -rf -- "$stage"
+      die "the identity map configures nothing: no unit, no key binding, no prefix. An empty file and {} read as no map at all, and the gateway would run with it off. Nothing was changed."
+    }
+    IDENTITY_MAP_ON=1
+  fi
+  # The backticks are the gateway's own quoting around a key id, matched as text.
+  # shellcheck disable=SC2016
+  orphans="$(sed -n 's/^tokenfuse: identity map key_id `\([^`]*\)` has no matching TOKENFUSE_CLIENT_KEYS entry.*/\1/p' <<<"$logs" | sort -u | tr '\n' ' ')"
+  if [ -n "$orphans" ]; then
+    rm -rf -- "$stage"
+    die "the identity map binds key id(s) ${orphans}that no client key carries, so its bindings could never match a call. Give a secret:key_id line for each in CLIENT_KEYS_FILE, or drop the binding. Nothing was changed."
+  fi
+  # shellcheck disable=SC2016  # the gateway's backticks again, matched as text
+  unbound="$(sed -n 's/^tokenfuse: client key `\([^`]*\)` has no keys\[\] binding.*/\1/p' <<<"$logs" | sort -u | tr '\n' ' ')"
+  if [ -n "$unbound" ]; then
+    rm -rf -- "$stage"
+    die "client key id(s) ${unbound}have no keys[] binding in the identity map, and under strict=enforce, which this box runs, every call with them is refused 403. Bind each in the map, or drop it from the keys file. Nothing was changed."
+  fi
+}
+
+# Write what identity_check passed. Touches nothing that this run was not given:
+# a re-run that names no file leaves .env and the map exactly as they were.
+identity_apply() {
+  local stage="$IDENTITY_STAGE"
+  mkdir -p "$STACK_DIR/identity" || die "could not create $STACK_DIR/identity"
+  chmod 0755 "$STACK_DIR/identity" || die "could not set the mode of $STACK_DIR/identity"
+  if [ "$IDENTITY_KEYS_GIVEN" = 1 ]; then
+    identity_env_set GATEWAY_CLIENT_KEYS "$IDENTITY_KEYS_NEW"
+    note "client keys: $IDENTITY_KEYS_COUNT key(s), kept in .env as GATEWAY_CLIENT_KEYS (never printed)"
+  fi
+  if [ -n "$IDENTITY_MAP_SRC" ]; then
+    if cmp -s "$stage/identity.json" "$STACK_DIR/identity/identity.json"; then
+      note "identity map: the same as the one already installed, left as is"
+    else
+      mv -f "$stage/identity.json" "$STACK_DIR/identity/identity.json" \
+        || die "could not put the identity map in place"
+      IDENTITY_MAP_CHANGED=1
+      note "identity map: installed at $STACK_DIR/identity/identity.json (read only for the gateway)"
+    fi
+    [ "$(identity_env_get GATEWAY_IDENTITY_MAP)" = "$IDENTITY_MAP_PATH" ] \
+      || identity_env_set GATEWAY_IDENTITY_MAP "$IDENTITY_MAP_PATH"
+  fi
+  [ -z "$stage" ] || rm -rf -- "$stage"
+  IDENTITY_STAGE=""
+}
+# identity-files: end
+identity_resolve
 
 say "installing docker and git"
 export DEBIAN_FRONTEND=noninteractive
@@ -1476,6 +1765,19 @@ if [ "${WITH_CLOSURE:-}" = "1" ]; then
   note "closing retained reservations is on: one secret, in .env and in ./closure/secret"
 fi
 
+# ---- 3e. client keys and the identity map, read by the gateway itself ---------
+# Section 0f checked what a shell can check without a JSON parser. Here, with the
+# gateway image on the box and nothing restarted yet, that image reads the pair
+# this run will leave (section 0f says how and what is refused), and only then are
+# the keys written to .env and the map moved into ./identity. The image is the one
+# compose resolves for tokenfuse-gateway, so a BUILD_FROM_SOURCE box checks with
+# the gateway it built. awk reads to the end rather than exiting early: an early
+# exit is a SIGPIPE for compose under pipefail.
+IDENTITY_IMAGE="$( { "${COMPOSE[@]}" config 2>/dev/null || true; } \
+  | awk '/^  [^ ]/{s=($0=="  tokenfuse-gateway:")} s&&/^    image: /&&!d{print $2; d=1}')"
+identity_check "$IDENTITY_IMAGE"
+identity_apply
+
 # ---- 4. the files the services read -----------------------------------------
 if [ ! -f policy.yaml ]; then
   cat > policy.yaml <<'EOF'
@@ -1654,6 +1956,14 @@ fi
 # would leave it running beside a broker that no longer points at it. A box that
 # never had one has nothing to remove, which is why the failure is ignored.
 if [ "$TYPED_PLANE" = off ] || [ "$TYPED_RISK_ON" != 1 ]; then "${COMPOSE[@]}" --profile typed-risk-signal rm -sf typryx-wardryx-proxy >/dev/null 2>&1 || true; fi
+# The gateway reads its identity map once, at start, and a new map behind the same
+# GATEWAY_IDENTITY_MAP line changes nothing compose compares, so `up` above left
+# the old map in force. A map this run installed is read only after a restart.
+if [ "$IDENTITY_MAP_CHANGED" = 1 ]; then
+  "${COMPOSE[@]}" restart tokenfuse-gateway >/dev/null \
+    || die "could not restart the gateway to read the new identity map"
+  note "gateway restarted to read the new identity map"
+fi
 sleep 8
 
 # ---- 6. the firewall ---------------------------------------------------------
@@ -1810,6 +2120,42 @@ check "gateway refuses /v1/runs without the admin key" \
       "c=\$(codenokey http://tokenfuse-gateway:4100/v1/runs); case \"\$c\" in 401|403) true ;; *) false ;; esac"
 check "gateway serves /v1/runs with the admin key" \
       "[ \"\$(code http://tokenfuse-gateway:4100/v1/runs '$GATEWAY_ADMIN')\" = 200 ]"
+
+# Client keys and the identity map (sections 0f and 3e), only on a box that has
+# them. Read from the running gateway, not from .env: its own start-up lines, and
+# two calls it must refuse 401. A gateway that did NOT hold the keys refuses the
+# same call before anything reaches a provider, so a 401 here can only be the
+# gateway asking for a key, never a provider's: measured 2026-10-13 on a gateway
+# with the keys taken out, 400 identity_required (no agent id while the policy
+# plane enforces), and 402 with an agent id, because each call also declares a
+# budget of one micro-dollar. busybox wget prints no header after an error
+# status, so the status is all there is to read. No call
+# here names an agent: a mismatch would be a high-severity event on the bus, and
+# an installer must not page its operator on every run (CI's identity leg sends
+# that one, see .github/workflows/install.yml).
+# shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
+fuse_refusal() { # client key, or "" for none: prints the status of a metered call
+  local hdrs=(--header="Content-Type: application/json" --header="x-fuse-run-id: install-check" --header="x-fuse-budget-usd: 0.000001")
+  [ -z "$1" ] || hdrs+=(--header="x-fuse-key: $1")
+  docker run --rm --network "$NET" busybox:1.36 wget -S -q -T5 -O /dev/null "${hdrs[@]}" \
+      --post-data='{"model":"claude-haiku-4-5","max_tokens":1,"messages":[{"role":"user","content":"install check"}]}' \
+      http://tokenfuse-gateway:4100/v1/messages 2>&1 \
+    | awk '/^  HTTP\//{c=$2} END{print c+0}'
+}
+if [ "$IDENTITY_KEYS_COUNT" -gt 0 ]; then
+  check_log "client keys: the gateway holds $IDENTITY_KEYS_COUNT" \
+        "$DC logs tokenfuse-gateway 2>&1 | grep -qF 'client auth: ON ($IDENTITY_KEYS_COUNT key(s))'"
+  check "client keys: a call with no key is refused" \
+        "[ \"\$(fuse_refusal '')\" = 401 ]"
+  check "client keys: a call with an unknown key is refused" \
+        "[ \"\$(fuse_refusal install-check-not-a-client-key)\" = 401 ]"
+fi
+if [ "$IDENTITY_MAP_ON" = 1 ]; then
+  check_log "identity map: the gateway reads it" \
+        "$DC logs tokenfuse-gateway 2>&1 | grep -qF 'identity map: ON ('"
+  check "identity map: every key is bound and every binding has a key" \
+        "! $DC logs tokenfuse-gateway 2>&1 | grep -qE 'has no keys\\[\\] binding|has no matching TOKENFUSE_CLIENT_KEYS entry'"
+fi
 
 check "cloud is NOT on the host"     "! curl -fsS -m3 -o /dev/null http://127.0.0.1:8080/healthz"
 check "wardryx is NOT on the host"   "! curl -fsS -m3 -o /dev/null http://127.0.0.1:8090/healthz"
@@ -2190,6 +2536,35 @@ case "$GATEWAY_BIND" in
       ANTHROPIC_BASE_URL=http://$PUBLIC_IP:4100" ;;
 esac
 
+# Which headers an agent sends, once client keys or an identity map are on. The
+# secrets are named by where they live, never printed.
+IDENTITY_REACH=""
+if [ "$IDENTITY_KEYS_COUNT" -gt 0 ]; then
+  IDENTITY_REACH="
+  Client keys are ON ($IDENTITY_KEYS_COUNT): every call carries its agent's own key in the
+  x-fuse-key header (the secret on its line of the keys file you gave; it is in
+  $STACK_DIR/.env as GATEWAY_CLIENT_KEYS and is not printed here), and
+  x-fuse-run-id. A call without a key, or with one the gateway does not hold, is
+  refused 401."
+  if [ "$IDENTITY_MAP_ON" = 1 ]; then
+    IDENTITY_REACH="$IDENTITY_REACH
+  The identity map is ON: each call also names its agent in x-fuse-agent-id, an id
+  the map binds to that key, or it is refused 403 identity_mismatch. Its spend
+  lands in the unit the map binds the key to."
+  fi
+  if [ -n "${GENARYX_COPILOT_KEY:-}" ]; then
+    IDENTITY_REACH="$IDENTITY_REACH
+  Felyx, the console's copilot, calls this gateway and sends no x-fuse-key, so
+  while client keys are on its calls are refused 401 (README, \"Client keys and
+  the identity map\")."
+  fi
+elif [ "$IDENTITY_MAP_ON" = 1 ]; then
+  IDENTITY_REACH="
+  The identity map is ON with no client keys: a call's unit comes from the
+  prefixes[] entry its x-fuse-agent-id matches. Nothing authenticates the caller,
+  so nothing is refused for identity."
+fi
+
 # The report below uses A && echo X || echo Y inside a substitution. C is `echo`,
 # which does not fail, so it is a plain ternary rather than the trap SC2015 warns
 # about. It cannot be silenced inside the heredoc: text in there is printed, not
@@ -2199,7 +2574,7 @@ cat <<EOF
 
 $(printf '\033[1m')$([ "$fail" -eq 0 ] && echo "Up, and every check passed." || echo "Up, with $fail failed check(s) above.")$(printf '\033[0m')
 
-$REACH
+$REACH$IDENTITY_REACH
 
 ${CONSOLE_PASSWORD:+  Console sign-in, shown once and stored nowhere:
 

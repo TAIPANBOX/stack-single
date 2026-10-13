@@ -64,6 +64,7 @@ change here is a change to something with root on somebody else's box.
 ./scripts/no-owner-quotes.sh
 ./scripts/firewall-is-enforce.sh
 ./scripts/pii-is-shadow.sh
+./scripts/identity-files-are-checked.sh
 ./scripts/features-are-bound.sh
 ./scripts/gates-have-teeth.sh   # invariant 8; needs a clean tree
 ```
@@ -786,6 +787,84 @@ an absent invariant.
     Docker; 18 teeth cases in `scripts/gates-have-teeth.sh`. Not covered: a live
     call recording a finding, the streamed path, mask and block against a real
     provider, and whether an operator keeps the switch set.)*
+
+29. **Client keys and the identity map come in as files, the gateway image reads
+    them before anything restarts, and a re-run keeps them.** `@decided
+    2026-10-13` (paraphrased): the installer takes the gateway's client keys and
+    identity map as files that a person or an onboarding agent prepares; keeps
+    them across re-runs, never rotating a secret or dropping the map; checks them
+    before anything restarts, refusing an unknown unit, an empty file and a map
+    that names a key with no secret; mounts the map read only into the gateway;
+    and ends by saying which header an agent sends.
+
+    `@claude 2026-10-13`, the shape chosen. `CLIENT_KEYS_FILE` holds one
+    `secret:key_id` per line, the line the console's Onboard tab prints (blank
+    lines and `#` comments ignored), and `IDENTITY_MAP_FILE` is tokenfuse's map
+    (docs/20). Files rather than keys minted here: the onboarding side already
+    mints a secret per agent and hands it over, and a second minter would be a
+    second copy of every secret to deliver. The keys go into `.env` (0600) as
+    `GATEWAY_CLIENT_KEYS`, single-quoted, because a secret may hold `:~:` and a
+    shell that sources `.env` expands that `~`; they are never printed. The map
+    is copied to `./identity/identity.json`, 0444 like `policy.yaml` (it holds no
+    secret, and a bind mount keeps host ownership, so any uid can read it), and
+    compose mounts `./identity` read only at `/etc/tokenfuse/identity`. Compose
+    passes both as `${...:-}`, which tokenfuse reads as off, so a box that gave no
+    file runs as before.
+
+    Checked twice, and nothing is written until both pass. Section 0f, before a
+    package is installed, is what a shell can check with no JSON parser: each file
+    readable, regular, not empty, no NUL byte, at most 256 KiB (keys) or 1 MiB
+    (map); each key line split on its LAST colon as tokenfuse splits it, a secret
+    of 24 to 256 of `A-Z a-z 0-9 . _ ~ + / = @ : -` and a key id of 1 to 128 of
+    `A-Z a-z 0-9 . _ -`, so no comma, quote, dollar or space reaches `.env` or
+    the spec; no secret given twice; the map starts with `{`; a value an earlier
+    run left in `.env` held to the same grammar; a refusal names the line, never
+    the secret. Section 3e, once the images are on the box and before anything
+    starts, hands the pair to the gateway image compose resolves for
+    `tokenfuse-gateway`, in a throwaway container with no network and the uid it
+    runs as, so tokenfuse's own parser is the judge, not a copy of it here.
+    Refused: whatever it would exit 2 on (an unknown unit, a bad pattern, a
+    non-positive budget, invalid JSON), and three things it only warns about and
+    then runs with: a map that configures nothing (an empty file and `{}` read as
+    no map at all), a map `key_id` no client key carries, and a client key the map
+    does not bind, which under strict=enforce is refused 403 on every call. This
+    launcher never sets `TOKENFUSE_IDENTITY_STRICT`; tokenfuse's default is
+    enforce (its invariant 37). A re-run that names no file keeps both and checks
+    them again; one that names a file replaces what it names and is checked
+    against the kept other half; a changed map restarts the gateway, which reads
+    the map only at start. Turning either off is removing its `.env` line.
+
+    Section 8 reads the running gateway: its own start-up lines, and two calls it
+    must refuse 401 (no key, an unknown key). It names no agent, because a
+    mismatch is a high-severity event on the bus and an installer must not page
+    its operator on every run; CI's `identity` leg sends that call. Felyx, the
+    console's copilot, sends no `x-fuse-key` (console v1.1.36), so with client
+    keys on its calls are refused 401; the closing report says so when
+    `GENARYX_COPILOT_KEY` is set. @measured `scratch compose project from this
+    compose.yaml (tokenfuse v1.11.0, wardryx v1.3.0, a python stub as the
+    upstream), .env and ./identity prepared by this block, curl from the compose
+    network` 2026-10-13: no key 401 `unauthorized`; an unknown key 401; the
+    treasury key as a research agent 403 `identity_mismatch`
+    (`agent_id_not_allowed`); the treasury key with no agent id 403
+    (`agent_id_missing`); each key as its own agent 200 from the stub; a re-run
+    naming no file left `.env` and the map byte for byte; a wider map stayed out
+    of force through `up` (403) and was in force after the restart (200); with the
+    keys taken out, section 8's call was answered 400 `identity_required` and 402
+    with an agent id, never 401, so its check goes red on a gateway that does not
+    hold the keys.
+    *(gate: `scripts/identity-files-are-checked.sh`, subjects derived from
+    compose.yaml's image and command lines like invariant 13's; it lifts the
+    `# identity-files:` block out of install.sh and runs the first half per case
+    against hostile files and the second half against the pinned gateway image,
+    reads the call order in install.sh and `docker compose config`, and refuses
+    to report OK on no gateway, no block, no Docker or no image; scenarios in
+    `features/client-keys-and-the-identity-map.feature`; teeth in
+    `scripts/gates-have-teeth.sh`; CI's `identity` install leg runs install.sh
+    twice with both files and asserts 401, 401, 403 `identity_mismatch` and a 402
+    past identity. Not covered: the unit budget refusing a call at its monthly
+    cap, a box with more than a few keys, a hand-edited `./identity/identity.json`
+    (read only at the next start, and only re-checked by the next install.sh
+    run), Felyx calling with a key, and stack-k8s, which has none of this yet.)*
 
 ## Decisions that have no gate yet
 

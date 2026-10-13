@@ -981,6 +981,176 @@ run_case "pii-is-shadow: a comment that names off is not the setting" pass \
 	'./scripts/pii-is-shadow.sh' \
 	"$(py 'edit("compose.yaml", "      TOKENFUSE_DLP_PII: ${TOKENFUSE_DLP_PII:-shadow}\n", "      # e.g. TOKENFUSE_DLP_PII: off in .env, see the README.\n      TOKENFUSE_DLP_PII: ${TOKENFUSE_DLP_PII:-shadow}\n")')"
 
+# ---- identity-files-are-checked (invariant 29): client keys and the identity
+# map come in as files, are read by the gateway image before anything restarts,
+# and survive a re-run. Several cases run the real gateway image, so each takes
+# a few seconds. A single quote inside a mutation is written \x27: the python
+# sits inside a shell single-quoted string.
+run_case "identity-files: the gateway loses its client keys setting" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_CLIENT_KEYS: ${GATEWAY_CLIENT_KEYS:-}\n", "")')" \
+	"sets no TOKENFUSE_CLIENT_KEYS"
+
+run_case "identity-files: the client keys become required" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("compose.yaml", "TOKENFUSE_CLIENT_KEYS: ${GATEWAY_CLIENT_KEYS:-}", "TOKENFUSE_CLIENT_KEYS: ${GATEWAY_CLIENT_KEYS:?set by install.sh}")')" \
+	"not \${GATEWAY_CLIENT_KEYS:-}"
+
+run_case "identity-files: the gateway loses its identity map setting" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_IDENTITY_MAP: ${GATEWAY_IDENTITY_MAP:-}\n", "")')" \
+	"sets no TOKENFUSE_IDENTITY_MAP"
+
+run_case "identity-files: the map is mounted writable" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("compose.yaml", "      - ./identity:/etc/tokenfuse/identity:ro\n", "      - ./identity:/etc/tokenfuse/identity\n")')" \
+	"The gateway reads the map and must"
+
+run_case "identity-files: another service is handed the client keys" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("compose.yaml", "      GENARYX_COPILOT_KEY: ${GENARYX_COPILOT_KEY:-}\n", "      GENARYX_COPILOT_KEY: ${GENARYX_COPILOT_KEY:-}\n      TOKENFUSE_CLIENT_KEYS: ${GATEWAY_CLIENT_KEYS:-}\n")')" \
+	"console names GATEWAY_CLIENT_KEYS"
+
+run_case "identity-files: no gateway service left to judge" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("compose.yaml", "    command: [\"/usr/local/bin/tokenfuse\"]\n    environment:\n      TOKENFUSE_ADDR", "    command: [\"/usr/local/bin/tokenfuse\", \"serve\"]\n    environment:\n      TOKENFUSE_ADDR")')" \
+	"measured NOTHING about client keys"
+
+run_case "identity-files: the map path in .env is not the file inside the mount" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("install.sh", "IDENTITY_MAP_PATH=/etc/tokenfuse/identity/identity.json  #", "IDENTITY_MAP_PATH=/etc/tokenfuse/identity.json  #")')" \
+	"which is not the file inside"
+
+run_case "identity-files: the installer accepts a short secret" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("install.sh", "elif [ \"${#secret}\" -lt 24 ]", "elif [ \"${#secret}\" -lt 2 ]")')" \
+	"(a secret of 23 characters) was accepted"
+
+run_case "identity-files: the installer lets a quote or a dollar into a secret" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("install.sh", "re_chars=\x27^[A-Za-z0-9._~+/=@:-]+$\x27", "re_chars=\x27^[^[:space:]]+$\x27")')" \
+	"(a secret with a quote) was accepted"
+
+run_case "identity-files: the installer keeps a secret given twice" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("install.sh", ") die \"CLIENT_KEYS_FILE: line $n gives a secret", ") note \"CLIENT_KEYS_FILE: line $n gives a secret")')" \
+	"(a secret given twice) was accepted"
+
+run_case "identity-files: a refusal repeats the secret" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("install.sh", "die \"CLIENT_KEYS_FILE: line $n $why.", "die \"CLIENT_KEYS_FILE: line $n ($line) $why.")')" \
+	"repeats the secret"
+
+run_case "identity-files: a keys file of comments alone is accepted" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("install.sh", "[ \"$count\" -gt 0 ] || die", "[ \"$count\" -ge 0 ] || die")')" \
+	"(comments and blank lines only) was accepted"
+
+run_case "identity-files: a NUL byte in a file is let through" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("install.sh", "printf \x27names a file holding a NUL byte\x27; return 0;", ":;")')" \
+	"(a NUL byte) was accepted"
+
+run_case "identity-files: a map that is not a JSON object passes the first half" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("install.sh", "[ \"$first\" = \"{\" ] || die", "[ -n \"$first\" ] || die")')" \
+	"(a JSON array, not an object) was accepted"
+
+run_case "identity-files: a bad key left in .env is accepted on a re-run" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("install.sh", "[ -z \"$why\" ] || die \".env holds a GATEWAY_CLIENT_KEYS whose", "[ -z \"$why\" ] || note \".env holds a GATEWAY_CLIENT_KEYS whose")')" \
+	"with a short secret was accepted"
+
+run_case "identity-files: the gateway's own refusal is not heard" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("install.sh", "    *\"tokenfuse gateway listening\"*) ;;\n", "    *) ;;\n")')" \
+	"refused, but not saying: not declared in units[]"
+
+run_case "identity-files: a map that configures nothing is accepted" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("install.sh", "grep -qF \x27identity map: ON (\x27 <<<\"$logs\" || {", "true || {")')" \
+	"a map that configures nothing ({}) was accepted"
+
+run_case "identity-files: a map that binds a key with no secret is accepted" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("install.sh", "  if [ -n \"$orphans\" ]; then", "  if false; then")')" \
+	"a map that binds a key id no client key carries was accepted"
+
+run_case "identity-files: a client key the map does not bind is accepted" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("install.sh", "  if [ -n \"$unbound\" ]; then", "  if false; then")')" \
+	"a client key the map does not bind was accepted"
+
+run_case "identity-files: the keys are written into .env unquoted" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("install.sh", "printf \"%s=\x27%s\x27\\n\" \"$1\" \"$2\" >>\"$tmp\"", "printf \"%s=%s\\n\" \"$1\" \"$2\" >>\"$tmp\"")')" \
+	"has to be quoted"
+
+run_case "identity-files: a new file adds a second line instead of replacing" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("install.sh", "  { grep -v \"^$1=\" \"$STACK_DIR/.env\" || true; } >\"$tmp\"\n  printf \"%s=\x27%s\x27\\n\" \"$1\" \"$2\"", "  cat \"$STACK_DIR/.env\" >\"$tmp\"\n  printf \"%s=\x27%s\x27\\n\" \"$1\" \"$2\"")')" \
+	"did not REPLACE"
+
+run_case "identity-files: a re-run that names no file loses the kept keys" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("install.sh", "[ \"$IDENTITY_KEYS_GIVEN\" = 1 ] || spec=\"$(identity_env_get GATEWAY_CLIENT_KEYS)\"", "[ \"$IDENTITY_KEYS_GIVEN\" = 1 ] || spec=\"\"")')" \
+	"a re-run that names no file was refused"
+
+run_case "identity-files: the same map again restarts the gateway" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("install.sh", "    if cmp -s \"$stage/identity.json\" \"$STACK_DIR/identity/identity.json\"; then", "    if false; then")')" \
+	"the same map given again was installed as a change"
+
+run_case "identity-files: the map is installed writable" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("install.sh", "chmod 0444 \"$stage/identity.json\"", "chmod 0644 \"$stage/identity.json\"")')" \
+	"the installed map is not 0444"
+
+run_case "identity-files: the files are checked after a package is installed" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("install.sh", "# identity-files: end\nidentity_resolve\n", "# identity-files: end\n"); edit("install.sh", "|| die \"docker did not start.\"\n", "|| die \"docker did not start.\"\nidentity_resolve\n")')" \
+	"runs after the first package install"
+
+run_case "identity-files: the gateway reads the files after the stack starts" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("install.sh", "identity_check \"$IDENTITY_IMAGE\"\nidentity_apply\n", ""); edit("install.sh", "say \"verify\"\n", "identity_check \"$IDENTITY_IMAGE\"\nidentity_apply\nsay \"verify\"\n")')" \
+	"runs after the stack starts"
+
+run_case "identity-files: the installer never asks the gateway image" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("install.sh", "identity_check \"$IDENTITY_IMAGE\"\n", "\n")')" \
+	"block is dead text"
+
+run_case "identity-files: a new map does not restart the gateway" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("install.sh", "\"${COMPOSE[@]}\" restart tokenfuse-gateway >/dev/null", "\"${COMPOSE[@]}\" ps tokenfuse-gateway >/dev/null")')" \
+	"does not restart tokenfuse-gateway"
+
+run_case "identity-files: section 8 stops asking the running gateway" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("install.sh", "check \"client keys: a call with no key is refused\"", "check \"client keys: configured\"")')" \
+	"section 8 no longer asks"
+
+run_case "identity-files: the end of the run stops naming the header" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("install.sh", "  x-fuse-key header (the secret", "  client key header (the secret")')" \
+	"which headers an agent sends"
+
+run_case "identity-files: the installer block is gone" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("install.sh", "# identity-files: begin\n", "# identity-files: start\n")')" \
+	"measured nothing about the installer's half"
+
+# A comment that names a required form of the setting is not the setting, and a
+# reworded refusal still refuses.
+run_case "identity-files: a comment that names a required setting is not the setting" pass \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_CLIENT_KEYS: ${GATEWAY_CLIENT_KEYS:-}\n", "      # never TOKENFUSE_CLIENT_KEYS: ${GATEWAY_CLIENT_KEYS:?x}, which stops a default box.\n      TOKENFUSE_CLIENT_KEYS: ${GATEWAY_CLIENT_KEYS:-}\n")')"
+
+run_case "identity-files: a reworded refusal still refuses" pass \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("install.sh", "Each line is secret:key_id. Nothing was installed.", "Each line holds one secret:key_id. Nothing was installed.")')"
+
 # ---- chain-verifier (invariant 21): the account is the whole containment.
 run_case "chain-verifier: the verifier gets a group_add" fail \
 	'./scripts/chain-verifier-is-contained.sh' \
