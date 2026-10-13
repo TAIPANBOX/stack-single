@@ -55,6 +55,7 @@ step "the FinOps console is an add-on, core unchanged" "./scripts/finops-is-opt-
 step "closing a retained reservation is off by default" "./scripts/closure-off-by-default.sh"
 step "no quote of the owner in a public file" "./scripts/no-owner-quotes.sh"
 step "the agent firewall is enforce by default" "./scripts/firewall-is-enforce.sh"
+step "personal data is shadow by default, one switch moves it" "./scripts/pii-is-shadow.sh"
 step "every scenario is bound to a test" "./scripts/features-are-bound.sh"
 # Reaches the network (a tarball from the sibling repo), which is why it is
 # last: everything that can be judged offline has already spoken by here.

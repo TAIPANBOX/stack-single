@@ -63,6 +63,7 @@ change here is a change to something with root on somebody else's box.
 ./scripts/closure-off-by-default.sh
 ./scripts/no-owner-quotes.sh
 ./scripts/firewall-is-enforce.sh
+./scripts/pii-is-shadow.sh
 ./scripts/features-are-bound.sh
 ./scripts/gates-have-teeth.sh   # invariant 8; needs a clean tree
 ```
@@ -760,6 +761,31 @@ an absent invariant.
     a call under enforce, which needs a live stack; the streamed path; the
     broker's own taint decisions under enforce; and whether an operator keeps the
     switch set.)*
+
+28. **Personal data in prompts and tool arguments is recorded in shadow by
+    default, on every box, and one installer variable is the only way to move
+    it.** `@decided 2026-10-13` (paraphrased): the launchers run TokenFuse's two
+    PII scanners, the gateway's and the MCP broker's, in shadow by default, and an
+    operator keeps one switch to move them to off, mask or block. Shadow records
+    and forwards: the prompt or the tool arguments go on unchanged. The gateway
+    adds an `x-fuse-dlp` note (the kinds and a count, never the values) to its
+    response and logs nothing; the broker logs a warning and, on a tool response,
+    marks `_tokenfuse.dlp_pii`. Neither is an event on the bus. `@claude
+    2026-10-13`: TokenFuse reads an unset or unrecognised value as off without a
+    word (`crates/gateway/src/defaults.rs`, `dlp_pii_mode_from`, and the broker's
+    `TOKENFUSE_MCP_DLP_PII` in `crates/gateway/src/main.rs`, at tokenfuse v1.11.0,
+    the tag this launcher pins), so a misspelling would silently switch detection
+    off. Every gateway sets `TOKENFUSE_DLP_PII` and the MCP broker sets
+    `TOKENFUSE_MCP_DLP_PII`, each from `${TOKENFUSE_DLP_PII:-shadow}` in
+    `compose.yaml`. `install.sh` section 0e refuses any value outside off, shadow,
+    mask and block before it installs anything. *(gate:
+    `scripts/pii-is-shadow.sh`, which lifts the `# pii-mode:` block out of
+    install.sh and runs it per case, checks the validation runs before the first
+    package install, reads `docker compose --profile typed config` for the
+    default, off and block, and refuses to report OK on no subject, no block or no
+    Docker; 18 teeth cases in `scripts/gates-have-teeth.sh`. Not covered: a live
+    call recording a finding, the streamed path, mask and block against a real
+    provider, and whether an operator keeps the switch set.)*
 
 ## Decisions that have no gate yet
 

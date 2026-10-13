@@ -602,6 +602,62 @@ firewall_apply() {
 # firewall-mode: end
 firewall_resolve
 
+# ---- 0e. personal data in prompts and tool arguments (PII) ------------------
+# tokenfuse runs two PII scanners (email, card and phone numbers): TOKENFUSE_DLP_PII
+# on the gateway and TOKENFUSE_MCP_DLP_PII on the MCP broker. This launcher runs
+# both in shadow by default, from compose.yaml (`${TOKENFUSE_DLP_PII:-shadow}`), a
+# decision made for every box (CLAUDE.md invariant 28). This one variable is the
+# switch for both: off, mask or block.
+#
+# Shadow records and forwards: it adds a note to the response, and the prompt and
+# the tool arguments go on unchanged. Mask rewrites them and block refuses the
+# call. tokenfuse reads any other value as off and says nothing (defaults.rs,
+# dlp_pii_mode_from, and main.rs for the broker), so a misspelling would switch
+# detection off on a box that looked covered. The value is checked HERE, before a
+# package is installed or a file written; a refusal never echoes what it was given.
+# Nothing set writes nothing: a default box carries no line and compose supplies
+# shadow. A run that sets it replaces the .env line. (gate:
+# scripts/pii-is-shadow.sh lifts this block out and runs it.)
+# pii-mode: begin
+PII_SET=""   # what this run puts in .env, "" when it says nothing
+
+pii_valid() { # VALUE: exactly one of the four modes tokenfuse reads
+  case "$1" in
+    off|shadow|mask|block) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+pii_resolve() {
+  local saved=""
+  PII_SET="${TOKENFUSE_DLP_PII:-}"
+  if [ -n "$PII_SET" ] && ! pii_valid "$PII_SET"; then
+    die "TOKENFUSE_DLP_PII must be off, shadow, mask or block. tokenfuse reads any other value as off, which switches personal-data detection off without a word. Nothing was installed."
+  fi
+  if [ -f "$STACK_DIR/.env" ]; then
+    saved="$(sed -n "/^TOKENFUSE_DLP_PII=/{s///p;q;}" "$STACK_DIR/.env")"
+    saved="${saved#\'}"
+    saved="${saved%\'}"
+  fi
+  if [ -n "$saved" ] && ! pii_valid "$saved"; then
+    die ".env holds a TOKENFUSE_DLP_PII that is not off, shadow, mask or block, which tokenfuse would read as off. Fix or remove that line. Nothing was changed."
+  fi
+}
+
+# Write the decision where compose reads it. Called once .env exists.
+pii_apply() {
+  local tmp
+  [ -n "$PII_SET" ] || return 0
+  tmp="$(mktemp)" || die "could not make a temporary file to update .env"
+  { grep -v "^TOKENFUSE_DLP_PII=" "$STACK_DIR/.env" || true; } >"$tmp"
+  printf 'TOKENFUSE_DLP_PII=%s\n' "$PII_SET" >>"$tmp"
+  cat "$tmp" >"$STACK_DIR/.env" || die "could not update $STACK_DIR/.env"
+  rm -f "$tmp"
+  note "personal data (PII): $PII_SET (shadow is the default; off, mask and block are the other positions)"
+}
+# pii-mode: end
+pii_resolve
+
 say "installing docker and git"
 export DEBIAN_FRONTEND=noninteractive
 # `--no-remove` on every apt line here, and it is not decoration. On Debian 13
@@ -1158,6 +1214,8 @@ typed_apply
 ceiling_apply
 # The agent firewall's mode (section 0d): written only when this run set it.
 firewall_apply
+# The PII switch (section 0e): written only when this run set it.
+pii_apply
 
 # The delegation plane's own door (profile delegation), handled like every
 # other opt-in plane's key above: generated whether or not WITH_DELEGATION is
@@ -1433,6 +1491,12 @@ if [ ! -f policy.yaml ]; then
 - name: starter-require-human-approval
   target: agent://mockryx.local/*
   require_human_above_usd: 1
+# The allow-list rehearsal identity: under Wardryx v1.3.0's allow_tool, the one
+# tool this identity may call is lookup_order_status; every other tool is denied.
+- name: mockryx-allow-list
+  target: "agent://mockryx.local/allow-list-rehearsal"
+  allow_tool:
+    - lookup_order_status
 - name: starter-deny-shell-exec
   target: agent://mockryx.local/*
   deny_tool:
