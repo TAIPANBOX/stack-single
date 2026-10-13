@@ -368,8 +368,9 @@ an absent invariant.
     *(gate: `scripts/felyx-through-the-gateway.sh`; teeth in
     `scripts/gates-have-teeth.sh`, three of them for the key;
     `features/felyx-presents-its-own-client-key.feature`. Not covered: a console
-    actually presenting the key to a live gateway, which needs a console
-    release carrying genaryx invariant 24 and is not pinned here yet.)*
+    actually presenting the key to a live gateway, which needs a running
+    stack. The console pinned here (v1.1.44) carries genaryx invariant 24: @measured
+    `git merge-base --is-ancestor 60ade51 d994ce5` in the genaryx checkout, 2026-10-13, exit 0.)*
 
 17. **The installer is run for real on every change, first install and
     re-run.** Every script gate here reads files; from v1.1.9 to v1.1.12 every

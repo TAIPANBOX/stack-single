@@ -437,7 +437,7 @@ the end of the run when `GENARYX_COPILOT_KEY` is set.
 A console that carries genaryx invariant 24 can present a key of its own:
 `compose.yaml` already hands it `GENARYX_COPILOT_FUSE_KEY_REF`, which points at
 `GENARYX_COPILOT_FUSE_KEY` in `.env`, and such a console sends that key as
-`x-fuse-key`. The console pinned here does not carry it yet. Once it does:
+`x-fuse-key`. The console pinned here (v1.1.44) carries it. To use it:
 
 1. Give Felyx its own line in the keys file, such as `gx_7d42e1...:felyx`.
 2. If you use an identity map, bind that key id in `keys[]` with `agents`
@@ -1143,7 +1143,7 @@ into `./closure/secret`, readable only by the console. Nothing prints it, and a
 re-run keeps it. To turn closing off again, remove `CLOSURE_SECRET` and
 `CLOSURE_SECRET_FILE` from `.env` and run `docker compose up -d`.
 
-It needs tokenfuse v1.9.0 or later and console v1.1.34 or later. The images pinned here are tokenfuse v1.13.0 and
+It needs tokenfuse v1.9.0 or later and console v1.1.34 or later. The images pinned here are tokenfuse v1.13.1 and
 console v1.1.43; an older image ignores the setting.
 
 ## The console
