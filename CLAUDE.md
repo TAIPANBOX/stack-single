@@ -66,6 +66,7 @@ change here is a change to something with root on somebody else's box.
 ./scripts/pii-is-shadow.sh
 ./scripts/identity-files-are-checked.sh
 ./scripts/checks-survive-a-closed-pipe.sh
+./scripts/gen-is-bounded.sh
 ./scripts/features-are-bound.sh
 ./scripts/gates-have-teeth.sh   # invariant 8; needs a clean tree
 ```
@@ -977,6 +978,44 @@ an absent invariant.
     (the fixtures carry the phrases `install.sh` looks for, not tokenfuse's whole
     lines); a short command (`docker port`, `curl`) piped into `grep -q`, which the
     helpers also make safe but this gate does not run.)*
+
+31. **A secret is minted from a bounded read, so minting one ends on its own
+    whatever SIGPIPE is set to.** `@claude 2026-10-14`, from a pre-push hook that
+    hung on a Mac. The idiom `tr -dc A-Za-z0-9 </dev/urandom | head -c N` reads a
+    stream that never ends, and only the pipe head closes stops tr. Git runs a
+    hook with SIGPIPE ignored, so tr's next write just fails: macOS's tr never
+    exits, and GNU tr exits printing `write error: Broken pipe`. @measured on
+    macOS 2026-10-14: `perl -e '$SIG{PIPE}="IGNORE"; alarm 5; exec @ARGV' bash -c
+    'LC_ALL=C tr -dc A-Za-z0-9 </dev/urandom | head -c 5'` was killed by the
+    alarm at 5 s (exit 142), and so were install.sh's `gen 40` and
+    `scripts/delegation-key-reused-on-rerun.sh`, whose own copy of the generator
+    was that line (the hook hung there); in debian:12-slim (GNU coreutils 9.1),
+    install.sh's `gen 40` under `trap '' PIPE` returned 40 characters and printed
+    `tr: write error: Broken pipe`, three runs of three. install.sh runs on
+    Debian or Ubuntu, where tr exits, so no install was stuck; the gates and the
+    hook on a Mac were.
+
+    So `gen` reads 4096 bytes with `head -c`, keeps the 62 characters with tr
+    (about 990 on average; the longest secret asked for is 64), and cuts to N in
+    bash: nothing closes a pipe early, so nothing depends on what SIGPIPE is. Its
+    length check still refuses a short value. It lives once, between the
+    `# gen:` markers, and the gate that mints keys with it lifts it rather than
+    keeping a copy.
+    *(gate: `scripts/gen-is-bounded.sh`. In install.sh, `.githooks/*` and
+    `scripts/*.sh`, every read of `/dev/urandom` in code (not a comment, not a
+    message) is the file operand of `head -c <count>`. A control first runs the
+    unbounded line with SIGPIPE ignored and a 3 s bound and requires it either not
+    to end or to write to stderr, so the harness is known to reproduce the fault.
+    Then every `gen()` defined in those files is run with SIGPIPE ignored and a
+    10 s bound, 20 times for each length install.sh asks for: each run must end,
+    exit 0, print exactly N of A-Za-z0-9 and nothing on stderr, and no value may
+    repeat. Refuses to report OK on no `gen`, no length or no read.
+    `scripts/delegation-key-reused-on-rerun.sh` refuses on no `# gen:` block.
+    Scenarios in `features/a-secret-is-minted-whatever-sigpipe-is.feature`; teeth
+    in `scripts/gates-have-teeth.sh`. Not covered: a generator that is not named
+    `gen`, a read of the random source by another path (`/dev/random`,
+    `openssl rand`), and the randomness itself, which only "no value repeats in
+    100 runs" touches.)*
 
 ## Decisions that have no gate yet
 

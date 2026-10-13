@@ -1264,6 +1264,59 @@ run_case "checks-survive-a-closed-pipe: compose_has has no markers to lift it by
 	"$(py 'edit("install.sh", "# compose-has: begin\n", "# compose-has: start\n")')" \
 	"measured nothing"
 
+# ---- gen-is-bounded (invariant 31): a secret is minted from a bounded read, so
+# minting one ends on its own with SIGPIPE ignored, as under git's pre-push hook.
+# The line install.sh had until 2026-10-14, put back.
+run_case "gen-is-bounded: install.sh's gen reads /dev/urandom with no bound again" fail \
+	'./scripts/gen-is-bounded.sh' \
+	"$(py 'edit("install.sh", "v=\"$(head -c 4096 /dev/urandom | LC_ALL=C tr -dc \x27A-Za-z0-9\x27)\" || v=\"\"", "v=\"$( set +o pipefail; LC_ALL=C tr -dc \x27A-Za-z0-9\x27 </dev/urandom | head -c \"$n\" )\"")')" \
+	"reads /dev/urandom with no bound"
+
+# The copy delegation-key-reused-on-rerun.sh carried, which hung the hook.
+run_case "gen-is-bounded: a gate mints with its own unbounded copy again" fail \
+	'./scripts/gen-is-bounded.sh' \
+	"$(py 'edit("scripts/delegation-key-reused-on-rerun.sh", "# pre-push hook).\n. \"$3\"\n", "# pre-push hook).\ngen() { LC_ALL=C tr -dc \x27A-Za-z0-9\x27 </dev/urandom | head -c \"${1:-40}\"; }\n")')" \
+	"scripts/delegation-key-reused-on-rerun.sh:"
+
+# Any reader taken to the end of a stream that has none, not only tr.
+run_case "gen-is-bounded: the urandom read goes through cat" fail \
+	'./scripts/gen-is-bounded.sh' \
+	"$(py 'edit("install.sh", "v=\"$(head -c 4096 /dev/urandom | LC_ALL=C", "v=\"$(cat /dev/urandom | head -c 4096 | LC_ALL=C")')" \
+	"reads /dev/urandom with no bound"
+
+# A bound too small for the longest secret install.sh asks for.
+run_case "gen-is-bounded: the read is too small for the longest secret" fail \
+	'./scripts/gen-is-bounded.sh' \
+	"$(py 'edit("install.sh", "v=\"$(head -c 4096 /dev/urandom |", "v=\"$(head -c 64 /dev/urandom |")')" \
+	"could not generate"
+
+run_case "gen-is-bounded: gen prints the same value every time" fail \
+	'./scripts/gen-is-bounded.sh' \
+	"$(py 'edit("install.sh", "  v=\"${v:0:$n}\"\n", "  v=\"$(printf \x27%*s\x27 \"$n\" \"\" | tr \" \" a)\"\n")')" \
+	"the same value twice"
+
+run_case "gen-is-bounded: gen leaves the alphabet" fail \
+	'./scripts/gen-is-bounded.sh' \
+	"$(py 'edit("install.sh", "LC_ALL=C tr -dc \x27A-Za-z0-9\x27)\" || v=\"\"", "LC_ALL=C tr -dc \x27A-Za-z0-9!\x27)\" || v=\"\"")')" \
+	"not exactly"
+
+run_case "gen-is-bounded: install.sh defines no gen" fail \
+	'./scripts/gen-is-bounded.sh' \
+	"$(py 'edit("install.sh", "# gen: begin\ngen() {", "# gen: begin\nmint() {")')" \
+	"measured NOTHING"
+
+run_case "gen-is-bounded: install.sh asks gen for no length" fail \
+	'./scripts/gen-is-bounded.sh' \
+	"$(py 's = open("install.sh").read()
+assert "$(gen " in s, "no caller of gen in install.sh"
+open("install.sh", "w").write(s.replace("$(gen ", "$(mint "))')" \
+	"measured NOTHING"
+
+run_case "delegation-key-reused-on-rerun: install.sh's gen has no markers to lift it by" fail \
+	'./scripts/delegation-key-reused-on-rerun.sh' \
+	"$(py 'edit("install.sh", "# gen: begin\n", "# gen: start\n")')" \
+	"measured NOTHING"
+
 # ---- chain-verifier (invariant 21): the account is the whole containment.
 run_case "chain-verifier: the verifier gets a group_add" fail \
 	'./scripts/chain-verifier-is-contained.sh' \
@@ -2186,6 +2239,19 @@ run_case "checks-survive-a-closed-pipe: a log check matches case-insensitively" 
 run_case "checks-survive-a-closed-pipe: a comment is added inside the helpers" pass \
 	'./scripts/checks-survive-a-closed-pipe.sh' \
 	"$(py 'edit("install.sh", "# check-helpers: begin\n", "# check-helpers: begin\n# a comment that changes no behaviour\n")')"
+
+# A message that names the file reads nothing.
+run_case "gen-is-bounded: a message names /dev/urandom" pass \
+	'./scripts/gen-is-bounded.sh' \
+	"$(py 'edit("install.sh", "# gen: end\n", "# gen: end\nnote \"secrets are minted from /dev/urandom, 4096 bytes at a time\"\n")')"
+
+run_case "gen-is-bounded: a comment names the unbounded idiom" pass \
+	'./scripts/gen-is-bounded.sh' \
+	"$(py 'edit("install.sh", "# gen: begin\n", "# gen: begin\n# never: tr -dc A-Za-z0-9 </dev/urandom | head -c N\n")')"
+
+run_case "gen-is-bounded: the read gets larger" pass \
+	'./scripts/gen-is-bounded.sh' \
+	"$(py 'edit("install.sh", "v=\"$(head -c 4096 /dev/urandom |", "v=\"$(head -c 8192 /dev/urandom |")')"
 
 run_case "felyx-through-the-gateway: the closing report's note is reworded" pass \
 	'./scripts/felyx-through-the-gateway.sh' \
