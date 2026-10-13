@@ -972,7 +972,7 @@ run_case "pii-is-shadow: the installer never writes the value" fail \
 # first package install. Moved behind it, a refused value arrives too late.
 run_case "pii-is-shadow: the validation runs after the first package install" fail \
 	'./scripts/pii-is-shadow.sh' \
-	"$(py 'edit("install.sh", "pii_resolve\n\nsay \"installing docker and git\"", "say \"installing docker and git\"")
+	"$(py 'edit("install.sh", "# pii-mode: end\npii_resolve\n", "# pii-mode: end\n")
 edit("install.sh", "  apt-get update -qq\n", "  apt-get update -qq\npii_resolve\n")')" \
 	"runs after the first package install"
 

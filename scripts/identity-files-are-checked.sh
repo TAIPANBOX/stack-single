@@ -507,7 +507,11 @@ if ! docker compose version >/dev/null 2>&1; then
 else
   cdir="$(mktemp -d "$scratch/cfg.XXXXXX")"
   cp compose.yaml "$cdir/compose.yaml"
-  grep -o '\${[A-Z_]*:?' compose.yaml | tr -d '${:?' | sort -u | sed 's/$/=fake-not-a-secret/' >"$cdir/base.env"
+  # The required variables of the file's own settings, not of its comments, and
+  # never the two this section sets itself: a comment naming
+  # `${GATEWAY_CLIENT_KEYS:?...}` would otherwise hand the default box a key.
+  grep -v '^[[:space:]]*#' compose.yaml | grep -o '\${[A-Z_]*:?' | tr -d '${:?' | sort -u \
+    | grep -v -x -e GATEWAY_CLIENT_KEYS -e GATEWAY_IDENTITY_MAP | sed 's/$/=fake-not-a-secret/' >"$cdir/base.env"
   resolved() { # extra .env lines on stdin; prints keys|map|mount|holders
     cat "$cdir/base.env" - >"$cdir/.env"
     env -u GATEWAY_CLIENT_KEYS -u GATEWAY_IDENTITY_MAP docker compose --project-directory "$cdir" -f "$cdir/compose.yaml" config --format json 2>"$cdir/err" |
