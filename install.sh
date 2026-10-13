@@ -1361,16 +1361,26 @@ PUBLIC_IP="$(curl -fsS -m5 https://api.ipify.org 2>/dev/null || hostname -I | aw
 
 say "credentials"
 # `tr </dev/urandom | head -c N` is the idiom everyone writes and it is a trap
-# under `set -o pipefail`: when head has its N bytes it closes the pipe, tr
-# dies of SIGPIPE, the pipeline reports 141 and `set -e` ends the script right
-# here, silently, with no .env written. The subshell turns pipefail off for
-# this one pipeline, which is exactly where it is wrong to have it on.
+# twice over, because tr reads a stream that never ends and only a closed pipe
+# stops it. Under `set -o pipefail` the SIGPIPE that stops it fails the
+# pipeline (141) and `set -e` ends the script here, silently, with no .env
+# written. With SIGPIPE ignored, which is how git runs a hook, nothing stops
+# it: macOS's tr never exits, and GNU tr prints "write error: Broken pipe" on
+# every call. So the read is bounded and nothing closes a pipe early: 4096
+# random bytes hold about 990 of the 62 characters on average, the longest
+# secret asked for here is 64, tr reads to the end of its input, and the cut
+# to N is bash's own. The length check is what refuses a short value.
+# (gate: scripts/gen-is-bounded.sh runs this under ignored SIGPIPE for every N
+# install.sh asks for; scripts/delegation-key-reused-on-rerun.sh lifts it.)
+# gen: begin
 gen() {
   local n="${1:-40}" v
-  v="$( set +o pipefail; LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c "$n" )"
+  v="$(head -c 4096 /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9')" || v=""
+  v="${v:0:$n}"
   [ "${#v}" = "$n" ] || die "could not generate a $n-character secret (got ${#v}); /dev/urandom is not readable."
   printf '%s' "$v"
 }
+# gen: end
 if [ -s .env ]; then
   note ".env already exists, left as is"
 else

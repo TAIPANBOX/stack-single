@@ -36,8 +36,8 @@
 #
 # The slice's own anchors moved, or the stub docker was never invoked on the
 # first run at all (nothing was minted, so "unchanged" would be vacuously
-# true), or install.sh has no `# gateway-probe:` block to run the slice with:
-# each is reported and fails.
+# true), or install.sh has no `# gateway-probe:` block or no `# gen:` block to
+# run the slice with: each is reported and fails.
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
@@ -60,6 +60,16 @@ if ! grep -q '^gateway_probe_resolve()' "$work/probe.sh"; then
   echo "FAIL: install.sh has no '# gateway-probe: begin' .. 'end' block defining"
   echo "      gateway_probe_resolve, so the slice cannot be run as the real script runs it"
   echo "      and this gate measured NOTHING."
+  exit 1
+fi
+
+# install.sh's secret generator, lifted the same way, so the slice mints with
+# the function the real run has rather than a copy that can drift from it.
+sed -n '/^# gen: begin$/,/^# gen: end$/p' install.sh >"$work/gen.sh"
+if ! grep -q '^gen()' "$work/gen.sh"; then
+  echo "FAIL: install.sh has no '# gen: begin' .. 'end' block defining gen, so the"
+  echo "      slice cannot mint its keys as the real script does and this gate"
+  echo "      measured NOTHING."
   exit 1
 fi
 
@@ -109,7 +119,11 @@ set -euo pipefail
 say()  { :; }
 note() { :; }
 die()  { printf 'die: %s\n' "$*" >&2; exit 1; }
-gen() { LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c "${1:-40}"; }
+# install.sh's own gen, lifted ($3), so the secrets here are minted the way
+# the real run mints them and nothing reads /dev/urandom without a bound (an
+# unbounded tr never exits on macOS when SIGPIPE is ignored, as under git's
+# pre-push hook).
+. "$3"
 sq_() { printf "'%s'" "$(printf '%s' "${1:-}" | sed "s/'/'\\\\''/g")"; }
 add_env_default() {
   grep -q "^${1}=" .env 2>/dev/null && return 0
@@ -137,7 +151,7 @@ cd "$sandbox" || exit 1
 : >.env
 
 run_once() {
-  PATH="$work/bin:$PATH" bash "$work/run.sh" "$work/slice.sh" "$work/probe.sh"
+  PATH="$work/bin:$PATH" bash "$work/run.sh" "$work/slice.sh" "$work/probe.sh" "$work/gen.sh"
 }
 
 if ! run_once >"$work/run1.log" 2>&1; then
@@ -192,7 +206,7 @@ sandbox3="$work/box3"
 mkdir -p "$sandbox3"
 cd "$sandbox3" || exit 1
 printf 'GATEWAY_BIND=192.168.1.10\n' >.env
-if ! env -u GATEWAY_BIND NO_PRESOURCE=1 PATH="$work/bin:$PATH" bash "$work/run.sh" "$work/slice.sh" "$work/probe.sh" >"$work/run3.log" 2>&1; then
+if ! env -u GATEWAY_BIND NO_PRESOURCE=1 PATH="$work/bin:$PATH" bash "$work/run.sh" "$work/slice.sh" "$work/probe.sh" "$work/gen.sh" >"$work/run3.log" 2>&1; then
   echo "FAIL: the delegation slice did not complete on a box whose .env names its bind:"
   sed 's/^/      /' "$work/run3.log"
   exit 1
