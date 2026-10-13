@@ -643,6 +643,9 @@ services:
       # any other named upstream this broker might gain later.
       TOKENFUSE_MCP_SECRETS: ${TOKENFUSE_MCP_SECRETS:-}
       TOKENFUSE_MCP_SECRET_SCOPES: typryx_key=tools:ask|ask_freeform|list_questions
+      # The broker's PII scanner reads the same one switch as the gateway's, so
+      # the two move together (CLAUDE.md invariant 28, shadow by default).
+      TOKENFUSE_MCP_DLP_PII: ${TOKENFUSE_DLP_PII:-shadow}
       # Its own file on the bus, never the gateway's, the control plane's or
       # typryx's own: two appenders on one file is a race with no lock, the
       # same reason the money plane's two writers each name their own file.
@@ -909,6 +912,13 @@ services:
       # its default and says nothing, so install.sh refuses one before anything
       # is installed. `firewall-is-enforce.sh` holds that every gateway sets it.
       TOKENFUSE_FIREWALL: ${TOKENFUSE_FIREWALL:-enforce}
+      # Personal data (email, card and phone numbers) in prompts is recorded and
+      # forwarded unchanged on every box, by decision (CLAUDE.md invariant 28).
+      # One installer variable moves it to off, mask or block. tokenfuse reads an
+      # unset or misspelt value as off, so install.sh refuses any value outside
+      # its four words before it installs anything. `pii-is-shadow.sh` holds that
+      # the gateway and the MCP broker both read this one switch.
+      TOKENFUSE_DLP_PII: ${TOKENFUSE_DLP_PII:-shadow}
       # The most a caller can make one run's budget. A run's budget used to be
       # whatever the agent said in `x-fuse-budget-usd`, and its next call could
       # widen it; tokenfuse 1.5.0 (invariant 73) clamps a budget that came

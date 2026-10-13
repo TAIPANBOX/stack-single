@@ -880,6 +880,107 @@ run_case "firewall-is-enforce: a comment that names shadow is not the setting" p
 	'./scripts/firewall-is-enforce.sh' \
 	"$(py 'edit("compose.yaml", "      TOKENFUSE_FIREWALL: ${TOKENFUSE_FIREWALL:-enforce}\n", "      # e.g. TOKENFUSE_FIREWALL: shadow in .env, see the README.\n      TOKENFUSE_FIREWALL: ${TOKENFUSE_FIREWALL:-enforce}\n")')"
 
+# ---- pii-is-shadow (invariant 28): personal data is recorded in shadow by
+# default, on the gateway and on the MCP broker, and one installer value moves
+# both. tokenfuse reads an unknown value as off, so an unvalidated one would
+# switch the detection off without a word.
+run_case "pii-is-shadow: the gateway loses its PII setting" fail \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_DLP_PII: ${TOKENFUSE_DLP_PII:-shadow}\n", "")')" \
+	"sets no TOKENFUSE_DLP_PII"
+
+run_case "pii-is-shadow: the gateway defaults PII detection to off" fail \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 'edit("compose.yaml", "TOKENFUSE_DLP_PII: ${TOKENFUSE_DLP_PII:-shadow}", "TOKENFUSE_DLP_PII: ${TOKENFUSE_DLP_PII:-off}")')" \
+	"defaults PII detection to off"
+
+run_case "pii-is-shadow: the gateway defaults PII detection to block" fail \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 'edit("compose.yaml", "TOKENFUSE_DLP_PII: ${TOKENFUSE_DLP_PII:-shadow}", "TOKENFUSE_DLP_PII: ${TOKENFUSE_DLP_PII:-block}")')" \
+	"defaults PII detection to block"
+
+run_case "pii-is-shadow: the gateway's setting becomes a literal" fail \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 'edit("compose.yaml", "TOKENFUSE_DLP_PII: ${TOKENFUSE_DLP_PII:-shadow}", "TOKENFUSE_DLP_PII: shadow")')" \
+	"A literal cannot be moved by the one installer switch"
+
+run_case "pii-is-shadow: the gateway's setting reads another variable" fail \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 'edit("compose.yaml", "TOKENFUSE_DLP_PII: ${TOKENFUSE_DLP_PII:-shadow}", "TOKENFUSE_DLP_PII: ${PII_MODE:-shadow}")')" \
+	"A literal cannot be moved by the one installer switch"
+
+run_case "pii-is-shadow: the broker loses its PII setting" fail \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_MCP_DLP_PII: ${TOKENFUSE_DLP_PII:-shadow}\n", "")')" \
+	"sets no TOKENFUSE_MCP_DLP_PII"
+
+run_case "pii-is-shadow: the broker defaults PII detection to off" fail \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 'edit("compose.yaml", "TOKENFUSE_MCP_DLP_PII: ${TOKENFUSE_DLP_PII:-shadow}", "TOKENFUSE_MCP_DLP_PII: ${TOKENFUSE_DLP_PII:-off}")')" \
+	"defaults PII detection to off"
+
+run_case "pii-is-shadow: the broker reads its own switch, not the one the gateway reads" fail \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 'edit("compose.yaml", "TOKENFUSE_MCP_DLP_PII: ${TOKENFUSE_DLP_PII:-shadow}", "TOKENFUSE_MCP_DLP_PII: ${TOKENFUSE_MCP_DLP_PII:-shadow}")')" \
+	"A literal cannot be moved by the one installer switch"
+
+# A second gateway start is the case a hard-coded name would miss: the subjects
+# come from the file, so a new gateway that defaults to off is judged.
+run_case "pii-is-shadow: a second gateway start defaults to off" fail \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 'edit("compose.yaml", "  tokenfuse-gateway:\n    <<: *restart\n", "  tokenfuse-gateway-canary:\n    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.11.0}\n    command: [\"/usr/local/bin/tokenfuse\"]\n    environment:\n      TOKENFUSE_DLP_PII: ${TOKENFUSE_DLP_PII:-off}\n  tokenfuse-gateway:\n    <<: *restart\n")')" \
+	"defaults PII detection to off"
+
+# Both subjects renamed away: nothing is judged, and the gate must say so.
+run_case "pii-is-shadow: no gateway and no broker left to judge" fail \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 'edit("compose.yaml", "    command: [\"/usr/local/bin/tokenfuse\"]\n    environment:\n      TOKENFUSE_ADDR", "    command: [\"/usr/local/bin/tokenfuse\", \"serve\"]\n    environment:\n      TOKENFUSE_ADDR")
+edit("compose.yaml", "    command: [\"mcp-broker\"]\n", "    command: [\"mcp-broker\", \"serve\"]\n")')" \
+	"measured NOTHING"
+
+run_case "pii-is-shadow: the installer accepts a value tokenfuse reads as off" fail \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 'edit("install.sh", "off|shadow|mask|block) return 0 ;;\n    *) return 1 ;;", "off|shadow|mask|block) return 0 ;;\n    *) return 0 ;;")')" \
+	"was accepted, and tokenfuse would read it as off"
+
+run_case "pii-is-shadow: the installer writes a second line instead of replacing" fail \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 'edit("install.sh", "  { grep -v \"^TOKENFUSE_DLP_PII=\" \"$STACK_DIR/.env\" || true; } >\"$tmp\"", "  cat \"$STACK_DIR/.env\" >\"$tmp\"")')" \
+	"did not replace the first"
+
+run_case "pii-is-shadow: a bad value left in .env is accepted" fail \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 'edit("install.sh", "  if [ -n \"$saved\" ] && ! pii_valid \"$saved\"; then", "  if false; then")')" \
+	"left in .env was accepted"
+
+run_case "pii-is-shadow: the refusal echoes the value" fail \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 'edit("install.sh", "die \"TOKENFUSE_DLP_PII must be off", "die \"TOKENFUSE_DLP_PII=$PII_SET must be off")')" \
+	"echoed the value"
+
+run_case "pii-is-shadow: the installer block is gone" fail \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 'edit("install.sh", "# pii-mode: begin\n", "# pii-mode: start\n")')" \
+	"measured nothing about the installer's half"
+
+run_case "pii-is-shadow: the installer never writes the value" fail \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 'edit("install.sh", "# The PII switch (section 0e): written only when this run set it.\npii_apply\n", "# The PII switch (section 0e): written only when this run set it.\n")')" \
+	"never calls pii_resolve and pii_apply"
+
+# The refusal means nothing was installed only if the check runs before the
+# first package install. Moved behind it, a refused value arrives too late.
+run_case "pii-is-shadow: the validation runs after the first package install" fail \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 'edit("install.sh", "pii_resolve\n\nsay \"installing docker and git\"", "say \"installing docker and git\"")
+edit("install.sh", "  apt-get update -qq\n", "  apt-get update -qq\npii_resolve\n")')" \
+	"runs after the first package install"
+
+# A comment that names the setting and a mode is not the setting.
+run_case "pii-is-shadow: a comment that names off is not the setting" pass \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_DLP_PII: ${TOKENFUSE_DLP_PII:-shadow}\n", "      # e.g. TOKENFUSE_DLP_PII: off in .env, see the README.\n      TOKENFUSE_DLP_PII: ${TOKENFUSE_DLP_PII:-shadow}\n")')"
+
 # ---- chain-verifier (invariant 21): the account is the whole containment.
 run_case "chain-verifier: the verifier gets a group_add" fail \
 	'./scripts/chain-verifier-is-contained.sh' \
