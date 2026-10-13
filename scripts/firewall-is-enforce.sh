@@ -9,7 +9,8 @@
 # The agent firewall is taint tracking: it judges what a run may do after the
 # run has read untrusted input. tokenfuse reads TOKENFUSE_FIREWALL as enforce,
 # shadow or off, and an unset value as shadow (crates/gateway/src/firewall.rs,
-# from_env, tokenfuse v1.11.0). Shadow records what it would refuse and refuses
+# from_env, tokenfuse v1.11.0). From tokenfuse v1.11.1 a value it does not know
+# exits at start instead (release notes). Shadow records what it would refuse and refuses
 # nothing, so a box left on shadow looks protected in its configuration and is
 # not. @decided 2026-10-13 (paraphrased): this launcher runs the firewall in
 # enforce by default, and an operator keeps one switch to run it in shadow or
@@ -30,7 +31,7 @@
 #      alone; enforce, shadow and off are written, and a later one REPLACES the
 #      earlier line; every other value refuses before .env is touched, names the
 #      variable, and never echoes what it was given; a bad value already in .env
-#      refuses too, because tokenfuse would ignore it and run shadow.
+#      refuses too, because tokenfuse would refuse to start on it.
 #   C. RESOLVED. `docker compose config` for a box with nothing set, and for a
 #      .env that sets shadow and then off: the gateway's value is enforce, then
 #      shadow, then off.
@@ -200,7 +201,7 @@ else
     d="$(mk)"
     out="$(run "$d" TOKENFUSE_FIREWALL="$v")"
     if [ "$(rc_of "$out")" = 0 ]; then
-      fail "TOKENFUSE_FIREWALL ($label) was accepted, and tokenfuse would ignore it and run shadow"
+      fail "TOKENFUSE_FIREWALL ($label) was accepted, and tokenfuse would refuse to start on it"
     elif ! printf '%s' "$out" | grep -qF 'TOKENFUSE_FIREWALL'; then
       fail "TOKENFUSE_FIREWALL ($label) was refused without naming the variable"
     elif [ "$(cat "$d/.env")" != "SENTINEL=1" ]; then
@@ -229,7 +230,7 @@ else
   before="$(cat "$d/.env")"
   out="$(run "$d")"
   if [ "$(rc_of "$out")" = 0 ]; then
-    fail "a TOKENFUSE_FIREWALL=shadowed left in .env was accepted: the gateway would run its default"
+    fail "a TOKENFUSE_FIREWALL=shadowed left in .env was accepted: the gateway would refuse to start"
   elif [ "$(cat "$d/.env")" != "$before" ]; then
     fail "a bad mode in .env was refused after .env was changed"
   fi
@@ -268,5 +269,5 @@ if [ "$problems" -gt 0 ]; then
   exit 1
 fi
 echo "OK: every gateway definition sets TOKENFUSE_FIREWALL to enforce by default, the installer writes only"
-echo "    the mode it was given, replaces rather than repeats, and refuses every value tokenfuse would ignore,"
+echo "    the mode it was given, replaces rather than repeats, and refuses every value tokenfuse does not accept,"
 echo "    before touching .env and without echoing it; the resolved configuration reads enforce, shadow, off."

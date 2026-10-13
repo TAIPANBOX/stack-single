@@ -75,7 +75,7 @@
           "record-seal": "trailryx-seal"
         },
         "manual_jobs": {
-          "idryx-detect": "A TEMPLATE a person runs, not a schedule, and not by preference. Measured 2026-09-01 on the published image: `go-service.Dockerfile` builds on distroless, so there is no /bin/sh for a loop, the binary is `/usr/local/bin/service` rather than `idryx`, and `detect` has no --interval or --watch. A loop is impossible here rather than unwanted. Publishing a shell-bearing idryx would put a shell back into a governance plane to buy a scheduler, which is a security property traded for a convenience.\\n\\nSo it takes the shape the estate already has for exactly this: stack-k8s ships `costcrew-crew` as a suspended CronJob a person runs, and this is the compose equivalent, behind a profile no install enables. Run it with `docker compose run --rm idryx-detect`.\\n\\nVerified rather than asserted: manifest-is-true.sh requires the service to exist, to sit behind a profile, and requires install.sh never to pass that profile. That is this file's answer to the `suspend: true` stack-k8s's own gate checks."
+          "idryx-detect": "A TEMPLATE a person runs, not a schedule, and not by preference. Measured 2026-09-01 on the published image: `go-service.Dockerfile` builds on distroless, so there is no /bin/sh for a loop, the binary is `/usr/local/bin/service` rather than `idryx`, and `detect` has no --interval or --watch. A loop is impossible here rather than unwanted. Publishing a shell-bearing idryx would put a shell back into a governance plane to buy a scheduler, which is a security property traded for a convenience.\\n\\nSo it takes the shape the estate already has for exactly this: stack-k8s keeps its `drills` CronJob suspended until a person runs it, and this is the compose equivalent, behind a profile no install enables. Run it with `docker compose run --rm idryx-detect`.\\n\\nVerified rather than asserted: manifest-is-true.sh requires the service to exist, to sit behind a profile, and requires install.sh never to pass that profile. That is this file's answer to the `suspend: true` stack-k8s's own gate checks."
         },
         "optional_addons": {
           "costcrew": "The FinOps console (CostCrew), an optional add-on in the `finops` profile. Started only by hand, `docker compose --profile finops up -d costcrew`; install.sh never passes that profile and never names the service. As shipped it cannot spend: no gateway is wired to it.",
@@ -106,20 +106,20 @@
         ],
         "pulls_images": [
           "ghcr.io/taipanbox/agent-conform:v1.1.0",
-          "ghcr.io/taipanbox/costcrew:v0.5.0",
-          "ghcr.io/taipanbox/genaryx-console:v1.1.36",
+          "ghcr.io/taipanbox/costcrew:v0.6.0",
+          "ghcr.io/taipanbox/genaryx-console:v1.1.43",
           "ghcr.io/taipanbox/heraldyx:v0.4.0",
           "ghcr.io/taipanbox/idryx:v1.1.0",
-          "ghcr.io/taipanbox/scopyx:v1.0.0",
-          "ghcr.io/taipanbox/scopyx:v1.0.0-chromium",
-          "ghcr.io/taipanbox/stack-caddy:v1.0.0",
-          "ghcr.io/taipanbox/stack-wg:v1.0.0",
+          "ghcr.io/taipanbox/scopyx:v1.0.1",
+          "ghcr.io/taipanbox/scopyx:v1.0.1-chromium",
+          "ghcr.io/taipanbox/stack-caddy:v1.1.43",
+          "ghcr.io/taipanbox/stack-wg:v1.1.43",
           "ghcr.io/taipanbox/tokenfuse-control-plane:v1.13.0",
           "ghcr.io/taipanbox/tokenfuse:v1.13.0",
           "ghcr.io/taipanbox/trailryx-node:v1.2.0",
           "ghcr.io/taipanbox/typryx:v0.4.0",
           "ghcr.io/taipanbox/vouchryx:v0.2.0",
-          "ghcr.io/taipanbox/wardryx:v1.3.0"
+          "ghcr.io/taipanbox/wardryx:v1.3.2"
         ]
       },
       "declared": {

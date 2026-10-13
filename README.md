@@ -50,7 +50,7 @@ This is the other thing. The differences are the whole point:
 | Survives a reboot | no | yes |
 | Console sign-in | no console at all | generated, shown once |
 | Credentials | a dev key | unique per box, 0600, never printed twice |
-| Governance routines on a schedule | all five, as OS timers | none, see below |
+| Governance routines on a schedule | six by default, plus an opt-in drill, as OS timers | none, see below |
 
 That "yes" is measured once, 2026-09-17: on a gateway bound to the box's
 tailnet address, the first reboot came back failed and the fix described
@@ -65,22 +65,25 @@ deployment shapes (`stack-up`, this one, `stack-k8s`) should be able to see
 both before installing, not after.
 
 **No governance routines run on a schedule.** `stack-up`'s `routines.sh`
-installs five OS-native timers for the stack's own recurring governance work:
-a FinOps export, a crypto-inventory trend, a quality-drift check, an
-identity-anomaly sweep, and an opt-in fire drill. `stack-k8s` runs three of
+installs six OS-native timers for the stack's own recurring governance work by
+default: a FinOps export, a crypto-inventory trend, a quality-drift check, an
+identity-anomaly sweep, an on-box chain verification and the record seal. It also
+has an opt-in fire drill. `stack-k8s` runs three of
 those as CronJobs (`crypto-trend`, `quality-drift`, `identity-sweep`; its own
 docs explain why the fourth, the FinOps export, cannot run as a CronJob
-there). Neither `install.sh` nor `compose.yaml` installs anything of the
-kind: this box runs **none of the five, ever, on its own.** Run one by hand
+there). No install starts one of them. `compose.yaml` does define two of them as looping
+services (`focus-export` and `verdryx-drift`) behind a `routines` profile that no
+install enables, so `docker compose --profile routines up -d` would start them. Run
+one by hand
 inside the console container when you want it:
 
 ```bash
 docker compose exec console verdryx drift --baseline <id>   # or qryx, ...
 ```
 
-One of the five is defined here as a service you START rather than one that
-loops, because a loop is impossible for it and not merely unwanted. The identity
-sweep runs on the idryx image, which is distroless: there is no shell for a
+The identity sweep is defined here as a service you START rather than one that
+loops, because a loop is impossible for it and not merely unwanted. It runs on the
+idryx image, which is distroless: there is no shell for a
 `sleep` loop, the binary is `/usr/local/bin/service` rather than `idryx`, and
 `detect` has no `--interval`. So it takes the shape stack-k8s already uses for
 the one job that must never start because a manifest was applied, and a person
@@ -93,9 +96,7 @@ docker compose run --rm idryx-detect
 It sits behind a `manual` profile that no install enables, which
 `scripts/manifest-is-true.sh` checks in both halves: the profile has to be there,
 and `install.sh` must never pass it. Put that line in your own cron if you want
-it hourly.
-
-or add your own cron entry on the host calling `docker compose exec`. This
+it hourly, or add your own cron entry on the host calling `docker compose exec`. This
 was not a documented choice before now; it is simply what the installer and
 the compose file do, and it is worth knowing before you pick this shape over
 the other two.
@@ -326,8 +327,33 @@ TOKENFUSE_FIREWALL=shadow ./install.sh      # or off; enforce is the default
 
 On an installed box, set `TOKENFUSE_FIREWALL` in `/opt/agent-stack/.env` and run
 `docker compose up -d tokenfuse-gateway`. The installer refuses any other value
-and one already left in `.env`, because tokenfuse would ignore a misspelling and
-run shadow without a word.
+and one already left in `.env`. tokenfuse also exits at start on a misspelling
+(exit 2), so a typo cannot quietly run shadow.
+
+### Personal data in prompts (shadow by default)
+
+On every box the gateway looks for personal data in prompts and tool arguments, and
+the MCP broker does the same when typed answers are on: email addresses, payment card
+numbers that pass a Luhn check, and international phone numbers. The default is **shadow**, which records what it finds
+and lets the call through unchanged. The gateway adds an `x-fuse-dlp` header to its
+answer with the kinds found and a count, never the values. The broker logs a warning
+and, on a tool response, marks `_tokenfuse.dlp_pii`. Neither writes an event to the
+shared bus.
+
+One switch moves both scanners:
+
+```bash
+TOKENFUSE_DLP_PII=mask ./install.sh      # or off, block; shadow is the default
+```
+
+`mask` replaces each finding with a `[REDACTED:kind]` marker before the call is
+forwarded. `block` refuses a call that carries a finding, including a false positive.
+Read what either does to your agents' traffic before you turn it on.
+
+On an installed box, set `TOKENFUSE_DLP_PII` in `/opt/agent-stack/.env` and run
+`docker compose up -d tokenfuse-gateway`. The installer refuses any value outside
+`off`, `shadow`, `mask` and `block`, and so does tokenfuse, which exits at start on a
+value it cannot read rather than switching detection off.
 
 ### Client keys and the identity map (opt-in, off by default)
 
@@ -444,6 +470,9 @@ have no host port at all, so nothing outside this machine can address them.
 ```bash
 docker compose --profile egress up -d scopyx
 ```
+
+`WITH_EGRESS=1 ./install.sh` pulls the scopyx image during the install; starting it is
+still the command above.
 
 Everything else here governs what your agents do to your own planes. This one
 governs what they do to the **outside**, which means that once it runs, agents
@@ -995,7 +1024,7 @@ cd /opt/agent-stack
 docker compose --profile finops up -d costcrew
 ```
 
-That pulls one image, `ghcr.io/taipanbox/costcrew:v0.5.0`, and starts it beside
+That pulls one image, `ghcr.io/taipanbox/costcrew:v0.6.0`, and starts it beside
 a small one-shot that prepares its volume. It is the FinOps console: cloud and
 AI spend, a crew of agents that triages it, and a person who reviews what the
 crew wrote.
@@ -1045,9 +1074,12 @@ decision about money and is yours to take, separately. The notifier does not
 read its passports, so an alert about one of its agents names the agent and not
 the person who answers for it.
 
-**Moving to a newer console.** The pin is `ghcr.io/taipanbox/costcrew:v0.5.0`.
+**Moving to a newer console.** The pin is `ghcr.io/taipanbox/costcrew:v0.6.0`.
 On a box that already ran an earlier pin, the same `up -d costcrew` picks it
-up. From v0.4.0, little changes for this launcher: the console adds a few
+up. From v0.5.0, the release adds two nullable columns to `drivers` at start (rows
+written before it read NULL, and no data is rewritten) and a new decision class,
+`driver.announced`, which only the owner's answer applies. From v0.4.0, little changes
+for this launcher: the console adds a few
 columns to its database at start and rewrites no data, no console flag was
 added or removed, and the crew runner (not started here) gained
 `-local-parallel`. If you import TokenFuse exports into it, import the gateway
@@ -1093,8 +1125,8 @@ into `./closure/secret`, readable only by the console. Nothing prints it, and a
 re-run keeps it. To turn closing off again, remove `CLOSURE_SECRET` and
 `CLOSURE_SECRET_FILE` from `.env` and run `docker compose up -d`.
 
-It needs tokenfuse v1.9.0 or later and console v1.1.34 or later, which are the
-images pinned here; an older image ignores the setting.
+It needs tokenfuse v1.9.0 or later and console v1.1.34 or later. The images pinned here are tokenfuse v1.13.0 and
+console v1.1.43; an older image ignores the setting.
 
 ## The console
 

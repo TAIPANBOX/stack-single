@@ -14,10 +14,11 @@
 # and the console has a sign-in that exists.
 #
 # What this box does NOT run, so you can compare before installing rather
-# than after: none of stack-up's five governance routines (a FinOps export, a
+# than after: none of stack-up's governance routines (a FinOps export, a
 # crypto-inventory trend, a quality-drift check, an identity-anomaly sweep,
-# and an opt-in fire drill) run here on any schedule; stack-k8s runs three of
-# the four safe ones as CronJobs, stack-up runs all five as OS timers, and
+# an on-box chain verification, the record seal and an opt-in fire drill) run here
+# on any schedule; stack-k8s runs three of
+# the four safe ones as CronJobs, stack-up runs its six default ones as OS timers, and
 # this compose file runs none of them. See the README's "What this box does
 # not run" section for the rest of the comparison, including the memory
 # plane.
@@ -558,9 +559,9 @@ ceiling_resolve
 # compose.yaml (`${TOKENFUSE_FIREWALL:-enforce}`), a decision made for every box
 # (CLAUDE.md invariant 27). The one switch back is this variable.
 #
-# tokenfuse reads any other value as its default and says nothing about it
-# (crates/gateway/src/firewall.rs, from_env), so a misspelling would silently run
-# shadow while the box looked enforced. The value is checked HERE, before a
+# tokenfuse exits at start on any other value (crates/gateway/src/firewall.rs,
+# from_env, since v1.11.1), so a misspelling stops the gateway rather than running
+# it in shadow. The value is checked HERE, before a
 # package is installed or a file written, whether it came from this run's
 # environment or was left in .env; a refusal never echoes what it was given.
 # Nothing set writes nothing: a default box carries no line and compose supplies
@@ -580,7 +581,7 @@ firewall_resolve() {
   local saved=""
   FIREWALL_SET="${TOKENFUSE_FIREWALL:-}"
   if [ -n "$FIREWALL_SET" ] && ! firewall_valid "$FIREWALL_SET"; then
-    die "TOKENFUSE_FIREWALL must be enforce, shadow or off. tokenfuse ignores any other value and runs its default, so a misspelling would run the wrong mode. Nothing was installed."
+    die "TOKENFUSE_FIREWALL must be enforce, shadow or off. tokenfuse refuses to start on any other value. Nothing was installed."
   fi
   if [ -f "$STACK_DIR/.env" ]; then
     saved="$(sed -n "/^TOKENFUSE_FIREWALL=/{s///p;q;}" "$STACK_DIR/.env")"
@@ -588,7 +589,7 @@ firewall_resolve() {
     saved="${saved%\'}"
   fi
   if [ -n "$saved" ] && ! firewall_valid "$saved"; then
-    die ".env holds a TOKENFUSE_FIREWALL that is not enforce, shadow or off, which tokenfuse would ignore. Fix or remove that line. Nothing was changed."
+    die ".env holds a TOKENFUSE_FIREWALL that is not enforce, shadow or off, which tokenfuse refuses to start on. Fix or remove that line. Nothing was changed."
   fi
 }
 
@@ -615,9 +616,9 @@ firewall_resolve
 #
 # Shadow records and forwards: it adds a note to the response, and the prompt and
 # the tool arguments go on unchanged. Mask rewrites them and block refuses the
-# call. tokenfuse reads any other value as off and says nothing (defaults.rs,
-# dlp_pii_mode_from, and main.rs for the broker), so a misspelling would switch
-# detection off on a box that looked covered. The value is checked HERE, before a
+# call. tokenfuse exits at start on any other value (defaults.rs,
+# dlp_pii_mode_from, and main.rs for the broker, since v1.12.0), so a misspelling
+# stops the gateway or the broker rather than switching detection off. The value is checked HERE, before a
 # package is installed or a file written; a refusal never echoes what it was given.
 # Nothing set writes nothing: a default box carries no line and compose supplies
 # shadow. A run that sets it replaces the .env line. (gate:
@@ -636,7 +637,7 @@ pii_resolve() {
   local saved=""
   PII_SET="${TOKENFUSE_DLP_PII:-}"
   if [ -n "$PII_SET" ] && ! pii_valid "$PII_SET"; then
-    die "TOKENFUSE_DLP_PII must be off, shadow, mask or block. tokenfuse reads any other value as off, which switches personal-data detection off without a word. Nothing was installed."
+    die "TOKENFUSE_DLP_PII must be off, shadow, mask or block. tokenfuse refuses to start on any other value. Nothing was installed."
   fi
   if [ -f "$STACK_DIR/.env" ]; then
     saved="$(sed -n "/^TOKENFUSE_DLP_PII=/{s///p;q;}" "$STACK_DIR/.env")"
@@ -644,7 +645,7 @@ pii_resolve() {
     saved="${saved%\'}"
   fi
   if [ -n "$saved" ] && ! pii_valid "$saved"; then
-    die ".env holds a TOKENFUSE_DLP_PII that is not off, shadow, mask or block, which tokenfuse would read as off. Fix or remove that line. Nothing was changed."
+    die ".env holds a TOKENFUSE_DLP_PII that is not off, shadow, mask or block, which tokenfuse refuses to start on. Fix or remove that line. Nothing was changed."
   fi
 }
 
@@ -2009,7 +2010,7 @@ if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx console; then
       # A console older than v1.1.36 reads whether it has an operator once, at
       # startup (stack-k8s GOTCHAS 50), and it is already running here, so
       # until it restarts it refuses the password printed below with 503. The
-      # pinned console (v1.1.36, genaryx#106) picks the operator up at the next
+      # pinned console (v1.1.36 or later, genaryx#106) picks the operator up at the next
       # sign-in on its own; the restart stays for a CONSOLE_IMAGE set to an
       # older one, and costs a few seconds otherwise.
       "${COMPOSE[@]}" restart console >/dev/null \
