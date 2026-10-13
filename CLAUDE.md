@@ -355,8 +355,21 @@ an absent invariant.
     2026-09-27 on a Linux Docker network with console v1.1.17 and a stub
     gateway: Felyx reported `local: true` and its question reached the gateway;
     without the allow-list it refused the endpoint.
+    `@decided 2026-10-13` (paraphrased): the console gains an optional setting
+    naming a gateway client key Felyx sends as `x-fuse-key` (genaryx invariant
+    24), and this launcher passes it through. compose.yaml hands the console
+    `GENARYX_COPILOT_FUSE_KEY_REF: env:GENARYX_COPILOT_FUSE_KEY` and
+    `GENARYX_COPILOT_FUSE_KEY: ${GENARYX_COPILOT_FUSE_KEY:-}`: the key comes from
+    `.env`, empty unless an operator gives Felyx one, never written into
+    compose.yaml and never required. The operator gives Felyx its own line in
+    the keys file and, with a map, a `keys[]` binding whose `agents` include
+    Felyx's agent id (README, "Client keys and the identity map"). A console
+    that does not read the reference ignores both lines.
     *(gate: `scripts/felyx-through-the-gateway.sh`; teeth in
-    `scripts/gates-have-teeth.sh`)*
+    `scripts/gates-have-teeth.sh`, three of them for the key;
+    `features/felyx-presents-its-own-client-key.feature`. Not covered: a console
+    actually presenting the key to a live gateway, which needs a console
+    release carrying genaryx invariant 24 and is not pinned here yet.)*
 
 17. **The installer is run for real on every change, first install and
     re-run.** Every script gate here reads files; from v1.1.9 to v1.1.12 every
