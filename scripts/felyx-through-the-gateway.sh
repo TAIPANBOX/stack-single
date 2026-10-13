@@ -7,6 +7,10 @@
 #   GENARYX_COPILOT_BASE_URL is http://tokenfuse-gateway:4100,
 #   GENARYX_COPILOT_LOCAL_HOSTNAMES allow-lists exactly tokenfuse-gateway,
 #   GENARYX_COPILOT_AGENT_ID is built from RECORD_TRUST_DOMAIN;
+#   GENARYX_COPILOT_FUSE_KEY_REF points at GENARYX_COPILOT_FUSE_KEY, and that
+#   is ${GENARYX_COPILOT_FUSE_KEY:-}: read from .env, empty by default (genaryx
+#   invariant 24, Felyx's own gateway client key). A literal would put a key
+#   into git; a required one would stop every box that gives Felyx none;
 # and anywhere in compose.yaml: no GENARYX_COPILOT_ALLOW_REMOTE, which would
 # skip the residency check and send Felyx past the meter.
 #
@@ -30,11 +34,16 @@ for k, v in {"GENARYX_COPILOT_BASE_URL": "http://tokenfuse-gateway:4100",
         errors.append(f"console: {k} is {env.get(k)!r}, not {v!r}: Felyx would not reach its model through this box's gateway")
 if env.get("GENARYX_COPILOT_AGENT_ID") != "agent://${RECORD_TRUST_DOMAIN:-local}/genaryx/felyx":
     errors.append(f"console: GENARYX_COPILOT_AGENT_ID is {env.get('GENARYX_COPILOT_AGENT_ID')!r}: Felyx's agent id must follow RECORD_TRUST_DOMAIN")
+if env.get("GENARYX_COPILOT_FUSE_KEY_REF") != "env:GENARYX_COPILOT_FUSE_KEY":
+    errors.append(f"console: GENARYX_COPILOT_FUSE_KEY_REF is {env.get('GENARYX_COPILOT_FUSE_KEY_REF')!r}, not 'env:GENARYX_COPILOT_FUSE_KEY': Felyx would not present its own gateway client key")
+# The value itself is never printed: if it is wrong, it may be a key.
+if env.get("GENARYX_COPILOT_FUSE_KEY") != "${GENARYX_COPILOT_FUSE_KEY:-}":
+    errors.append("console: GENARYX_COPILOT_FUSE_KEY is not ${GENARYX_COPILOT_FUSE_KEY:-}: Felyx's client key must be read from .env and empty by default, never written here or required")
 for n, line in enumerate(text.splitlines(), 1):
     if not line.lstrip().startswith("#") and "GENARYX_COPILOT_ALLOW_REMOTE" in line:
         errors.append(f"compose.yaml:{n} sets GENARYX_COPILOT_ALLOW_REMOTE: Felyx would skip the residency check and go around the gateway")
 if errors:
     for e in errors: print(f"FAIL: {e}")
     sys.exit(1)
-print("OK: Felyx reaches its model through tokenfuse-gateway by service name, under agent://<RECORD_TRUST_DOMAIN>/genaryx/felyx, and nothing lets it go around.")
+print("OK: Felyx reaches its model through tokenfuse-gateway by service name, under agent://<RECORD_TRUST_DOMAIN>/genaryx/felyx, with its own client key read from .env when one is given, and nothing lets it go around.")
 PY

@@ -1123,6 +1123,15 @@ services:
       GENARYX_COPILOT_AGENT_ID: agent://${RECORD_TRUST_DOMAIN:-local}/genaryx/felyx
       GENARYX_COPILOT_API_KEY_REF: env:GENARYX_COPILOT_KEY
       GENARYX_COPILOT_KEY: ${GENARYX_COPILOT_KEY:-}
+      # Felyx's own gateway client key (genaryx invariant 24): with client keys
+      # on, this gateway answers 401 to any call without a key it holds,
+      # Felyx's included. A console carrying that invariant reads the key
+      # through this reference and sends it as x-fuse-key; the pinned one
+      # ignores both lines. Give Felyx its own line in the keys file, put the
+      # same secret in .env as GENARYX_COPILOT_FUSE_KEY (single-quoted), and
+      # `docker compose up -d console`. Empty, the default, sends no key.
+      GENARYX_COPILOT_FUSE_KEY_REF: env:GENARYX_COPILOT_FUSE_KEY
+      GENARYX_COPILOT_FUSE_KEY: ${GENARYX_COPILOT_FUSE_KEY:-}
       TOKENFUSE_CLOUD_URL: http://tokenfuse-cloud:8080
       # ADMIN_KEY, not CLOUD_KEY. `TOKENFUSE_CLOUD_KEY` is the name the GATEWAY
       # reads; the console's money plane looks for `TOKENFUSE_CLOUD_ADMIN_KEY`

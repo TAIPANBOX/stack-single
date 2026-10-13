@@ -408,6 +408,24 @@ Felyx, the console's copilot, calls this gateway and sends no `x-fuse-key`, so
 while client keys are on, its calls are refused 401. The installer says so at
 the end of the run when `GENARYX_COPILOT_KEY` is set.
 
+A console that carries genaryx invariant 24 can present a key of its own:
+`compose.yaml` already hands it `GENARYX_COPILOT_FUSE_KEY_REF`, which points at
+`GENARYX_COPILOT_FUSE_KEY` in `.env`, and such a console sends that key as
+`x-fuse-key`. The console pinned here does not carry it yet. Once it does:
+
+1. Give Felyx its own line in the keys file, such as `gx_7d42e1...:felyx`.
+2. If you use an identity map, bind that key id in `keys[]` with `agents`
+   naming Felyx's agent id, `agent://<RECORD_TRUST_DOMAIN>/genaryx/felyx`
+   (`agent://local/genaryx/felyx` when `RECORD_TRUST_DOMAIN` is unset), and the
+   unit its spend should land in. The installer refuses a key the map does not
+   bind.
+3. Run the installer with both files again, as above.
+4. Put the same secret in `.env`, single-quoted, as
+   `GENARYX_COPILOT_FUSE_KEY='gx_7d42e1...'`, and run
+   `docker compose up -d console`.
+
+Left empty, the default, Felyx sends no key, as before.
+
 ### The chain verifier
 
 Every writer on the shared events bus chains its lines (`prev_hash`) so a
