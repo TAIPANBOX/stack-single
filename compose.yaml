@@ -988,6 +988,19 @@ services:
       # gateway does not need it to be.
       TOKENFUSE_DELEGATION_REVOCATIONS: ${TOKENFUSE_DELEGATION_REVOCATIONS:-}
       TOKENFUSE_DELEGATION_REVOCATIONS_INTERVAL_MS: ${TOKENFUSE_DELEGATION_REVOCATIONS_INTERVAL_MS:-}
+      # Client keys and the identity map (tokenfuse docs/20), opt-in: who may call
+      # this gateway (`x-fuse-key`), which agent ids each key may speak as, and
+      # which unit pays. Both `:-` with an EMPTY fallback, which tokenfuse reads as
+      # off, so a box that never gave install.sh CLIENT_KEYS_FILE or
+      # IDENTITY_MAP_FILE runs exactly as before. install.sh writes the two .env
+      # lines only after the gateway image itself has read the pair (sections 0f
+      # and 3e). Set, the gateway refuses every call with no key or an unknown
+      # one (401), and under strict=enforce, tokenfuse's default and never set
+      # otherwise here, a key speaking as an agent its binding does not name
+      # (403 identity_mismatch). CLAUDE.md invariant 29;
+      # `identity-files-are-checked.sh` holds this.
+      TOKENFUSE_CLIENT_KEYS: ${GATEWAY_CLIENT_KEYS:-}
+      TOKENFUSE_IDENTITY_MAP: ${GATEWAY_IDENTITY_MAP:-}
     ports:
       # Loopback if the variable is absent, matching install.sh. The fallback
       # matters on its own: someone running `docker compose up` by hand
@@ -1006,6 +1019,12 @@ services:
       # whether or not that plane is installed: an empty directory, nothing
       # this container reads unless the env var above also names a file in it.
       - ./delegation-public:/etc/tokenfuse/delegation:ro
+      # Read only, and always mounted, like ./delegation-public above: the
+      # identity map install.sh puts in place (0444, no secret in it) once it was given
+      # IDENTITY_MAP_FILE, at the path GATEWAY_IDENTITY_MAP names. A directory, not
+      # the file, so a new map moves in by rename and the next start reads it. An
+      # empty directory on a box that has no map, which nothing here reads.
+      - ./identity:/etc/tokenfuse/identity:ro
     depends_on:
       init-volumes:
         condition: service_completed_successfully

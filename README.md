@@ -329,6 +329,85 @@ On an installed box, set `TOKENFUSE_FIREWALL` in `/opt/agent-stack/.env` and run
 and one already left in `.env`, because tokenfuse would ignore a misspelling and
 run shadow without a word.
 
+### Client keys and the identity map (opt-in, off by default)
+
+By default the gateway answers any caller that can reach it, and the agent id on
+a call is whatever the caller wrote. Two files change that, prepared by you or by
+an onboarding agent (the console's Onboard tab prints both pieces):
+
+- a **keys file**: one `secret:key_id` per line. The secret is what one agent
+  presents; the key id is the name the gateway records its spend under. Blank
+  lines and `#` comments are ignored.
+- an **identity map**: tokenfuse's JSON map ([docs/20](https://github.com/TAIPANBOX/tokenfuse/blob/main/docs/20-identity-map.md))
+  of units (a team or business unit, with an optional monthly budget), which key
+  belongs to which unit, and which agent ids each key may speak as.
+
+```text
+# keys.txt
+gx_3f0c9a...:treasury-bots
+gx_9b21d4...:research-bots
+```
+
+```json
+{
+  "units": [
+    {"id": "treasury", "owner": "user://bank.example/olena", "budget_usd_month": 2000},
+    {"id": "research", "budget_usd_month": 300}
+  ],
+  "keys": [
+    {"key_id": "treasury-bots", "unit": "treasury", "agents": ["agent://bank.example/treasury/*"]},
+    {"key_id": "research-bots", "unit": "research", "agents": ["agent://bank.example/research/*"]}
+  ]
+}
+```
+
+```bash
+CLIENT_KEYS_FILE=/path/keys.txt IDENTITY_MAP_FILE=/path/identity.json ./install.sh
+```
+
+What an agent then sends, besides its provider key, on every call:
+
+| Header | Value |
+|---|---|
+| `x-fuse-key` | its own secret from the keys file |
+| `x-fuse-agent-id` | an id the map binds to that key, such as `agent://bank.example/treasury/recon-batch` |
+| `x-fuse-run-id` | its run, as before |
+
+A call with no key, or a key the gateway does not hold, is refused 401. A key
+speaking as an agent its binding does not name, or naming none, is refused 403
+`identity_mismatch` before anything reaches a provider. Its spend lands in the
+key's unit, and with `TOKENFUSE_MODE` enforce (this box's setting) a unit over
+its monthly budget is refused 402.
+
+The installer checks both files before anything restarts, in two steps. Before
+it installs a package, the shell grammar: each file is readable and not empty,
+each key line is `secret:key_id` with a secret of 24 to 256 characters from
+`A-Z a-z 0-9 . _ ~ + / = @ : -` and a key id from `A-Z a-z 0-9 . _ -`, no secret
+appears twice, and the map is a JSON object. Then, once the images are on the
+box, the gateway image itself reads the pair in a throwaway container with no
+network, so its own parser decides: a unit the map does not declare, a bad
+pattern, a map that configures nothing (an empty file or `{}`), a map key id no
+secret carries, and a key the map does not bind (every call with it would be
+refused 403) are each refused, and nothing is written. A refusal names the line,
+never the secret.
+
+The keys are kept in `.env` (0600) as `GATEWAY_CLIENT_KEYS` and are never
+printed. The map is kept at `/opt/agent-stack/identity/identity.json` and
+mounted read only into the gateway. A re-run that names neither file keeps both
+and checks them again; naming one replaces it, and a new map restarts the
+gateway, which reads the map only at start. To turn either off, remove its line
+from `.env` (`GATEWAY_CLIENT_KEYS`, `GATEWAY_IDENTITY_MAP`) and run
+`docker compose up -d tokenfuse-gateway`.
+
+The keys file can hold only the keys, with no map: callers are then
+authenticated and their spend attributed by key id, with no agent binding. A
+map with only units and `prefixes[]` and no keys attributes spend by agent id
+and authenticates nobody.
+
+Felyx, the console's copilot, calls this gateway and sends no `x-fuse-key`, so
+while client keys are on, its calls are refused 401. The installer says so at
+the end of the run when `GENARYX_COPILOT_KEY` is set.
+
 ### The chain verifier
 
 Every writer on the shared events bus chains its lines (`prev_hash`) so a

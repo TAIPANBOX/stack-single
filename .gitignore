@@ -5,6 +5,10 @@
 policy.yaml
 environments/
 src/
+# The identity map install.sh installs from IDENTITY_MAP_FILE, and the directory
+# it stages one in while the gateway image reads it.
+identity/
+identity.check.*/
 
 # macOS writes these into any directory Finder has opened, and `git add -A`
 # picks them up. Three repositories in this estate got one on 2026-08-10 from

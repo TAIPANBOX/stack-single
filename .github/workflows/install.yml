@@ -25,15 +25,40 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        profile: [default, delegation, typed-risk]
+        profile: [default, delegation, typed-risk, identity]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The identity leg hands install.sh a keys file and an identity map, the
+      # way an onboarding agent would. Fresh secrets per run, never printed.
+      - name: identity inputs
+        if: matrix.profile == 'identity'
+        run: |
+          d="$RUNNER_TEMP/identity"
+          mkdir -p "$d"
+          umask 077
+          printf '# CI keys, %s\n%s:treasury-bots\n%s:research-bots\n' "$(date -u +%F)" \
+            "ci-$(openssl rand -hex 20)" "ci-$(openssl rand -hex 20)" >"$d/keys.txt"
+          cat >"$d/identity.json" <<'JSON'
+          {
+            "units": [
+              {"id": "treasury", "owner": "user://ci.invalid/treasury", "budget_usd_month": 20},
+              {"id": "research", "budget_usd_month": 5}
+            ],
+            "keys": [
+              {"key_id": "treasury-bots", "unit": "treasury", "agents": ["agent://ci.invalid/treasury/*"]},
+              {"key_id": "research-bots", "unit": "research", "agents": ["agent://ci.invalid/research/*"]}
+            ]
+          }
+          JSON
+          echo "IDENTITY_IN=$d" >>"$GITHUB_ENV"
 
       - name: first install
         run: |
           extra=""
           [ "${{ matrix.profile }}" = delegation ] && extra="WITH_DELEGATION=1 WITH_DELEGATION_DEMO_ISSUER=1"
           [ "${{ matrix.profile }}" = typed-risk ] && extra="WITH_TYPED=1 TYPED_RISK_SIGNAL=1"
+          [ "${{ matrix.profile }}" = identity ] && extra="CLIENT_KEYS_FILE=$IDENTITY_IN/keys.txt IDENTITY_MAP_FILE=$IDENTITY_IN/identity.json"
           sudo env STACK_DIR=/opt/agent-stack $extra ./install.sh 2>&1 | tee install-1.log
           grep -q "every check passed" install-1.log || { echo "::error::the first install did not pass every check"; exit 1; }
 
@@ -41,7 +66,8 @@ jobs:
         run: |
           # The re-run says nothing about the risk signal: it must stay on from
           # what the first run saved in .env. The stub is not saved, so it is
-          # asked for again, exactly as an operator does.
+          # asked for again, exactly as an operator does. Nor about the identity
+          # files: the keys and the map must survive from the first run.
           extra=""
           [ "${{ matrix.profile }}" = delegation ] && extra="WITH_DELEGATION=1 WITH_DELEGATION_DEMO_ISSUER=1"
           [ "${{ matrix.profile }}" = typed-risk ] && extra="WITH_TYPED=1"
@@ -66,6 +92,34 @@ jobs:
           # nothing seeds a rule that reads the signal. An explicit if: a bare
           # `! grep` is exempt from errexit and could never fail this step.
           if grep -q hold_if_signal policy.yaml; then echo "::error::policy.yaml carries a hold_if_signal rule nobody wrote"; exit 1; fi
+
+      - name: client keys and the identity map are kept, and the gateway holds callers to them
+        if: matrix.profile == 'identity'
+        run: |
+          cd /opt/agent-stack
+          [ "$(sudo grep -c '^GATEWAY_CLIENT_KEYS=' .env)" = 1 ] || { echo "::error::.env does not carry exactly one GATEWAY_CLIENT_KEYS after the re-run"; exit 1; }
+          sudo cmp -s identity/identity.json "$IDENTITY_IN/identity.json" || { echo "::error::the installed map is not the map given"; exit 1; }
+          if grep -qF "$(sed -n 's/:treasury-bots$//p' "$IDENTITY_IN/keys.txt")" "$GITHUB_WORKSPACE/install-1.log" "$GITHUB_WORKSPACE/install-2.log"; then
+            echo "::error::a client key secret appears in the installer's output"; exit 1
+          fi
+          tkey="$(sed -n 's/:treasury-bots$//p' "$IDENTITY_IN/keys.txt")"
+          # status and the error type of one metered call; the budget of one
+          # micro-dollar stops an admitted call before it reaches a provider.
+          call() {
+            curl -s -o "$RUNNER_TEMP/body.json" -w '%{http_code}' -X POST http://127.0.0.1:4100/v1/messages \
+              -H 'content-type: application/json' -H "x-fuse-run-id: ci-$RANDOM" -H 'x-fuse-budget-usd: 0.000001' \
+              "$@" -d '{"model":"claude-haiku-4-5","max_tokens":1,"messages":[{"role":"user","content":"ci"}]}'
+            printf ' %s\n' "$(sed -n 's/.*"type":"\([a-z_]*\)".*/\1/p' "$RUNNER_TEMP/body.json")"
+          }
+          a="$(call -H 'x-fuse-agent-id: agent://ci.invalid/treasury/recon')"
+          b="$(call -H 'x-fuse-key: ci-not-a-key-0000000000000000' -H 'x-fuse-agent-id: agent://ci.invalid/treasury/recon')"
+          c="$(call -H "x-fuse-key: $tkey" -H 'x-fuse-agent-id: agent://ci.invalid/research/summariser')"
+          d="$(call -H "x-fuse-key: $tkey" -H 'x-fuse-agent-id: agent://ci.invalid/treasury/recon')"
+          echo "no key: $a | unknown key: $b | treasury key as a research agent: $c | treasury key as its own agent: $d"
+          [ "$a" = "401 unauthorized" ] || { echo "::error::a call with no key was not refused 401"; exit 1; }
+          [ "$b" = "401 unauthorized" ] || { echo "::error::a call with an unknown key was not refused 401"; exit 1; }
+          [ "$c" = "403 identity_mismatch" ] || { echo "::error::a key speaking as another unit's agent was not refused 403 identity_mismatch"; exit 1; }
+          [ "${d%% *}" = 402 ] || { echo "::error::a key speaking as its own agent did not get past identity to the budget (402)"; exit 1; }
 
       - name: the chain verifier is up on every profile
         run: |
