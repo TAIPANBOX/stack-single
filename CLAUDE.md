@@ -65,6 +65,7 @@ change here is a change to something with root on somebody else's box.
 ./scripts/firewall-is-enforce.sh
 ./scripts/pii-is-shadow.sh
 ./scripts/identity-files-are-checked.sh
+./scripts/checks-survive-a-closed-pipe.sh
 ./scripts/features-are-bound.sh
 ./scripts/gates-have-teeth.sh   # invariant 8; needs a clean tree
 ```
@@ -247,9 +248,30 @@ an absent invariant.
     and section 8 reads the gateway's port mapping from `docker port` on the
     container rather than believing `Started`. Proven by a second reboot on
     that box: published, healthz 200, within 40 s.
+
+    The probe follows the bind the box HAS, not the one this run was given.
+    `@claude 2026-10-13`: `GATEWAY_PROBE` was worked out once, at the top of
+    `install.sh`, before `.env` is read, and a re-run sources `.env` over the
+    run's own default (the README's way to change the bind on an installed box is
+    to edit `GATEWAY_BIND` there). So with nothing in the environment, check 1
+    probed loopback on a healthy box whose gateway is published on one other
+    address, and `TOKENFUSE_DELEGATION_URL` would have been minted from the same
+    stale value on a re-run that first enables delegation. @measured `install.sh`
+    v1.1.32 re-run on a Debian 13 box whose `.env` holds `GATEWAY_BIND=192.168.1.10`,
+    2026-10-13: `FAIL gateway answers on 127.0.0.1:4100` with no `GATEWAY_BIND` in
+    the environment, `ok gateway answers on 192.168.1.10:4100` with it exported,
+    `curl http://192.168.1.10:4100/healthz` 200 throughout. So the mapping is one
+    function, `gateway_probe_resolve`, called at the top and again on the next line
+    of code after every `. ./.env`, and nothing else assigns `GATEWAY_PROBE`.
     *(gate: `scripts/bind-is-honoured.sh`, which refuses to report OK when the
-    gateway check or the `case "$GATEWAY_BIND"` block is gone; teeth in
-    `scripts/gates-have-teeth.sh`)*
+    gateway check or the `case "$GATEWAY_BIND"` block is gone, and requires the
+    single assignment, the call before the first read of `.env`, the call after
+    every read of it, and runs the lifted function for loopback, `0.0.0.0`, an
+    address and two IPv6 literals and across a `.env` that names another bind;
+    `scripts/delegation-key-reused-on-rerun.sh` runs the real slice of `install.sh`
+    over a `.env` naming `192.168.1.10` and requires the delegation origin to
+    follow it; teeth in `scripts/gates-have-teeth.sh`; scenarios in
+    `features/the-install-report-matches-the-box.feature`)*
 
 12. **The package step never takes Docker away, and never asks apt for what
     the box already has.** On Debian 13 with Docker CE installed, the line
@@ -365,11 +387,26 @@ an absent invariant.
     the keys file and, with a map, a `keys[]` binding whose `agents` include
     Felyx's agent id (README, "Client keys and the identity map"). A console
     that does not read the reference ignores both lines.
-    *(gate: `scripts/felyx-through-the-gateway.sh`; teeth in
-    `scripts/gates-have-teeth.sh`, three of them for the key;
-    `features/felyx-presents-its-own-client-key.feature`. Not covered: a console
-    actually presenting the key to a live gateway, which needs a running
-    stack. The console pinned here (v1.1.44) carries genaryx invariant 24: @measured
+
+    The closing report says which of the two the box has. `@claude 2026-10-13`:
+    with client keys on and `GENARYX_COPILOT_KEY` set, `felyx_gateway_note` prints
+    one of two notes. With `GENARYX_COPILOT_FUSE_KEY` set, Felyx presents it, and it
+    has to be one of the keys and, with a map, bound to Felyx's agent id; empty,
+    Felyx sends none and its calls are refused 401. The report used to say "sends no
+    key" on both, including on a box that had given Felyx one. @measured two
+    throwaway consoles `ghcr.io/taipanbox/genaryx-console:v1.1.44` on a Debian 13 box
+    against its gateway with client keys on, 2026-10-13: with
+    `GENARYX_COPILOT_FUSE_KEY` set to a key the gateway holds, `copilot_ask` answered
+    HTTP 200 in 1611 ms; with it empty, it returned the gateway's 401 `unauthorized`
+    ("requires a client credential in the `x-fuse-key` header").
+    *(gate: `scripts/felyx-through-the-gateway.sh`, which also lifts
+    `felyx_gateway_note` out of `install.sh` and runs it for a Felyx with a key, one
+    without, client keys off and no provider key, and requires that it never prints
+    the key; teeth in `scripts/gates-have-teeth.sh`, three of them for the key and
+    five for the note; `features/felyx-presents-its-own-client-key.feature`. Not
+    covered by a gate: a console presenting the key to a live gateway, which needs a
+    running stack and was measured by hand once (above). The console pinned here
+    (v1.1.44) carries genaryx invariant 24: @measured
     `git merge-base --is-ancestor 60ade51 d994ce5` in the genaryx checkout, 2026-10-13, exit 0.)*
 
 17. **The installer is run for real on every change, first install and
@@ -859,9 +896,11 @@ an absent invariant.
     must refuse 401 (no key, an unknown key). It names no agent, because a
     mismatch is a high-severity event on the bus and an installer must not page
     its operator on every run; CI's `identity` leg sends that call. Felyx, the
-    console's copilot, sends no `x-fuse-key` (console v1.1.36), so with client
-    keys on its calls are refused 401; the closing report says so when
-    `GENARYX_COPILOT_KEY` is set. @measured `scratch compose project from this
+    console's copilot, sends an `x-fuse-key` only when `GENARYX_COPILOT_FUSE_KEY`
+    is set (invariant 16; a console from v1.1.44 on, where v1.1.36 sent none), so
+    with client keys on and that key empty its calls are refused 401; when
+    `GENARYX_COPILOT_KEY` is set the closing report says which of the two the box
+    has. @measured `scratch compose project from this
     compose.yaml (tokenfuse v1.11.0, wardryx v1.3.0, a python stub as the
     upstream), .env and ./identity prepared by this block, curl from the compose
     network` 2026-10-13: no key 401 `unauthorized`; an unknown key 401; the
@@ -887,7 +926,57 @@ an absent invariant.
     past identity. Not covered: the unit budget refusing a call at its monthly
     cap, a box with more than a few keys, a hand-edited `./identity/identity.json`
     (read only at the next start, and only re-checked by the next install.sh
-    run), Felyx calling with a key, and stack-k8s, which has none of this yet.)*
+    run), Felyx calling with a key (measured by hand once, invariant 16, not
+    gated), and stack-k8s, which has none of this yet.)*
+
+30. **A check reports the box, not which of two processes finished first.**
+    `@claude 2026-10-13`, from upgrading an installed box to v1.1.32. `install.sh`
+    runs under `set -o pipefail`, and several of its verification checks read a
+    container's log through a pipe: `docker compose logs <service> 2>&1 | grep -q
+    <line>`. `grep -q` exits at its first match, compose is still writing, meets
+    the closed pipe and exits 255, and pipefail fails the pipeline although the
+    line was in the log. @measured `set -o pipefail; docker compose logs
+    tokenfuse-gateway 2>&1 | grep -qF 'client auth: ON (3 key(s))'` five times on
+    a Debian 13 box (Docker 26.1.5, Compose 2.26.1), 2026-10-13: exit 0, 255, 255,
+    0, 255; the same without `-q`, where grep reads everything: 0 five times. Two
+    installs on that box reported `FAIL client keys: the gateway holds 3` and
+    `FAIL identity map: the gateway reads it` on a healthy gateway, while CI on
+    GitHub's runners happened to pass. The negative form, `! docker compose logs
+    ... | grep -qE '<a bad line>'`, reads ok with the bad line present: the 255
+    fails the pipeline and `!` turns that into a pass. `@claude`: that direction
+    was reproduced with a stub `docker` (below), not seen on the box.
+
+    So `check()` and `check_log()` evaluate a command string in a subshell with
+    pipefail off, and a pipeline's verdict is its reader's, the last command's:
+    the line was there, or it was not. Once, in the helpers, so a check added next
+    month cannot bring the race back. A producer that cannot run at all leaves the
+    reader nothing to find, so a positive check still FAILs; the one negative log
+    check (`identity map: every key is bound ...`) reads ok on an unreadable log
+    and is paired, on the same log, with a positive one that does not. The
+    installer's own `if` that asks whether a service exists is `compose_has`,
+    which reads the service list to its end before it looks, because a wrong "no"
+    there skips a whole group of checks and the run still ends "every check
+    passed".
+    *(gate: `scripts/checks-survive-a-closed-pipe.sh`. It lifts the
+    `# check-helpers:` and `# compose-has:` blocks out of `install.sh` and runs
+    them under `set -euo pipefail` against a stub `docker` on PATH that prints a
+    log (the line first, then four megabytes) and, like compose, exits 255 when its
+    reader goes; it first shows the stub breaks the unwrapped pipeline every time.
+    It extracts every `check` and `check_log` of `install.sh` that reads a log or
+    the service list through a pipe, as written, and runs each in six situations (a
+    healthy box, a silent log, nothing running, unreadable logs, a refused line in
+    both logs, a refused line in the gateway's): a positive check must be ok on the
+    line and FAIL without it, a refused line must never read ok. A log check added
+    without a case here, or a case whose check is gone, is reported. It also
+    refuses any other line that pipes `compose logs` or `compose ps` into an
+    early-exit reader. Refuses to report OK on no helper block, no check or a stub
+    that did not break the pipe. Scenarios in
+    `features/the-install-report-matches-the-box.feature`; teeth in
+    `scripts/gates-have-teeth.sh`. Not covered: a Compose or a Docker other than
+    the pair measured; a log wording that no longer matches the running tokenfuse
+    (the fixtures carry the phrases `install.sh` looks for, not tokenfuse's whole
+    lines); a short command (`docker port`, `curl`) piped into `grep -q`, which the
+    helpers also make safe but this gate does not run.)*
 
 ## Decisions that have no gate yet
 

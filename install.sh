@@ -125,17 +125,33 @@ CONSOLE_USER="${CONSOLE_USER:-ops}"
 GATEWAY_BIND="${GATEWAY_BIND:-127.0.0.1}"
 # Where the gateway is actually reached from outside its own container: the
 # bind with 0.0.0.0 mapped to loopback (every address includes it) and an
-# IPv6 literal bracketed, as a URL needs. Computed once, here, because both
-# section 8's own health check and the delegation plane's
-# TOKENFUSE_DELEGATION_URL (the origin a hand-off proof's DPoP `htu` is
-# checked against) need the identical answer; two copies of this case
-# statement disagreeing would be the same trap CLAUDE.md's WARDRYX_DB story
+# IPv6 literal bracketed, as a URL needs. Both section 8's own health check and
+# the delegation plane's TOKENFUSE_DELEGATION_URL (the origin a hand-off proof's
+# DPoP `htu` is checked against) need the identical answer; two copies of this
+# case statement disagreeing would be the same trap CLAUDE.md's WARDRYX_DB story
 # already names, one variable over.
-case "$GATEWAY_BIND" in
-  0.0.0.0) GATEWAY_PROBE=127.0.0.1 ;;
-  *:*)     GATEWAY_PROBE="[$GATEWAY_BIND]" ;;
-  *)       GATEWAY_PROBE="$GATEWAY_BIND" ;;
-esac
+#
+# A function, called again after every `. ./.env`, and not a value computed
+# once here. The bind this run was given is only the bind the box HAS on a first
+# install: on a re-run `.env` is sourced over it (the README's way to change the
+# bind on an installed box is to edit GATEWAY_BIND there), and a probe worked
+# out before that read the environment's default, loopback, and FAILed `gateway
+# answers on 127.0.0.1:4100` on a healthy box whose gateway is published on one
+# other address (measured 2026-10-13, Debian 13: FAIL with nothing in the
+# environment, ok with GATEWAY_BIND exported, `curl http://192.168.1.10:4100/healthz`
+# 200 throughout). The same stale value would have minted
+# TOKENFUSE_DELEGATION_URL from the wrong address. CLAUDE.md invariant 11, gate
+# scripts/bind-is-honoured.sh.
+# gateway-probe: begin
+gateway_probe_resolve() {
+  case "$GATEWAY_BIND" in
+    0.0.0.0) GATEWAY_PROBE=127.0.0.1 ;;
+    *:*)     GATEWAY_PROBE="[$GATEWAY_BIND]" ;;
+    *)       GATEWAY_PROBE="$GATEWAY_BIND" ;;
+  esac
+}
+# gateway-probe: end
+gateway_probe_resolve
 
 say()  { printf '\n\033[1m>> %s\033[0m\n' "$*"; }
 note() { printf '   %s\n' "$*"; }
@@ -948,6 +964,35 @@ identity_apply() {
   [ -z "$stage" ] || rm -rf -- "$stage"
   IDENTITY_STAGE=""
 }
+
+# What the end of the run says about Felyx, the console's copilot, which calls
+# this gateway like any agent does. With client keys on it needs a key, and
+# whether it has one depends on GENARYX_COPILOT_FUSE_KEY in .env (compose hands
+# it to a console from v1.1.44 on as GENARYX_COPILOT_FUSE_KEY_REF, CLAUDE.md
+# invariant 16): set, Felyx presents it as x-fuse-key; empty, the default, it
+# sends none and the gateway refuses it 401. The note used to say "sends no
+# x-fuse-key" whatever the box held (found 2026-10-13 on a box that had given
+# Felyx a key). Says nothing when client keys are off or Felyx has no provider
+# key, since then it makes no call that could be refused. Prints no key value.
+# (gate: scripts/felyx-through-the-gateway.sh lifts this and runs it.)
+felyx_gateway_note() {
+  [ "$IDENTITY_KEYS_COUNT" -gt 0 ] && [ -n "${GENARYX_COPILOT_KEY:-}" ] || return 0
+  if [ -n "${GENARYX_COPILOT_FUSE_KEY:-}" ]; then
+    printf '\n  Felyx, the console'"'"'s copilot, calls this gateway too. GENARYX_COPILOT_FUSE_KEY is\n'
+    printf '  set, so a console from v1.1.44 on sends that key as x-fuse-key (an older one\n'
+    printf '  ignores the setting and sends none). The key has to be one of the secrets in\n'
+    printf '  your keys file, and with an identity map its key id needs a keys[] binding\n'
+    printf '  whose agents include Felyx'"'"'s agent id, or the gateway refuses its calls\n'
+    printf '  (README, "Client keys and the identity map").'
+  else
+    printf '\n  Felyx, the console'"'"'s copilot, calls this gateway and, with GENARYX_COPILOT_FUSE_KEY\n'
+    printf '  empty (the default), sends no x-fuse-key, so while client keys are on its calls\n'
+    printf '  are refused 401. To give it a key of its own, add a line for it to the keys\n'
+    printf '  file, bind its key id in the identity map if you use one, and put the same\n'
+    printf '  secret in %s/.env as GENARYX_COPILOT_FUSE_KEY (README, "Client keys and the\n' "$STACK_DIR"
+    printf '  identity map").'
+  fi
+}
 # identity-files: end
 identity_resolve
 
@@ -1002,6 +1047,23 @@ else
   else die "no docker compose available; install the docker-compose-v2 package."; fi
 fi
 note "docker $(docker --version | awk '{print $3}' | tr -d ,), compose present"
+
+# Whether the compose project has a service called NAME, for the `if` that
+# decides whether a group of checks or a step applies at all. The list is read to
+# its end before anything looks at it, and not piped into `grep -q`: grep exits at
+# its first match, compose is still writing the rest of the list, hits the closed
+# pipe and exits non-zero, and under `set -o pipefail` that fails the pipeline
+# although the name was there (check() in section 8 has the measured case, for a
+# log). Here a false answer is quieter than a red check: the console's checks, or
+# the broker's, are skipped, and the run still ends "every check passed".
+# (gate: scripts/checks-survive-a-closed-pipe.sh lifts this and runs it.)
+# compose-has: begin
+compose_has() { # NAME
+  local out
+  out="$("${COMPOSE[@]}" ps --services 2>/dev/null)" || return 1
+  grep -qx -- "$1" <<<"$out"
+}
+# compose-has: end
 
 # ---- 1. this repo, whether cloned or piped ----------------------------------
 # C here is `true`, so the fallback is an empty HERE, which the next line handles.
@@ -1592,6 +1654,9 @@ repair_env_quoting() {
 repair_env_quoting .env || die "could not check .env's quoting"
 # shellcheck disable=SC1091  # generated at install time, not in this repo
 . ./.env
+# The bind is now the one this box has, which may not be the one this run was
+# given (see gateway_probe_resolve at the top).
+gateway_probe_resolve
 
 # ---- 3b. delegation: vouchryx, opt-in -----------------------------------------
 # @decided 2026-09-27: the launchers offer vouchryx as an opt-in delegation
@@ -1950,6 +2015,7 @@ verified chain and nothing came up to verify it against. Check: ${COMPOSE[*]} lo
   add_env_default TOKENFUSE_DELEGATION_JWKS /etc/tokenfuse/delegation/vouchryx.jwks.json
   # shellcheck disable=SC1091  # generated at install time, not in this repo
   . ./.env
+  gateway_probe_resolve
 fi
 
 "${COMPOSE[@]}" "${UP_PROFILES[@]}" up -d --remove-orphans
@@ -1998,7 +2064,7 @@ fi
 
 # ---- 7. the console account --------------------------------------------------
 CONSOLE_PASSWORD=""
-if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx console; then
+if compose_has console; then
   say "console account"
   if "${COMPOSE[@]}" exec -T console test -s /var/lib/stack/.taipan/genaryx-web/operator.json >/dev/null 2>&1; then
     note "an operator already exists, left as is"
@@ -2025,9 +2091,34 @@ fi
 # ---- 8. does it actually work -------------------------------------------------
 say "verify"
 fail=0
+# A check's command string is evaluated with pipefail OFF, in a subshell, and that
+# is deliberate. Several checks read a container's log through a pipe,
+# `$DC logs svc 2>&1 | grep -q PATTERN`, and `grep -q` exits at its first match.
+# `docker compose logs` is still writing, hits the closed pipe and exits 255, and
+# under the `set -o pipefail` this script runs with, that failed the pipeline
+# although the line WAS in the log. Measured 2026-10-13 on Debian 13 (Docker
+# 26.1.5, Compose 2.26.1): `set -o pipefail; docker compose logs tokenfuse-gateway
+# 2>&1 | grep -qF 'client auth: ON (3 key(s))'`, five times, returned 0 255 255 0
+# 255; the same without -q, where grep reads everything, 0 five times. It made two
+# installs report `FAIL client keys: the gateway holds 3` and `FAIL identity map:
+# the gateway reads it` on a healthy box, and it is a race a CI runner happens to
+# win. The other direction is worse: a check written the negative way,
+# `! $DC logs svc 2>&1 | grep -qE BAD`, read ok while the bad line WAS in the log,
+# because the 255 failed the pipeline and `!` turned that into a pass.
+#
+# So the verdict of a check is its reader's, the last command's, which is what a
+# pipeline's status is without pipefail: grep found the line, or it did not. A
+# producer that could not run at all leaves the reader nothing to find, so a
+# positive check still FAILs, and the one negative check that would read ok on an
+# unreadable log (identity map: every key is bound) is paired, on the same log,
+# with a positive one that does not. Fixed here once rather than at each pipeline,
+# so a check added next month cannot bring the race back.
+# (gate: scripts/checks-survive-a-closed-pipe.sh lifts both helpers and runs this
+# file's own log checks against a stub docker that exits 255 when its reader goes.)
+# check-helpers: begin
 check() { # name, command
   [ "$#" -eq 2 ] || die "internal: check() got $# arguments, expected 2 (\$1='${1:-}')"
-  if eval "$2" >/dev/null 2>&1; then printf '   ok    %s\n' "$1"; else printf '   FAIL  %s\n' "$1"; fail=$((fail+1)); fi
+  if ( set +o pipefail; eval "$2" ) >/dev/null 2>&1; then printf '   ok    %s\n' "$1"; else printf '   FAIL  %s\n' "$1"; fail=$((fail+1)); fi
 }
 # The same, for a check that reads a container's LOG: retried for up to ten
 # seconds. A log line is written once, some milliseconds after the process
@@ -2041,11 +2132,12 @@ check_log() { # name, command
   [ "$#" -eq 2 ] || die "internal: check_log() got $# arguments, expected 2 (\$1='${1:-}')"
   local left=10
   while [ "$left" -gt 0 ]; do
-    if eval "$2" >/dev/null 2>&1; then printf '   ok    %s\n' "$1"; return 0; fi
+    if ( set +o pipefail; eval "$2" ) >/dev/null 2>&1; then printf '   ok    %s\n' "$1"; return 0; fi
     sleep 1; left=$((left - 1))
   done
   printf '   FAIL  %s\n' "$1"; fail=$((fail+1))
 }
+# check-helpers: end
 # One word, not an array. `"${COMPOSE[@]}"` inside a larger quoted string does
 # not stay one argument: it word-splits, check() silently receives three
 # arguments instead of two, `$2` becomes the fragment `"docker`, and every
@@ -2082,8 +2174,9 @@ codenokey() { docker run --rm --network "$NET" busybox:1.36 \
 # not from the LAN) Docker publishes on that address only, so loopback
 # refuses, and this line read FAIL twice on a healthy box while the same probe
 # against that address answered 200 and "published on $GATEWAY_BIND only"
-# below passed (#54, measured 2026-09-17). GATEWAY_PROBE itself is computed
-# once, at the top of this file, alongside GATEWAY_BIND.
+# below passed (#54, measured 2026-09-17). GATEWAY_PROBE itself comes from
+# gateway_probe_resolve at the top of this file, called again after each read of
+# .env, so on a re-run it follows the bind the box has, not the run's default.
 check "gateway answers on $GATEWAY_PROBE:4100" "curl -fsS -m5 -o /dev/null http://$GATEWAY_PROBE:4100/healthz"
 # The bus half of the stack. tokenfuse logs this line once at start when
 # TOKENFUSE_EVENTS_PATH is set and the file could be opened; without it the
@@ -2222,7 +2315,7 @@ check "wireguard interface is up" \
 # group-readable forwarder instead. Checked from the console's side, because a
 # tunnel that is up while the console cannot reach it looks healthy from
 # everywhere else.
-if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx console; then
+if compose_has console; then
   check "console can manage peers over UAPI" \
         "$DC exec -T console test -r /var/run/wireguard/console.sock"
 fi
@@ -2244,7 +2337,7 @@ fi
 # taking. Skipped with FIRST_DEVICE=0 on a re-run, or when the config already
 # exists: a second run should not mint a peer nobody asked for, and existing
 # devices are never touched either way.
-if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx console; then
+if compose_has console; then
   CONF_OUT="$STACK_DIR/${CONSOLE_DOMAIN}.conf"
   if [ -s "$CONF_OUT" ]; then
     note "first device already issued: $CONF_OUT, left as is"
@@ -2294,7 +2387,7 @@ check "console TLS names ${CONSOLE_DOMAIN:-the configured domain}" \
       "$DC exec -T caddy sh -c 'grep -q \"^${CONSOLE_DOMAIN}\" /etc/caddy/Caddyfile'"
 check "tunnel accepts on ${WG_LISTEN_PORT:-51820}/udp" \
       "$DC port --protocol udp wg ${WG_LISTEN_PORT:-51820} | grep -q ':${WG_LISTEN_PORT:-51820}$'"
-if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx console; then
+if compose_has console; then
   check "console answers on loopback" "curl -fsS -m5 -o /dev/null http://127.0.0.1:7420/healthz"
   # Reachability is not usefulness. The console comes up perfectly whether or
   # not it can resolve the planes behind it, and the difference is only visible
@@ -2325,7 +2418,7 @@ fi
 # The typed plane's own door, only when WITH_TYPED actually brought it up
 # (section 5): a check that asked a service nothing started would prove
 # nothing, the same reasoning every other opt-in check here follows.
-if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx tokenfuse-mcp-broker; then
+if compose_has tokenfuse-mcp-broker; then
   # Not `docker compose exec ... curl`: the same reason as the money and
   # policy planes above, this image has neither curl nor a shell. The MCP
   # wire is JSON-RPC over HTTP, so this is one wget POST with the right
@@ -2388,7 +2481,7 @@ if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx tokenfuse-mcp-broker; th
   # must fail to pass, because the proxy runs without a credential and who can
   # reach it is its only protection. And only the broker's policy client was
   # pointed at it: the LLM gateway keeps asking wardryx directly.
-  if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx typryx-wardryx-proxy; then
+  if compose_has typryx-wardryx-proxy; then
     # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
     risk_probe() { docker run --rm --network agent-stack_risk-signal busybox:1.36 wget -q -T5 -O /dev/null "$1"; }
     check "typed risk signal: the proxy answers on its own network" \
@@ -2440,7 +2533,7 @@ fi
 # The delegation plane's own checks, only when WITH_DELEGATION actually
 # brought vouchryx up: the same reasoning as the typed plane above, a check
 # that asked a service nothing started would prove nothing.
-if "${COMPOSE[@]}" ps --services 2>/dev/null | grep -qx vouchryx; then
+if compose_has vouchryx; then
   # Must fail to pass, exactly like "cloud is NOT on the host" above: vouchryx
   # is a real running service, deliberately never published (compose.yaml's
   # own comment on it says so), and a reachable JWKS endpoint on the host
@@ -2556,12 +2649,7 @@ if [ "$IDENTITY_KEYS_COUNT" -gt 0 ]; then
   the map binds to that key, or it is refused 403 identity_mismatch. Its spend
   lands in the unit the map binds the key to."
   fi
-  if [ -n "${GENARYX_COPILOT_KEY:-}" ]; then
-    IDENTITY_REACH="$IDENTITY_REACH
-  Felyx, the console's copilot, calls this gateway and sends no x-fuse-key, so
-  while client keys are on its calls are refused 401 (README, \"Client keys and
-  the identity map\")."
-  fi
+  IDENTITY_REACH="$IDENTITY_REACH$(felyx_gateway_note)"
 elif [ "$IDENTITY_MAP_ON" = 1 ]; then
   IDENTITY_REACH="
   The identity map is ON with no client keys: a call's unit comes from the
