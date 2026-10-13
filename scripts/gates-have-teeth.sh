@@ -1516,6 +1516,21 @@ run_case "felyx-through-the-gateway: the remote opt-in comes back" fail \
 	"$(py 'edit("compose.yaml", "      GENARYX_COPILOT_API_KEY_REF: env:GENARYX_COPILOT_KEY\n", "      GENARYX_COPILOT_API_KEY_REF: env:GENARYX_COPILOT_KEY\n      GENARYX_COPILOT_ALLOW_REMOTE: \"1\"\n")')" \
 	"would skip the residency check"
 
+run_case "felyx-through-the-gateway: Felyx's client key reference is dropped" fail \
+	'./scripts/felyx-through-the-gateway.sh' \
+	"$(py 'edit("compose.yaml", "      GENARYX_COPILOT_FUSE_KEY_REF: env:GENARYX_COPILOT_FUSE_KEY\n", "")')" \
+	"would not present its own gateway client key"
+
+run_case "felyx-through-the-gateway: Felyx's client key is written into compose.yaml" fail \
+	'./scripts/felyx-through-the-gateway.sh' \
+	"$(py 'edit("compose.yaml", "      GENARYX_COPILOT_FUSE_KEY: ${GENARYX_COPILOT_FUSE_KEY:-}\n", "      GENARYX_COPILOT_FUSE_KEY: planted\n")')" \
+	"must be read from .env and empty by default"
+
+run_case "felyx-through-the-gateway: Felyx's client key becomes required" fail \
+	'./scripts/felyx-through-the-gateway.sh' \
+	"$(py 'edit("compose.yaml", "      GENARYX_COPILOT_FUSE_KEY: ${GENARYX_COPILOT_FUSE_KEY:-}\n", "      GENARYX_COPILOT_FUSE_KEY: ${GENARYX_COPILOT_FUSE_KEY:?set it in .env}\n")')" \
+	"must be read from .env and empty by default"
+
 run_case "felyx-through-the-gateway: a comment about Felyx changes" pass \
 	'./scripts/felyx-through-the-gateway.sh' \
 	"$(py 'edit("compose.yaml", "# Felyx, the console\x27s copilot, talks to its model THROUGH", "# Felyx, the console\x27s copilot, reaches its model THROUGH")')"
