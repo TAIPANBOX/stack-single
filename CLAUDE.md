@@ -740,7 +740,10 @@ an absent invariant.
     `TOKENFUSE_FIREWALL` as `enforce`, `shadow` or `off`, and reads any other
     value as its default, shadow, without a word
     (`crates/gateway/src/firewall.rs`, `from_env`, at tokenfuse v1.11.0), so a
-    misspelt value would run shadow on a box that looked enforced. So every
+    misspelt value would run shadow on a box that looked enforced. `@claude 2026-10-13`,
+    correction: that holds for tokenfuse v1.11.0 only. From v1.11.1 a value outside the
+    three words exits 2 before the listener binds (tokenfuse release notes, v1.11.1), so
+    a misspelt value stops the gateway instead of running it in shadow. So every
     gateway service sets `${TOKENFUSE_FIREWALL:-enforce}` in `compose.yaml`, and
     `install.sh` refuses any value other than the three before it installs
     anything, writes a usable one to `.env`, and replaces the line an earlier run
@@ -776,7 +779,11 @@ an absent invariant.
     word (`crates/gateway/src/defaults.rs`, `dlp_pii_mode_from`, and the broker's
     `TOKENFUSE_MCP_DLP_PII` in `crates/gateway/src/main.rs`, at tokenfuse v1.11.0,
     the tag this launcher pins), so a misspelling would silently switch detection
-    off. Every gateway sets `TOKENFUSE_DLP_PII` and the MCP broker sets
+    off. `@claude 2026-10-13`, correction: that holds for tokenfuse v1.11.0 only. From
+    v1.12.0 a set value outside the accepted words exits 2 before the listener binds
+    (tokenfuse release notes, v1.12.0, invariant 98); an unset value still takes the
+    `shadow` default that compose supplies. Every gateway sets `TOKENFUSE_DLP_PII` and
+    the MCP broker sets
     `TOKENFUSE_MCP_DLP_PII`, each from `${TOKENFUSE_DLP_PII:-shadow}` in
     `compose.yaml`. `install.sh` section 0e refuses any value outside off, shadow,
     mask and block before it installs anything. *(gate:

@@ -8,9 +8,9 @@
 #
 # tokenfuse has two PII scanners (email, card and phone numbers): the gateway
 # reads TOKENFUSE_DLP_PII and the MCP broker reads TOKENFUSE_MCP_DLP_PII. Both
-# read an unset value as off, and so does any value they do not know, without a
-# word (crates/gateway/src/defaults.rs, dlp_pii_mode_from; crates/gateway/src/
-# main.rs for the broker). Off finds nothing, so a box left on it looks covered
+# read an unset value as off (crates/gateway/src/defaults.rs, dlp_pii_mode_from;
+# crates/gateway/src/main.rs for the broker). From tokenfuse v1.12.0 a value they do
+# not know exits at start rather than reading as off. Off finds nothing, so a box left on it looks covered
 # and is not. @decided 2026-10-13 (paraphrased): this launcher runs both scanners
 # in shadow by default, and an operator keeps one switch to move them to off,
 # mask or block. This gate is that decision, held where a later edit would break
@@ -207,7 +207,7 @@ else
     d="$(mk)"
     out="$(run "$d" TOKENFUSE_DLP_PII="$v")"
     if [ "$(rc_of "$out")" = 0 ]; then
-      fail "TOKENFUSE_DLP_PII ($label) was accepted, and tokenfuse would read it as off"
+      fail "TOKENFUSE_DLP_PII ($label) was accepted, and tokenfuse would refuse to start on it"
     elif ! printf '%s' "$out" | grep -qF 'TOKENFUSE_DLP_PII'; then
       fail "TOKENFUSE_DLP_PII ($label) was refused without naming the variable"
     elif [ "$(cat "$d/.env")" != "SENTINEL=1" ]; then
@@ -236,7 +236,7 @@ else
   before="$(cat "$d/.env")"
   out="$(run "$d")"
   if [ "$(rc_of "$out")" = 0 ]; then
-    fail "a TOKENFUSE_DLP_PII=shadowed left in .env was accepted: the gateway would read it as off"
+    fail "a TOKENFUSE_DLP_PII=shadowed left in .env was accepted: the gateway would refuse to start"
   elif [ "$(cat "$d/.env")" != "$before" ]; then
     fail "a bad value in .env was refused after .env was changed"
   fi

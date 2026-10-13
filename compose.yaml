@@ -175,7 +175,7 @@ services:
   # ---- policy --------------------------------------------------------------
   wardryx:
     <<: *restart
-    image: ${WARDRYX_IMAGE:-ghcr.io/taipanbox/wardryx:v1.3.0}
+    image: ${WARDRYX_IMAGE:-ghcr.io/taipanbox/wardryx:v1.3.2}
     # The image's own 65532:65532, with the GID moved to the one that owns the
     # shared event directory. The binary is a static Go binary and reads no
     # /etc/passwd, so a numeric pair it was not built with is fine.
@@ -382,7 +382,7 @@ services:
   scopyx:
     <<: *restart
     profiles: ["egress"]
-    image: ${SCOPYX_IMAGE:-ghcr.io/taipanbox/scopyx:v1.0.0}
+    image: ${SCOPYX_IMAGE:-ghcr.io/taipanbox/scopyx:v1.0.1}
     user: "65532:65532"
     environment:
       # Inside the compose network, not on the host. Nothing publishes a port
@@ -440,7 +440,7 @@ services:
   scopyx-browser:
     <<: *restart
     profiles: ["egress-browser"]
-    image: ${SCOPYX_BROWSER_IMAGE:-ghcr.io/taipanbox/scopyx:v1.0.0-chromium}
+    image: ${SCOPYX_BROWSER_IMAGE:-ghcr.io/taipanbox/scopyx:v1.0.1-chromium}
     user: "65532:65532"
     # The name the rest of the box reaches it by. Same as the profile above, so
     # nothing else in this file changes when an operator switches profiles.
@@ -1043,7 +1043,7 @@ services:
   # volume, holding no capability of its own.
   wg:
     <<: *restart
-    image: ${WG_IMAGE:-ghcr.io/taipanbox/stack-wg:v1.0.0}
+    image: ${WG_IMAGE:-ghcr.io/taipanbox/stack-wg:v1.1.43}
     cap_add:
       - NET_ADMIN
     devices:
@@ -1078,7 +1078,7 @@ services:
   # simply cannot happen over WireGuard, on any device.
   caddy:
     <<: *restart
-    image: ${CADDY_IMAGE:-ghcr.io/taipanbox/stack-caddy:v1.0.0}
+    image: ${CADDY_IMAGE:-ghcr.io/taipanbox/stack-caddy:v1.1.43}
     environment:
       CONSOLE_DOMAIN: ${CONSOLE_DOMAIN:?set by install.sh}
       CONSOLE_UPSTREAM: console:7420
@@ -1095,7 +1095,7 @@ services:
 
   console:
     <<: *restart
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.1.36}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.1.43}
     environment:
       HOME: /var/lib/stack
       TAIPAN_HOME: /etc/genaryx/taipan
@@ -1391,7 +1391,7 @@ services:
   # move into the binary either: it is a one-shot by design.
   #
   # So it becomes what it actually is, and the estate already has the shape:
-  # stack-k8s ships `costcrew-crew` as a suspended CronJob a person runs. The
+  # stack-k8s keeps its `drills` CronJob suspended until a person runs it. The
   # compose equivalent is a service behind a profile no install ever enables,
   # started by hand:
   #
@@ -1424,7 +1424,7 @@ services:
 
   verdryx-drift:
     <<: *restart
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.1.36}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.1.43}
     user: "10001:10001"
     profiles: ["routines"]
     environment:
@@ -1547,7 +1547,7 @@ services:
   costcrew:
     <<: *restart
     profiles: ["finops"]
-    image: ${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.5.0}
+    image: ${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.6.0}
     user: "10003:10003"
     # The image's ENTRYPOINT is the console, so this is its argv.
     command:

@@ -528,7 +528,7 @@ run_case "manifest-is-true: a routine arrives and the manifest does not claim it
 # is one character in one tag, which is exactly how it would arrive.
 run_case "manifest-is-true: a pulled tag moves in compose and not in the manifest" fail \
 	'./scripts/manifest-is-true.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v1.3.0", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v1.3.2", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
 	"an image it pulls"
 
 # invariant 15: the delegation plane's default is byte-for-byte what it was
@@ -848,7 +848,7 @@ run_case "firewall-is-enforce: no gateway service left to judge" fail \
 run_case "firewall-is-enforce: the installer accepts a value tokenfuse ignores" fail \
 	'./scripts/firewall-is-enforce.sh' \
 	"$(py 'edit("install.sh", "off|shadow|enforce) return 0 ;;\n    *) return 1 ;;", "off|shadow|enforce) return 0 ;;\n    *) return 0 ;;")')" \
-	"was accepted, and tokenfuse would ignore it"
+	"was accepted, and tokenfuse would refuse to start on it"
 
 run_case "firewall-is-enforce: the installer writes a second line instead of replacing" fail \
 	'./scripts/firewall-is-enforce.sh' \
@@ -882,8 +882,8 @@ run_case "firewall-is-enforce: a comment that names shadow is not the setting" p
 
 # ---- pii-is-shadow (invariant 28): personal data is recorded in shadow by
 # default, on the gateway and on the MCP broker, and one installer value moves
-# both. tokenfuse reads an unknown value as off, so an unvalidated one would
-# switch the detection off without a word.
+# both. tokenfuse refuses to start on an unknown value (v1.12.0 on), and the
+# installer must refuse one before a box is touched.
 run_case "pii-is-shadow: the gateway loses its PII setting" fail \
 	'./scripts/pii-is-shadow.sh' \
 	"$(py 'edit("compose.yaml", "      TOKENFUSE_DLP_PII: ${TOKENFUSE_DLP_PII:-shadow}\n", "")')" \
@@ -941,7 +941,7 @@ edit("compose.yaml", "    command: [\"mcp-broker\"]\n", "    command: [\"mcp-bro
 run_case "pii-is-shadow: the installer accepts a value tokenfuse reads as off" fail \
 	'./scripts/pii-is-shadow.sh' \
 	"$(py 'edit("install.sh", "off|shadow|mask|block) return 0 ;;\n    *) return 1 ;;", "off|shadow|mask|block) return 0 ;;\n    *) return 0 ;;")')" \
-	"was accepted, and tokenfuse would read it as off"
+	"was accepted, and tokenfuse would refuse to start on it"
 
 run_case "pii-is-shadow: the installer writes a second line instead of replacing" fail \
 	'./scripts/pii-is-shadow.sh' \
@@ -1316,7 +1316,7 @@ run_case "typed-risk-signal: typryx is pinned before the proxy existed" fail \
 
 run_case "typed-risk-signal: wardryx is pinned before it read signals" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v1.3.0}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v1.3.2}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
 	"hold_if_signal and signals on /v1/decide do not exist before it"
 
 run_case "typed-risk-signal: tokenfuse is pinned before it sent the tool call" fail \
@@ -1819,7 +1819,7 @@ run_case "finops: its root filesystem becomes writable" fail \
 
 run_case "finops: its image is unpinned" fail \
 	'./scripts/finops-is-opt-in.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.5.0}", "ghcr.io/taipanbox/costcrew:latest}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.6.0}", "ghcr.io/taipanbox/costcrew:latest}")')" \
 	"is not the pinned"
 
 run_case "finops: it is published on every address" fail \
@@ -1870,7 +1870,7 @@ run_case "finops: the console stops waiting for its one-shot" fail \
 
 run_case "finops: no console left to judge" fail \
 	'./scripts/finops-is-opt-in.sh' \
-	"$(py 'edit("compose.yaml", "${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.5.0}", "${COSTCREW_IMAGE:-registry.invalid/costcrew}")')" \
+	"$(py 'edit("compose.yaml", "${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.6.0}", "${COSTCREW_IMAGE:-registry.invalid/costcrew}")')" \
 	"measured NOTHING about the FinOps console"
 
 # The rendering half: text a parser accepts and compose does not.
@@ -1948,7 +1948,7 @@ run_case "finops: the owner default changes" pass \
 
 run_case "finops: the pinned tag moves" pass \
 	'./scripts/finops-is-opt-in.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.5.0}", "ghcr.io/taipanbox/costcrew:v0.5.1}")')"
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.6.0}", "ghcr.io/taipanbox/costcrew:v0.6.1}")')"
 
 run_case "finops: the loopback port moves" pass \
 	'./scripts/finops-is-opt-in.sh' \
