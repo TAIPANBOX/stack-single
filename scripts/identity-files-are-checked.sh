@@ -44,7 +44,8 @@
 #      a re-run that names nothing changes nothing; the same map again changes
 #      nothing, a new one is installed and flagged for a restart; a new keys file
 #      replaces the old line and is checked against the kept map; and the
-#      gateway's refusals and its three warnings refuse with .env untouched.
+#      gateway's refusals and its three warnings refuse with .env untouched; and
+#      an image with no ENTRYPOINT, the shape BUILD_FROM_SOURCE builds, works too.
 #   D. ORDER, in install.sh: the first half before the first package install, the
 #      second after the images are on the box and before anything is started; a
 #      changed map restarts the gateway after `up`; section 8 reads the running
@@ -438,6 +439,16 @@ if [ "$block_ok" = 1 ]; then
       ! compgen -G "$d/identity.check.*" >/dev/null || echo "FAIL: $1 left the staging directory behind"
       if grep -qF -- "$K1" <<<"$out" || grep -qF -- "$K3" <<<"$out"; then echo "FAIL: $1 was refused by an answer that repeats a secret"; fi
     }
+    # The image BUILD_FROM_SOURCE builds has no ENTRYPOINT (stack-k8s
+    # images/tokenfuse.Dockerfile), so the check has to give the command compose
+    # gives the gateway. One line on top of the pinned image is that image's shape.
+    c_no_entrypoint() {
+      local d out
+      d="$(mk)"
+      out="$(IMG="$NOENT" run "$d" all CLIENT_KEYS_FILE=keys.txt IDENTITY_MAP_FILE=map.json)"
+      grep -qx 'count=2 map_on=1 changed=1' <<<"$out" \
+        || echo "FAIL: a gateway image with no ENTRYPOINT, the shape BUILD_FROM_SOURCE builds, could not check the files: $(grep -E '^(count|die)' <<<"$out")"
+    }
     c_prefixes() {
       local d out
       d="$(mk)"
@@ -452,6 +463,12 @@ if [ "$block_ok" = 1 ]; then
     c_refused "a map naming a unit it does not declare" keys.txt map-unknown-unit.json "not declared in units[]" >"$scratch/c.unknown" 2>&1 &
     c_refused "a map with key bindings and no client keys at all" "" map.json "that no client key carries" >"$scratch/c.nokeys" 2>&1 &
     c_prefixes >"$scratch/c.prefixes" 2>&1 &
+    NOENT="stack-single-gate/tokenfuse-no-entrypoint:local"
+    if printf 'FROM %s\nENTRYPOINT []\n' "$IMG" | docker build -q -t "$NOENT" - >/dev/null 2>&1; then
+      c_no_entrypoint >"$scratch/c.noentry" 2>&1 &
+    else
+      echo "FAIL: could not build a no-ENTRYPOINT image from $IMG, so the BUILD_FROM_SOURCE shape was not checked" >"$scratch/c.noentry"
+    fi
     wait
     for f in "$scratch"/c.*; do
       while IFS= read -r line; do

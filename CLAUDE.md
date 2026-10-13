@@ -855,7 +855,9 @@ an absent invariant.
     *(gate: `scripts/identity-files-are-checked.sh`, subjects derived from
     compose.yaml's image and command lines like invariant 13's; it lifts the
     `# identity-files:` block out of install.sh and runs the first half per case
-    against hostile files and the second half against the pinned gateway image,
+    against hostile files and the second half against the pinned gateway image
+    and against that image with its ENTRYPOINT emptied, the shape BUILD_FROM_SOURCE
+    builds,
     reads the call order in install.sh and `docker compose config`, and refuses
     to report OK on no gateway, no block, no Docker or no image; scenarios in
     `features/client-keys-and-the-identity-map.feature`; teeth in

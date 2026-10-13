@@ -863,13 +863,16 @@ identity_check() {
 
   docker rm -f "$name" >/dev/null 2>&1 || true
   # The keys travel in this command's environment and `-e NAME` with no value,
-  # never on a command line.
+  # never on a command line. The command is compose's own for the gateway: the
+  # published image's ENTRYPOINT is the binary already, and the image
+  # BUILD_FROM_SOURCE builds has none, so with no command it would not start
+  # (measured 2026-10-13 with the entrypoint emptied: docker refused, no command).
   TOKENFUSE_CLIENT_KEYS="$spec" docker run -d --name "$name" --network none \
       -e TOKENFUSE_UPSTREAM=https://api.anthropic.com/v1/messages \
       -e TOKENFUSE_CLIENT_KEYS \
       -e "TOKENFUSE_IDENTITY_MAP=${map:+$IDENTITY_MAP_PATH}" \
       -v "$stage:/etc/tokenfuse/identity:ro" \
-      "$img" >/dev/null \
+      "$img" /usr/local/bin/tokenfuse >/dev/null \
     || die "could not start $img to check the identity files. Nothing was changed."
   while [ "$left" -gt 0 ]; do
     logs="$(docker logs "$name" 2>&1)"

@@ -1121,6 +1121,11 @@ run_case "identity-files: the installer never asks the gateway image" fail \
 	"$(py 'edit("install.sh", "identity_check \"$IDENTITY_IMAGE\"\n", "\n")')" \
 	"block is dead text"
 
+run_case "identity-files: the check gives the image no command" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("install.sh", "\"$img\" /usr/local/bin/tokenfuse >/dev/null", "\"$img\" >/dev/null")')" \
+	"the shape BUILD_FROM_SOURCE builds, could not check"
+
 run_case "identity-files: a new map does not restart the gateway" fail \
 	'./scripts/identity-files-are-checked.sh' \
 	"$(py 'edit("install.sh", "\"${COMPOSE[@]}\" restart tokenfuse-gateway >/dev/null", "\"${COMPOSE[@]}\" ps tokenfuse-gateway >/dev/null")')" \

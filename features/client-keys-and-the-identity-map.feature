@@ -59,6 +59,12 @@ Feature: the installer takes client keys and the identity map as files, and keep
     Then identity-files-are-checked.sh fails
     # -> gates-have-teeth.sh "identity-files: the gateway's own refusal is not heard"
 
+  Scenario: a box that builds its images from source checks its files too
+    Given BUILD_FROM_SOURCE builds a gateway image with no ENTRYPOINT
+    When install.sh starts the check with no command, which such an image cannot run
+    Then identity-files-are-checked.sh fails
+    # -> gates-have-teeth.sh "identity-files: the check gives the image no command"
+
   Scenario: an empty map, a key with no secret and a key with no binding are refused too
     Given the gateway only warns about these three and then runs
     When install.sh accepts a map that configures nothing, a map binding a key id no secret carries, or a key the map does not bind
