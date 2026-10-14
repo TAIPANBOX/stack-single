@@ -576,7 +576,7 @@ run_case "manifest-is-true: a routine arrives and the manifest does not claim it
 # is one character in one tag, which is exactly how it would arrive.
 run_case "manifest-is-true: a pulled tag moves in compose and not in the manifest" fail \
 	'./scripts/manifest-is-true.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v1.3.2", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v1.5.0", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
 	"an image it pulls"
 
 # invariant 15: the delegation plane's default is byte-for-byte what it was
@@ -728,7 +728,7 @@ run_case "typed-data-mode: switching mode leaves the old mode's lines" fail \
 	"left the own-model lines"
 
 # The training log and the pin (typryx; the log needs v0.3.0 or later, and the
-# risk-signal proxy v0.4.0, which is the pin now). Each case plants the fault the
+# risk-signal proxy v0.4.0, and v0.4.1 is the pin now). Each case plants the fault the
 # matching check in scripts/typed-data-mode.sh exists for.
 run_case "typed-data-mode: the training log is on when nobody asked" fail \
 	'./scripts/typed-data-mode.sh' \
@@ -777,17 +777,17 @@ run_case "typed-data-mode: no volume is mounted where the training log lives" fa
 
 run_case "typed-data-mode: compose still pins a typryx older than the pin" fail \
 	'./scripts/typed-data-mode.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/typryx:v0.4.0}", "ghcr.io/taipanbox/typryx:v0.2.0}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/typryx:v0.4.1}", "ghcr.io/taipanbox/typryx:v0.2.0}")')" \
 	"compose.yaml pins typryx v0.2.0"
 
 run_case "typed-data-mode: components.json keeps the old typryx pin" fail \
 	'./scripts/typed-data-mode.sh' \
-	"$(py 'edit("components.json", "ghcr.io/taipanbox/typryx:v0.4.0", "ghcr.io/taipanbox/typryx:v0.2.0")')" \
+	"$(py 'edit("components.json", "ghcr.io/taipanbox/typryx:v0.4.1", "ghcr.io/taipanbox/typryx:v0.2.0")')" \
 	"components.json names typryx:v0.2.0"
 
 run_case "typed-data-mode: the README names a typryx tag compose does not pin" fail \
 	'./scripts/typed-data-mode.sh' \
-	"$(py 'edit("README.md", "this launcher pins typryx v0.4.0, so it is there", "this launcher pins ghcr.io/taipanbox/typryx:v0.2.0, so it is there")')" \
+	"$(py 'edit("README.md", "this launcher pins typryx v0.4.1, so it is there", "this launcher pins ghcr.io/taipanbox/typryx:v0.2.0, so it is there")')" \
 	"README.md names typryx:v0.2.0"
 
 # ---- run-budget-ceiling (invariant 20): tokenfuse 1.5.0's ceiling is OFF unless
@@ -892,7 +892,7 @@ run_case "firewall-is-enforce: the setting reads another variable" fail \
 # from the file, so a new gateway service that defaults to shadow is judged.
 run_case "firewall-is-enforce: a second gateway start defaults to shadow" fail \
 	'./scripts/firewall-is-enforce.sh' \
-	"$(py 'edit("compose.yaml", "  tokenfuse-gateway:\n    <<: *restart\n", "  tokenfuse-gateway-canary:\n    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.13.1}\n    command: [\"/usr/local/bin/tokenfuse\"]\n    environment:\n      TOKENFUSE_FIREWALL: ${TOKENFUSE_FIREWALL:-shadow}\n  tokenfuse-gateway:\n    <<: *restart\n")')" \
+	"$(py 'edit("compose.yaml", "  tokenfuse-gateway:\n    <<: *restart\n", "  tokenfuse-gateway-canary:\n    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.13.2}\n    command: [\"/usr/local/bin/tokenfuse\"]\n    environment:\n      TOKENFUSE_FIREWALL: ${TOKENFUSE_FIREWALL:-shadow}\n  tokenfuse-gateway:\n    <<: *restart\n")')" \
 	"defaults the agent firewall to shadow"
 
 run_case "firewall-is-enforce: no gateway service left to judge" fail \
@@ -983,7 +983,7 @@ run_case "pii-is-shadow: the broker reads its own switch, not the one the gatewa
 # come from the file, so a new gateway that defaults to off is judged.
 run_case "pii-is-shadow: a second gateway start defaults to off" fail \
 	'./scripts/pii-is-shadow.sh' \
-	"$(py 'edit("compose.yaml", "  tokenfuse-gateway:\n    <<: *restart\n", "  tokenfuse-gateway-canary:\n    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.13.1}\n    command: [\"/usr/local/bin/tokenfuse\"]\n    environment:\n      TOKENFUSE_DLP_PII: ${TOKENFUSE_DLP_PII:-off}\n  tokenfuse-gateway:\n    <<: *restart\n")')" \
+	"$(py 'edit("compose.yaml", "  tokenfuse-gateway:\n    <<: *restart\n", "  tokenfuse-gateway-canary:\n    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.13.2}\n    command: [\"/usr/local/bin/tokenfuse\"]\n    environment:\n      TOKENFUSE_DLP_PII: ${TOKENFUSE_DLP_PII:-off}\n  tokenfuse-gateway:\n    <<: *restart\n")')" \
 	"defaults PII detection to off"
 
 # Both subjects renamed away: nothing is judged, and the gate must say so.
@@ -1476,17 +1476,17 @@ open("README.md", "w").write(s.replace("hold_if_signal", "hold_if_a_signal"))')"
 
 run_case "typed-risk-signal: typryx is pinned before the proxy existed" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/typryx:v0.4.0}", "ghcr.io/taipanbox/typryx:v0.3.0}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/typryx:v0.4.1}", "ghcr.io/taipanbox/typryx:v0.3.0}")')" \
 	"the proxy (wardryx-proxy) does not exist before it"
 
 run_case "typed-risk-signal: wardryx is pinned before it read signals" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v1.3.2}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v1.5.0}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
 	"hold_if_signal and signals on /v1/decide do not exist before it"
 
 run_case "typed-risk-signal: tokenfuse is pinned before it sent the tool call" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/tokenfuse:v1.13.1}", "ghcr.io/taipanbox/tokenfuse:v1.4.1}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/tokenfuse:v1.13.2}", "ghcr.io/taipanbox/tokenfuse:v1.4.1}")')" \
 	"the broker sends no tool_call to the policy plane before it"
 
 run_case "typed-risk-signal: install.sh starts the proxy profile unconditionally" fail \
@@ -1777,12 +1777,12 @@ run_case "bus-has-a-writer: the OpenAI door's file is not pre-created" fail \
 
 run_case "bus-names: the idryx pin goes back before the OpenAI door's row" fail \
 	'./scripts/bus-names-match-their-source.sh' \
-	"$(py 'edit_all("compose.yaml", "ghcr.io/taipanbox/idryx:v1.2.0", "ghcr.io/taipanbox/idryx:v1.1.0")')" \
+	"$(py 'edit_all("compose.yaml", "ghcr.io/taipanbox/idryx:v1.2.1", "ghcr.io/taipanbox/idryx:v1.1.0")')" \
 	"older than v1.2.0"
 
 run_case "bus-names: the heraldyx pin goes back before the OpenAI door's row" fail \
 	'./scripts/bus-names-match-their-source.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/heraldyx:v0.5.0", "ghcr.io/taipanbox/heraldyx:v0.4.0")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/heraldyx:v0.6.0", "ghcr.io/taipanbox/heraldyx:v0.4.0")')" \
 	"older than v0.5.0"
 
 echo "=== and what they must NOT catch ==="
@@ -2122,7 +2122,7 @@ edit("compose.yaml", "      typryx:\n        condition: service_started", "     
 run_case "typed-data-mode: compose names no typryx image to read a pin from" fail \
 	'./scripts/typed-data-mode.sh' \
 	"$(py 's = open("compose.yaml").read()
-a = "image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.4.0}"
+a = "image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.4.1}"
 assert s.count(a) == 2, "expected the typryx service and the risk-signal proxy to name the image"
 open("compose.yaml", "w").write(s.replace(a, "image: ${TYPRYX_IMAGE:-registry.invalid/typryx}"))')" \
 	"names no ghcr.io/taipanbox/typryx"

@@ -474,9 +474,9 @@ an absent invariant.
     the training log, runs the block for off, on, re-run, mode switch, 0 and the
     refusals, reads the resolved config for a writable volume under the
     training dir beside the ledger, and requires every `typryx:vX.Y.Z` in
-    compose.yaml, components.json, README.md and install.sh to be the one pin (v0.4.0
-    since 2026-10-04, the release the risk-signal proxy needs; v0.3.0 was the first
-    with the training log); it
+    compose.yaml, components.json, README.md and install.sh to be the one pin (v0.4.1
+    since 2026-10-14; v0.4.0 from 2026-10-04, the release the risk-signal proxy needs;
+    v0.3.0 was the first with the training log); it
     refuses to report OK on no block, no profile line, no typryx image or no
     Docker; teeth in `scripts/gates-have-teeth.sh`. Not covered: a real
     `install.sh` run on Debian in any typed mode, and the interactive prompt,

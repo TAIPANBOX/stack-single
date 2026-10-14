@@ -356,6 +356,30 @@ On an installed box, set `TOKENFUSE_DLP_PII` in `/opt/agent-stack/.env` and run
 `off`, `shadow`, `mask` and `block`, and so does tokenfuse, which exits at start on a
 value it cannot read rather than switching detection off.
 
+### Which models an agent may use (you write it, nothing is seeded)
+
+A policy can name the models its agents may use. wardryx 1.5.0 reads `allow_models`:
+a model call whose `model` matches none of the entries is denied, and a model
+call whose model is empty is refused. An entry is a model id or a glob (`*` any run
+of characters, `?` one character), matched exactly, so `Claude-Sonnet-5` is not
+`claude-sonnet-5`. When several matched policies set a list, each of them has to
+name the model. Tool calls are not judged by it. This launcher seeds no such list,
+so until you write one every model passes, as it did before. tokenfuse sends the
+model with each decide request, so the list reaches the model calls the gateway
+makes. Not measured here against a live provider.
+
+```yaml
+- name: support-fleet
+  target: "agent://<your trust domain>/support/*"
+  allow_models:
+    - "claude-sonnet-*"
+    - claude-haiku-5
+```
+
+Add it to `/opt/agent-stack/policy.yaml` beside the rule above and run
+`docker compose restart wardryx`. A decision under a list is never cached, so each
+model call reaches wardryx.
+
 ### Client keys and the identity map (opt-in, off by default)
 
 By default the gateway answers any caller that can reach it, and the agent id on
@@ -733,7 +757,7 @@ the caller ever sees:
 `WITH_TYPED=1`; it never prints a key's value.
 
 **Measured end to end** (typryx v0.2.0, tokenfuse
-v1.1.1; this launcher now pins typryx v0.4.0), live on Docker Desktop on 2026-09-26: an `ask` whose typryx key
+v1.1.1; this launcher pins typryx v0.4.1 now), live on Docker Desktop on 2026-09-26: an `ask` whose typryx key
 travelled only as `{{secret:typryx_key}}` through the broker was answered,
 typryx wrote its `typed_answer` to the shared bus under the key's agent with
 the caller's `run_id`, the broker wrote its own `tool_call`, a wrong key was
@@ -777,12 +801,23 @@ destructive, an external send or a payment, add this to `/opt/agent-stack/policy
     name: action.risk_class
     values: [destructive, external_send, financial]
     min_probability: 0.8
+    when_absent: hold
 ```
 
 A signal can add a hold and nothing else: wardryx refuses a rule that would deny
 on one, and no answer in time, an unanswered or a refusal sends the call on
 untouched. A held call returns an approval id and is released by the person who
 approves it in the console.
+
+`when_absent: hold` (wardryx 1.4.0 or later) closes the gap a missing answer
+leaves. Without it, a tool call that arrives with no `action.risk_class` signal
+passes, and the broker sends a call over 12 KiB without its arguments, so padding
+a call past that cap was enough to get it through unread. With it, such a call is
+held for a person, and the reason says the signal was missing. The price is that
+every tool call the proxy does not answer (down, slow, or its budget spent) waits
+for a person. Leave `WARDRYX_APPROVAL_SINGLE_USE` unset: a padded call carries no
+arguments, so every padded call to one tool and target has the same digest, and
+under single-use one approval lets exactly one through.
 
 What turning it on changes, so nobody is surprised:
 
@@ -912,7 +947,7 @@ post, never what Jev said.
 
 **The opt-in training log.** `@decided 2026-09-30`: typryx can keep a local
 training log, off by default. typryx v0.3.0 is the first release that has it and
-this launcher pins typryx v0.4.0, so it is there. Switch it on with `TYPED_TRAINING=1` next to any typed mode
+this launcher pins typryx v0.4.1, so it is there. Switch it on with `TYPED_TRAINING=1` next to any typed mode
 (`WITH_TYPED=1`, `TYPED_MODE=jev` or `TYPED_MODE=own-model`):
 
 ```bash
@@ -1228,7 +1263,7 @@ into `./closure/secret`, readable only by the console. Nothing prints it, and a
 re-run keeps it. To turn closing off again, remove `CLOSURE_SECRET` and
 `CLOSURE_SECRET_FILE` from `.env` and run `docker compose up -d`.
 
-It needs tokenfuse v1.9.0 or later and console v1.1.34 or later. The images pinned here are tokenfuse v1.13.1 and
+It needs tokenfuse v1.9.0 or later and console v1.1.34 or later. The images pinned here are tokenfuse v1.13.2 and
 console v1.1.43; an older image ignores the setting.
 
 ## The console
