@@ -418,8 +418,10 @@ an absent invariant.
     five for the note; `features/felyx-presents-its-own-client-key.feature`. Not
     covered by a gate: a console presenting the key to a live gateway, which needs a
     running stack and was measured by hand once (above). The console pinned here
-    (v1.1.44) carries genaryx invariant 24: @measured
-    `git merge-base --is-ancestor 60ade51 d994ce5` in the genaryx checkout, 2026-10-13, exit 0.)*
+    (v1.1.45) carries genaryx invariant 24: @measured
+    `git merge-base --is-ancestor 60ade51 d994ce5` in the genaryx checkout, 2026-10-13, exit 0,
+    and `git merge-base --is-ancestor 60ade51 fd7a1ab` in the same checkout, 2026-10-14, exit 0,
+    where fd7a1ab is the source label of v1.1.45.)*
 
 17. **The installer is run for real on every change, first install and
     re-run.** Every script gate here reads files; from v1.1.9 to v1.1.12 every
