@@ -25,7 +25,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        profile: [default, delegation, typed-risk, identity]
+        profile: [default, delegation, typed-risk, identity, openai-door]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -53,12 +53,70 @@ jobs:
           JSON
           echo "IDENTITY_IN=$d" >>"$GITHUB_ENV"
 
+      # The OpenAI door's leg (CLAUDE.md invariant 32): its own keys file and map,
+      # and a stub on the runner that answers the OpenAI wire and writes down the
+      # Authorization each call brought, so the door's forwarding is seen rather
+      # than assumed. Fresh secrets per run, never printed. No provider is called.
+      - name: openai door inputs and a stub upstream
+        if: matrix.profile == 'openai-door'
+        run: |
+          d="$RUNNER_TEMP/door"
+          mkdir -p "$d"
+          umask 077
+          printf '%s:flint\n%s:brume\n' "ci-$(openssl rand -hex 20)" "ci-$(openssl rand -hex 20)" >"$d/keys.txt"
+          cat >"$d/identity.json" <<'JSON'
+          {
+            "units": [{"id": "routers", "budget_usd_month": 3}],
+            "keys": [
+              {"key_id": "flint", "unit": "routers", "agents": ["agent://ci.invalid/flint/*"]},
+              {"key_id": "brume", "unit": "routers", "agents": ["agent://ci.invalid/brume/*"]}
+            ]
+          }
+          JSON
+          cat >"$d/stub.py" <<'PY'
+          import json
+          import sys
+          from http.server import BaseHTTPRequestHandler, HTTPServer
+
+          SEEN = sys.argv[1]
+
+
+          class Stub(BaseHTTPRequestHandler):
+              def do_POST(self):
+                  self.rfile.read(int(self.headers.get("content-length") or 0))
+                  with open(SEEN, "a") as f:
+                      f.write("%s %s\n" % (self.path, self.headers.get("authorization", "")))
+                  body = json.dumps({
+                      "id": "chatcmpl-ci", "object": "chat.completion", "model": "gpt-4o-mini",
+                      "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
+                      "usage": {"prompt_tokens": 5, "completion_tokens": 1, "total_tokens": 6},
+                  }).encode()
+                  self.send_response(200)
+                  self.send_header("content-type", "application/json")
+                  self.send_header("content-length", str(len(body)))
+                  self.end_headers()
+                  self.wfile.write(body)
+
+              def log_message(self, *args):
+                  pass
+
+
+          HTTPServer(("0.0.0.0", 8999), Stub).serve_forever()
+          PY
+          : >"$d/seen.txt"
+          nohup python3 "$d/stub.py" "$d/seen.txt" >"$d/stub.log" 2>&1 &
+          # The host as a container on the stack's network reaches it: docker0's address.
+          host="$(ip -4 -o addr show docker0 | awk '{print $4}' | cut -d/ -f1)"
+          echo "DOOR_IN=$d" >>"$GITHUB_ENV"
+          echo "DOOR_UPSTREAM_CI=http://$host:8999/v1/chat/completions" >>"$GITHUB_ENV"
+
       - name: first install
         run: |
           extra=""
           [ "${{ matrix.profile }}" = delegation ] && extra="WITH_DELEGATION=1 WITH_DELEGATION_DEMO_ISSUER=1"
           [ "${{ matrix.profile }}" = typed-risk ] && extra="WITH_TYPED=1 TYPED_RISK_SIGNAL=1"
           [ "${{ matrix.profile }}" = identity ] && extra="CLIENT_KEYS_FILE=$IDENTITY_IN/keys.txt IDENTITY_MAP_FILE=$IDENTITY_IN/identity.json"
+          [ "${{ matrix.profile }}" = openai-door ] && extra="OPENAI_DOOR=1 OPENAI_DOOR_UPSTREAM=$DOOR_UPSTREAM_CI OPENAI_DOOR_CLIENT_KEYS_FILE=$DOOR_IN/keys.txt OPENAI_DOOR_IDENTITY_MAP_FILE=$DOOR_IN/identity.json"
           sudo env STACK_DIR=/opt/agent-stack $extra ./install.sh 2>&1 | tee install-1.log
           grep -q "every check passed" install-1.log || { echo "::error::the first install did not pass every check"; exit 1; }
 
@@ -67,7 +125,8 @@ jobs:
           # The re-run says nothing about the risk signal: it must stay on from
           # what the first run saved in .env. The stub is not saved, so it is
           # asked for again, exactly as an operator does. Nor about the identity
-          # files: the keys and the map must survive from the first run.
+          # files: the keys and the map must survive from the first run. Nor about
+          # the OpenAI door: it must stay on, with its keys, map and upstream.
           extra=""
           [ "${{ matrix.profile }}" = delegation ] && extra="WITH_DELEGATION=1 WITH_DELEGATION_DEMO_ISSUER=1"
           [ "${{ matrix.profile }}" = typed-risk ] && extra="WITH_TYPED=1"
@@ -92,6 +151,59 @@ jobs:
           # nothing seeds a rule that reads the signal. An explicit if: a bare
           # `! grep` is exempt from errexit and could never fail this step.
           if grep -q hold_if_signal policy.yaml; then echo "::error::policy.yaml carries a hold_if_signal rule nobody wrote"; exit 1; fi
+
+      - name: the OpenAI door is up only when asked for, and 4110 answers only then
+        run: |
+          names="$(sudo docker ps --format '{{.Names}}')"
+          if grep -q 'tokenfuse-gateway-openai' <<<"$names"; then running=yes; else running=no; fi
+          if curl -fsS -m3 -o /dev/null http://127.0.0.1:4110/healthz; then answers=yes; else answers=no; fi
+          want=no; [ "${{ matrix.profile }}" = openai-door ] && want=yes
+          echo "tokenfuse-gateway-openai running: $running, 4110 answers: $answers (want $want)"
+          [ "$running" = "$want" ] && [ "$answers" = "$want" ]
+
+      - name: the OpenAI door holds callers to its own keys and map, and forwards the caller's key
+        if: matrix.profile == 'openai-door'
+        run: |
+          cd /opt/agent-stack
+          [ "$(sudo grep -c '^OPENAI_DOOR_CLIENT_KEYS=' .env)" = 1 ] || { echo "::error::.env does not carry exactly one OPENAI_DOOR_CLIENT_KEYS after the re-run"; exit 1; }
+          if sudo grep -q '^GATEWAY_CLIENT_KEYS=' .env; then echo "::error::the door's keys reached the gateway's line"; exit 1; fi
+          sudo cmp -s identity-openai/identity.json "$DOOR_IN/identity.json" || { echo "::error::the door's installed map is not the map given"; exit 1; }
+          fkey="$(sed -n 's/:flint$//p' "$DOOR_IN/keys.txt")"
+          if grep -qF "$fkey" "$GITHUB_WORKSPACE/install-1.log" "$GITHUB_WORKSPACE/install-2.log"; then
+            echo "::error::a door client key secret appears in the installer's output"; exit 1
+          fi
+          # status, then the body, of one call on the OpenAI wire; the caller's own
+          # provider key travels as Authorization, as an OpenAI SDK sends it.
+          call() {
+            local budget="$1"
+            shift
+            curl -s -o "$RUNNER_TEMP/door-body.json" -w '%{http_code}' -X POST http://127.0.0.1:4110/v1/chat/completions \
+              -H 'content-type: application/json' -H "x-fuse-run-id: ci-door-$RANDOM" -H "x-fuse-budget-usd: $budget" \
+              -H 'authorization: Bearer ci-caller-provider-key' "$@" \
+              -d '{"model":"gpt-4o-mini","max_tokens":1,"messages":[{"role":"user","content":"ci"}]}'
+          }
+          a="$(call 0.000001 -H 'x-fuse-agent-id: agent://ci.invalid/flint/one')"
+          b="$(call 0.000001 -H 'x-fuse-key: ci-not-a-key-0000000000000000' -H 'x-fuse-agent-id: agent://ci.invalid/flint/one')"
+          c="$(call 0.000001 -H "x-fuse-key: $fkey" -H 'x-fuse-agent-id: agent://ci.invalid/brume/one')"
+          cbody="$(cat "$RUNNER_TEMP/door-body.json")"
+          d="$(call 0.000001 -H "x-fuse-key: $fkey" -H 'x-fuse-agent-id: agent://ci.invalid/flint/one')"
+          e="$(call 1.00 -H "x-fuse-key: $fkey" -H 'x-fuse-agent-id: agent://ci.invalid/flint/one')"
+          ebody="$(cat "$RUNNER_TEMP/door-body.json")"
+          echo "no key: $a | unknown key: $b | flint's key as brume: $c | flint's key as flint, budget 1e-6: $d | budget 1.00: $e"
+          [ "$a" = 401 ] || { echo "::error::a call with no key was not refused 401"; exit 1; }
+          [ "$b" = 401 ] || { echo "::error::a call with an unknown key was not refused 401"; exit 1; }
+          [ "$c" = 403 ] && grep -q identity_mismatch <<<"$cbody" || { echo "::error::a key speaking as another agent was not refused 403 identity_mismatch: $cbody"; exit 1; }
+          [ "$d" = 402 ] || { echo "::error::a key speaking as its own agent did not get past identity to the budget (402)"; exit 1; }
+          [ "$e" = 200 ] && grep -q '"choices"' <<<"$ebody" || { echo "::error::an admitted call was not answered by the upstream: $e $ebody"; exit 1; }
+          echo "the stub saw:"; cat "$DOOR_IN/seen.txt"
+          grep -qx '/v1/chat/completions Bearer ci-caller-provider-key' "$DOOR_IN/seen.txt" \
+            || { echo "::error::the upstream did not receive the caller's own Authorization on /v1/chat/completions"; exit 1; }
+          [ "$(grep -c . "$DOOR_IN/seen.txt")" = 1 ] || { echo "::error::a refused call reached the upstream"; exit 1; }
+          sudo docker run --rm -v agent-stack_events:/e:ro busybox:1.36 grep -q identity_mismatch /e/tokenfuse-openai.ndjson \
+            || { echo "::error::the door's refusal did not reach its own stream, tokenfuse-openai.ndjson"; exit 1; }
+          if sudo docker run --rm -v agent-stack_events:/e:ro busybox:1.36 grep -q 'ci.invalid/brume' /e/tokenfuse.ndjson; then
+            echo "::error::the door's events reached the gateway's stream"; exit 1
+          fi
 
       - name: client keys and the identity map are kept, and the gateway holds callers to them
         if: matrix.profile == 'identity'
@@ -134,6 +246,18 @@ jobs:
           cd /opt/agent-stack
           if sudo docker compose ps --services | grep -qx typryx-wardryx-proxy; then echo "::error::the proxy is still running after TYPED_RISK_SIGNAL=0"; exit 1; fi
           if sudo grep -q '^TYPED_RISK_' .env; then echo "::error::TYPED_RISK_ lines are still in .env after TYPED_RISK_SIGNAL=0"; exit 1; fi
+
+      - name: turning the OpenAI door off removes it and keeps its lines
+        if: matrix.profile == 'openai-door'
+        run: |
+          sudo env STACK_DIR=/opt/agent-stack OPENAI_DOOR=0 ./install.sh 2>&1 | tee install-3.log
+          grep -q "every check passed" install-3.log || { echo "::error::the install that turned the door off did not pass every check"; exit 1; }
+          names="$(sudo docker ps -a --format '{{.Names}}')"
+          if grep -q 'tokenfuse-gateway-openai' <<<"$names"; then echo "::error::the door's container is still there after OPENAI_DOOR=0"; exit 1; fi
+          if curl -fsS -m3 -o /dev/null http://127.0.0.1:4110/healthz; then echo "::error::4110 still answers after OPENAI_DOOR=0"; exit 1; fi
+          cd /opt/agent-stack
+          if sudo grep -q '^OPENAI_DOOR=' .env; then echo "::error::OPENAI_DOOR is still in .env after OPENAI_DOOR=0"; exit 1; fi
+          sudo grep -q '^OPENAI_DOOR_CLIENT_KEYS=' .env || { echo "::error::OPENAI_DOOR=0 dropped the door's keys"; exit 1; }
 
       - name: state on failure
         if: failure()

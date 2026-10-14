@@ -67,6 +67,7 @@ change here is a change to something with root on somebody else's box.
 ./scripts/identity-files-are-checked.sh
 ./scripts/checks-survive-a-closed-pipe.sh
 ./scripts/gen-is-bounded.sh
+./scripts/openai-door.sh
 ./scripts/features-are-bound.sh
 ./scripts/gates-have-teeth.sh   # invariant 8; needs a clean tree
 ```
@@ -218,9 +219,19 @@ an absent invariant.
     the `root:10001 2775` events directory, and the exporter swallows the open
     error. So each money-plane writer names its own file, and `init-volumes`
     pre-creates both by name, owned by that uid.
+
+    Since invariant 32 the box can run a second gateway, the OpenAI door, so
+    "the gateway's file" reads "a file some gateway writes": every service that
+    runs the gateway image with no subcommand is a writer, no two writers name one
+    file (two gateways on one chained file fork its chain), `init-volumes`
+    pre-creates each one, every `--load tokenfuse:` names a file some gateway
+    writes, and every reader that loads the gateways' log loads each gateway's
+    file, so idryx and `idryx-detect` load `tokenfuse-openai.ndjson` on every box
+    (empty unless the door runs).
     *(gate: `scripts/bus-has-a-writer.sh`, which refuses to report OK when the
-    gateway, init-volumes, or every writable volume has been taken away;
-    teeth in `scripts/gates-have-teeth.sh`)*
+    gateway, init-volumes, or every writable volume has been taken away, and
+    derives the gateways from their image and command lines rather than naming
+    them; teeth in `scripts/gates-have-teeth.sh`)*
 
 11. **The operator's bind is honoured end to end.** `GATEWAY_BIND` is the one
     address decision an operator makes here, and every check that depends on
@@ -930,6 +941,25 @@ an absent invariant.
     run), Felyx calling with a key (measured by hand once, invariant 16, not
     gated), and stack-k8s, which has none of this yet.)*
 
+    One block, every door. `@claude 2026-10-14`: the OpenAI door (invariant 32)
+    takes a keys file and a map of its own, and they are checked by this same
+    block, run for that door by name: `identity_door main` or `identity_door
+    openai` names the input variables (`CLIENT_KEYS_FILE` or
+    `OPENAI_DOOR_CLIENT_KEYS_FILE`, and the two map variables), the `.env` lines
+    (`GATEWAY_CLIENT_KEYS` or `OPENAI_DOOR_CLIENT_KEYS`), the directory
+    (`./identity` or `./identity-openai`), the service, and the wire and upstream
+    the check container starts with (the gateway refuses the openai wire with no
+    upstream). Each door's state is kept under its own name when the other is
+    named (`printf -v` and `${!name}`, which bash 3.2 has), and the check now
+    requires the container's own `serving one door` line to name the door's route,
+    so a check started on the other wire is refused. Not a copy per door: two
+    copies of a security check drift apart (stack-k8s GOTCHAS 101).
+    *(gate: `scripts/identity-files-are-checked.sh` reads the doors from
+    identity_door's own case labels and runs sections A to E once per door, and
+    requires every gateway in compose.yaml to be exactly one door's service; it
+    also runs one process through both doors and back and requires each to keep
+    its own state; teeth for the door dimension in `scripts/gates-have-teeth.sh`)*
+
 30. **A check reports the box, not which of two processes finished first.**
     `@claude 2026-10-13`, from upgrading an installed box to v1.1.32. `install.sh`
     runs under `set -o pipefail`, and several of its verification checks read a
@@ -1016,6 +1046,101 @@ an absent invariant.
     `gen`, a read of the random source by another path (`/dev/random`,
     `openssl rand`), and the randomness itself, which only "no value repeats in
     100 runs" touches.)*
+
+32. **The OpenAI door is opt-in, a gateway like the first in every hardened
+    setting, on keys and a map of its own, on the operator's bind, and never on a
+    box that did not ask for it.** `@decided 2026-10-13` (paraphrased): an opt-in
+    second tokenfuse gateway serves the OpenAI wire on port 4110, in front of an
+    OpenAI-compatible upstream the operator chooses, with every hardened setting
+    the first gateway has; the notifier and the identity plane read its stream as
+    tokenfuse through a built-in row each of them ships (heraldyx v0.5.0, idryx
+    v1.2.0), so invariant 23 stays as written and no stream declaration is set on
+    the box; and it takes a keys file and an identity map of its own rather than
+    the gateway's, because a unit's month counter lives in one gateway process
+    (tokenfuse docs/20) and a unit in both maps would get its cap once on each
+    door.
+
+    `@claude 2026-10-14`, the shape. compose.yaml's `tokenfuse-gateway-openai`
+    runs the gateway's own image default and bare command, so every gate that
+    derives its subjects from those lines judges it, behind `profiles:
+    ["openai-door"]`, with every hardened line written out in its own block, not
+    through a YAML anchor. It sets `TOKENFUSE_WIRE: openai`, publishes
+    `${GATEWAY_BIND:-127.0.0.1}:4110:4100`, exports to
+    `tokenfuse-openai.ndjson`, keeps `traces/gateway-openai` (both made by
+    `init-volumes` on every box), reads its map from `./identity-openai`, and sets
+    no delegation or closure variable (a hand-off proof's DPoP `htu` is checked
+    against the 4100 origin, and the console closes reservations through one
+    gateway). Its keys are `${OPENAI_DOOR_CLIENT_KEYS:-}` and its map
+    `${OPENAI_DOOR_IDENTITY_MAP:-}`; its upstream is
+    `${OPENAI_DOOR_CLIENT_KEYS:+${OPENAI_DOOR_IDENTITY_MAP:+${OPENAI_DOOR_UPSTREAM:-}}}`,
+    empty unless keys and a map are set, and tokenfuse refuses to start with no
+    upstream, so a door started by hand without them does not open. Not
+    `${VAR:?}`: compose interpolates every service, a profile's too, so a
+    required variable on the door stops `docker compose up` on every box that
+    never asked for it. @measured `docker compose config` of a two-service file
+    whose profile-only service sets `${DOOR_X:?}`, Docker Compose v5.6.0 on
+    macOS, 2026-10-14: "required variable DOOR_X is missing a value" with the
+    profile off. @measured the nested `:+` form in `docker compose --profile door
+    config` under Compose v2.22.0, v2.26.1 and v2.29.1 (images docker:23.0-cli,
+    docker:26.0-cli, docker:24.0.9-cli) and v5.6.0, 2026-10-14: the upstream with
+    all three set, empty with any one unset. @measured `docker run --rm
+    --network none -e TOKENFUSE_WIRE=openai -e TOKENFUSE_UPSTREAM=
+    ghcr.io/taipanbox/tokenfuse:v1.13.1 /usr/local/bin/tokenfuse`, 2026-10-14:
+    exit 2, "refusing to start: TOKENFUSE_UPSTREAM is not set" (the gate re-runs
+    this on every pass).
+
+    install.sh section 0g reads `OPENAI_DOOR` (1 on, 0 off, unset keeps what
+    `.env` saved) and, before any package is installed, refuses the door without
+    `OPENAI_DOOR_UPSTREAM` (http or https, a host, no credentials, query or
+    fragment, ending in `/chat/completions`), without a keys file and without a
+    map (given now or kept in `.env`), and refuses a door setting given with the
+    door off; a refusal never echoes the upstream. The door's files go through
+    section 0f's block by name (invariant 29). Section 3e checks the gateway's
+    pair, then the door's with the image compose resolves for the door, then
+    compares the two maps with python3 in a throwaway, network-less container of
+    the console's image (@measured `docker run --rm --network none --entrypoint
+    python3 ghcr.io/taipanbox/genaryx-console:v1.1.44 -c ...`, 2026-10-14: Python
+    3.12.15) and refuses two that declare one unit id, removing both staging
+    directories; only then is either written. Both profile lists gain
+    `--profile openai-door` on a line `DOOR_ON` decides; off, the container is
+    removed by name after `up` (a profile's container survives an `up` that does
+    not name it); a new door map restarts the door. Section 8, on every box that
+    asked and never skipped there, asks the door what it asks the gateway: 4110 on
+    the bind and loopback refusing on a one-address bind, the published rule, the
+    wire, the export line, the ceiling line, its keys and map, and 401 with no key
+    and with an unknown key. The closing report says a metered upstream bills
+    whoever's key the caller sends. `OPENAI_DOOR=0` drops `OPENAI_DOOR` and keeps
+    the door's other lines.
+
+    The limits, named rather than implied. The door's traces are not in the FOCUS
+    export (`focus-export` reads `traces/gateway`, stack-single#61). The console
+    reaches one gateway's admin routes, so a 4110 run shows in the Cloud and on
+    the bus and not in the console's runs view. Counters are per gateway process:
+    a unit is counted by its door alone (hence distinct units), and a run id used
+    on both doors gets a run budget on each, two budgets. A metered upstream is
+    billed to whoever's key the caller sends; budgets limit the spend, not whose
+    account pays. The door holds the gateway's admin, declassify, Cloud and
+    wardryx credentials, so it has the gateway's blast radius. stack-k8s and
+    stack-up have no door, and nothing there pre-creates `tokenfuse-openai.ndjson`.
+    *(gate: `scripts/openai-door.sh`: the door's compose block against the
+    gateway's, the installer block run per case, two maps sharing a unit against
+    the pinned gateway and console images, the order in install.sh, the resolved
+    configuration with and without the profile, and the pinned image refusing an
+    empty upstream; refuses to report OK on no door service, no block, no Docker
+    or no image. The firewall, PII and run-budget gates read the resolved
+    configuration with `--profile openai-door` and require every gateway section A
+    found; `scripts/bus-has-a-writer.sh` and
+    `scripts/bus-names-match-their-source.sh` (row `tokenfuse-openai.ndjson ->
+    tokenfuse`, and readers pinned at or after the releases that carry it) hold
+    its stream; `scripts/checks-survive-a-closed-pipe.sh` runs its log checks.
+    Scenarios in `features/the-openai-door.feature`; teeth in
+    `scripts/gates-have-teeth.sh`; CI's `openai-door` install leg runs install.sh
+    twice with the door on against a stub upstream on the runner, asserts 401,
+    401, 403 `identity_mismatch`, 402 and a 200 whose upstream received the
+    caller's own Authorization, and turns the door off. Not covered: a real
+    metered upstream, a streamed call through the door, a box with a one-address
+    bind, `docker-compose` v1, and the forge upgrade from its hand-written
+    override, which is an operator step.)*
 
 ## Decisions that have no gate yet
 

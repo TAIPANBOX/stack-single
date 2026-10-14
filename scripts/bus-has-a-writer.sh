@@ -33,13 +33,18 @@
 #
 # So this holds two things about compose.yaml, both structural:
 #
-#   A. Each money-plane writer, `tokenfuse-gateway` and `tokenfuse-cloud`, sets
+#   A. Each money-plane writer, every gateway and `tokenfuse-cloud`, sets
 #      `TOKENFUSE_EVENTS_PATH`, the file sits inside a volume that service
-#      mounts read-write, the two name different files (one bus file, two
-#      appenders, no lock), and `init-volumes` pre-creates each file by name
-#      in that volume, since neither uid can. Every `--load tokenfuse:<path>`
-#      in compose.yaml (idryx, at start and on demand) names the gateway's
-#      file. A bus with a reader and no writer is the fault above.
+#      mounts read-write, no two name the same file (one bus file, two
+#      appenders, no lock: two gateways on one chained file fork its chain), and
+#      `init-volumes` pre-creates each file by name in that volume, since no
+#      tokenfuse uid can. The gateways are derived from compose.yaml's own image
+#      and command lines (the tokenfuse gateway image, no subcommand), so the
+#      OpenAI door (`tokenfuse-gateway-openai`, CLAUDE.md invariant 32) is judged
+#      like the first without being named here. Every `--load tokenfuse:<path>`
+#      in compose.yaml (idryx, at start and on demand) names a file some gateway
+#      writes, and every service that loads the gateways' log loads each
+#      gateway's file: a door whose events nobody reads is the fault above.
 #
 #   B. Every named volume that a service running as a non-root `user:` mounts
 #      read-write is mounted by `init-volumes` and given to that uid or gid by
@@ -156,12 +161,26 @@ def precreated(dirpath):
 
 # Each writer's own env var name differs (typryx and the broker do not read
 # TOKENFUSE_EVENTS_PATH), so the table carries the var name beside the
-# consequence rather than assuming one name for every writer.
+# consequence rather than assuming one name for every writer. The gateways are
+# not named: every service that runs the tokenfuse gateway image with no
+# subcommand is one, read from its own image and command lines.
+def is_gateway(block):
+    image = any(re.match(r"^\s*image:\s*.*ghcr\.io/taipanbox/tokenfuse:", l) for l in block)
+    bare = any(re.match(r'^\s*command:\s*\["/usr/local/bin/tokenfuse"\]\s*$', l) for l in block)
+    return image and bare
+
+
+gateways = sorted(n for n, b in blocks.items() if is_gateway(b))
+if "tokenfuse-gateway" not in gateways:
+    note("no tokenfuse-gateway service runs the gateway image with no subcommand: nothing to hold the bus writer on, so this gate measured nothing")
 WRITERS = {
-    "tokenfuse-gateway": ("TOKENFUSE_EVENTS_PATH", "the gateway exports no agent events, the bus has readers and no writer"),
+    g: ("TOKENFUSE_EVENTS_PATH", f"{g} exports no agent events, so the bus has readers and no writer for it")
+    for g in gateways
+}
+WRITERS.update({
     "tokenfuse-cloud": ("TOKENFUSE_EVENTS_PATH", "the control plane's incidents (a budget gone, a sustained loop) never leave /v1/incidents for the notifier, the identity plane or the record"),
     "typryx": ("TYPRYX_EVENTS", "typryx's typed_answer, typed_unanswered, typed_refused and calibration_drift events never reach heraldyx or the record"),
-}
+})
 written = {}
 for name, (envvar, consequence) in WRITERS.items():
     svc = blocks.get(name)
@@ -184,18 +203,30 @@ for name, (envvar, consequence) in WRITERS.items():
     base = path[len(target.rstrip("/")) + 1:]
     if base not in precreated(init_mounts[vol]):
         note(f"init-volumes does not pre-create {base} in {init_mounts[vol]}: {name} may not be able to create it there, and {consequence.split(',')[0]}")
-if len(set(written.values())) < len(written):
-    note("two writers name the same events path: two appenders on one file with no lock")
-events_path = written.get("tokenfuse-gateway")
+seen_paths = {}
+for name, path in sorted(written.items()):
+    if path in seen_paths:
+        note(f"{seen_paths[path]} and {name} name the same events path {path}: two appenders on one file with no lock, and two gateways on one chained file fork its chain")
+    seen_paths.setdefault(path, name)
+gateway_files = {written[g] for g in gateways if g in written}
 
-loads = re.findall(r"--load\s*\n?\s*-?\s*tokenfuse:(/\S+)|tokenfuse:(/var/lib/stack/events/\S+)", text)
-load_paths = sorted({a or b for a, b in loads})
+# Per reader, from its own block with comments dropped: the files it loads as tokenfuse.
+load_re = re.compile(r"--load\s*\n?\s*-?\s*tokenfuse:(/\S+)|tokenfuse:(/var/lib/stack/events/\S+)")
+readers = {}
+for name, block in blocks.items():
+    code = "\n".join(l for l in block if not l.lstrip().startswith("#"))
+    found = {a or b for a, b in load_re.findall(code)}
+    if found:
+        readers[name] = found
+load_paths = sorted(set().union(*readers.values())) if readers else []
 if not load_paths:
     note("nothing in compose.yaml loads tokenfuse:<path>: idryx has no bus to read, so the reader half of this gate measured nothing")
-elif events_path:
-    for p in load_paths:
-        if p != events_path:
-            note(f"a service loads tokenfuse:{p} but the gateway writes {events_path}: reader and writer disagree on the file")
+else:
+    for name, found in sorted(readers.items()):
+        for p in sorted(found - gateway_files):
+            note(f"{name} loads tokenfuse:{p} and no gateway writes it (they write {', '.join(sorted(gateway_files)) or 'nothing'}): reader and writer disagree on the file")
+        for p in sorted(gateway_files - found):
+            note(f"{name} does not load tokenfuse:{p}, which a gateway writes: that gateway's agents never reach the identity graph")
 
 # ---- B. every volume a non-root service writes has an owner ----------------
 if init is None:
@@ -238,5 +269,6 @@ if judged == 0:
 if problems:
     print(f"{len(problems)} problem(s)")
     sys.exit(1)
-print(f"OK: the gateway exports to {events_path}, the control plane to {written.get('tokenfuse-cloud')}, and typryx to {written.get('typryx')}, every one pre-created by init-volumes; {len(load_paths)} reader(s) load the gateway's file, and every one of {judged} writable volume mount(s) of a non-root service is prepared by init-volumes")
+gw_said = ", ".join(f"{g} to {written[g]}" for g in gateways if g in written)
+print(f"OK: {len(gateways)} gateway(s) export ({gw_said}), the control plane to {written.get('tokenfuse-cloud')}, and typryx to {written.get('typryx')}, every one pre-created by init-volumes; {len(readers)} reader(s) load every gateway's file and nothing else as tokenfuse, and every one of {judged} writable volume mount(s) of a non-root service is prepared by init-volumes")
 PY

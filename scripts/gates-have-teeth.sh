@@ -193,7 +193,11 @@ run_case() {
 	fi
 }
 
-py() { printf 'def edit(p, a, b):\n    s = open(p).read()\n    assert a in s, "pattern not found in " + p\n    open(p, "w").write(s.replace(a, b, 1))\n%s\n' "$1"; }
+# edit: the first occurrence. edit_all: every one, for a fault that has to reach
+# both gateways (the OpenAI door, CLAUDE.md invariant 32, runs the same image and
+# command). door: the first occurrence inside the OpenAI door's own block, for a
+# fault on the door alone where the gateway carries the same line.
+py() { printf 'def edit(p, a, b):\n    s = open(p).read()\n    assert a in s, "pattern not found in " + p\n    open(p, "w").write(s.replace(a, b, 1))\ndef edit_all(p, a, b):\n    s = open(p).read()\n    assert a in s, "pattern not found in " + p\n    open(p, "w").write(s.replace(a, b))\ndef door(a, b):\n    s = open("compose.yaml").read()\n    i = s.index("  tokenfuse-gateway-openai:\\n")\n    assert a in s[i:], "pattern not found in the OpenAI door"\n    open("compose.yaml", "w").write(s[:i] + s[i:].replace(a, b, 1))\n%s\n' "$1"; }
 
 echo "=== faults each gate must catch ==="
 
@@ -283,7 +287,7 @@ run_case "bus-has-a-writer: the control plane stops exporting events" fail \
 # reads as wired while the file never exists.
 run_case "bus-has-a-writer: the control plane's file is not pre-created" fail \
 	'./scripts/bus-has-a-writer.sh' \
-	"$(py 'edit("compose.yaml", "for f in tokenfuse.ndjson tokenfuse-cloud.ndjson tokenfuse-mcp.ndjson wardryx.ndjson typryx.ndjson vouchryx.ndjson; do", "for f in tokenfuse.ndjson tokenfuse-mcp.ndjson wardryx.ndjson typryx.ndjson vouchryx.ndjson; do")')" \
+	"$(py 'edit("compose.yaml", "for f in tokenfuse.ndjson tokenfuse-cloud.ndjson tokenfuse-mcp.ndjson tokenfuse-openai.ndjson wardryx.ndjson typryx.ndjson vouchryx.ndjson; do", "for f in tokenfuse.ndjson tokenfuse-mcp.ndjson tokenfuse-openai.ndjson wardryx.ndjson typryx.ndjson vouchryx.ndjson; do")')" \
 	"does not pre-create tokenfuse-cloud.ndjson"
 
 # typryx joined the bus 2026-09-26; its writer entry has its own env var name
@@ -480,7 +484,7 @@ run_case "gateway-cache-is-off: TOKENFUSE_CACHE flips to on" fail \
 # and it must say it measured nothing rather than report OK on an empty list.
 run_case "gateway-cache-is-off: no gateway service left to judge" fail \
 	'./scripts/gateway-cache-is-off.sh' \
-	"$(py 'edit("compose.yaml", "command: [\"/usr/local/bin/tokenfuse\"]", "command: [\"/usr/local/bin/tokenfuse\", \"serve\"]")')" \
+	"$(py 'edit_all("compose.yaml", "command: [\"/usr/local/bin/tokenfuse\"]", "command: [\"/usr/local/bin/tokenfuse\", \"serve\"]")')" \
 	"measured NOTHING"
 
 # invariant 19: the gateway's declassify key is minted per install and reaches
@@ -520,7 +524,7 @@ run_case "declassify-is-keyed: install.sh mints a fixed key" fail \
 # finds it by, and it must say it measured nothing, never OK.
 run_case "declassify-is-keyed: no gateway service left to judge" fail \
 	'./scripts/declassify-is-keyed.sh' \
-	"$(py 'edit("compose.yaml", "command: [\"/usr/local/bin/tokenfuse\"]", "command: [\"/usr/local/bin/tokenfuse\", \"serve\"]")')" \
+	"$(py 'edit_all("compose.yaml", "command: [\"/usr/local/bin/tokenfuse\"]", "command: [\"/usr/local/bin/tokenfuse\", \"serve\"]")')" \
 	"measured NOTHING"
 
 # The second subject taken away: no installer to read the mint from.
@@ -848,7 +852,7 @@ run_case "run-budget-ceiling: the installer never writes the figure" fail \
 
 run_case "run-budget-ceiling: no gateway service left to judge" fail \
 	'./scripts/run-budget-ceiling.sh' \
-	"$(py 'edit("compose.yaml", "    command: [\"/usr/local/bin/tokenfuse\"]\n    environment:\n      TOKENFUSE_ADDR", "    command: [\"/usr/local/bin/tokenfuse\", \"serve\"]\n    environment:\n      TOKENFUSE_ADDR")')" \
+	"$(py 'edit_all("compose.yaml", "    command: [\"/usr/local/bin/tokenfuse\"]\n", "    command: [\"/usr/local/bin/tokenfuse\", \"serve\"]\n")')" \
 	"measured NOTHING about the run-budget"
 
 run_case "run-budget-ceiling: the installer block is gone" fail \
@@ -893,7 +897,7 @@ run_case "firewall-is-enforce: a second gateway start defaults to shadow" fail \
 
 run_case "firewall-is-enforce: no gateway service left to judge" fail \
 	'./scripts/firewall-is-enforce.sh' \
-	"$(py 'edit("compose.yaml", "    command: [\"/usr/local/bin/tokenfuse\"]\n    environment:\n      TOKENFUSE_ADDR", "    command: [\"/usr/local/bin/tokenfuse\", \"serve\"]\n    environment:\n      TOKENFUSE_ADDR")')" \
+	"$(py 'edit_all("compose.yaml", "    command: [\"/usr/local/bin/tokenfuse\"]\n", "    command: [\"/usr/local/bin/tokenfuse\", \"serve\"]\n")')" \
 	"measured NOTHING about the agent"
 
 run_case "firewall-is-enforce: the installer accepts a value tokenfuse ignores" fail \
@@ -985,7 +989,7 @@ run_case "pii-is-shadow: a second gateway start defaults to off" fail \
 # Both subjects renamed away: nothing is judged, and the gate must say so.
 run_case "pii-is-shadow: no gateway and no broker left to judge" fail \
 	'./scripts/pii-is-shadow.sh' \
-	"$(py 'edit("compose.yaml", "    command: [\"/usr/local/bin/tokenfuse\"]\n    environment:\n      TOKENFUSE_ADDR", "    command: [\"/usr/local/bin/tokenfuse\", \"serve\"]\n    environment:\n      TOKENFUSE_ADDR")
+	"$(py 'edit_all("compose.yaml", "    command: [\"/usr/local/bin/tokenfuse\"]\n", "    command: [\"/usr/local/bin/tokenfuse\", \"serve\"]\n")
 edit("compose.yaml", "    command: [\"mcp-broker\"]\n", "    command: [\"mcp-broker\", \"serve\"]\n")')" \
 	"measured NOTHING"
 
@@ -1064,7 +1068,7 @@ run_case "identity-files: another service is handed the client keys" fail \
 
 run_case "identity-files: no gateway service left to judge" fail \
 	'./scripts/identity-files-are-checked.sh' \
-	"$(py 'edit("compose.yaml", "    command: [\"/usr/local/bin/tokenfuse\"]\n    environment:\n      TOKENFUSE_ADDR", "    command: [\"/usr/local/bin/tokenfuse\", \"serve\"]\n    environment:\n      TOKENFUSE_ADDR")')" \
+	"$(py 'edit_all("compose.yaml", "    command: [\"/usr/local/bin/tokenfuse\"]\n", "    command: [\"/usr/local/bin/tokenfuse\", \"serve\"]\n")')" \
 	"measured NOTHING about client keys"
 
 run_case "identity-files: the map path in .env is not the file inside the mount" fail \
@@ -1084,12 +1088,12 @@ run_case "identity-files: the installer lets a quote or a dollar into a secret" 
 
 run_case "identity-files: the installer keeps a secret given twice" fail \
 	'./scripts/identity-files-are-checked.sh' \
-	"$(py 'edit("install.sh", ") die \"CLIENT_KEYS_FILE: line $n gives a secret", ") note \"CLIENT_KEYS_FILE: line $n gives a secret")')" \
+	"$(py 'edit("install.sh", ") die \"$ID_KEYS_FILE_VAR: line $n gives a secret", ") note \"$ID_KEYS_FILE_VAR: line $n gives a secret")')" \
 	"(a secret given twice) was accepted"
 
 run_case "identity-files: a refusal repeats the secret" fail \
 	'./scripts/identity-files-are-checked.sh' \
-	"$(py 'edit("install.sh", "die \"CLIENT_KEYS_FILE: line $n $why.", "die \"CLIENT_KEYS_FILE: line $n ($line) $why.")')" \
+	"$(py 'edit("install.sh", "die \"$ID_KEYS_FILE_VAR: line $n $why.", "die \"$ID_KEYS_FILE_VAR: line $n ($line) $why.")')" \
 	"repeats the secret"
 
 run_case "identity-files: a keys file of comments alone is accepted" fail \
@@ -1109,7 +1113,7 @@ run_case "identity-files: a map that is not a JSON object passes the first half"
 
 run_case "identity-files: a bad key left in .env is accepted on a re-run" fail \
 	'./scripts/identity-files-are-checked.sh' \
-	"$(py 'edit("install.sh", "[ -z \"$why\" ] || die \".env holds a GATEWAY_CLIENT_KEYS whose", "[ -z \"$why\" ] || note \".env holds a GATEWAY_CLIENT_KEYS whose")')" \
+	"$(py 'edit("install.sh", "[ -z \"$why\" ] || die \".env holds a $ID_KEYS_ENV whose", "[ -z \"$why\" ] || note \".env holds a $ID_KEYS_ENV whose")')" \
 	"with a short secret was accepted"
 
 run_case "identity-files: the gateway's own refusal is not heard" fail \
@@ -1144,12 +1148,12 @@ run_case "identity-files: a new file adds a second line instead of replacing" fa
 
 run_case "identity-files: a re-run that names no file loses the kept keys" fail \
 	'./scripts/identity-files-are-checked.sh' \
-	"$(py 'edit("install.sh", "[ \"$IDENTITY_KEYS_GIVEN\" = 1 ] || spec=\"$(identity_env_get GATEWAY_CLIENT_KEYS)\"", "[ \"$IDENTITY_KEYS_GIVEN\" = 1 ] || spec=\"\"")')" \
+	"$(py 'edit("install.sh", "[ \"$IDENTITY_KEYS_GIVEN\" = 1 ] || spec=\"$(identity_env_get \"$ID_KEYS_ENV\")\"", "[ \"$IDENTITY_KEYS_GIVEN\" = 1 ] || spec=\"\"")')" \
 	"a re-run that names no file was refused"
 
 run_case "identity-files: the same map again restarts the gateway" fail \
 	'./scripts/identity-files-are-checked.sh' \
-	"$(py 'edit("install.sh", "    if cmp -s \"$stage/identity.json\" \"$STACK_DIR/identity/identity.json\"; then", "    if false; then")')" \
+	"$(py 'edit("install.sh", "    if cmp -s \"$stage/identity.json\" \"$STACK_DIR/$ID_DIR/identity.json\"; then", "    if false; then")')" \
 	"the same map given again was installed as a change"
 
 run_case "identity-files: the map is installed writable" fail \
@@ -1159,12 +1163,12 @@ run_case "identity-files: the map is installed writable" fail \
 
 run_case "identity-files: the files are checked after a package is installed" fail \
 	'./scripts/identity-files-are-checked.sh' \
-	"$(py 'edit("install.sh", "# identity-files: end\nidentity_resolve\n", "# identity-files: end\n"); edit("install.sh", "|| die \"docker did not start.\"\n", "|| die \"docker did not start.\"\nidentity_resolve\n")')" \
+	"$(py 'edit("install.sh", "door_resolve\nidentity_door main\nidentity_resolve\n", "door_resolve\nidentity_door main\n"); edit("install.sh", "|| die \"docker did not start.\"\n", "|| die \"docker did not start.\"\nidentity_resolve\n")')" \
 	"runs after the first package install"
 
 run_case "identity-files: the gateway reads the files after the stack starts" fail \
 	'./scripts/identity-files-are-checked.sh' \
-	"$(py 'edit("install.sh", "identity_check \"$IDENTITY_IMAGE\"\nidentity_apply\n", ""); edit("install.sh", "say \"verify\"\n", "identity_check \"$IDENTITY_IMAGE\"\nidentity_apply\nsay \"verify\"\n")')" \
+	"$(py 'edit("install.sh", "identity_check \"$IDENTITY_IMAGE\"\n", ""); edit("install.sh", "say \"verify\"\n", "identity_check \"$IDENTITY_IMAGE\"\nsay \"verify\"\n")')" \
 	"runs after the stack starts"
 
 run_case "identity-files: the installer never asks the gateway image" fail \
@@ -1543,8 +1547,8 @@ run_case "bus-names: a declaration widens the rule" fail \
 run_case "bus-names: nothing loads a stream any more" fail \
 	'./scripts/bus-names-match-their-source.sh' \
 	"$(py 's = open("compose.yaml").read()
-assert "tokenfuse:/var/lib/stack/events/tokenfuse.ndjson" in s
-open("compose.yaml", "w").write(s.replace("tokenfuse:/var/lib/stack/events/tokenfuse.ndjson", "/var/lib/stack/events/tokenfuse.ndjson"))')" \
+assert "tokenfuse:/var/lib/stack/events/" in s
+open("compose.yaml", "w").write(s.replace("tokenfuse:/var/lib/stack/events/", "/var/lib/stack/events/"))')" \
 	"measured NOTHING about idryx"
 
 # ---- features-are-bound: the binding is held both ways.
@@ -1565,6 +1569,222 @@ os.rename("features", "feature-files")')" \
 	"there is no features/*.feature"
 
 echo
+# ---- the OpenAI door (invariant 32): opt-in, a gateway like the first in every
+# hardened setting, on keys and a map of its own, on the operator's bind. Several
+# cases run the gateway and console images, so each takes a few seconds. A
+# single quote inside a mutation is written \x27.
+run_case "openai-door: the door loses its profile" fail \
+	'./scripts/openai-door.sh' \
+	"$(py 'door("    profiles: [\"openai-door\"]\n", "")')" \
+	"starts on every box"
+
+run_case "openai-door: the door serves the Anthropic wire" fail \
+	'./scripts/openai-door.sh' \
+	"$(py 'door("      TOKENFUSE_WIRE: openai\n", "      TOKENFUSE_WIRE: anthropic\n")')" \
+	"not openai"
+
+run_case "openai-door: the door's upstream gets a default" fail \
+	'./scripts/openai-door.sh' \
+	"$(py 'door("${OPENAI_DOOR_UPSTREAM:-}}}", "${OPENAI_DOOR_UPSTREAM:-https://api.openai.com/v1/chat/completions}}}")')" \
+	"must be empty until the door's keys and map are set"
+
+run_case "openai-door: the door's upstream no longer waits for its keys" fail \
+	'./scripts/openai-door.sh' \
+	"$(py 'door("      TOKENFUSE_UPSTREAM: ${OPENAI_DOOR_CLIENT_KEYS:+${OPENAI_DOOR_IDENTITY_MAP:+${OPENAI_DOOR_UPSTREAM:-}}}\n", "      TOKENFUSE_UPSTREAM: ${OPENAI_DOOR_UPSTREAM:-}\n")')" \
+	"must be empty until the door's keys and map are set"
+
+run_case "openai-door: the door is published on every address" fail \
+	'./scripts/openai-door.sh' \
+	"$(py 'door("      - \"${GATEWAY_BIND:-127.0.0.1}:4110:4100\"\n", "      - \"0.0.0.0:4110:4100\"\n")')" \
+	"not exactly"
+
+run_case "openai-door: the door loses its policy plane fail mode" fail \
+	'./scripts/openai-door.sh' \
+	"$(py 'door("      TOKENFUSE_WARDRYX_FAILMODE: closed\n", "")')" \
+	"and the gateway sets 'closed'"
+
+run_case "openai-door: the door's policy plane runs in shadow" fail \
+	'./scripts/openai-door.sh' \
+	"$(py 'door("      TOKENFUSE_WARDRYX_MODE: enforce\n", "      TOKENFUSE_WARDRYX_MODE: shadow\n")')" \
+	"TOKENFUSE_WARDRYX_MODE 'shadow'"
+
+run_case "openai-door: the door loses its admin key" fail \
+	'./scripts/openai-door.sh' \
+	"$(py 'door("      TOKENFUSE_ADMIN_KEYS: ${GATEWAY_ADMIN:?set by install.sh}\n", "")')" \
+	"sets TOKENFUSE_ADMIN_KEYS None"
+
+run_case "openai-door: the door's environment comes through a YAML anchor" fail \
+	'./scripts/openai-door.sh' \
+	"$(py 'door("      TOKENFUSE_CACHE: \"off\"\n", "      <<: *door-hardening\n")')" \
+	"YAML anchor"
+
+run_case "openai-door: the door carries delegation" fail \
+	'./scripts/openai-door.sh' \
+	"$(py 'door("      TOKENFUSE_WIRE: openai\n", "      TOKENFUSE_WIRE: openai\n      TOKENFUSE_DELEGATION_ISSUER: ${TOKENFUSE_DELEGATION_ISSUER:-}\n")')" \
+	"Delegation and closure stay off"
+
+run_case "openai-door: the door writes the gateway's stream" fail \
+	'./scripts/openai-door.sh' \
+	"$(py 'door("TOKENFUSE_EVENTS_PATH: /var/lib/stack/events/tokenfuse-openai.ndjson", "TOKENFUSE_EVENTS_PATH: /var/lib/stack/events/tokenfuse.ndjson")')" \
+	"not /var/lib/stack/events/tokenfuse-openai.ndjson"
+
+run_case "openai-door: the door shares the gateway's data directory" fail \
+	'./scripts/openai-door.sh' \
+	"$(py 'door("TOKENFUSE_DATA_DIR: /var/lib/stack/traces/gateway-openai", "TOKENFUSE_DATA_DIR: /var/lib/stack/traces/gateway")')" \
+	"keeps too"
+
+run_case "openai-door: the door reads the gateway's map" fail \
+	'./scripts/openai-door.sh' \
+	"$(py 'door("      - ./identity-openai:/etc/tokenfuse/identity:ro\n", "      - ./identity:/etc/tokenfuse/identity:ro\n")')" \
+	"mounts too"
+
+run_case "openai-door: install.sh opens the door with no keys file" fail \
+	'./scripts/openai-door.sh' \
+	"$(py 'edit("install.sh", "|| die \"OPENAI_DOOR=1 needs OPENAI_DOOR_CLIENT_KEYS_FILE", "|| note \"OPENAI_DOOR=1 needs OPENAI_DOOR_CLIENT_KEYS_FILE")')" \
+	"the door on with no keys file was accepted"
+
+run_case "openai-door: install.sh opens the door with no upstream" fail \
+	'./scripts/openai-door.sh' \
+	"$(py 'edit("install.sh", "  [ -n \"$DOOR_UPSTREAM\" ] || DOOR_UPSTREAM=\"$(door_env_get OPENAI_DOOR_UPSTREAM)\"\n", "  [ -n \"$DOOR_UPSTREAM\" ] || DOOR_UPSTREAM=\"$(door_env_get OPENAI_DOOR_UPSTREAM)\"\n  [ -n \"$DOOR_UPSTREAM\" ] || DOOR_UPSTREAM=https://api.openai.com/v1/chat/completions\n")')" \
+	"the door on with no upstream was accepted"
+
+run_case "openai-door: install.sh takes a base URL as the upstream" fail \
+	'./scripts/openai-door.sh' \
+	"$(py 'edit("install.sh", "(/[A-Za-z0-9._~+-]+)*/chat/completions$\x27", "(/[A-Za-z0-9._~+-]+)*(/chat/completions)?$\x27")')" \
+	"(a base URL, not the endpoint) was accepted"
+
+run_case "openai-door: a refusal echoes the upstream" fail \
+	'./scripts/openai-door.sh' \
+	"$(py 'edit("install.sh", "die \"OPENAI_DOOR_UPSTREAM must be an http or https URL", "die \"OPENAI_DOOR_UPSTREAM ($DOOR_UPSTREAM) must be an http or https URL")')" \
+	"echoes it"
+
+run_case "openai-door: two maps sharing a unit are accepted" fail \
+	'./scripts/openai-door.sh' \
+	"$(py 'edit("install.sh", "  if [ -n \"$shared\" ]; then\n", "  if false; then\n")')" \
+	"the unit would get its cap once on each door"
+
+run_case "openai-door: two maps that cannot be compared are let through" fail \
+	'./scripts/openai-door.sh' \
+	"$(py 'edit("install.sh", "  if ! shared=\"$(door_units_shared \"$2\" \"$a\" \"$b\")\"; then\n", "  if ! shared=\"$(door_units_shared \"$2\" \"$a\" \"$b\" || true)\"; then\n")')" \
+	"could not be compared"
+
+run_case "openai-door: the door's refusals come after a package install" fail \
+	'./scripts/openai-door.sh' \
+	"$(py 'edit("install.sh", "# openai-door: end\ndoor_resolve\n", "# openai-door: end\n"); edit("install.sh", "|| die \"docker did not start.\"\n", "|| die \"docker did not start.\"\ndoor_resolve\n")')" \
+	"does not run before the first package install"
+
+run_case "openai-door: the door's profile is passed whatever DOOR_ON says" fail \
+	'./scripts/openai-door.sh' \
+	"$(py 'edit("install.sh", "[ \"$DOOR_ON\" != 1 ] || UP_PROFILES+=(--profile openai-door)", "UP_PROFILES+=(--profile openai-door)")')" \
+	"on a line DOOR_ON does not decide"
+
+run_case "openai-door: the door is left running when it is turned off" fail \
+	'./scripts/openai-door.sh' \
+	"$(py 'edit("install.sh", "if [ \"$DOOR_ON\" != 1 ]; then \"${COMPOSE[@]}\" --profile openai-door rm -sf tokenfuse-gateway-openai >/dev/null 2>&1 || true; fi\n", "")')" \
+	"does not remove tokenfuse-gateway-openai"
+
+run_case "openai-door: a new door map does not restart the door" fail \
+	'./scripts/openai-door.sh' \
+	"$(py 'edit("install.sh", "\"${COMPOSE[@]}\" --profile openai-door restart tokenfuse-gateway-openai >/dev/null", "\"${COMPOSE[@]}\" --profile openai-door ps tokenfuse-gateway-openai >/dev/null")')" \
+	"does not restart tokenfuse-gateway-openai"
+
+run_case "openai-door: section 8 stops asking the door for a key" fail \
+	'./scripts/openai-door.sh' \
+	"$(py 'edit("install.sh", "check \"openai door: a call with no key is refused\"", "check \"openai door: configured\"")')" \
+	"section 8 no longer asks the running door"
+
+run_case "openai-door: the closing report stops saying who pays" fail \
+	'./scripts/openai-door.sh' \
+	"$(py 'edit("install.sh", "a metered upstream bills whoever\x27s key that is.", "a metered upstream bills the caller.")')" \
+	"who pays"
+
+run_case "openai-door: no door service left to judge" fail \
+	'./scripts/openai-door.sh' \
+	"$(py 'edit("compose.yaml", "  tokenfuse-gateway-openai:\n", "  tokenfuse-gateway-opena1:\n")')" \
+	"measured NOTHING about the"
+
+run_case "openai-door: the installer block is gone" fail \
+	'./scripts/openai-door.sh' \
+	"$(py 'edit("install.sh", "# openai-door: begin\n", "# openai-door: start\n")')" \
+	"measured nothing about the installer's half"
+
+run_case "openai-door: a comment beside the door's upstream is not a setting" pass \
+	'./scripts/openai-door.sh' \
+	"$(py 'door("      TOKENFUSE_UPSTREAM: ${OPENAI_DOOR_CLIENT_KEYS", "      # never TOKENFUSE_UPSTREAM: ${OPENAI_DOOR_UPSTREAM:-https://api.openai.com/v1/chat/completions}\n      TOKENFUSE_UPSTREAM: ${OPENAI_DOOR_CLIENT_KEYS")')"
+
+run_case "openai-door: a reworded refusal still refuses" pass \
+	'./scripts/openai-door.sh' \
+	"$(py 'edit("install.sh", "Set OPENAI_DOOR=1 with it. Nothing was installed.", "Set OPENAI_DOOR=1 alongside it. Nothing was installed.")')"
+
+# The door dimension of invariant 29's block, run once per door.
+run_case "identity-files: the OpenAI door's check runs on the Anthropic wire" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("install.sh", "ID_WIRE=openai ID_ROUTE=/v1/chat/completions", "ID_WIRE=anthropic ID_ROUTE=/v1/chat/completions")')" \
+	"did not serve its wire"
+
+run_case "identity-files: switching doors loses the first door's state" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("install.sh", "      printf -v \"IDENTITY_${IDENTITY_DOOR}_$f\" \x27%s\x27 \"${!v}\"\n", "      :\n")')" \
+	"lost the main door's own state"
+
+run_case "identity-files: an unknown door is taken quietly" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("install.sh", "    *) die \"internal: identity_door was given", "    *) : \"internal: identity_door was given")')" \
+	"accepts a door it does not know"
+
+run_case "identity-files: a gateway that no door names" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'edit("install.sh", "ID_SERVICE=tokenfuse-gateway-openai", "ID_SERVICE=tokenfuse-gateway-ai")')" \
+	"0 door(s) of install.sh's identity block name it"
+
+run_case "identity-files: the door is handed the gateway's client keys" fail \
+	'./scripts/identity-files-are-checked.sh' \
+	"$(py 'door("      TOKENFUSE_CLIENT_KEYS: ${OPENAI_DOOR_CLIENT_KEYS:-}\n", "      TOKENFUSE_CLIENT_KEYS: ${GATEWAY_CLIENT_KEYS:-}\n")')" \
+	"tokenfuse-gateway-openai names GATEWAY_CLIENT_KEYS"
+
+# The resolved halves read every gateway with the door's profile on; a door they
+# cannot see is a failure, not a smaller subject.
+run_case "firewall-is-enforce: the resolved read misses the OpenAI door" fail \
+	'./scripts/firewall-is-enforce.sh' \
+	"$(py 'door("    profiles: [\"openai-door\"]\n", "    profiles: [\"openai-doors\"]\n")')" \
+	"not enforce on each of"
+
+run_case "pii-is-shadow: the resolved read misses the OpenAI door" fail \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 'door("    profiles: [\"openai-door\"]\n", "    profiles: [\"openai-doors\"]\n")')" \
+	"for the gateways, not shadow on each of"
+
+run_case "run-budget-ceiling: the resolved read misses the OpenAI door" fail \
+	'./scripts/run-budget-ceiling.sh' \
+	"$(py 'door("    profiles: [\"openai-door\"]\n", "    profiles: [\"openai-doors\"]\n")')" \
+	"not 5.00 on each of"
+
+# The door's stream: written, pre-created, loaded, accepted.
+run_case "bus-has-a-writer: idryx stops loading the OpenAI door's file" fail \
+	'./scripts/bus-has-a-writer.sh' \
+	"$(py 'edit_all("compose.yaml", "      - --load\n      - tokenfuse:/var/lib/stack/events/tokenfuse-openai.ndjson\n", "")')" \
+	"does not load tokenfuse:/var/lib/stack/events/tokenfuse-openai.ndjson"
+
+run_case "bus-has-a-writer: the OpenAI door writes the gateway's file" fail \
+	'./scripts/bus-has-a-writer.sh' \
+	"$(py 'door("TOKENFUSE_EVENTS_PATH: /var/lib/stack/events/tokenfuse-openai.ndjson", "TOKENFUSE_EVENTS_PATH: /var/lib/stack/events/tokenfuse.ndjson")')" \
+	"name the same events path"
+
+run_case "bus-has-a-writer: the OpenAI door's file is not pre-created" fail \
+	'./scripts/bus-has-a-writer.sh' \
+	"$(py 'edit("compose.yaml", "tokenfuse-mcp.ndjson tokenfuse-openai.ndjson wardryx.ndjson", "tokenfuse-mcp.ndjson wardryx.ndjson")')" \
+	"does not pre-create tokenfuse-openai.ndjson"
+
+run_case "bus-names: the idryx pin goes back before the OpenAI door's row" fail \
+	'./scripts/bus-names-match-their-source.sh' \
+	"$(py 'edit_all("compose.yaml", "ghcr.io/taipanbox/idryx:v1.2.0", "ghcr.io/taipanbox/idryx:v1.1.0")')" \
+	"older than v1.2.0"
+
+run_case "bus-names: the heraldyx pin goes back before the OpenAI door's row" fail \
+	'./scripts/bus-names-match-their-source.sh' \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/heraldyx:v0.5.0", "ghcr.io/taipanbox/heraldyx:v0.4.0")')" \
+	"older than v0.5.0"
+
 echo "=== and what they must NOT catch ==="
 
 # A shellcheck directive with its reason beside it is the documented way to

@@ -36,8 +36,9 @@
 #      substitution) refuses saying so, before touching .env, and never echoes
 #      what it was given; a bad value already in .env refuses too, because that
 #      is a gateway that exits 2 on every start.
-#   C. RESOLVED. `docker compose config` for the default and for a box whose
-#      .env sets 2.50: the gateway's value is 5.00, then 2.50.
+#   C. RESOLVED. `docker compose config`, with the OpenAI door's profile on, for
+#      the default and for a box whose .env sets 2.50: every gateway's value is
+#      5.00, then 2.50, and the gateways read back are the ones section A found.
 #
 # AND IT REFUSES TO REPORT OK ON NOTHING
 #
@@ -50,7 +51,8 @@ problems=0
 fail() { printf 'FAIL: %s\n' "$*"; problems=$((problems + 1)); }
 
 # ---- A. compose --------------------------------------------------------------
-python3 - "${1:-compose.yaml}" <<'PY' || problems=$((problems + 1))
+gwlist="$(mktemp)"
+python3 - "${1:-compose.yaml}" "$gwlist" <<'PY' || problems=$((problems + 1))
 import re
 import sys
 
@@ -97,6 +99,7 @@ def env_value(block, key):
 
 
 subjects = sorted(n for n, b in blocks.items() if is_gateway(b))
+open(sys.argv[2], "w").write("".join(n + "\n" for n in subjects))
 if not subjects:
     print("FAIL: no service in compose.yaml both uses the tokenfuse gateway image and runs")
     print("      it with no subcommand, so this gate measured NOTHING about the run-budget")
@@ -251,17 +254,32 @@ else
   mkdir -p "$cdir/typed" "$cdir/delegation-public" "$cdir/environments"
   : >"$cdir/policy.yaml"
   grep -o '\${[A-Z_]*:?' compose.yaml | tr -d '${:?' | sort -u | sed 's/$/=fake-not-a-secret/' >"$cdir/base.env"
-  ceiling_of() { # extra .env lines on stdin
+  # Every gateway, read back from the resolved configuration with the OpenAI
+  # door's profile on (CLAUDE.md invariant 32): "service=value" for each service
+  # that runs the tokenfuse gateway image with no subcommand. Compared with the
+  # gateways section A derived from compose.yaml, so a gateway the resolved read
+  # does not hold is a failure, not a smaller subject.
+  values_of() { # KEY; extra .env lines on stdin
     cat "$cdir/base.env" - >"$cdir/.env"
-    docker compose --project-directory "$cdir" -f "$cdir/compose.yaml" config --format json 2>"$cdir/err" |
-      python3 -c "import json,sys; print(json.load(sys.stdin)['services']['tokenfuse-gateway']['environment'].get('TOKENFUSE_MAX_RUN_BUDGET_USD',''))" 2>>"$cdir/err"
+    env -u RUN_BUDGET_CEILING_USD docker compose --project-directory "$cdir" -f "$cdir/compose.yaml" --profile openai-door config --format json 2>"$cdir/err" |
+      python3 -c '
+import json, sys
+s = json.load(sys.stdin)["services"]
+for n in sorted(s):
+    v = s[n]
+    if str(v.get("image", "")).startswith("ghcr.io/taipanbox/tokenfuse:") and v.get("command") == ["/usr/local/bin/tokenfuse"]:
+        print("%s=%s" % (n, (v.get("environment") or {}).get(sys.argv[1], "")))
+' "$1" 2>>"$cdir/err"
   }
-  got="$(ceiling_of </dev/null)"
-  [ "$got" = "5.00" ] || fail "resolved: a default box's gateway has TOKENFUSE_MAX_RUN_BUDGET_USD='$got', not 5.00 ($(head -1 "$cdir/err"))"
-  got="$(ceiling_of <<<"RUN_BUDGET_CEILING_USD=2.50")"
-  [ "$got" = "2.50" ] || fail "resolved: a box whose .env sets 2.50 has TOKENFUSE_MAX_RUN_BUDGET_USD='$got', so the installer variable moves nothing"
+  want_all() { [ -n "$gateways" ] && sed "s/\$/=$1/" <<<"$gateways"; }
+  gateways="$(cat "$gwlist")"
+  got="$(values_of TOKENFUSE_MAX_RUN_BUDGET_USD </dev/null)"
+  [ "$got" = "$(want_all 5.00)" ] || fail "resolved: a default box's gateways read TOKENFUSE_MAX_RUN_BUDGET_USD '$(tr '\n' ' ' <<<"$got")', not 5.00 on each of $(tr '\n' ' ' <<<"$gateways")($(head -1 "$cdir/err"))"
+  got="$(values_of TOKENFUSE_MAX_RUN_BUDGET_USD <<<"RUN_BUDGET_CEILING_USD=2.50")"
+  [ "$got" = "$(want_all 2.50)" ] || fail "resolved: a box whose .env sets 2.50 reads '$(tr '\n' ' ' <<<"$got")', so the installer variable does not move every gateway"
   rm -rf "$cdir"
 fi
+rm -f "$gwlist"
 
 if [ "$problems" -gt 0 ]; then
   echo

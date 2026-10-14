@@ -9,7 +9,9 @@
 # for the FILE it was read from (bus layer 2, heraldyx#85 and idryx#91). The
 # default is `<source>.ndjson` carries `<source>` for fourteen registered
 # sources, plus `tokenfuse-cloud.ndjson` and `tokenfuse-mcp.ndjson` carrying
-# `tokenfuse`. A line in any other file is counted, named once and never
+# `tokenfuse`, and, from heraldyx 0.5.0 and idryx 1.2.0, `tokenfuse-openai.ndjson`
+# too (the OpenAI door's file, CLAUDE.md invariant 32). A line in any other file
+# is counted, named once and never
 # processed as that plane. Nothing fails loudly: a writer whose file name does
 # not match is a plane whose alerts stop arriving, on a box where every check is
 # green, which is the shape of the 2026-09-13 bus faults.
@@ -23,6 +25,9 @@
 #   - every `--load <source>:<path>` (idryx at start and on demand): the same;
 #   - every file init-volumes pre-creates on the bus: its stem is allowed
 #     for some source, so no file sits there that a reader would call unknown;
+#   - a file only a newer reader accepts (`tokenfuse-openai.ndjson`) is named
+#     only while compose.yaml pins a heraldyx and an idryx that accept it: an
+#     older pin is the same silent refusal as a wrong name;
 #   - nothing sets HERALDYX_STREAMS or IDRYX_STREAMS. The preferred repair for
 #     a mismatch is to rename the file, and a declaration widens what a box
 #     accepts from a co-tenant of the bus directory (heraldyx's own note).
@@ -60,6 +65,11 @@ KNOWN = {
 ALLOWED = {s: {s} for s in KNOWN}
 ALLOWED["tokenfuse-cloud"] = {"tokenfuse"}
 ALLOWED["tokenfuse-mcp"] = {"tokenfuse"}
+# The OpenAI door's file (profile openai-door). A row heraldyx carries from 0.5.0
+# and idryx from 1.2.0 (each `internal/.../stream` exception table); an older
+# reader refuses every line of it, so a stem listed here needs those pins.
+ALLOWED["tokenfuse-openai"] = {"tokenfuse"}
+NEEDS = {"tokenfuse-openai": {"heraldyx": (0, 5, 0), "idryx": (1, 2, 0)}}
 
 # The source each image's lines claim.
 CLAIMS = {
@@ -167,6 +177,21 @@ for f in sorted(pre):
     if stem not in ALLOWED:
         note(f"{pre[f]} pre-creates {f} on the bus, and `{stem}` is a stream name nothing accepts by default: a reader would call it unknown")
 
+# a stem only a newer reader accepts needs that reader pinned
+used = {os.path.basename(r[1]).removesuffix(".ndjson") for r in rows}
+for stem, readers in sorted(NEEDS.items()):
+    if stem not in used:
+        continue
+    for repo, least in sorted(readers.items()):
+        # image lines only: a comment may quote an old tag on purpose
+        pins = re.findall(r"^\s*image:\s*.*ghcr\.io/taipanbox/" + re.escape(repo) + r":v(\d+)\.(\d+)\.(\d+)", text, re.M)
+        if not pins:
+            note(f"{stem}.ndjson is on this bus and compose.yaml pins no {repo} image, so nothing says its reader accepts the file")
+            continue
+        for pin in pins:
+            if tuple(int(x) for x in pin) < least:
+                note(f"{stem}.ndjson is on this bus and compose.yaml pins {repo} v{'.'.join(pin)}, older than v{'.'.join(map(str, least))}, the first that reads it: every line of it is refused there")
+
 # nothing widens the rule
 for m in re.finditer(r"\b(HERALDYX_STREAMS|IDRYX_STREAMS)\b", "\n".join(l for l in text.split("\n") if not l.lstrip().startswith("#"))):
     note(f"compose.yaml sets {m.group(1)}: rename the stream file instead, a declaration widens what the box accepts from anything that can create a file in the bus directory")
@@ -186,7 +211,7 @@ if not pre:
 if problems:
     print(f"{len(problems)} problem(s). See CLAUDE.md invariant 23.")
     sys.exit(1)
-print("OK: every stream file on this bus is one heraldyx 0.3.0 and idryx 1.1.0 accept for the source its writer claims:")
+print("OK: every stream file on this bus is one the pinned heraldyx and idryx accept for the source its writer claims:")
 for who, f, src, how in rows:
     print(f"    {how:<11} {f:<24} {src:<14} ({who})")
 PY

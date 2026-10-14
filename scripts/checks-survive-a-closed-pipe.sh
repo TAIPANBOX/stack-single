@@ -156,6 +156,15 @@ CASES = {
     "console's bus is live": {1: "ok", 2: "FAIL", 3: "FAIL", 4: "FAIL", 5: "FAIL", 6: "ok"},
     # Reads the list of running services only.
     "typed plane: typryx is running on its $TYPED_PLANE backend": {1: "ok", 2: "ok", 3: "FAIL", 4: "FAIL", 5: "ok", 6: "ok"},
+    # The OpenAI door's log (CLAUDE.md invariant 32): the gateway's questions, asked
+    # of the second gateway. Its log carries what the gateway's does in each
+    # situation, plus the line that names the wire it serves.
+    "openai door serves the OpenAI wire": POS,
+    "openai door exports agent events": POS,
+    "openai door clamps a run budget to a ceiling": POS,
+    "openai door: client keys: the door holds ${IDENTITY_openai_KEYS_COUNT:-0}": POS,
+    "openai door: identity map: the door reads it": POS,
+    "openai door: every key is bound and every binding has a key": {1: "ok", 5: "FAIL", 6: "FAIL"},
 }
 SCENARIO = {
     1: "a healthy box",
@@ -215,28 +224,39 @@ GW_GOOD = [
     STAMP + "1Z client auth: ON (3 key(s))",
     STAMP + "1Z identity map: ON (2 unit(s), 3 key(s), 0 prefix(es))",
 ]
+# The OpenAI door's start-up, as tokenfuse v1.13.1 prints it (the wire line carries
+# tracing's colour codes on a box, which a `.*` between the two words reads past).
+DOOR_GOOD = [
+    STAMP + "1Z INFO tokenfuse: serving one door \x1b[3mwire\x1b[0m=OpenAi \x1b[3mpath\x1b[0m=/v1/chat/completions",
+    STAMP + "1Z agent-event NDJSON export enabled (fresh prev_hash chain) path='/var/lib/stack/events/tokenfuse-openai.ndjson'",
+    STAMP + "1Z run budget ceiling: a caller-declared or default budget is clamped to it (5.00 USD)",
+    STAMP + "1Z client auth: ON (3 key(s))",
+    STAMP + "1Z identity map: ON (1 unit(s), 3 key binding(s)); strict=Enforce",
+]
 GW_BAD_A = [STAMP + "2Z tokenfuse: client key `felyx` has no keys[] binding in the identity map"]
 GW_BAD_B = [STAMP + "2Z tokenfuse: identity map key_id `ghost` has no matching TOKENFUSE_CLIENT_KEYS entry"]
 CONN_GOOD = [STAMP + "3Z genaryx-web: bus LIVE (/var/lib/stack/events)"]
 CONN_BAD = [STAMP + "3Z genaryx-web: bus startup failed: permission denied"]
 AC_GOOD = [STAMP + "5Z PASS tokenfuse.ndjson (hash chain: 4 chained, 1 head(s))"]
 SILENT = [STAMP + "9Z nothing of interest"]
-RUNNING = ["agent-conform", "typryx", "console", "tokenfuse-gateway"]
+RUNNING = ["agent-conform", "typryx", "console", "tokenfuse-gateway", "tokenfuse-gateway-openai"]
 
 
 def logs_for(situation):
     """{service: lines} for a situation, or None when the logs cannot be read. A line the
     install must refuse comes FIRST, so grep -q on it exits while the stub is still writing."""
     if situation == 1:
-        return {"tokenfuse-gateway": GW_GOOD, "console": CONN_GOOD, "agent-conform": AC_GOOD}
+        return {"tokenfuse-gateway": GW_GOOD, "tokenfuse-gateway-openai": DOOR_GOOD, "console": CONN_GOOD, "agent-conform": AC_GOOD}
     if situation in (2, 3):
-        return {s: SILENT for s in ("tokenfuse-gateway", "console", "agent-conform")}
+        return {s: SILENT for s in ("tokenfuse-gateway", "tokenfuse-gateway-openai", "console", "agent-conform")}
     if situation == 4:
         return None
     if situation == 5:
-        return {"tokenfuse-gateway": GW_BAD_A + GW_GOOD, "console": CONN_BAD + CONN_GOOD, "agent-conform": AC_GOOD}
+        return {"tokenfuse-gateway": GW_BAD_A + GW_GOOD, "tokenfuse-gateway-openai": GW_BAD_A + DOOR_GOOD,
+                "console": CONN_BAD + CONN_GOOD, "agent-conform": AC_GOOD}
     if situation == 6:
-        return {"tokenfuse-gateway": GW_BAD_B + GW_GOOD, "console": CONN_GOOD, "agent-conform": AC_GOOD}
+        return {"tokenfuse-gateway": GW_BAD_B + GW_GOOD, "tokenfuse-gateway-openai": GW_BAD_B + DOOR_GOOD,
+                "console": CONN_GOOD, "agent-conform": AC_GOOD}
 
 
 def ps_for(situation):
@@ -280,6 +300,7 @@ def run(root, situation, body):
         "COMPOSE=(docker compose)\n"
         "DC=\"${COMPOSE[*]}\"\n"
         "IDENTITY_KEYS_COUNT=3\n"
+        "IDENTITY_openai_KEYS_COUNT=3\n"
         "TYPED_PLANE=own-model\n"
         "sleep() { :; }\n"
         + body + "\n")

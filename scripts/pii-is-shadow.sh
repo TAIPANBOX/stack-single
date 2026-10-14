@@ -34,7 +34,8 @@
 #      echoes what it was given; a bad value already in .env refuses too.
 #   C. ORDER. pii_resolve runs before the first package install, so a refusal
 #      really does mean nothing was installed.
-#   D. RESOLVED. `docker compose --profile typed config` with nothing set, and
+#   D. RESOLVED. `docker compose --profile typed --profile openai-door config`
+#      (every gateway, the OpenAI door's too, and the broker) with nothing set, and
 #      with .env setting off and block: the gateway and the broker read the same
 #      value each time.
 #
@@ -49,7 +50,8 @@ problems=0
 fail() { printf 'FAIL: %s\n' "$*"; problems=$((problems + 1)); }
 
 # ---- A. compose --------------------------------------------------------------
-python3 - "${1:-compose.yaml}" <<'PY' || problems=$((problems + 1))
+gwlist="$(mktemp)"
+python3 - "${1:-compose.yaml}" "$gwlist" <<'PY' || problems=$((problems + 1))
 import re
 import sys
 
@@ -106,6 +108,7 @@ KEY = {"gateway": "TOKENFUSE_DLP_PII", "broker": "TOKENFUSE_MCP_DLP_PII"}
 WANT = "${TOKENFUSE_DLP_PII:-shadow}"
 
 subjects = sorted((n, role(b)) for n, b in blocks.items() if role(b))
+open(sys.argv[2], "w").write("".join(n + "\n" for n, k in subjects if k == "gateway"))
 if not subjects:
     print("FAIL: no service in compose.yaml uses the tokenfuse image as a gateway or as the")
     print("      MCP broker, so this gate measured NOTHING about personal-data detection.")
@@ -262,21 +265,41 @@ else
   mkdir -p "$cdir/typed" "$cdir/delegation-public" "$cdir/environments"
   : >"$cdir/policy.yaml"
   grep -o '\${[A-Z_]*:?' compose.yaml | tr -d '${:?' | sort -u | sed 's/$/=fake-not-a-secret/' >"$cdir/base.env"
-  # Prints "<gateway value> <broker value>" for the typed profile, which is the
-  # profile the broker starts under.
-  resolved() { # extra .env lines on stdin
+  # Every gateway, read back from the resolved configuration with the OpenAI
+  # door's profile on (CLAUDE.md invariant 32): "service=value" for each service
+  # that runs the tokenfuse gateway image with no subcommand. Compared with the
+  # gateways section A derived from compose.yaml, so a gateway the resolved read
+  # does not hold is a failure, not a smaller subject.
+  values_of() { # KEY; extra .env lines on stdin
     cat "$cdir/base.env" - >"$cdir/.env"
-    env -u TOKENFUSE_DLP_PII -u TOKENFUSE_MCP_DLP_PII docker compose --project-directory "$cdir" -f "$cdir/compose.yaml" --profile typed config --format json 2>"$cdir/err" |
-      python3 -c "import json,sys; s=json.load(sys.stdin)['services']; print(s['tokenfuse-gateway']['environment'].get('TOKENFUSE_DLP_PII',''), s['tokenfuse-mcp-broker']['environment'].get('TOKENFUSE_MCP_DLP_PII',''))" 2>>"$cdir/err"
+    env -u TOKENFUSE_DLP_PII -u TOKENFUSE_MCP_DLP_PII docker compose --project-directory "$cdir" -f "$cdir/compose.yaml" --profile typed --profile openai-door config --format json 2>"$cdir/err" |
+      python3 -c '
+import json, sys
+s = json.load(sys.stdin)["services"]
+for n in sorted(s):
+    v = s[n]
+    if str(v.get("image", "")).startswith("ghcr.io/taipanbox/tokenfuse:") and v.get("command") == ["/usr/local/bin/tokenfuse"]:
+        print("%s=%s" % (n, (v.get("environment") or {}).get(sys.argv[1], "")))
+' "$1" 2>>"$cdir/err"
   }
-  got="$(resolved </dev/null)"
-  [ "$got" = "shadow shadow" ] || fail "resolved: a default box reads '$got' for the gateway and the broker, not 'shadow shadow' ($(head -1 "$cdir/err"))"
-  got="$(resolved <<<"TOKENFUSE_DLP_PII=off")"
-  [ "$got" = "off off" ] || fail "resolved: a .env that sets off reads '$got', so the one switch does not move both"
-  got="$(resolved <<<"TOKENFUSE_DLP_PII=block")"
-  [ "$got" = "block block" ] || fail "resolved: a .env that sets block reads '$got', so the one switch does not move both"
+  want_all() { [ -n "$gateways" ] && sed "s/\$/=$1/" <<<"$gateways"; }
+  # The broker's own value, from the typed profile it starts under.
+  broker_of() { # extra .env lines on stdin
+    cat "$cdir/base.env" - >"$cdir/.env"
+    env -u TOKENFUSE_DLP_PII -u TOKENFUSE_MCP_DLP_PII docker compose --project-directory "$cdir" -f "$cdir/compose.yaml" --profile typed config --format json 2>>"$cdir/err" |
+      python3 -c "import json,sys; s=json.load(sys.stdin)['services']; print(s['tokenfuse-mcp-broker']['environment'].get('TOKENFUSE_MCP_DLP_PII',''))" 2>>"$cdir/err"
+  }
+  gateways="$(cat "$gwlist")"
+  for mode in "" off block; do
+    want="${mode:-shadow}"
+    got="$(values_of TOKENFUSE_DLP_PII <<<"${mode:+TOKENFUSE_DLP_PII=$mode}")"
+    [ "$got" = "$(want_all "$want")" ] || fail "resolved: a .env that sets '${mode:-nothing}' reads '$(tr '\n' ' ' <<<"$got")' for the gateways, not $want on each of $(tr '\n' ' ' <<<"$gateways")($(head -1 "$cdir/err"))"
+    got="$(broker_of <<<"${mode:+TOKENFUSE_DLP_PII=$mode}")"
+    [ "$got" = "$want" ] || fail "resolved: a .env that sets '${mode:-nothing}' reads '$got' for the broker, not $want, so the one switch does not move both scanners"
+  done
   rm -rf "$cdir"
 fi
+rm -f "$gwlist"
 
 if [ "$problems" -gt 0 ]; then
   echo
