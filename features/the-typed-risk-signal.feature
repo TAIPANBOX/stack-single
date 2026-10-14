@@ -66,12 +66,19 @@ Feature: a typed risk signal can hold a tool call, and only when the operator as
     # -> gates-have-teeth.sh "typed-risk-signal: a hold_if_signal policy is seeded"
     # -> gates-have-teeth.sh "typed-risk-signal: the README loses its example policy"
 
+  Scenario: the README's example holds a call whose signal never came
+    Given a missing signal is the gap a tool call can pass through, and the README's example closes it
+    When the example drops when_absent: hold
+    Then typed-risk-signal.sh fails, because the example no longer holds what the signal did not answer
+    # -> gates-have-teeth.sh "typed-risk-signal: the README drops when_absent from its example"
+
   Scenario: the pins that give the signal an effect move back
-    Given the signal needs typryx 0.4.0, wardryx 1.2.0 and tokenfuse 1.5.0
-    When any of the three is pinned older
+    Given the signal needs typryx 0.4.0, wardryx 1.2.0 and tokenfuse 1.5.0, and the example's when_absent needs wardryx 1.4.0
+    When any of them is pinned older
     Then typed-risk-signal.sh fails, because an older pin adds no signal and says nothing
     # -> gates-have-teeth.sh "typed-risk-signal: typryx is pinned before the proxy existed"
     # -> gates-have-teeth.sh "typed-risk-signal: wardryx is pinned before it read signals"
+    # -> gates-have-teeth.sh "typed-risk-signal: wardryx is pinned before when_absent"
     # -> gates-have-teeth.sh "typed-risk-signal: tokenfuse is pinned before it sent the tool call"
 
   Scenario: the profile is started without the operator asking

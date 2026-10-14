@@ -474,9 +474,9 @@ an absent invariant.
     the training log, runs the block for off, on, re-run, mode switch, 0 and the
     refusals, reads the resolved config for a writable volume under the
     training dir beside the ledger, and requires every `typryx:vX.Y.Z` in
-    compose.yaml, components.json, README.md and install.sh to be the one pin (v0.4.0
-    since 2026-10-04, the release the risk-signal proxy needs; v0.3.0 was the first
-    with the training log); it
+    compose.yaml, components.json, README.md and install.sh to be the one pin (v0.4.1
+    since 2026-10-14; v0.4.0 from 2026-10-04, the release the risk-signal proxy needs;
+    v0.3.0 was the first with the training log); it
     refuses to report OK on no block, no profile line, no typryx image or no
     Docker; teeth in `scripts/gates-have-teeth.sh`. Not covered: a real
     `install.sh` run on Debian in any typed mode, and the interactive prompt,
@@ -607,7 +607,13 @@ an absent invariant.
     deadline. The broker's decide deadline is 7000 ms and the proxy's ask
     deadline 3000 ms (`TYPED_RISK_ASK_TIMEOUT_MS`, at most 5000): typryx's own
     150 ms default is shorter than a hosted model answers and the signal would
-    almost never arrive. Nothing seeds a `hold_if_signal` policy. `@claude`: the
+    almost never arrive. Nothing seeds a `hold_if_signal` policy. The README's one
+    example carries `when_absent: hold` (`@claude 2026-10-14`, wardryx 1.4.0): a
+    tool call that arrives with no `action.risk_class` signal is held for a person
+    rather than passed. Without it the broker sends a call over 12 KiB with no
+    arguments and no signal, so padding past the cap was a bypass. Under
+    single-use (`WARDRYX_APPROVAL_SINGLE_USE` unset, the default) one approval
+    lets exactly one padded call through. `@claude`: the
     broker was NOT a policy enforcement point on this launcher before (it never
     set `TOKENFUSE_WARDRYX_URL`), so turning the signal on makes every tool call
     subject to the operator's whole `policy.yaml`, requires `x-fuse-agent-id`
@@ -629,8 +635,10 @@ an absent invariant.
     *(gate: `scripts/typed-risk-signal.sh`, which lifts the `# typed-mode:` block
     and runs it per case, reads `docker compose config` for the proxy's
     network, ports, key, upstream and members, the broker's and the gateway's
-    URLs, requires typryx 0.4.0, wardryx 1.2.0 and tokenfuse 1.5.0 or later, no
-    seeded `hold_if_signal` and one in the README, and refuses to report OK on no
+    URLs, requires typryx 0.4.0, wardryx 1.2.0 and tokenfuse 1.5.0 or later,
+    wardryx 1.4.0 or later for the README's `when_absent: hold`, no seeded
+    `hold_if_signal` and one in the README that carries `when_absent: hold`, and
+    refuses to report OK on no
     block, no proxy or no Docker; scenarios in
     `features/the-typed-risk-signal.feature`; teeth in
     `scripts/gates-have-teeth.sh`; CI's third install leg runs it for real on

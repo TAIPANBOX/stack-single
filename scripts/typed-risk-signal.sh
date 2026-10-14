@@ -48,7 +48,9 @@
 #      TYPED_PLANE decides and only with the flag on; the seeded policy.yaml
 #      carries no hold_if_signal; the README shows one.
 #   D. THE PINS the feature needs: typryx >= 0.4.0 (the proxy), wardryx >= 1.2.0
-#      (reads signals), tokenfuse >= 1.5.0 (sends the tool call). An older pin
+#      (reads signals), wardryx >= 1.4.0 (when_absent: hold, which the README
+#      example uses to hold a call no signal answered), tokenfuse >= 1.5.0 (sends
+#      the tool call). An older pin
 #      does not fail, it silently adds no signal.
 #
 # AND IT REFUSES TO REPORT OK ON NOTHING
@@ -189,6 +191,7 @@ atleast() { # have want: dotted versions
 }
 for pair in "typryx 0.4.0 the proxy (wardryx-proxy) does not exist before it" \
             "wardryx 1.2.0 hold_if_signal and signals on /v1/decide do not exist before it" \
+            "wardryx 1.4.0 when_absent: hold, the missing-signal hold the README example shows, does not exist before it" \
             "tokenfuse 1.5.0 the broker sends no tool_call to the policy plane before it"; do
   # shellcheck disable=SC2086
   set -- $pair
@@ -222,6 +225,7 @@ elif printf '%s' "$seeded" | grep -q 'hold_if_signal'; then
   fail "install.sh seeds a hold_if_signal policy: a classifier would hold tool calls on a box whose operator never chose that"
 fi
 grep -q 'hold_if_signal' README.md || fail "README.md shows no hold_if_signal example, and the signal does nothing until the operator writes one"
+grep -q 'when_absent: hold' README.md || fail "README.md shows no when_absent: hold on its example, so a tool call that arrives with no signal passes"
 
 # ---- B. compose ------------------------------------------------------------------
 if ! docker compose version >/dev/null 2>&1; then
