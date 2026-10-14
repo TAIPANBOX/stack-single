@@ -19,45 +19,61 @@
 # the gateway, and says at the end which header an agent sends. This gate is that
 # decision, held where a later edit would break it.
 #
+# ONE BLOCK, EVERY DOOR
+#
+# The OpenAI door (CLAUDE.md invariant 32) is a second gateway with a keys file
+# and a map of its own, checked by the same block run for that door by name
+# (`identity_door main`, `identity_door openai`). So the doors are read from the
+# block itself, from identity_door's own case labels, with the names it gives
+# each one (the service, the two input variables, the two .env lines, the
+# directory), and every half below runs once per door. A door added to the block
+# is checked here without this file naming it; a gateway in compose.yaml that no
+# door names is a failure, because nothing would check its files.
+#
 # WHAT THIS CHECKS
 #
 #   A. COMPOSE. The subjects are derived from compose.yaml's own image and
 #      command lines, like gateway-cache-is-off.sh: every service whose image is
-#      the tokenfuse gateway image and whose command is the bare binary. Each sets
-#      TOKENFUSE_CLIENT_KEYS to `${GATEWAY_CLIENT_KEYS:-}` and
-#      TOKENFUSE_IDENTITY_MAP to `${GATEWAY_IDENTITY_MAP:-}` (empty is off, so a
-#      default box is unchanged; `:?` would stop every default box) and mounts
-#      `./identity:/etc/tokenfuse/identity:ro`, read only. No other service names
-#      the keys or the directory, and the path install.sh writes into .env is the
-#      file inside that mount.
+#      the tokenfuse gateway image and whose command is the bare binary. Each is
+#      the service of exactly one door, and sets TOKENFUSE_CLIENT_KEYS to
+#      `${<that door's keys line>:-}` and TOKENFUSE_IDENTITY_MAP to
+#      `${<its map line>:-}` (empty is off, so a default box is unchanged; `:?`
+#      would stop every default box) and mounts `./<its directory>:/etc/tokenfuse/identity:ro`,
+#      read only. No other service names a door's keys or its directory, and the
+#      path install.sh writes into .env is the file inside that mount.
 #   B. THE INSTALLER'S FIRST HALF, `# identity-files: begin` .. `end` lifted out
 #      of install.sh and run in a scratch STACK_DIR, identity_resolve alone, as
-#      section 0f runs it before any package: a usable keys file (comments, blank
-#      lines, CRLF, surrounding spaces) is read into the spec and nothing is
-#      written; every hostile or unusable file refuses, names the variable,
-#      leaves .env alone, runs nothing it was given and never echoes a secret; a
-#      bad value an earlier run left in .env refuses too; a relative map path is
-#      resolved where the operator stood.
+#      section 0f runs it before any package, for each door: a usable keys file
+#      (comments, blank lines, CRLF, surrounding spaces) is read into the spec and
+#      nothing is written; every hostile or unusable file refuses, names the
+#      door's variable, leaves .env alone, runs nothing it was given and never
+#      echoes a secret; a bad value an earlier run left in .env refuses too; a
+#      relative map path is resolved where the operator stood. And the two doors
+#      keep apart: switching from one to the other and back loses nothing.
 #   C. THE INSTALLER'S SECOND HALF, the same block through identity_check and
-#      identity_apply, with the gateway image compose.yaml pins: a valid pair is
-#      written (one quoted .env line each, a 0444 map, nothing staged left over);
-#      a re-run that names nothing changes nothing; the same map again changes
-#      nothing, a new one is installed and flagged for a restart; a new keys file
-#      replaces the old line and is checked against the kept map; and the
-#      gateway's refusals and its three warnings refuse with .env untouched; and
-#      an image with no ENTRYPOINT, the shape BUILD_FROM_SOURCE builds, works too.
+#      identity_apply, with the gateway image compose.yaml pins, for each door
+#      (the OpenAI door's check serves the openai wire, with an upstream it never
+#      dials): a valid pair is written (one quoted .env line each, a 0444 map,
+#      nothing staged left over, no other door's line touched); a re-run that
+#      names nothing changes nothing; the same map again changes nothing, a new
+#      one is installed and flagged for a restart; a new keys file replaces the
+#      old line and is checked against the kept map; and the gateway's refusals
+#      and its three warnings refuse with .env untouched; and an image with no
+#      ENTRYPOINT, the shape BUILD_FROM_SOURCE builds, works too.
 #   D. ORDER, in install.sh: the first half before the first package install, the
 #      second after the images are on the box and before anything is started; a
 #      changed map restarts the gateway after `up`; section 8 reads the running
-#      gateway; the end of the run names x-fuse-key and x-fuse-agent-id.
-#   E. RESOLVED. `docker compose config` for a default box (both values empty)
-#      and for a .env that sets them (the values arrive, at the gateway only, and
-#      the mount is a read-only bind).
+#      gateway; the end of the run names x-fuse-key and x-fuse-agent-id. The
+#      OpenAI door's own order is scripts/openai-door.sh's.
+#   E. RESOLVED. `docker compose config`, with every profile a gateway sits
+#      behind, for a default box (every door's values empty) and for a .env that
+#      sets every door's pair (each door's values arrive at that door's gateway
+#      only, and each mount is a read-only bind of its own directory).
 #
 # AND IT REFUSES TO REPORT OK ON NOTHING
 #
-# No gateway service, no installer block, no functions in it, no Docker, or no
-# gateway image: each is reported and fails.
+# No gateway service, no installer block, no functions in it, no door in it, no
+# Docker, or no gateway image: each is reported and fails.
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
@@ -65,14 +81,75 @@ problems=0
 fail() { printf 'FAIL: %s\n' "$*"; problems=$((problems + 1)); }
 
 MAP_PATH=/etc/tokenfuse/identity/identity.json
+# The upstream the OpenAI door's check starts with. It is never dialled: the
+# check container has no network.
+DOOR_UP=https://api.openai.com/v1/chat/completions
+
+scratch="$(mktemp -d)"
+trap 'rm -rf "$scratch"' EXIT
+
+# ---- the block, and the doors it names ----------------------------------------
+BLOCK="$(sed -n '/^# identity-files: begin$/,/^# identity-files: end$/p' install.sh)"
+block_ok=0
+if [ -z "$BLOCK" ]; then
+  fail "install.sh has no '# identity-files: begin' .. '# identity-files: end' block, so this measured nothing about the installer's half"
+elif ! grep -q '^identity_door()' <<<"$BLOCK" || ! grep -q '^identity_resolve()' <<<"$BLOCK" || ! grep -q '^identity_check()' <<<"$BLOCK" || ! grep -q '^identity_apply()' <<<"$BLOCK"; then
+  fail "the identity-files block defines no identity_door, identity_resolve, identity_check or identity_apply, so this measured nothing"
+elif ! grep -q '^identity_resolve$' install.sh || ! grep -q '^identity_check "\$IDENTITY_IMAGE"$' install.sh || ! grep -q '^identity_apply$' install.sh; then
+  fail "install.sh never calls identity_resolve, identity_check and identity_apply, so the block is dead text"
+else
+  block_ok=1
+fi
+
+# DOOR: the names identity_door gives DOOR, one per line: service, keys file
+# variable, map file variable, keys .env line, map .env line, directory.
+names_of() {
+  env -i PATH="$PATH" BLOCK="$BLOCK" DOOR="$1" DOOR_UPSTREAM="$DOOR_UP" bash -c '
+    set -euo pipefail
+    note() { :; }
+    die() { printf "die: %s\n" "$*"; exit 1; }
+    eval "$BLOCK"
+    identity_door "$DOOR"
+    printf "%s\n" "$ID_SERVICE" "$ID_KEYS_FILE_VAR" "$ID_MAP_FILE_VAR" "$ID_KEYS_ENV" "$ID_MAP_ENV" "$ID_DIR"' 2>&1
+}
+
+DOORS=""
+: >"$scratch/doors"
+if [ "$block_ok" = 1 ]; then
+  DOORS="$(sed -n '/^identity_door() {/,/^}/p' <<<"$BLOCK" | sed -n 's/^    \([a-z][a-z0-9]*\))$/\1/p' | tr '\n' ' ')"
+  if [ -z "${DOORS// /}" ]; then
+    fail "identity_door names no door (no '    <name>)' case in it), so this measured nothing about which gateway the block checks"
+    block_ok=0
+  fi
+  # A door the block does not know is an internal error, never a quiet default.
+  grep -q '^die: internal: identity_door' <<<"$(names_of gate-no-such-door)" \
+    || fail "identity_door accepts a door it does not know, so a misspelt door name would check the files of whichever door its names were left at"
+  for door in $DOORS; do
+    names="$(names_of "$door")"
+    if [ "$(printf '%s\n' "$names" | grep -c .)" != 6 ] || grep -q '^die:' <<<"$names"; then
+      fail "identity_door $door did not name its service, variables, .env lines and directory: $names"
+      block_ok=0
+      continue
+    fi
+    printf '%s %s\n' "$door" "$(printf '%s' "$names" | tr '\n' ' ')" >>"$scratch/doors"
+  done
+fi
+# door_field DOOR N: the Nth name of DOOR (1 service, 2 keys file var, 3 map file
+# var, 4 keys .env line, 5 map .env line, 6 directory).
+door_field() { awk -v d="$1" -v n="$2" '$1 == d { print $(n + 1) }' "$scratch/doors"; }
 
 # ---- A. compose --------------------------------------------------------------
-python3 - compose.yaml install.sh <<'PY' || problems=$((problems + 1))
+python3 - compose.yaml install.sh "$scratch/doors" <<'PY' || problems=$((problems + 1))
 import re
 import sys
 
 text = open(sys.argv[1]).read()
 installer = open(sys.argv[2]).read()
+doors = []
+for line in open(sys.argv[3]).read().split("\n"):
+    f = line.split()
+    if len(f) == 7:
+        doors.append(dict(zip(["door", "service", "keys_file", "map_file", "keys_env", "map_env", "dir"], f)))
 
 # Two-space-indented service blocks, the same reader firewall-is-enforce.sh uses:
 # compose.yaml is hand-written and hand-indented.
@@ -136,43 +213,62 @@ if not subjects:
     print("      with no subcommand, so this gate measured NOTHING about client keys or the")
     print("      identity map. Silence here is not health.")
     sys.exit(1)
+if not doors:
+    print("FAIL: install.sh's identity block names no door, so no gateway's client keys or map")
+    print("      can be judged against it. This gate measured NOTHING.")
+    sys.exit(1)
 
 bad = 0
-WANT = {
-    "TOKENFUSE_CLIENT_KEYS": "${GATEWAY_CLIENT_KEYS:-}",
-    "TOKENFUSE_IDENTITY_MAP": "${GATEWAY_IDENTITY_MAP:-}",
-}
-MOUNT = "./identity:/etc/tokenfuse/identity:ro"
+by_service = {}
+for d in doors:
+    by_service.setdefault(d["service"], []).append(d)
+    if d["service"] not in subjects:
+        print(f"FAIL: install.sh checks the files of its {d['door']} door for {d['service']}, and compose.yaml runs")
+        print("      no such gateway, so what it writes into .env reaches nothing.")
+        bad += 1
 for name in subjects:
-    for var, want in WANT.items():
+    mine = by_service.get(name, [])
+    if len(mine) != 1:
+        print(f"FAIL: {name} runs the gateway, and {len(mine)} door(s) of install.sh's identity block name it.")
+        print("      Its client keys and identity map are checked by exactly one door, or by nothing.")
+        bad += 1
+        continue
+    d = mine[0]
+    want = {
+        "TOKENFUSE_CLIENT_KEYS": "${%s:-}" % d["keys_env"],
+        "TOKENFUSE_IDENTITY_MAP": "${%s:-}" % d["map_env"],
+    }
+    for var, w in want.items():
         got = env_value(blocks[name], var)
         if got is None:
             print(f"FAIL: {name} sets no {var}, so what install.sh writes into .env never reaches it.")
             bad += 1
-        elif got != want:
-            print(f"FAIL: {name} sets {var}: {got}, not {want}. Empty is the default that keeps")
+        elif got != w:
+            print(f"FAIL: {name} sets {var}: {got}, not {w}. Empty is the default that keeps")
             print("      a box that gave no file exactly as it was; `:?` would stop every such box,")
             print("      and a literal or another variable makes install.sh's line do nothing.")
             bad += 1
+    mount = "./%s:/etc/tokenfuse/identity:ro" % d["dir"]
     mounts = [v.lstrip("-").strip().strip('"').strip("'") for v in keyed(blocks[name], "volumes")]
-    if MOUNT not in mounts:
-        near = [m for m in mounts if m.startswith("./identity")]
+    if mount not in mounts:
+        near = [m for m in mounts if m.endswith(":/etc/tokenfuse/identity") or m.startswith("./%s:" % d["dir"])]
         if near:
-            print(f"FAIL: {name} mounts {near[0]}, not {MOUNT}. The gateway reads the map and must")
-            print("      not be able to change it.")
+            print(f"FAIL: {name} mounts {near[0]}, not {mount}. The gateway reads the map and must")
+            print("      not be able to change it, and reads its own door's map, never another's.")
         else:
-            print(f"FAIL: {name} does not mount {MOUNT}, so the map install.sh puts there is not")
+            print(f"FAIL: {name} does not mount {mount}, so the map install.sh puts there is not")
             print("      the map it reads.")
         bad += 1
 
 for name, block in blocks.items():
-    if name in subjects:
-        continue
     joined = "\n".join(code_lines(block))
-    if "GATEWAY_CLIENT_KEYS" in joined or "./identity:" in joined:
-        print(f"FAIL: {name} names GATEWAY_CLIENT_KEYS or ./identity. The client keys and the map")
-        print("      are the gateway's; another service holding them is another place they leak from.")
-        bad += 1
+    for d in doors:
+        if name == d["service"]:
+            continue
+        if d["keys_env"] in joined or ("./%s:" % d["dir"]) in joined:
+            print(f"FAIL: {name} names {d['keys_env']} or ./{d['dir']}. The client keys and the map are")
+            print(f"      {d['service']}'s; another service holding them is another place they leak from.")
+            bad += 1
 
 m = re.search(r"^IDENTITY_MAP_PATH=(\S+)", installer, re.M)
 if not m:
@@ -185,24 +281,10 @@ elif m.group(1) != "/etc/tokenfuse/identity/identity.json":
 
 if bad:
     sys.exit(1)
-print(f"compose: {', '.join(subjects)} read the client keys and the identity map from .env, default off, map mounted read only")
+print("compose: " + ", ".join(f"{d['service']} ({d['door']} door, {d['keys_env']}, ./{d['dir']})" for d in doors)
+      + " read their client keys and identity map from .env, default off, map mounted read only")
 PY
 
-# ---- B and C. the installer's block -------------------------------------------
-BLOCK="$(sed -n '/^# identity-files: begin$/,/^# identity-files: end$/p' install.sh)"
-block_ok=0
-if [ -z "$BLOCK" ]; then
-  fail "install.sh has no '# identity-files: begin' .. '# identity-files: end' block, so this measured nothing about the installer's half"
-elif ! grep -q '^identity_resolve()' <<<"$BLOCK" || ! grep -q '^identity_check()' <<<"$BLOCK" || ! grep -q '^identity_apply()' <<<"$BLOCK"; then
-  fail "the identity-files block defines no identity_resolve, identity_check or identity_apply, so this measured nothing"
-elif ! grep -q '^identity_resolve$' install.sh || ! grep -q '^identity_check "\$IDENTITY_IMAGE"$' install.sh || ! grep -q '^identity_apply$' install.sh; then
-  fail "install.sh never calls identity_resolve, identity_check and identity_apply, so the block is dead text"
-else
-  block_ok=1
-fi
-
-scratch="$(mktemp -d)"
-trap 'rm -rf "$scratch"' EXIT
 op="$scratch/op"   # where the operator stands when they run install.sh
 mkdir -p "$op"
 
@@ -242,19 +324,21 @@ mk() {
   printf 'SENTINEL=1\n' >"$d/.env"
   printf '%s' "$d"
 }
-# run DIR STEPS [VAR=VALUE...]: the block as install.sh runs it, from the
-# operator's directory. STEPS is `resolve` (section 0f alone) or `all` (0f, then
-# 3e's check and apply against $IMG).
+# run DIR STEPS [VAR=VALUE...]: the block as install.sh runs it, for the door in
+# $DOOR, from the operator's directory. STEPS is `resolve` (section 0f alone) or
+# `all` (0f, then 3e's check and apply against $IMG).
 run() {
   local d="$1" steps="$2"
   shift 2
   (
     cd "$op" || exit 99
-    env -i PATH="$PATH" HOME="$d" STACK_DIR="$d" BLOCK="$BLOCK" STEPS="$steps" IMG="${IMG:-}" "$@" bash -c '
+    env -i PATH="$PATH" HOME="$d" STACK_DIR="$d" BLOCK="$BLOCK" STEPS="$steps" IMG="${IMG:-}" \
+        DOOR="${DOOR:-main}" DOOR_UPSTREAM="$DOOR_UP" "$@" bash -c '
       set -euo pipefail
       note() { printf "note: %s\n" "$*"; }
       die() { printf "die: %s\n" "$*"; exit 1; }
       eval "$BLOCK"
+      identity_door "$DOOR"
       identity_resolve
       if [ "$STEPS" = resolve ]; then
         printf "spec=%s\nsrc=%s\n" "$IDENTITY_KEYS_NEW" "$IDENTITY_MAP_SRC"
@@ -271,22 +355,35 @@ val_of() { printf '%s' "$1" | sed -n "s/^$2=//p" | tail -1; }
 lines_of() { grep -c "^$2=" "$1/.env" || true; }
 sourced() { (set +u; . "$1/.env" >/dev/null 2>&1; printf '%s' "${!2:-}"); }
 
-if [ "$block_ok" = 1 ]; then
-  # ---- B. the first half -------------------------------------------------------
+# select_door DOOR: the names the halves below use for DOOR. OTHERS holds every
+# other door's .env lines, which a run for this door must never write.
+select_door() {
+  DOOR="$1"
+  KF="$(door_field "$1" 2)"
+  MF="$(door_field "$1" 3)"
+  KE="$(door_field "$1" 4)"
+  ME="$(door_field "$1" 5)"
+  DIR="$(door_field "$1" 6)"
+  OTHERS="$(awk -v d="$1" '$1 != d { print $5; print $6 }' "$scratch/doors" | tr '\n' ' ')"
+}
+
+# ---- B. the first half, for one door ----------------------------------------------
+first_half() {
+  local d out before
   d="$(mk)"
   out="$(run "$d" resolve)"
-  [ "$(rc_of "$out")" = 0 ] || fail "nothing set: it was refused: $out"
-  [ "$(cat "$d/.env")" = "SENTINEL=1" ] || fail "nothing set: .env was changed, so a default box would carry a line it never asked for"
+  [ "$(rc_of "$out")" = 0 ] || fail "$DOOR door: nothing set: it was refused: $out"
+  [ "$(cat "$d/.env")" = "SENTINEL=1" ] || fail "$DOOR door: nothing set: .env was changed, so a default box would carry a line it never asked for"
 
   d="$(mk)"
-  out="$(run "$d" resolve CLIENT_KEYS_FILE=keys.txt IDENTITY_MAP_FILE=map.json)"
+  out="$(run "$d" resolve "$KF=keys.txt" "$MF=map.json")"
   if [ "$(rc_of "$out")" != 0 ]; then
-    fail "a usable keys file (a comment, a blank line, CRLF, surrounding spaces) and map, named relative to where the operator stands, were refused: $out"
+    fail "$DOOR door: a usable keys file (a comment, a blank line, CRLF, surrounding spaces) and map, named relative to where the operator stands, were refused: $out"
   else
-    [ "$(val_of "$out" spec)" = "$SPEC2" ] || fail "the keys file was not read as its two secret:key_id lines, in order and trimmed"
-    [ "$(val_of "$out" src)" = "$(cd "$op" && pwd -P)/map.json" ] || fail "a relative IDENTITY_MAP_FILE was not resolved where the operator stood (got '$(val_of "$out" src)')"
+    [ "$(val_of "$out" spec)" = "$SPEC2" ] || fail "$DOOR door: the keys file was not read as its two secret:key_id lines, in order and trimmed"
+    [ "$(val_of "$out" src)" = "$(cd "$op" && pwd -P)/map.json" ] || fail "$DOOR door: a relative $MF was not resolved where the operator stood (got '$(val_of "$out" src)')"
   fi
-  [ "$(cat "$d/.env")" = "SENTINEL=1" ] || fail "the first half wrote .env, and it runs before the gateway image has read anything"
+  [ "$(cat "$d/.env")" = "SENTINEL=1" ] || fail "$DOOR door: the first half wrote .env, and it runs before the gateway image has read anything"
 
   # Every one refuses, names the variable, touches nothing, runs nothing it was
   # given and never repeats a secret.
@@ -307,60 +404,184 @@ if [ "$block_ok" = 1 ]; then
   # The case's file, written where the operator stands; one at a time, so one name.
   kf() { printf "$@" >"$op/k.case"; printf 'k.case'; }
   long="$(printf 'a%.0s' $(seq 1 257))"
-  refuses "a line with no colon" CLIENT_KEYS_FILE "$(kf 'gate-secret-nocolon-aaaaaaaaaaaaa\n')" gate-secret-nocolon-aaaaaaaaaaaaa
-  refuses "an empty key id" CLIENT_KEYS_FILE "$(kf '%s:\n' "$K1")" "$K1"
-  refuses "a key id with a space" CLIENT_KEYS_FILE "$(kf '%s:treasury bots\n' "$K1")" "$K1"
-  refuses "a key id with a comma" CLIENT_KEYS_FILE "$(kf '%s:a,b\n' "$K1")" "$K1"
-  refuses "a key id of 129 characters" CLIENT_KEYS_FILE "$(kf '%s:%s\n' "$K1" "${long:0:129}")" "$K1"
-  refuses "a secret of 23 characters" CLIENT_KEYS_FILE "$(kf 'gate-secret-23-charsxxx:k\n')" gate-secret-23-charsxxx
-  refuses "a secret of 257 characters" CLIENT_KEYS_FILE "$(kf '%s:k\n' "$long")" "$long"
-  refuses "a secret with a space" CLIENT_KEYS_FILE "$(kf 'gate-secret with-a-space-aaaaaaa:k\n')" "gate-secret with-a-space-aaaaaaa"
-  refuses "a secret with a quote" CLIENT_KEYS_FILE "$(kf "gate-secret-'quote'-aaaaaaaaaaa:k\n")" "gate-secret-'quote'-aaaaaaaaaaa"
-  refuses "a secret with a command substitution" CLIENT_KEYS_FILE "$(kf 'gate-secret-$(touch pwned-by-identity)-a:k\n')" 'gate-secret-$(touch pwned-by-identity)-a'
-  refuses "a secret with a backtick" CLIENT_KEYS_FILE "$(kf 'gate-secret-`touch pwned-by-identity`-aa:k\n')" 'gate-secret-`touch pwned-by-identity`-aa'
-  refuses "a secret given twice" CLIENT_KEYS_FILE "$(kf '%s:a\n%s:b\n' "$K1" "$K1")" "$K1"
-  refuses "comments and blank lines only" CLIENT_KEYS_FILE "$(kf '# nothing here\n\n   \n')"
-  refuses "an empty file" CLIENT_KEYS_FILE "$(kf '')"
-  refuses "a path that names nothing" CLIENT_KEYS_FILE "no-such-keys-file"
-  refuses "a directory" CLIENT_KEYS_FILE "."
-  refuses "a NUL byte" CLIENT_KEYS_FILE "$(kf '%s:treasury-bots\n\0\n' "$K1")" "$K1"
+  refuses "a line with no colon" "$KF" "$(kf 'gate-secret-nocolon-aaaaaaaaaaaaa\n')" gate-secret-nocolon-aaaaaaaaaaaaa
+  refuses "an empty key id" "$KF" "$(kf '%s:\n' "$K1")" "$K1"
+  refuses "a key id with a space" "$KF" "$(kf '%s:treasury bots\n' "$K1")" "$K1"
+  refuses "a key id with a comma" "$KF" "$(kf '%s:a,b\n' "$K1")" "$K1"
+  refuses "a key id of 129 characters" "$KF" "$(kf '%s:%s\n' "$K1" "${long:0:129}")" "$K1"
+  refuses "a secret of 23 characters" "$KF" "$(kf 'gate-secret-23-charsxxx:k\n')" gate-secret-23-charsxxx
+  refuses "a secret of 257 characters" "$KF" "$(kf '%s:k\n' "$long")" "$long"
+  refuses "a secret with a space" "$KF" "$(kf 'gate-secret with-a-space-aaaaaaa:k\n')" "gate-secret with-a-space-aaaaaaa"
+  refuses "a secret with a quote" "$KF" "$(kf "gate-secret-'quote'-aaaaaaaaaaa:k\n")" "gate-secret-'quote'-aaaaaaaaaaa"
+  refuses "a secret with a command substitution" "$KF" "$(kf 'gate-secret-$(touch pwned-by-identity)-a:k\n')" 'gate-secret-$(touch pwned-by-identity)-a'
+  refuses "a secret with a backtick" "$KF" "$(kf 'gate-secret-`touch pwned-by-identity`-aa:k\n')" 'gate-secret-`touch pwned-by-identity`-aa'
+  refuses "a secret given twice" "$KF" "$(kf '%s:a\n%s:b\n' "$K1" "$K1")" "$K1"
+  refuses "comments and blank lines only" "$KF" "$(kf '# nothing here\n\n   \n')"
+  refuses "an empty file" "$KF" "$(kf '')"
+  refuses "a path that names nothing" "$KF" "no-such-keys-file"
+  refuses "a directory" "$KF" "."
+  refuses "a NUL byte" "$KF" "$(kf '%s:treasury-bots\n\0\n' "$K1")" "$K1"
   head -c 262145 /dev/zero | tr '\0' 'a' >"$op/keys-huge"
-  refuses "a file over 256 KiB" CLIENT_KEYS_FILE keys-huge
-  [ ! -e "$op/pwned-by-identity" ] && [ ! -e "$scratch/pwned-by-identity" ] || fail "a command in a keys file was executed"
+  refuses "a file over 256 KiB" "$KF" keys-huge
+  [ ! -e "$op/pwned-by-identity" ] && [ ! -e "$scratch/pwned-by-identity" ] || fail "$DOOR door: a command in a keys file was executed"
 
-  refuses "a path that names nothing" IDENTITY_MAP_FILE "no-such-map.json"
-  refuses "a directory" IDENTITY_MAP_FILE "."
-  refuses "an empty file" IDENTITY_MAP_FILE "$(kf '   \n')"
-  refuses "a JSON array, not an object" IDENTITY_MAP_FILE "$(kf '[{"units": []}]\n')"
-  refuses "a NUL byte" IDENTITY_MAP_FILE "$(kf '{"units": []}\0\n')"
+  refuses "a path that names nothing" "$MF" "no-such-map.json"
+  refuses "a directory" "$MF" "."
+  refuses "an empty file" "$MF" "$(kf '   \n')"
+  refuses "a JSON array, not an object" "$MF" "$(kf '[{"units": []}]\n')"
+  refuses "a NUL byte" "$MF" "$(kf '{"units": []}\0\n')"
   { printf '{'; head -c 1048576 /dev/zero | tr '\0' ' '; printf '}'; } >"$op/map-huge.json"
-  refuses "a file over 1 MiB" IDENTITY_MAP_FILE map-huge.json
+  refuses "a file over 1 MiB" "$MF" map-huge.json
 
   # A value an earlier run left in .env is held to the same rules.
   d="$(mk)"
-  printf "GATEWAY_CLIENT_KEYS='short-secret:k'\n" >>"$d/.env"
+  printf "%s='short-secret:k'\n" "$KE" >>"$d/.env"
   before="$(cat "$d/.env")"
   out="$(run "$d" resolve)"
   if [ "$(rc_of "$out")" = 0 ]; then
-    fail "a GATEWAY_CLIENT_KEYS left in .env with a short secret was accepted on a re-run"
+    fail "$DOOR door: a $KE left in .env with a short secret was accepted on a re-run"
   elif grep -qF 'short-secret' <<<"$out"; then
-    fail "a bad GATEWAY_CLIENT_KEYS in .env was refused by an answer that repeats the secret"
+    fail "$DOOR door: a bad $KE in .env was refused by an answer that repeats the secret"
   fi
-  [ "$(cat "$d/.env")" = "$before" ] || fail "a bad GATEWAY_CLIENT_KEYS in .env was refused after .env was changed"
+  [ "$(cat "$d/.env")" = "$before" ] || fail "$DOOR door: a bad $KE in .env was refused after .env was changed"
   d="$(mk)"
-  printf "GATEWAY_CLIENT_KEYS='%s'\n" "$SPEC2" >>"$d/.env"
+  printf "%s='%s'\n" "$KE" "$SPEC2" >>"$d/.env"
   out="$(run "$d" resolve)"
-  [ "$(rc_of "$out")" = 0 ] || fail "a usable GATEWAY_CLIENT_KEYS kept in .env was refused on a re-run: $out"
+  [ "$(rc_of "$out")" = 0 ] || fail "$DOOR door: a usable $KE kept in .env was refused on a re-run: $out"
   d="$(mk)"
-  printf "GATEWAY_IDENTITY_MAP='/somewhere/else.json'\n" >>"$d/.env"
+  printf "%s='/somewhere/else.json'\n" "$ME" >>"$d/.env"
   out="$(run "$d" resolve)"
-  [ "$(rc_of "$out")" != 0 ] || fail "a GATEWAY_IDENTITY_MAP in .env that names another path was accepted"
+  [ "$(rc_of "$out")" != 0 ] || fail "$DOOR door: a $ME in .env that names another path was accepted"
   d="$(mk)"
-  printf "GATEWAY_IDENTITY_MAP='%s'\n" "$MAP_PATH" >>"$d/.env"
+  printf "%s='%s'\n" "$ME" "$MAP_PATH" >>"$d/.env"
   out="$(run "$d" resolve)"
-  [ "$(rc_of "$out")" != 0 ] || fail "a GATEWAY_IDENTITY_MAP in .env with no map behind it was accepted, and the gateway would refuse to start"
+  [ "$(rc_of "$out")" != 0 ] || fail "$DOOR door: a $ME in .env with no map behind it was accepted, and the gateway would refuse to start"
+}
 
-  # ---- C. the second half, with the gateway image compose.yaml pins ---------------
+# ---- C. the second half, for one door, with the gateway image compose.yaml pins ----
+c_pair() {
+  local d out o
+  d="$(mk)"
+  out="$(run "$d" all "$KF=keys.txt" "$MF=map.json")"
+  if [ "$(rc_of "$out")" != 0 ]; then
+    echo "FAIL: $DOOR door: a valid keys file and map were refused by the second half: $out"
+    return
+  fi
+  grep -qx 'count=2 map_on=1 changed=1' <<<"$out" || echo "FAIL: $DOOR door: a first install with both files did not report two keys, a map and a change: $(grep '^count' <<<"$out")"
+  [ "$(lines_of "$d" "$KE")" = 1 ] && [ "$(sourced "$d" "$KE")" = "$SPEC2" ] \
+    || echo "FAIL: $DOOR door: .env does not carry exactly one $KE line that reads back as the keys given"
+  [ "$(lines_of "$d" "$ME")" = 1 ] && [ "$(sourced "$d" "$ME")" = "$MAP_PATH" ] \
+    || echo "FAIL: $DOOR door: .env does not carry exactly one $ME=$MAP_PATH"
+  cmp -s "$op/map.json" "$d/$DIR/identity.json" || echo "FAIL: $DOOR door: the installed map is not the map given"
+  [ "$(ls -l "$d/$DIR/identity.json" | cut -c1-10)" = "-r--r--r--" ] || echo "FAIL: $DOOR door: the installed map is not 0444"
+  ! compgen -G "$d/$DIR.check.*" >/dev/null || echo "FAIL: $DOOR door: the staging directory was left behind"
+  head -n 1 "$d/.env" | grep -qx 'SENTINEL=1' || echo "FAIL: $DOOR door: writing the keys disturbed the rest of .env"
+  for o in $OTHERS; do
+    if grep -q "^$o=" "$d/.env"; then echo "FAIL: $DOOR door: its files wrote $o, another door's line"; fi
+  done
+
+  cp "$d/.env" "$d/.env.before"
+  cp "$d/$DIR/identity.json" "$d/map.before"
+  out="$(run "$d" all)"
+  [ "$(rc_of "$out")" = 0 ] || { echo "FAIL: $DOOR door: a re-run that names no file was refused, so an upgrade would stop: $out"; return; }
+  grep -qx 'count=2 map_on=1 changed=0' <<<"$out" || echo "FAIL: $DOOR door: a re-run that names no file did not keep both: $(grep '^count' <<<"$out")"
+  cmp -s "$d/.env" "$d/.env.before" || echo "FAIL: $DOOR door: a re-run that names no file changed .env"
+  cmp -s "$d/$DIR/identity.json" "$d/map.before" || echo "FAIL: $DOOR door: a re-run that names no file changed the map"
+
+  out="$(run "$d" all "$MF=map.json")"
+  grep -qx 'count=2 map_on=1 changed=0' <<<"$out" || echo "FAIL: $DOOR door: the same map given again was installed as a change, which restarts the gateway for nothing: $(grep -E '^(count|die)' <<<"$out")"
+
+  out="$(run "$d" all "$MF=map2.json")"
+  grep -qx 'count=2 map_on=1 changed=1' <<<"$out" || echo "FAIL: $DOOR door: a new map was not installed as a change: $(grep -E '^(count|die)' <<<"$out")"
+  cmp -s "$op/map2.json" "$d/$DIR/identity.json" || echo "FAIL: $DOOR door: a new map did not replace the old one"
+  [ "$(lines_of "$d" "$ME")" = 1 ] || echo "FAIL: $DOOR door: a new map left more than one $ME line in .env"
+
+  out="$(run "$d" all "$KF=keys3.txt")"
+  grep -qx 'count=3 map_on=1 changed=0' <<<"$out" || echo "FAIL: $DOOR door: a new keys file checked against the kept map did not pass: $(grep -E '^(count|die)' <<<"$out")"
+  [ "$(lines_of "$d" "$KE")" = 1 ] && [ "$(sourced "$d" "$KE")" = "$SPEC3" ] \
+    || echo "FAIL: $DOOR door: a new keys file did not REPLACE the $KE line"
+
+  cp "$d/.env" "$d/.env.before"
+  out="$(run "$d" all "$KF=keys-treasury-only.txt")"
+  [ "$(rc_of "$out")" != 0 ] || echo "FAIL: $DOOR door: a keys file that drops a key the kept map binds was accepted"
+  cmp -s "$d/.env" "$d/.env.before" || echo "FAIL: $DOOR door: a refused keys file still changed .env"
+}
+c_tilde() {
+  local d out
+  d="$(mk)"
+  out="$(run "$d" all "$KF=keys-tilde.txt")"
+  [ "$(rc_of "$out")" = 0 ] || { echo "FAIL: $DOOR door: a secret holding :~ was refused: $out"; return; }
+  [ "$(sourced "$d" "$KE")" = "$KT:tilde-bot,$K1:treasury-bots" ] \
+    || echo "FAIL: $DOOR door: $KE does not read back as given when .env is sourced; a value with :~ in it has to be quoted"
+  grep -q "^$ME=" "$d/.env" && echo "FAIL: $DOOR door: keys alone wrote a $ME line"
+  grep -qx 'count=2 map_on=0 changed=0' <<<"$out" || echo "FAIL: $DOOR door: keys alone did not report two keys and no map: $(grep '^count' <<<"$out")"
+}
+c_refused() { # label keysfile mapfile needle
+  local d out
+  d="$(mk)"
+  out="$(run "$d" all ${2:+"$KF=$2"} ${3:+"$MF=$3"})"
+  if [ "$(rc_of "$out")" = 0 ]; then
+    echo "FAIL: $DOOR door: $1 was accepted"
+  elif ! grep -qF -- "$4" <<<"$out"; then
+    echo "FAIL: $DOOR door: $1 was refused, but not saying: $4 ($(grep '^die' <<<"$out"))"
+  fi
+  [ "$(cat "$d/.env")" = "SENTINEL=1" ] || echo "FAIL: $DOOR door: $1 was refused after .env was changed"
+  [ ! -e "$d/$DIR/identity.json" ] || echo "FAIL: $DOOR door: $1 was refused after the map was put in place"
+  ! compgen -G "$d/$DIR.check.*" >/dev/null || echo "FAIL: $DOOR door: $1 left the staging directory behind"
+  if grep -qF -- "$K1" <<<"$out" || grep -qF -- "$K3" <<<"$out"; then echo "FAIL: $DOOR door: $1 was refused by an answer that repeats a secret"; fi
+}
+# The image BUILD_FROM_SOURCE builds has no ENTRYPOINT (stack-k8s
+# images/tokenfuse.Dockerfile), so the check has to give the command compose
+# gives the gateway. One line on top of the pinned image is that image's shape.
+c_no_entrypoint() {
+  local d out
+  d="$(mk)"
+  out="$(IMG="$NOENT" run "$d" all "$KF=keys.txt" "$MF=map.json")"
+  grep -qx 'count=2 map_on=1 changed=1' <<<"$out" \
+    || echo "FAIL: $DOOR door: a gateway image with no ENTRYPOINT, the shape BUILD_FROM_SOURCE builds, could not check the files: $(grep -E '^(count|die)' <<<"$out")"
+}
+c_prefixes() {
+  local d out
+  d="$(mk)"
+  out="$(run "$d" all "$MF=map-prefixes.json")"
+  grep -qx 'count=0 map_on=1 changed=1' <<<"$out" || echo "FAIL: $DOOR door: a map of units and prefixes alone, with no keys, was not installed: $(grep -E '^(count|die)' <<<"$out")"
+}
+
+if [ "$block_ok" = 1 ]; then
+  for door in $DOORS; do
+    select_door "$door"
+    first_half
+  done
+
+  # The two doors keep apart: one process resolves the first door's files, then the
+  # second's, then names the first again, and each still holds its own. A door's
+  # state that is not saved on the way out is the first door's keys lost, or the
+  # second's written over them.
+  set -- $DOORS
+  if [ "$#" -ge 2 ]; then
+    a="$1" b="$2"
+    d="$(mk)"
+    out="$( (
+      cd "$op" || exit 99
+      env -i PATH="$PATH" HOME="$d" STACK_DIR="$d" BLOCK="$BLOCK" A="$a" B="$b" DOOR_UPSTREAM="$DOOR_UP" \
+          "$(door_field "$a" 2)=keys.txt" "$(door_field "$b" 2)=keys3.txt" "$(door_field "$b" 3)=map.json" bash -c '
+        set -euo pipefail
+        note() { :; }
+        die() { printf "die: %s\n" "$*"; exit 1; }
+        eval "$BLOCK"
+        identity_door "$A"; identity_resolve
+        identity_door "$B"; identity_resolve
+        identity_door "$A"
+        printf "a_spec=%s\na_given=%s\na_src=%s\n" "$IDENTITY_KEYS_NEW" "$IDENTITY_KEYS_GIVEN" "$IDENTITY_MAP_SRC"
+        bspec="IDENTITY_${B}_KEYS_NEW"; bsrc="IDENTITY_${B}_MAP_SRC"
+        printf "b_spec=%s\nb_src=%s\n" "${!bspec:-}" "${!bsrc:-}"'
+    ) 2>&1 )"
+    [ "$(val_of "$out" a_spec)" = "$SPEC2" ] && [ "$(val_of "$out" a_given)" = 1 ] && [ -z "$(val_of "$out" a_src)" ] \
+      || fail "switching from the $a door to the $b door and back lost the $a door's own state (keys '$(val_of "$out" a_spec | cut -c1-12)...', map '$(val_of "$out" a_src)'): $(grep '^die' <<<"$out")"
+    [ "$(val_of "$out" b_spec)" = "$SPEC3" ] && [ "$(val_of "$out" b_src)" = "$(cd "$op" && pwd -P)/map.json" ] \
+      || fail "the $b door's state was not kept under its own name when the $a door was named again"
+  fi
+
   IMG="$(sed -n 's/^    image: \${TOKENFUSE_IMAGE:-\(ghcr\.io\/taipanbox\/tokenfuse:[^}]*\)}$/\1/p' compose.yaml | head -n 1)"
   if [ -z "$IMG" ]; then
     fail "compose.yaml names no \${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:...} image, so the second half could not be run"
@@ -370,105 +591,26 @@ if [ "$block_ok" = 1 ]; then
     fail "could not pull $IMG, so the second half could not be run"
   else
     export IMG
-    # Each case on its own box, all at once: every one starts a container.
-    c_pair() {
-      local d out
-      d="$(mk)"
-      out="$(run "$d" all CLIENT_KEYS_FILE=keys.txt IDENTITY_MAP_FILE=map.json)"
-      if [ "$(rc_of "$out")" != 0 ]; then
-        echo "FAIL: a valid keys file and map were refused by the second half: $out"
-        return
-      fi
-      grep -qx 'count=2 map_on=1 changed=1' <<<"$out" || echo "FAIL: a first install with both files did not report two keys, a map and a change: $(grep '^count' <<<"$out")"
-      [ "$(lines_of "$d" GATEWAY_CLIENT_KEYS)" = 1 ] && [ "$(sourced "$d" GATEWAY_CLIENT_KEYS)" = "$SPEC2" ] \
-        || echo "FAIL: .env does not carry exactly one GATEWAY_CLIENT_KEYS line that reads back as the keys given"
-      [ "$(lines_of "$d" GATEWAY_IDENTITY_MAP)" = 1 ] && [ "$(sourced "$d" GATEWAY_IDENTITY_MAP)" = "$MAP_PATH" ] \
-        || echo "FAIL: .env does not carry exactly one GATEWAY_IDENTITY_MAP=$MAP_PATH"
-      cmp -s "$op/map.json" "$d/identity/identity.json" || echo "FAIL: the installed map is not the map given"
-      [ "$(ls -l "$d/identity/identity.json" | cut -c1-10)" = "-r--r--r--" ] || echo "FAIL: the installed map is not 0444"
-      ! compgen -G "$d/identity.check.*" >/dev/null || echo "FAIL: the staging directory was left behind"
-      head -n 1 "$d/.env" | grep -qx 'SENTINEL=1' || echo "FAIL: writing the keys disturbed the rest of .env"
-
-      cp "$d/.env" "$d/.env.before"
-      cp "$d/identity/identity.json" "$d/map.before"
-      out="$(run "$d" all)"
-      [ "$(rc_of "$out")" = 0 ] || { echo "FAIL: a re-run that names no file was refused, so an upgrade would stop: $out"; return; }
-      grep -qx 'count=2 map_on=1 changed=0' <<<"$out" || echo "FAIL: a re-run that names no file did not keep both: $(grep '^count' <<<"$out")"
-      cmp -s "$d/.env" "$d/.env.before" || echo "FAIL: a re-run that names no file changed .env"
-      cmp -s "$d/identity/identity.json" "$d/map.before" || echo "FAIL: a re-run that names no file changed the map"
-
-      out="$(run "$d" all IDENTITY_MAP_FILE=map.json)"
-      grep -qx 'count=2 map_on=1 changed=0' <<<"$out" || echo "FAIL: the same map given again was installed as a change, which restarts the gateway for nothing: $(grep -E '^(count|die)' <<<"$out")"
-
-      out="$(run "$d" all IDENTITY_MAP_FILE=map2.json)"
-      grep -qx 'count=2 map_on=1 changed=1' <<<"$out" || echo "FAIL: a new map was not installed as a change: $(grep -E '^(count|die)' <<<"$out")"
-      cmp -s "$op/map2.json" "$d/identity/identity.json" || echo "FAIL: a new map did not replace the old one"
-      [ "$(lines_of "$d" GATEWAY_IDENTITY_MAP)" = 1 ] || echo "FAIL: a new map left more than one GATEWAY_IDENTITY_MAP line in .env"
-
-      out="$(run "$d" all CLIENT_KEYS_FILE=keys3.txt)"
-      grep -qx 'count=3 map_on=1 changed=0' <<<"$out" || echo "FAIL: a new keys file checked against the kept map did not pass: $(grep -E '^(count|die)' <<<"$out")"
-      [ "$(lines_of "$d" GATEWAY_CLIENT_KEYS)" = 1 ] && [ "$(sourced "$d" GATEWAY_CLIENT_KEYS)" = "$SPEC3" ] \
-        || echo "FAIL: a new keys file did not REPLACE the GATEWAY_CLIENT_KEYS line"
-
-      cp "$d/.env" "$d/.env.before"
-      out="$(run "$d" all CLIENT_KEYS_FILE=keys-treasury-only.txt)"
-      [ "$(rc_of "$out")" != 0 ] || echo "FAIL: a keys file that drops a key the kept map binds was accepted"
-      cmp -s "$d/.env" "$d/.env.before" || echo "FAIL: a refused keys file still changed .env"
-    }
-    c_tilde() {
-      local d out
-      d="$(mk)"
-      out="$(run "$d" all CLIENT_KEYS_FILE=keys-tilde.txt)"
-      [ "$(rc_of "$out")" = 0 ] || { echo "FAIL: a secret holding :~ was refused: $out"; return; }
-      [ "$(sourced "$d" GATEWAY_CLIENT_KEYS)" = "$KT:tilde-bot,$K1:treasury-bots" ] \
-        || echo "FAIL: GATEWAY_CLIENT_KEYS does not read back as given when .env is sourced; a value with :~ in it has to be quoted"
-      grep -q "^GATEWAY_IDENTITY_MAP=" "$d/.env" && echo "FAIL: keys alone wrote a GATEWAY_IDENTITY_MAP line"
-      grep -qx 'count=2 map_on=0 changed=0' <<<"$out" || echo "FAIL: keys alone did not report two keys and no map: $(grep '^count' <<<"$out")"
-    }
-    c_refused() { # label keysfile mapfile needle
-      local d out
-      d="$(mk)"
-      out="$(run "$d" all ${2:+CLIENT_KEYS_FILE=$2} ${3:+IDENTITY_MAP_FILE=$3})"
-      if [ "$(rc_of "$out")" = 0 ]; then
-        echo "FAIL: $1 was accepted"
-      elif ! grep -qF -- "$4" <<<"$out"; then
-        echo "FAIL: $1 was refused, but not saying: $4 ($(grep '^die' <<<"$out"))"
-      fi
-      [ "$(cat "$d/.env")" = "SENTINEL=1" ] || echo "FAIL: $1 was refused after .env was changed"
-      [ ! -e "$d/identity/identity.json" ] || echo "FAIL: $1 was refused after the map was put in place"
-      ! compgen -G "$d/identity.check.*" >/dev/null || echo "FAIL: $1 left the staging directory behind"
-      if grep -qF -- "$K1" <<<"$out" || grep -qF -- "$K3" <<<"$out"; then echo "FAIL: $1 was refused by an answer that repeats a secret"; fi
-    }
-    # The image BUILD_FROM_SOURCE builds has no ENTRYPOINT (stack-k8s
-    # images/tokenfuse.Dockerfile), so the check has to give the command compose
-    # gives the gateway. One line on top of the pinned image is that image's shape.
-    c_no_entrypoint() {
-      local d out
-      d="$(mk)"
-      out="$(IMG="$NOENT" run "$d" all CLIENT_KEYS_FILE=keys.txt IDENTITY_MAP_FILE=map.json)"
-      grep -qx 'count=2 map_on=1 changed=1' <<<"$out" \
-        || echo "FAIL: a gateway image with no ENTRYPOINT, the shape BUILD_FROM_SOURCE builds, could not check the files: $(grep -E '^(count|die)' <<<"$out")"
-    }
-    c_prefixes() {
-      local d out
-      d="$(mk)"
-      out="$(run "$d" all IDENTITY_MAP_FILE=map-prefixes.json)"
-      grep -qx 'count=0 map_on=1 changed=1' <<<"$out" || echo "FAIL: a map of units and prefixes alone, with no keys, was not installed: $(grep -E '^(count|die)' <<<"$out")"
-    }
-    c_pair >"$scratch/c.pair" 2>&1 &
-    c_tilde >"$scratch/c.tilde" 2>&1 &
-    c_refused "a map that binds a key id no client key carries" keys-treasury-only.txt map.json "research-bots that no client key carries" >"$scratch/c.orphan" 2>&1 &
-    c_refused "a client key the map does not bind" keys-orphan.txt map.json "orphan have no keys[] binding" >"$scratch/c.unbound" 2>&1 &
-    c_refused "a map that configures nothing ({})" keys.txt map-empty-object.json "configures nothing" >"$scratch/c.empty" 2>&1 &
-    c_refused "a map naming a unit it does not declare" keys.txt map-unknown-unit.json "not declared in units[]" >"$scratch/c.unknown" 2>&1 &
-    c_refused "a map with key bindings and no client keys at all" "" map.json "that no client key carries" >"$scratch/c.nokeys" 2>&1 &
-    c_prefixes >"$scratch/c.prefixes" 2>&1 &
     NOENT="stack-single-gate/tokenfuse-no-entrypoint:local"
-    if printf 'FROM %s\nENTRYPOINT []\n' "$IMG" | docker build -q -t "$NOENT" - >/dev/null 2>&1; then
-      c_no_entrypoint >"$scratch/c.noentry" 2>&1 &
-    else
-      echo "FAIL: could not build a no-ENTRYPOINT image from $IMG, so the BUILD_FROM_SOURCE shape was not checked" >"$scratch/c.noentry"
-    fi
+    noent_ok=0
+    if printf 'FROM %s\nENTRYPOINT []\n' "$IMG" | docker build -q -t "$NOENT" - >/dev/null 2>&1; then noent_ok=1; fi
+    # Each case on its own box, every door at once: every one starts a container.
+    for door in $DOORS; do
+      select_door "$door"
+      c_pair >"$scratch/c.$door.pair" 2>&1 &
+      c_tilde >"$scratch/c.$door.tilde" 2>&1 &
+      c_refused "a map that binds a key id no client key carries" keys-treasury-only.txt map.json "research-bots that no client key carries" >"$scratch/c.$door.orphan" 2>&1 &
+      c_refused "a client key the map does not bind" keys-orphan.txt map.json "orphan have no keys[] binding" >"$scratch/c.$door.unbound" 2>&1 &
+      c_refused "a map that configures nothing ({})" keys.txt map-empty-object.json "configures nothing" >"$scratch/c.$door.empty" 2>&1 &
+      c_refused "a map naming a unit it does not declare" keys.txt map-unknown-unit.json "not declared in units[]" >"$scratch/c.$door.unknown" 2>&1 &
+      c_refused "a map with key bindings and no client keys at all" "" map.json "that no client key carries" >"$scratch/c.$door.nokeys" 2>&1 &
+      c_prefixes >"$scratch/c.$door.prefixes" 2>&1 &
+      if [ "$noent_ok" = 1 ]; then
+        c_no_entrypoint >"$scratch/c.$door.noentry" 2>&1 &
+      else
+        echo "FAIL: could not build a no-ENTRYPOINT image from $IMG, so the BUILD_FROM_SOURCE shape was not checked" >"$scratch/c.$door.noentry"
+      fi
+    done
     wait
     for f in "$scratch"/c.*; do
       while IFS= read -r line; do
@@ -486,7 +628,8 @@ if [ "$block_ok" = 1 ]; then
   pull_line="$(ln_of 'config --images')"
   first_up="$(ln_of '"\${COMPOSE\[@\]}".* up -d')"
   main_up="$(ln_of 'up -d --remove-orphans')"
-  restart_line="$(ln_of 'restart tokenfuse-gateway')"
+  # The gateway's own restart, not the OpenAI door's (`restart tokenfuse-gateway-openai`).
+  restart_line="$(ln_of 'restart tokenfuse-gateway[^-]')"
   verify_line="$(ln_of '^say "verify"$')"
   if [ -n "$first_apt" ] && [ -n "$resolve_line" ] && [ "$resolve_line" -gt "$first_apt" ]; then
     fail "identity_resolve (line $resolve_line) runs after the first package install (line $first_apt), so a refused file would arrive after something was installed"
@@ -513,7 +656,7 @@ if [ "$block_ok" = 1 ]; then
   reach="$(sed -n '/^IDENTITY_REACH=""$/,/^fi$/p' install.sh)"
   if ! grep -qF 'x-fuse-key header' <<<"$reach" || ! grep -qF 'x-fuse-agent-id' <<<"$reach"; then
     fail "the end of the run no longer says which headers an agent sends (x-fuse-key, x-fuse-agent-id)"
-  elif ! grep -q '^\$REACH\$IDENTITY_REACH$' install.sh; then
+  elif ! grep -q '^\$REACH\$IDENTITY_REACH' install.sh; then
     fail "the closing report does not print IDENTITY_REACH"
   fi
 fi
@@ -521,37 +664,69 @@ fi
 # ---- E. resolved ------------------------------------------------------------------
 if ! docker compose version >/dev/null 2>&1; then
   fail "no docker compose here, so the resolved configuration could not be read. This gate does not pass on a box that cannot run it."
+elif [ ! -s "$scratch/doors" ]; then
+  fail "no door to read the resolved configuration for, so its half measured nothing"
 else
   cdir="$(mktemp -d "$scratch/cfg.XXXXXX")"
   cp compose.yaml "$cdir/compose.yaml"
+  # Every profile a door's gateway sits behind, so the resolved configuration holds
+  # every door, not only the one a default box starts.
+  profiles=()
+  for p in $(python3 - compose.yaml "$scratch/doors" <<'PY'
+import re, sys
+text = open(sys.argv[1]).read()
+services = {l.split()[1] for l in open(sys.argv[2]).read().split("\n") if l.strip()}
+for s in sorted(services):
+    m = re.search(r"^  " + re.escape(s) + r":\n(.*?)(?=^  [a-z0-9-]+:\s*$|\Z)", text, re.M | re.S)
+    if m:
+        for p in re.findall(r'^    profiles:\s*\[([^\]]*)\]', m.group(1), re.M):
+            for name in re.findall(r'"([a-z0-9-]+)"', p):
+                print(name)
+PY
+  ); do profiles+=(--profile "$p"); done
   # The required variables of the file's own settings, not of its comments, and
-  # never the two this section sets itself: a comment naming
+  # never the ones this section sets itself: a comment naming
   # `${GATEWAY_CLIENT_KEYS:?...}` would otherwise hand the default box a key.
+  excl=()
+  for v in $(awk '{ print $5; print $6 }' "$scratch/doors"); do excl+=(-e "$v"); done
   grep -v '^[[:space:]]*#' compose.yaml | grep -o '\${[A-Z_]*:?' | tr -d '${:?' | sort -u \
-    | grep -v -x -e GATEWAY_CLIENT_KEYS -e GATEWAY_IDENTITY_MAP | sed 's/$/=fake-not-a-secret/' >"$cdir/base.env"
-  resolved() { # extra .env lines on stdin; prints keys|map|mount|holders
+    | grep -v -x "${excl[@]}" | sed 's/$/=fake-not-a-secret/' >"$cdir/base.env"
+  unset_args=()
+  for v in $(awk '{ print $5; print $6 }' "$scratch/doors"); do unset_args+=(-u "$v"); done
+  resolved() { # extra .env lines on stdin; prints door|service|keys|map|mount|holders per door
     cat "$cdir/base.env" - >"$cdir/.env"
-    env -u GATEWAY_CLIENT_KEYS -u GATEWAY_IDENTITY_MAP docker compose --project-directory "$cdir" -f "$cdir/compose.yaml" config --format json 2>"$cdir/err" |
+    env "${unset_args[@]}" docker compose --project-directory "$cdir" -f "$cdir/compose.yaml" "${profiles[@]}" config --format json 2>"$cdir/err" |
       python3 -c '
 import json, sys
 s = json.load(sys.stdin)["services"]
-g = s["tokenfuse-gateway"]
-env = g.get("environment") or {}
-mount = [v for v in g.get("volumes", []) if v.get("target") == "/etc/tokenfuse/identity"]
-m = "none"
-if mount:
-    v = mount[0]
-    m = "%s,%s,%s" % (v.get("type"), "ro" if v.get("read_only") else "rw", v.get("source", "").rsplit("/", 1)[-1])
-secret = "gate-resolved-secret-aaaaaaaaaaaa"
-holders = sorted(n for n, svc in s.items() if secret in json.dumps(svc.get("environment") or {}))
-print("|".join([env.get("TOKENFUSE_CLIENT_KEYS", "<unset>"), env.get("TOKENFUSE_IDENTITY_MAP", "<unset>"), m, ",".join(holders)]))
-' 2>>"$cdir/err"
+for line in open(sys.argv[1]).read().split("\n"):
+    f = line.split()
+    if len(f) != 7:
+        continue
+    door, svc = f[0], f[1]
+    g = s.get(svc)
+    if g is None:
+        print("|".join([door, svc, "<no such service>"]))
+        continue
+    env = g.get("environment") or {}
+    mount = [v for v in g.get("volumes", []) if v.get("target") == "/etc/tokenfuse/identity"]
+    m = "none"
+    if mount:
+        v = mount[0]
+        m = "%s,%s,%s" % (v.get("type"), "ro" if v.get("read_only") else "rw", v.get("source", "").rsplit("/", 1)[-1])
+    secret = "gate-resolved-secret-%s-aaaaaaaaaaaa" % door
+    holders = sorted(n for n, svc_ in s.items() if secret in json.dumps(svc_.get("environment") or {}))
+    print("|".join([door, svc, env.get("TOKENFUSE_CLIENT_KEYS", "<unset>"), env.get("TOKENFUSE_IDENTITY_MAP", "<unset>"), m, ",".join(holders)]))
+' "$scratch/doors" 2>>"$cdir/err"
   }
+  want_default="$(awk '{ printf "%s|%s|||bind,ro,%s|\n", $1, $2, $7 }' "$scratch/doors")"
   got="$(resolved </dev/null)"
-  [ "$got" = "||bind,ro,identity|" ] || fail "resolved: a default box reads '$got', not empty keys, no map and a read-only ./identity bind ($(head -1 "$cdir/err"))"
-  got="$(printf "GATEWAY_CLIENT_KEYS='gate-resolved-secret-aaaaaaaaaaaa:k1'\nGATEWAY_IDENTITY_MAP='%s'\n" "$MAP_PATH" | resolved)"
-  [ "$got" = "gate-resolved-secret-aaaaaaaaaaaa:k1|$MAP_PATH|bind,ro,identity|tokenfuse-gateway" ] \
-    || fail "resolved: a box whose .env sets both reads '$got', so the keys or the map do not reach the gateway, or reach more than the gateway"
+  [ "$got" = "$want_default" ] || fail "resolved: a default box reads '$(tr '\n' ' ' <<<"$got")', not empty keys, no map and a read-only bind of each door's own directory ($(head -1 "$cdir/err"))"
+  set_lines="$(awk -v mp="$MAP_PATH" '{ printf "%s=\047gate-resolved-secret-%s-aaaaaaaaaaaa:k1\047\n%s=\047%s\047\n", $5, $1, $6, mp }' "$scratch/doors")"
+  want_set="$(awk -v mp="$MAP_PATH" '{ printf "%s|%s|gate-resolved-secret-%s-aaaaaaaaaaaa:k1|%s|bind,ro,%s|%s\n", $1, $2, $1, mp, $7, $2 }' "$scratch/doors")"
+  got="$(resolved <<<"$set_lines")"
+  [ "$got" = "$want_set" ] \
+    || fail "resolved: a box whose .env sets every door's pair reads '$(tr '\n' ' ' <<<"$got")', so a door's keys or map do not reach its gateway, or reach more than it"
 fi
 
 if [ "$problems" -gt 0 ]; then
@@ -559,7 +734,8 @@ if [ "$problems" -gt 0 ]; then
   echo "$problems problem(s). See CLAUDE.md invariant 29."
   exit 1
 fi
-echo "OK: every gateway reads the client keys and the identity map from .env, off by default, the map mounted"
-echo "    read only; install.sh refuses hostile files before anything is installed and lets the pinned"
-echo "    gateway image read the pair before anything restarts, keeps both on a re-run, replaces rather"
-echo "    than repeats, never echoes a secret, restarts the gateway for a new map, and names the headers."
+echo "OK: every gateway reads its door's client keys and identity map from .env, off by default, the map"
+echo "    mounted read only; for every door ($DOORS) install.sh refuses hostile files before anything is"
+echo "    installed and lets the pinned gateway image read the pair, on that door's own wire, before"
+echo "    anything restarts, keeps both on a re-run, replaces rather than repeats, never echoes a secret,"
+echo "    keeps each door's state apart, restarts the gateway for a new map, and names the headers."

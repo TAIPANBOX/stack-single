@@ -58,6 +58,10 @@
 #     # who may call the gateway (secret:key_id lines) and which agent ids and
 #     # unit each key speaks for; off unless given, kept on a re-run, checked by
 #     # the gateway image itself before anything restarts. See section 0f.
+#   OPENAI_DOOR=1 OPENAI_DOOR_UPSTREAM=https://api.openai.com/v1/chat/completions \
+#     OPENAI_DOOR_CLIENT_KEYS_FILE=/path/keys.txt OPENAI_DOOR_IDENTITY_MAP_FILE=/path/map.json ./install.sh
+#     # a second gateway on port 4110 for agents that speak the OpenAI wire, with
+#     # keys and a map of its own; off unless asked, 0 turns it off. See section 0g.
 #
 # The typed-answer plane (typryx) answers a typed question from one of the
 # templates baked into its image, with a probability for every option. The
@@ -724,15 +728,65 @@ pii_resolve
 # remove its line from .env (GATEWAY_CLIENT_KEYS, GATEWAY_IDENTITY_MAP) and run
 # docker compose up -d tokenfuse-gateway. (gate: scripts/identity-files-are-checked.sh
 # lifts this block out and runs it.)
+#
+# The OpenAI door (section 0g) is a second gateway with a keys file and a map of its
+# own, checked by this same block, run once for that door by name: identity_door
+# main or identity_door openai says which gateway the functions act on, and every
+# name below (the input variables, the .env lines, the directory, the service, the
+# wire the check container serves) comes from it. One block for both doors, not a
+# copy per door, because two copies of a security check drift apart.
 # identity-files: begin
-IDENTITY_MAP_PATH=/etc/tokenfuse/identity/identity.json  # where the gateway reads it
-IDENTITY_KEYS_GIVEN=0    # 1 when this run named CLIENT_KEYS_FILE
+IDENTITY_MAP_PATH=/etc/tokenfuse/identity/identity.json  # where a gateway reads it, on either door
+IDENTITY_KEYS_GIVEN=0    # 1 when this run named the door's keys file
 IDENTITY_KEYS_NEW=""     # the spec this run's file gives, comma-joined; never printed
 IDENTITY_MAP_SRC=""      # the absolute path of the map this run was given
 IDENTITY_KEYS_COUNT=0    # client keys the gateway holds after this run (0 = off)
 IDENTITY_MAP_ON=0        # 1 when the gateway reads an identity map after this run
 IDENTITY_MAP_CHANGED=0   # 1 when this run installed a different map
 IDENTITY_STAGE=""        # this run's staging directory, from identity_check to identity_apply
+IDENTITY_DOOR=""         # the door the state above belongs to: main or openai
+
+# NAME: which gateway the functions below act on. `main` is tokenfuse-gateway on
+# 4100; `openai` is tokenfuse-gateway-openai, the OpenAI door on 4110 (CLAUDE.md
+# invariant 32). The state above belongs to the door named last. The door it leaves
+# keeps its own as IDENTITY_<door>_<field> (IDENTITY_openai_KEYS_COUNT), saved here
+# and loaded back when that door is named again. printf -v and ${!name}, which bash
+# 3.2 has, and no associative array or nameref, which it does not.
+IDENTITY_FIELDS="KEYS_GIVEN KEYS_NEW MAP_SRC KEYS_COUNT MAP_ON MAP_CHANGED STAGE"
+identity_door() {
+  local f v
+  if [ -n "$IDENTITY_DOOR" ]; then
+    for f in $IDENTITY_FIELDS; do
+      v="IDENTITY_$f"
+      printf -v "IDENTITY_${IDENTITY_DOOR}_$f" '%s' "${!v}"
+    done
+  fi
+  case "$1" in
+    main)
+      ID_KEYS_FILE_VAR=CLIENT_KEYS_FILE ID_MAP_FILE_VAR=IDENTITY_MAP_FILE
+      ID_KEYS_ENV=GATEWAY_CLIENT_KEYS ID_MAP_ENV=GATEWAY_IDENTITY_MAP
+      ID_DIR=identity ID_SERVICE=tokenfuse-gateway ID_LABEL="the gateway" ID_CHECK=""
+      ID_WIRE=anthropic ID_ROUTE=/v1/messages ID_UPSTREAM=https://api.anthropic.com/v1/messages
+      ;;
+    openai)
+      ID_KEYS_FILE_VAR=OPENAI_DOOR_CLIENT_KEYS_FILE ID_MAP_FILE_VAR=OPENAI_DOOR_IDENTITY_MAP_FILE
+      ID_KEYS_ENV=OPENAI_DOOR_CLIENT_KEYS ID_MAP_ENV=OPENAI_DOOR_IDENTITY_MAP
+      ID_DIR=identity-openai ID_SERVICE=tokenfuse-gateway-openai ID_LABEL="the OpenAI door" ID_CHECK=-openai
+      # The door's own upstream, from section 0g: the gateway refuses the openai
+      # wire with no upstream, so its check has to start with the one it will have.
+      ID_WIRE=openai ID_ROUTE=/v1/chat/completions ID_UPSTREAM="${DOOR_UPSTREAM:-}"
+      ;;
+    *) die "internal: identity_door was given '$1', which is neither main nor openai" ;;
+  esac
+  IDENTITY_DOOR="$1"
+  for f in $IDENTITY_FIELDS; do
+    v="IDENTITY_${1}_$f"
+    case "$f" in
+      KEYS_NEW|MAP_SRC|STAGE) printf -v "IDENTITY_$f" '%s' "${!v:-}" ;;
+      *) printf -v "IDENTITY_$f" '%s' "${!v:-0}" ;;
+    esac
+  done
+}
 
 identity_env_get() { # NAME: what .env holds for NAME, single quotes removed
   local v
@@ -787,10 +841,11 @@ identity_entry_why() {
 # a secret is, before anything has been touched.
 identity_resolve() {
   local f why line secret n=0 count=0 spec="" seen=$'\n' kept first
-  if [ -n "${CLIENT_KEYS_FILE:-}" ]; then
-    f="$CLIENT_KEYS_FILE"
+  [ -n "$IDENTITY_DOOR" ] || die "internal: identity_resolve ran before identity_door named a door"
+  if [ -n "${!ID_KEYS_FILE_VAR:-}" ]; then
+    f="${!ID_KEYS_FILE_VAR}"
     why="$(identity_file_why "$f" 262144)"
-    [ -z "$why" ] || die "CLIENT_KEYS_FILE $why. It must name a file of secret:key_id lines (README, \"Client keys and the identity map\"). Nothing was installed."
+    [ -z "$why" ] || die "$ID_KEYS_FILE_VAR $why. It must name a file of secret:key_id lines (README, \"Client keys and the identity map\"). Nothing was installed."
     while IFS= read -r line || [ -n "$line" ]; do
       n=$((n + 1))
       line="${line%$'\r'}"
@@ -798,44 +853,44 @@ identity_resolve() {
       line="${line%"${line##*[![:space:]]}"}"
       case "$line" in ""|"#"*) continue ;; esac
       why="$(identity_entry_why "$line")"
-      [ -z "$why" ] || die "CLIENT_KEYS_FILE: line $n $why. Each line is secret:key_id. Nothing was installed."
+      [ -z "$why" ] || die "$ID_KEYS_FILE_VAR: line $n $why. Each line is secret:key_id. Nothing was installed."
       secret="${line%:*}"
       case "$seen" in
-        *$'\n'"$secret"$'\n'*) die "CLIENT_KEYS_FILE: line $n gives a secret an earlier line already gave, and the gateway would keep only one of the two. Nothing was installed." ;;
+        *$'\n'"$secret"$'\n'*) die "$ID_KEYS_FILE_VAR: line $n gives a secret an earlier line already gave, and $ID_LABEL would keep only one of the two. Nothing was installed." ;;
       esac
       seen="$seen$secret"$'\n'
       spec="${spec:+$spec,}$line"
       count=$((count + 1))
     done <"$f"
-    [ "$count" -gt 0 ] || die "CLIENT_KEYS_FILE names no key: every line in it is blank or a comment. Nothing was installed."
-    [ "${#spec}" -le 65536 ] || die "CLIENT_KEYS_FILE gives more keys than fit in one environment value (65536 bytes). Nothing was installed."
+    [ "$count" -gt 0 ] || die "$ID_KEYS_FILE_VAR names no key: every line in it is blank or a comment. Nothing was installed."
+    [ "${#spec}" -le 65536 ] || die "$ID_KEYS_FILE_VAR gives more keys than fit in one environment value (65536 bytes). Nothing was installed."
     IDENTITY_KEYS_NEW="$spec"
     IDENTITY_KEYS_GIVEN=1
   else
-    kept="$(identity_env_get GATEWAY_CLIENT_KEYS)"
+    kept="$(identity_env_get "$ID_KEYS_ENV")"
     if [ -n "$kept" ]; then
       while IFS= read -r -d ',' line; do
         n=$((n + 1))
         why="$(identity_entry_why "$line")"
-        [ -z "$why" ] || die ".env holds a GATEWAY_CLIENT_KEYS whose entry $n $why. Give CLIENT_KEYS_FILE again, or remove that line. Nothing was changed."
+        [ -z "$why" ] || die ".env holds a $ID_KEYS_ENV whose entry $n $why. Give $ID_KEYS_FILE_VAR again, or remove that line. Nothing was changed."
       done <<<"$kept,"
     fi
   fi
 
-  if [ -n "${IDENTITY_MAP_FILE:-}" ]; then
-    f="$IDENTITY_MAP_FILE"
+  if [ -n "${!ID_MAP_FILE_VAR:-}" ]; then
+    f="${!ID_MAP_FILE_VAR}"
     why="$(identity_file_why "$f" 1048576)"
-    [ -z "$why" ] || die "IDENTITY_MAP_FILE $why. It must name tokenfuse's identity map, a JSON file (README, \"Client keys and the identity map\"). Nothing was installed."
+    [ -z "$why" ] || die "$ID_MAP_FILE_VAR $why. It must name tokenfuse's identity map, a JSON file (README, \"Client keys and the identity map\"). Nothing was installed."
     first="$(sed -n '/[^[:space:]]/{s/^[[:space:]]*//;s/^\(.\).*/\1/p;q;}' "$f")"
-    [ "$first" = "{" ] || die "IDENTITY_MAP_FILE is not a JSON object: an identity map starts with {. Nothing was installed."
-    IDENTITY_MAP_SRC="$(readlink -f -- "$f")" || die "could not resolve the path IDENTITY_MAP_FILE names. Nothing was installed."
+    [ "$first" = "{" ] || die "$ID_MAP_FILE_VAR is not a JSON object: an identity map starts with {. Nothing was installed."
+    IDENTITY_MAP_SRC="$(readlink -f -- "$f")" || die "could not resolve the path $ID_MAP_FILE_VAR names. Nothing was installed."
   else
-    kept="$(identity_env_get GATEWAY_IDENTITY_MAP)"
+    kept="$(identity_env_get "$ID_MAP_ENV")"
     if [ -n "$kept" ]; then
       [ "$kept" = "$IDENTITY_MAP_PATH" ] \
-        || die ".env holds a GATEWAY_IDENTITY_MAP other than $IDENTITY_MAP_PATH, the one place this installer keeps the map. Fix or remove that line. Nothing was changed."
-      [ -s "$STACK_DIR/identity/identity.json" ] \
-        || die ".env names an identity map and $STACK_DIR/identity/identity.json is missing or empty, so the gateway would refuse to start. Give IDENTITY_MAP_FILE again, or remove GATEWAY_IDENTITY_MAP from .env. Nothing was changed."
+        || die ".env holds a $ID_MAP_ENV other than $IDENTITY_MAP_PATH, the one place this installer keeps the map. Fix or remove that line. Nothing was changed."
+      [ -s "$STACK_DIR/$ID_DIR/identity.json" ] \
+        || die ".env names an identity map and $STACK_DIR/$ID_DIR/identity.json is missing or empty, so $ID_LABEL would refuse to start. Give $ID_MAP_FILE_VAR again, or remove $ID_MAP_ENV from .env. Nothing was changed."
     fi
   fi
 }
@@ -848,29 +903,33 @@ identity_resolve() {
 identity_check() {
   local img="$1" spec map="" stage name
   local logs="" status="" left=40 orphans unbound
-  # One name per STACK_DIR: a run cut short leaves its container behind, and the
-  # next run on the same box removes it by this name before starting its own.
-  name="agent-stack-identity-check-$(printf '%s' "$STACK_DIR" | cksum | cut -d' ' -f1)"
+  [ -n "$IDENTITY_DOOR" ] || die "internal: identity_check ran before identity_door named a door"
+  # One name per STACK_DIR and door: a run cut short leaves its container behind,
+  # and the next run on the same box removes it by this name before starting its
+  # own. The gateway's has no door in it, the name it had before the OpenAI door.
+  name="agent-stack-identity-check$ID_CHECK-$(printf '%s' "$STACK_DIR" | cksum | cut -d' ' -f1)"
   spec="$IDENTITY_KEYS_NEW"
-  [ "$IDENTITY_KEYS_GIVEN" = 1 ] || spec="$(identity_env_get GATEWAY_CLIENT_KEYS)"
+  [ "$IDENTITY_KEYS_GIVEN" = 1 ] || spec="$(identity_env_get "$ID_KEYS_ENV")"
   if [ -n "$IDENTITY_MAP_SRC" ]; then
     map="$IDENTITY_MAP_SRC"
-  elif [ -n "$(identity_env_get GATEWAY_IDENTITY_MAP)" ]; then
-    map="$STACK_DIR/identity/identity.json"
+  elif [ -n "$(identity_env_get "$ID_MAP_ENV")" ]; then
+    map="$STACK_DIR/$ID_DIR/identity.json"
   fi
-  # What a run cut short left behind.
-  rm -rf -- "${STACK_DIR:?}"/identity.check.*
+  # What a run cut short left behind, for this door only (identity.check.* and
+  # identity-openai.check.* do not match each other).
+  rm -rf -- "${STACK_DIR:?}/$ID_DIR".check.*
   IDENTITY_STAGE=""
   IDENTITY_KEYS_COUNT=0
   IDENTITY_MAP_ON=0
   [ -n "$spec$map" ] || return 0
-  [ -n "$img" ] || die "could not tell which gateway image this box runs, so the identity files cannot be checked. Nothing was changed."
+  [ -n "$img" ] || die "could not tell which gateway image this box runs for $ID_LABEL, so its identity files cannot be checked. Nothing was changed."
+  [ -n "$ID_UPSTREAM" ] || die "internal: $ID_LABEL has no upstream to start its check with"
 
   # A new directory every run, never a path an earlier run removed: Docker
   # Desktop's file sharing has shown a container a re-created path as it was
   # before, an empty directory, and the gateway then reported the map missing
   # (measured 2026-10-13 on macOS; a Linux bind mount reads the path at start).
-  stage="$(mktemp -d "${STACK_DIR:?}/identity.check.XXXXXX")" || die "could not create a staging directory in $STACK_DIR"
+  stage="$(mktemp -d "${STACK_DIR:?}/$ID_DIR.check.XXXXXX")" || die "could not create a staging directory in $STACK_DIR"
   IDENTITY_STAGE="$stage"
   chmod 0755 "$stage" || die "could not set the mode of $stage"
   if [ -n "$map" ]; then
@@ -884,13 +943,16 @@ identity_check() {
   # published image's ENTRYPOINT is the binary already, and the image
   # BUILD_FROM_SOURCE builds has none, so with no command it would not start
   # (measured 2026-10-13 with the entrypoint emptied: docker refused, no command).
+  # The wire and the upstream are the door's own: the gateway refuses the openai
+  # wire with no upstream, and with no network the upstream is never dialled.
   TOKENFUSE_CLIENT_KEYS="$spec" docker run -d --name "$name" --network none \
-      -e TOKENFUSE_UPSTREAM=https://api.anthropic.com/v1/messages \
+      -e "TOKENFUSE_WIRE=$ID_WIRE" \
+      -e "TOKENFUSE_UPSTREAM=$ID_UPSTREAM" \
       -e TOKENFUSE_CLIENT_KEYS \
       -e "TOKENFUSE_IDENTITY_MAP=${map:+$IDENTITY_MAP_PATH}" \
       -v "$stage:/etc/tokenfuse/identity:ro" \
       "$img" /usr/local/bin/tokenfuse >/dev/null \
-    || die "could not start $img to check the identity files. Nothing was changed."
+    || die "could not start $img to check the identity files of $ID_LABEL. Nothing was changed."
   while [ "$left" -gt 0 ]; do
     logs="$(docker logs "$name" 2>&1)"
     case "$logs" in *"tokenfuse gateway listening"*) break ;; esac
@@ -907,20 +969,26 @@ identity_check() {
     *)
       rm -rf -- "$stage"
       printf '%s\n' "$logs" | grep '^tokenfuse: ' | sed 's/^/   /' >&2 || true
-      die "the gateway image ($img) would not start with these identity files (its own words are above). Nothing was changed, and the running stack is as it was."
+      die "the gateway image ($img) would not start as $ID_LABEL with these identity files (its own words are above). Nothing was changed, and the running stack is as it was."
       ;;
   esac
+  # The wire it served, from its own start-up line: a check that started on the
+  # other wire read the files as a different gateway than the one that will.
+  grep -q "serving one door.*$ID_ROUTE" <<<"$logs" || {
+    rm -rf -- "$stage"
+    die "the check of $ID_LABEL's identity files did not serve its wire ($ID_ROUTE), so it did not read them as $ID_LABEL will. Nothing was changed."
+  }
   if [ -n "$spec" ]; then
     IDENTITY_KEYS_COUNT=$(( $(printf '%s' "$spec" | tr -cd ',' | wc -c) + 1 ))
     grep -qF "client auth: ON ($IDENTITY_KEYS_COUNT key(s))" <<<"$logs" || {
       rm -rf -- "$stage"
-      die "the gateway did not take all $IDENTITY_KEYS_COUNT client key(s) it was given. Nothing was changed."
+      die "$ID_LABEL did not take all $IDENTITY_KEYS_COUNT client key(s) it was given. Nothing was changed."
     }
   fi
   if [ -n "$map" ]; then
     grep -qF 'identity map: ON (' <<<"$logs" || {
       rm -rf -- "$stage"
-      die "the identity map configures nothing: no unit, no key binding, no prefix. An empty file and {} read as no map at all, and the gateway would run with it off. Nothing was changed."
+      die "the identity map of $ID_LABEL configures nothing: no unit, no key binding, no prefix. An empty file and {} read as no map at all, and it would run with the map off. Nothing was changed."
     }
     IDENTITY_MAP_ON=1
   fi
@@ -929,13 +997,13 @@ identity_check() {
   orphans="$(sed -n 's/^tokenfuse: identity map key_id `\([^`]*\)` has no matching TOKENFUSE_CLIENT_KEYS entry.*/\1/p' <<<"$logs" | sort -u | tr '\n' ' ')"
   if [ -n "$orphans" ]; then
     rm -rf -- "$stage"
-    die "the identity map binds key id(s) ${orphans}that no client key carries, so its bindings could never match a call. Give a secret:key_id line for each in CLIENT_KEYS_FILE, or drop the binding. Nothing was changed."
+    die "the identity map of $ID_LABEL binds key id(s) ${orphans}that no client key carries, so its bindings could never match a call. Give a secret:key_id line for each in $ID_KEYS_FILE_VAR, or drop the binding. Nothing was changed."
   fi
   # shellcheck disable=SC2016  # the gateway's backticks again, matched as text
   unbound="$(sed -n 's/^tokenfuse: client key `\([^`]*\)` has no keys\[\] binding.*/\1/p' <<<"$logs" | sort -u | tr '\n' ' ')"
   if [ -n "$unbound" ]; then
     rm -rf -- "$stage"
-    die "client key id(s) ${unbound}have no keys[] binding in the identity map, and under strict=enforce, which this box runs, every call with them is refused 403. Bind each in the map, or drop it from the keys file. Nothing was changed."
+    die "client key id(s) ${unbound}have no keys[] binding in the identity map of $ID_LABEL, and under strict=enforce, which this box runs, every call with them is refused 403. Bind each in the map, or drop it from the keys file. Nothing was changed."
   fi
 }
 
@@ -943,23 +1011,24 @@ identity_check() {
 # a re-run that names no file leaves .env and the map exactly as they were.
 identity_apply() {
   local stage="$IDENTITY_STAGE"
-  mkdir -p "$STACK_DIR/identity" || die "could not create $STACK_DIR/identity"
-  chmod 0755 "$STACK_DIR/identity" || die "could not set the mode of $STACK_DIR/identity"
+  [ -n "$IDENTITY_DOOR" ] || die "internal: identity_apply ran before identity_door named a door"
+  mkdir -p "$STACK_DIR/$ID_DIR" || die "could not create $STACK_DIR/$ID_DIR"
+  chmod 0755 "$STACK_DIR/$ID_DIR" || die "could not set the mode of $STACK_DIR/$ID_DIR"
   if [ "$IDENTITY_KEYS_GIVEN" = 1 ]; then
-    identity_env_set GATEWAY_CLIENT_KEYS "$IDENTITY_KEYS_NEW"
-    note "client keys: $IDENTITY_KEYS_COUNT key(s), kept in .env as GATEWAY_CLIENT_KEYS (never printed)"
+    identity_env_set "$ID_KEYS_ENV" "$IDENTITY_KEYS_NEW"
+    note "client keys ($ID_LABEL): $IDENTITY_KEYS_COUNT key(s), kept in .env as $ID_KEYS_ENV (never printed)"
   fi
   if [ -n "$IDENTITY_MAP_SRC" ]; then
-    if cmp -s "$stage/identity.json" "$STACK_DIR/identity/identity.json"; then
-      note "identity map: the same as the one already installed, left as is"
+    if cmp -s "$stage/identity.json" "$STACK_DIR/$ID_DIR/identity.json"; then
+      note "identity map ($ID_LABEL): the same as the one already installed, left as is"
     else
-      mv -f "$stage/identity.json" "$STACK_DIR/identity/identity.json" \
+      mv -f "$stage/identity.json" "$STACK_DIR/$ID_DIR/identity.json" \
         || die "could not put the identity map in place"
       IDENTITY_MAP_CHANGED=1
-      note "identity map: installed at $STACK_DIR/identity/identity.json (read only for the gateway)"
+      note "identity map ($ID_LABEL): installed at $STACK_DIR/$ID_DIR/identity.json (read only for $ID_SERVICE)"
     fi
-    [ "$(identity_env_get GATEWAY_IDENTITY_MAP)" = "$IDENTITY_MAP_PATH" ] \
-      || identity_env_set GATEWAY_IDENTITY_MAP "$IDENTITY_MAP_PATH"
+    [ "$(identity_env_get "$ID_MAP_ENV")" = "$IDENTITY_MAP_PATH" ] \
+      || identity_env_set "$ID_MAP_ENV" "$IDENTITY_MAP_PATH"
   fi
   [ -z "$stage" ] || rm -rf -- "$stage"
   IDENTITY_STAGE=""
@@ -994,7 +1063,194 @@ felyx_gateway_note() {
   fi
 }
 # identity-files: end
+
+# ---- 0g. a second door, on the OpenAI wire (opt-in) ----------------------------
+# The gateway speaks the Anthropic wire, POST /v1/messages. An agent whose SDK
+# speaks the OpenAI wire (POST /v1/chat/completions: an OpenAI client, an Ollama
+# or vLLM one) needs a gateway that serves that door in front of an upstream that
+# speaks it, because tokenfuse serves one wire per process and translates nothing
+# (tokenfuse docs/26). OPENAI_DOOR=1 runs a second gateway, tokenfuse-gateway-openai:
+# the same image with every hardened setting of the first, published on port 4110
+# on the same bind as 4100 (CLAUDE.md invariant 32).
+#
+#   OPENAI_DOOR=1                          the door on; 0 turns it off; unset keeps
+#                                          what an earlier run saved in .env
+#   OPENAI_DOOR_UPSTREAM=https://...       the full endpoint it forwards to, ending
+#                                          in /chat/completions, not a base URL
+#   OPENAI_DOOR_CLIENT_KEYS_FILE=/path     the door's own keys file and identity
+#   OPENAI_DOOR_IDENTITY_MAP_FILE=/path    map, in section 0f's formats
+#
+# The door hands each caller's Authorization header to the upstream, so this box
+# keeps no provider key for it, and a metered upstream bills whoever's key the
+# caller sends. That is why it never opens without keys and a map: with
+# OPENAI_DOOR=1 and no upstream, no keys file or no map (given now, or kept in .env
+# by an earlier run), this refuses HERE, before a package is installed, and never
+# echoes what it was given. Keys and a map of its OWN, not the gateway's: a unit's
+# month counter lives in one gateway process, so a unit in both maps would spend
+# its cap once on each door, and section 3e refuses two maps that declare the same
+# unit. The files themselves are checked by section 0f's block, run for this door
+# by name. Off removes the container; its lines stay in .env for a later
+# OPENAI_DOOR=1. (gate: scripts/openai-door.sh lifts this block out and runs it.)
+# openai-door: begin
+DOOR_ON=0             # 1 when this box runs the OpenAI door after this run
+DOOR_SET=""           # what this run said: "" nothing, 1 on, 0 off
+DOOR_UPSTREAM=""      # the endpoint the door forwards to after this run
+DOOR_UPSTREAM_NEW=""  # the endpoint this run named, "" when it named none
+
+door_env_get() { # NAME: what .env holds for NAME, single quotes removed
+  local v
+  [ -f "$STACK_DIR/.env" ] || return 0
+  v="$(sed -n "/^$1=/{s///p;q;}" "$STACK_DIR/.env")"
+  v="${v#\'}"
+  v="${v%\'}"
+  printf '%s' "$v"
+}
+
+door_env_set() { # NAME VALUE: replace or add NAME in .env, single-quoted
+  local tmp
+  tmp="$(mktemp)" || die "could not make a temporary file to update .env"
+  { grep -v "^$1=" "$STACK_DIR/.env" || true; } >"$tmp"
+  printf "%s='%s'\n" "$1" "$2" >>"$tmp"
+  cat "$tmp" >"$STACK_DIR/.env" || die "could not update $STACK_DIR/.env"
+  rm -f "$tmp"
+}
+
+door_env_forget() { # NAME: drop NAME's line from .env
+  local tmp
+  tmp="$(mktemp)" || die "could not make a temporary file to update .env"
+  { grep -v "^$1=" "$STACK_DIR/.env" || true; } >"$tmp"
+  cat "$tmp" >"$STACK_DIR/.env" || die "could not update $STACK_DIR/.env"
+  rm -f "$tmp"
+}
+
+# URL: an http or https endpoint with a host, ending in /chat/completions, and
+# nothing more: no credentials, no query, no fragment, and no space, quote or
+# dollar, so the value is plain text to compose and to the shell that sources .env.
+door_url_ok() {
+  local LC_ALL=C re='^https?://([A-Za-z0-9._-]+|\[[0-9A-Fa-f:.]+\])(:[0-9]{1,5})?(/[A-Za-z0-9._~+-]+)*/chat/completions$'
+  [[ "$1" =~ $re ]]
+}
+
+# Decide whether this box runs the door after this run, and refuse, naming what is
+# missing, before anything has been touched.
+door_resolve() {
+  local saved
+  DOOR_SET="${OPENAI_DOOR:-}"
+  case "$DOOR_SET" in
+    ""|0|1) ;;
+    *) die "OPENAI_DOOR must be 1 (the OpenAI door on) or 0 (off). Nothing was installed." ;;
+  esac
+  saved="$(door_env_get OPENAI_DOOR)"
+  case "$saved" in
+    ""|1) ;;
+    *) die ".env holds an OPENAI_DOOR other than 1. Fix or remove that line. Nothing was changed." ;;
+  esac
+  case "$DOOR_SET" in
+    1) DOOR_ON=1 ;;
+    0) DOOR_ON=0 ;;
+    *) if [ "$saved" = 1 ]; then DOOR_ON=1; else DOOR_ON=0; fi ;;
+  esac
+  DOOR_UPSTREAM_NEW="${OPENAI_DOOR_UPSTREAM:-}"
+  if [ "$DOOR_ON" != 1 ]; then
+    [ -z "$DOOR_UPSTREAM_NEW${OPENAI_DOOR_CLIENT_KEYS_FILE:-}${OPENAI_DOOR_IDENTITY_MAP_FILE:-}" ] \
+      || die "an OPENAI_DOOR_* setting was given with the OpenAI door off, so it would be ignored. Set OPENAI_DOOR=1 with it. Nothing was installed."
+    DOOR_UPSTREAM=""
+    return 0
+  fi
+  DOOR_UPSTREAM="$DOOR_UPSTREAM_NEW"
+  [ -n "$DOOR_UPSTREAM" ] || DOOR_UPSTREAM="$(door_env_get OPENAI_DOOR_UPSTREAM)"
+  [ -n "$DOOR_UPSTREAM" ] \
+    || die "OPENAI_DOOR=1 needs OPENAI_DOOR_UPSTREAM, the full endpoint of an OpenAI-compatible provider, ending in /chat/completions (such as https://api.openai.com/v1/chat/completions). Nothing was installed."
+  door_url_ok "$DOOR_UPSTREAM" \
+    || die "OPENAI_DOOR_UPSTREAM must be an http or https URL with a host and no credentials, query or fragment, ending in /chat/completions: the full endpoint, not a base URL. Nothing was installed."
+  [ -n "${OPENAI_DOOR_CLIENT_KEYS_FILE:-}" ] || [ -n "$(door_env_get OPENAI_DOOR_CLIENT_KEYS)" ] \
+    || die "OPENAI_DOOR=1 needs OPENAI_DOOR_CLIENT_KEYS_FILE, a keys file of the door's own (secret:key_id lines): the door hands each caller's provider key to the upstream, so it never opens to callers it cannot name. Nothing was installed."
+  [ -n "${OPENAI_DOOR_IDENTITY_MAP_FILE:-}" ] || [ -n "$(door_env_get OPENAI_DOOR_IDENTITY_MAP)" ] \
+    || die "OPENAI_DOOR=1 needs OPENAI_DOOR_IDENTITY_MAP_FILE, an identity map of the door's own, with units no other map declares (README, \"A second door on the OpenAI wire\"). Nothing was installed."
+}
+
+# Write the decision where compose reads it. Called once .env exists. A run that
+# says nothing changes nothing.
+door_apply() {
+  case "$DOOR_SET" in
+    1) door_env_set OPENAI_DOOR 1 ;;
+    0)
+      door_env_forget OPENAI_DOOR
+      note "OpenAI door: off. Its upstream, keys and map stay in .env for a later OPENAI_DOOR=1; remove the OPENAI_DOOR_ lines to forget them"
+      ;;
+  esac
+  [ -z "$DOOR_UPSTREAM_NEW" ] || door_env_set OPENAI_DOOR_UPSTREAM "$DOOR_UPSTREAM_NEW"
+  [ "$DOOR_ON" != 1 ] || note "OpenAI door: on, port 4110, forwarding to $DOOR_UPSTREAM"
+}
+
+# IMAGE MAP_A MAP_B: prints the ids of the units both maps declare, space-separated,
+# nothing when they share none, and fails when the comparison could not run. A shell
+# cannot read JSON, so python3 reads both, in a throwaway container of IMAGE (the
+# console's image, which has it) with no network. Each map has already been read by
+# the gateway image, so each is valid JSON.
+door_units_shared() {
+  local out
+  [ -n "$1" ] || return 1
+  out="$(docker run --rm --network none --entrypoint python3 \
+      -v "$2:/maps/a.json:ro" -v "$3:/maps/b.json:ro" "$1" -c '
+import json
+def units(path):
+    m = json.load(open(path))
+    return {u["id"] for u in (m.get("units") or []) if isinstance(u, dict) and isinstance(u.get("id"), str)}
+print(" ".join(sorted(units("/maps/a.json") & units("/maps/b.json"))))
+' 2>/dev/null)" || return 1
+  printf '%s' "$out"
+}
+
+# DOOR_IMAGE CONSOLE_IMAGE: section 3e for the door, once the gateway's own check
+# has run and before anything is written. The door's pair is read by the gateway
+# image it will run, as section 0f says; then the two maps the run will leave are
+# compared, and two that declare one unit are refused. Leaves the gateway selected.
+# A refusal removes both doors' staging directories, so nothing is left half done.
+door_identity_check() {
+  local a="" b="" shared
+  [ "$DOOR_ON" = 1 ] || return 0
+  identity_door openai
+  identity_check "$1"
+  [ -z "$IDENTITY_STAGE" ] || b="$IDENTITY_STAGE/identity.json"
+  identity_door main
+  [ -z "$IDENTITY_STAGE" ] || a="$IDENTITY_STAGE/identity.json"
+  [ -n "$a" ] && [ -f "$a" ] && [ -n "$b" ] && [ -f "$b" ] || return 0
+  if ! shared="$(door_units_shared "$2" "$a" "$b")"; then
+    door_unstage
+    die "could not compare the gateway's identity map with the OpenAI door's (python3 in ${2:-the console image}), so a unit in both could not be ruled out. Nothing was changed."
+  fi
+  if [ -n "$shared" ]; then
+    door_unstage
+    die "the gateway's identity map and the OpenAI door's both declare unit(s) $shared. A unit's month counter lives in one gateway process, so a unit in both maps would get its cap once on each door. Give each door units of its own. Nothing was changed."
+  fi
+}
+
+# Both doors' staging directories, removed before a refusal of the pair. Run with the
+# gateway selected, so its own is IDENTITY_STAGE and the door's was saved by name.
+door_unstage() {
+  local s
+  for s in "$IDENTITY_STAGE" "${IDENTITY_openai_STAGE:-}"; do
+    [ -z "$s" ] || rm -rf -- "$s"
+  done
+}
+
+# Write what door_identity_check passed, as identity_apply does for the gateway.
+door_identity_apply() {
+  [ "$DOOR_ON" = 1 ] || return 0
+  identity_door openai
+  identity_apply
+  identity_door main
+}
+# openai-door: end
+door_resolve
+identity_door main
 identity_resolve
+if [ "$DOOR_ON" = 1 ]; then
+  identity_door openai
+  identity_resolve
+  identity_door main
+fi
 
 say "installing docker and git"
 export DEBIAN_FRONTEND=noninteractive
@@ -1581,6 +1837,8 @@ ceiling_apply
 firewall_apply
 # The PII switch (section 0e): written only when this run set it.
 pii_apply
+# The OpenAI door (section 0g): written only when this run said something about it.
+door_apply
 
 # The delegation plane's own door (profile delegation), handled like every
 # other opt-in plane's key above: generated whether or not WITH_DELEGATION is
@@ -1798,6 +2056,9 @@ if [ -z "$BUILD_FROM_SOURCE" ]; then
   # `config --images` resolves the same set docker will run.
   if [ "$TYPED_PLANE" != off ] && [ "$TYPED_RISK_ON" = 1 ]; then profiles+=(--profile typed-risk-signal); fi
   [ -z "${WITH_DELEGATION:-}" ] || profiles+=(--profile delegation)
+  # The OpenAI door runs the gateway's own image, so this adds nothing to pull;
+  # named so that `config --images` resolves the same set docker will run.
+  [ "$DOOR_ON" != 1 ] || profiles+=(--profile openai-door)
   pulled=0
   while read -r img; do
     case "$img" in
@@ -1852,10 +2113,29 @@ fi
 # compose resolves for tokenfuse-gateway, so a BUILD_FROM_SOURCE box checks with
 # the gateway it built. awk reads to the end rather than exiting early: an early
 # exit is a SIGPIPE for compose under pipefail.
-IDENTITY_IMAGE="$( { "${COMPOSE[@]}" config 2>/dev/null || true; } \
-  | awk '/^  [^ ]/{s=($0=="  tokenfuse-gateway:")} s&&/^    image: /&&!d{print $2; d=1}')"
+#
+# With the OpenAI door on (section 0g), its own pair is read the same way by the
+# image compose resolves for tokenfuse-gateway-openai, and the two maps are compared
+# in the console's image, which has python3; only when every check has passed is
+# anything written, for either door.
+compose_image() { # SERVICE [compose options]: the image compose resolves for SERVICE
+  local svc="$1"
+  shift
+  { "${COMPOSE[@]}" "$@" config 2>/dev/null || true; } \
+    | awk -v want="  $svc:" '/^  [^ ]/{s=($0==want)} s&&/^    image: /&&!d{print $2; d=1}'
+}
+IDENTITY_IMAGE="$(compose_image tokenfuse-gateway)"
+DOOR_IMAGE=""
+DOOR_CHECK_IMAGE=""
+if [ "$DOOR_ON" = 1 ]; then
+  DOOR_IMAGE="$(compose_image tokenfuse-gateway-openai --profile openai-door)"
+  DOOR_CHECK_IMAGE="$(compose_image console)"
+fi
+identity_door main
 identity_check "$IDENTITY_IMAGE"
+door_identity_check "$DOOR_IMAGE" "$DOOR_CHECK_IMAGE"
 identity_apply
+door_identity_apply
 
 # ---- 4. the files the services read -----------------------------------------
 if [ ! -f policy.yaml ]; then
@@ -1979,6 +2259,9 @@ UP_PROFILES=()
 # in section 0b, and a saved flag is inert while typed answers are off.
 if [ "$TYPED_PLANE" != off ] && [ "$TYPED_RISK_ON" = 1 ]; then UP_PROFILES+=(--profile typed-risk-signal); fi
 [ -z "${WITH_DELEGATION:-}" ] || UP_PROFILES+=(--profile delegation)
+# The OpenAI door (OPENAI_DOOR=1, section 0g) is started like the typed plane, so
+# section 8 can ask it the questions it asks the gateway.
+[ "$DOOR_ON" != 1 ] || UP_PROFILES+=(--profile openai-door)
 
 # Delegation needs a head start, the same reason `stack-up` starts vouchryx
 # before its own gateway (README, "Delegation: a proved chain"): the gateway
@@ -2036,6 +2319,10 @@ fi
 # would leave it running beside a broker that no longer points at it. A box that
 # never had one has nothing to remove, which is why the failure is ignored.
 if [ "$TYPED_PLANE" = off ] || [ "$TYPED_RISK_ON" != 1 ]; then "${COMPOSE[@]}" --profile typed-risk-signal rm -sf typryx-wardryx-proxy >/dev/null 2>&1 || true; fi
+# The same for the OpenAI door: off, or never asked for, it is removed by name, or
+# "off" would leave it answering on 4110. A box that never had one has nothing to
+# remove, which is why the failure is ignored.
+if [ "$DOOR_ON" != 1 ]; then "${COMPOSE[@]}" --profile openai-door rm -sf tokenfuse-gateway-openai >/dev/null 2>&1 || true; fi
 # The gateway reads its identity map once, at start, and a new map behind the same
 # GATEWAY_IDENTITY_MAP line changes nothing compose compares, so `up` above left
 # the old map in force. A map this run installed is read only after a restart.
@@ -2043,6 +2330,12 @@ if [ "$IDENTITY_MAP_CHANGED" = 1 ]; then
   "${COMPOSE[@]}" restart tokenfuse-gateway >/dev/null \
     || die "could not restart the gateway to read the new identity map"
   note "gateway restarted to read the new identity map"
+fi
+# And the OpenAI door's own map, for the same reason.
+if [ "$DOOR_ON" = 1 ] && [ "${IDENTITY_openai_MAP_CHANGED:-0}" = 1 ]; then
+  "${COMPOSE[@]}" --profile openai-door restart tokenfuse-gateway-openai >/dev/null \
+    || die "could not restart the OpenAI door to read its new identity map"
+  note "OpenAI door restarted to read its new identity map"
 fi
 sleep 8
 
@@ -2063,6 +2356,7 @@ case "$GATEWAY_BIND" in
     note "published to the world: 4100 (gateway) only, bound $GATEWAY_BIND"
     note "loopback only: 7420 (console), reachable over your own tunnel" ;;
 esac
+[ "$DOOR_ON" != 1 ] || note "and 4110 (the OpenAI door), on the gateway's own bind ($GATEWAY_BIND) and no wider"
 note "the operator's tunnel: ${WG_LISTEN_PORT:-51820}/udp, open on purpose"
 note "  WireGuard answers nothing without a valid key: no banner, no handshake,"
 note "  nothing for a scanner to find. It is the road in, not an exposed plane."
@@ -2241,12 +2535,19 @@ check "gateway serves /v1/runs with the admin key" \
 # an installer must not page its operator on every run (CI's identity leg sends
 # that one, see .github/workflows/install.yml).
 # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
-fuse_refusal() { # client key, or "" for none: prints the status of a metered call
+fuse_refusal() { # client key or "" for none, then main (default) or openai: prints the status of a metered call
   local hdrs=(--header="Content-Type: application/json" --header="x-fuse-run-id: install-check" --header="x-fuse-budget-usd: 0.000001")
+  local url=http://tokenfuse-gateway:4100/v1/messages
+  local body='{"model":"claude-haiku-4-5","max_tokens":1,"messages":[{"role":"user","content":"install check"}]}'
+  if [ "${2:-main}" = openai ]; then
+    # The OpenAI door's own route and body shape: the other route answers 400 on
+    # this door before any key is asked for.
+    url=http://tokenfuse-gateway-openai:4100/v1/chat/completions
+    body='{"model":"gpt-4o-mini","max_tokens":1,"messages":[{"role":"user","content":"install check"}]}'
+  fi
   [ -z "$1" ] || hdrs+=(--header="x-fuse-key: $1")
   docker run --rm --network "$NET" busybox:1.36 wget -S -q -T5 -O /dev/null "${hdrs[@]}" \
-      --post-data='{"model":"claude-haiku-4-5","max_tokens":1,"messages":[{"role":"user","content":"install check"}]}' \
-      http://tokenfuse-gateway:4100/v1/messages 2>&1 \
+      --post-data="$body" "$url" 2>&1 \
     | awk '/^  HTTP\//{c=$2} END{print c+0}'
 }
 if [ "$IDENTITY_KEYS_COUNT" -gt 0 ]; then
@@ -2262,6 +2563,39 @@ if [ "$IDENTITY_MAP_ON" = 1 ]; then
         "$DC logs tokenfuse-gateway 2>&1 | grep -qF 'identity map: ON ('"
   check "identity map: every key is bound and every binding has a key" \
         "! $DC logs tokenfuse-gateway 2>&1 | grep -qE 'has no keys\\[\\] binding|has no matching TOKENFUSE_CLIENT_KEYS entry'"
+fi
+
+# The OpenAI door (OPENAI_DOOR=1, section 0g), on every box that asked for it and
+# never skipped there: a door that did not come up must turn these red. The same
+# questions the gateway is asked: it answers on the operator's bind and nowhere
+# wider, serves the OpenAI wire, exports to its own file, clamps a run budget, holds
+# its own keys and map, and refuses a call with no key or an unknown one before
+# anything reaches the upstream (the call's budget is one micro-dollar, and no agent
+# is named, for the reason the gateway's checks above give).
+if [ "$DOOR_ON" = 1 ]; then
+  check "openai door answers on $GATEWAY_PROBE:4110" "curl -fsS -m5 -o /dev/null http://$GATEWAY_PROBE:4110/healthz"
+  case "$GATEWAY_BIND" in
+    127.0.0.1|localhost|::1|0.0.0.0) ;;
+    *) check "openai door is NOT on loopback" "! curl -fsS -m3 -o /dev/null http://127.0.0.1:4110/healthz" ;;
+  esac
+  check "openai door published on $GATEWAY_BIND only" \
+        "$DC port tokenfuse-gateway-openai 4100 | grep -q '^${GATEWAY_BIND}:'"
+  check_log "openai door serves the OpenAI wire" \
+        "$DC logs tokenfuse-gateway-openai 2>&1 | grep -q 'serving one door.*/v1/chat/completions'"
+  check_log "openai door exports agent events" \
+        "$DC logs tokenfuse-gateway-openai 2>&1 | grep -q 'NDJSON export enabled'"
+  check_log "openai door clamps a run budget to a ceiling" \
+        "$DC logs tokenfuse-gateway-openai 2>&1 | grep -q 'run budget ceiling: a caller-declared or default budget is clamped to it'"
+  check_log "openai door: client keys: the door holds ${IDENTITY_openai_KEYS_COUNT:-0}" \
+        "$DC logs tokenfuse-gateway-openai 2>&1 | grep -qF 'client auth: ON (${IDENTITY_openai_KEYS_COUNT:-0} key(s))'"
+  check_log "openai door: identity map: the door reads it" \
+        "$DC logs tokenfuse-gateway-openai 2>&1 | grep -qF 'identity map: ON ('"
+  check "openai door: every key is bound and every binding has a key" \
+        "! $DC logs tokenfuse-gateway-openai 2>&1 | grep -qE 'has no keys\\[\\] binding|has no matching TOKENFUSE_CLIENT_KEYS entry'"
+  check "openai door: a call with no key is refused" \
+        "[ \"\$(fuse_refusal '' openai)\" = 401 ]"
+  check "openai door: a call with an unknown key is refused" \
+        "[ \"\$(fuse_refusal install-check-not-a-client-key openai)\" = 401 ]"
 fi
 
 check "cloud is NOT on the host"     "! curl -fsS -m3 -o /dev/null http://127.0.0.1:8080/healthz"
@@ -2667,6 +3001,25 @@ elif [ "$IDENTITY_MAP_ON" = 1 ]; then
   so nothing is refused for identity."
 fi
 
+# The OpenAI door, when this box runs it: where an agent points, what it sends,
+# who pays, and what this box does not see of it. Its keys are named by where they
+# live, never printed.
+DOOR_REACH=""
+if [ "$DOOR_ON" = 1 ]; then
+  DOOR_REACH="
+
+  The OpenAI door is ON (port 4110, on the gateway's bind). An agent whose SDK
+  speaks the OpenAI wire sets its base URL to http://<this box>:4110/v1, and the
+  door forwards each call to $DOOR_UPSTREAM.
+  The agent sends its OWN provider key as Authorization, and the door passes it on:
+  a metered upstream bills whoever's key that is. Every call also carries
+  x-fuse-key (a secret from the door's own keys file, kept in .env as
+  OPENAI_DOOR_CLIENT_KEYS and not printed here), x-fuse-agent-id (an id the door's
+  map binds to that key) and x-fuse-run-id. Its units are counted by the door
+  alone; its traces are not in the FOCUS export, and the console shows the
+  gateway's runs, not the door's (README, \"A second door on the OpenAI wire\")."
+fi
+
 # The report below uses A && echo X || echo Y inside a substitution. C is `echo`,
 # which does not fail, so it is a plain ternary rather than the trap SC2015 warns
 # about. It cannot be silenced inside the heredoc: text in there is printed, not
@@ -2676,7 +3029,7 @@ cat <<EOF
 
 $(printf '\033[1m')$([ "$fail" -eq 0 ] && echo "Up, and every check passed." || echo "Up, with $fail failed check(s) above.")$(printf '\033[0m')
 
-$REACH$IDENTITY_REACH
+$REACH$IDENTITY_REACH$DOOR_REACH
 
 ${CONSOLE_PASSWORD:+  Console sign-in, shown once and stored nowhere:
 

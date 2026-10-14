@@ -53,6 +53,13 @@ services:
         mkdir -p /vol/events /vol/traces /vol/cloud /vol/heraldyx /vol/records /vol/scopyx /vol/focus /vol/typryx /vol/vouchryx /vol/conform
         chown 0:10001 /vol/events && chmod 2775 /vol/events
         chown 10001:10001 /vol/traces /vol/cloud && chmod 0775 /vol/traces /vol/cloud
+        # The OpenAI door (tokenfuse-gateway-openai, profile openai-door, opt-in)
+        # keeps its traces and its retained-reservation journal in a directory of
+        # its own: two gateway processes in one TOKENFUSE_DATA_DIR would be two
+        # writers of one journal. Made on every box, like the stream files below,
+        # so turning the door on later needs nothing here. CLAUDE.md invariant 32.
+        mkdir -p /vol/traces/gateway-openai
+        chown 10001:10001 /vol/traces/gateway-openai && chmod 0775 /vol/traces/gateway-openai
         # The notifier runs 65532:10001 like the Go planes, and writes exactly
         # one file here. Same trap as the others: a fresh named volume is
         # root:root 0755, and without this line the process starts, reads the
@@ -121,7 +128,15 @@ services:
         # the schema its mapper refuses all four by name on purpose
         # (trailryx#81: an answer to a question is not a decision the agent
         # took).
-        for f in tokenfuse.ndjson tokenfuse-cloud.ndjson tokenfuse-mcp.ndjson wardryx.ndjson typryx.ndjson vouchryx.ndjson; do
+        #
+        # tokenfuse-openai.ndjson is the OpenAI door's own file (profile
+        # openai-door, opt-in): the tokenfuse image again, so it cannot create
+        # here either, and its own file because two gateways appending to one
+        # chained file would fork the chain. Pre-created on every box, because
+        # idryx loads it at start on every box and exits on a file that is not
+        # there; an empty file is an empty log. heraldyx v0.5.0 and idryx v1.2.0
+        # read it as tokenfuse (CLAUDE.md invariants 23 and 32).
+        for f in tokenfuse.ndjson tokenfuse-cloud.ndjson tokenfuse-mcp.ndjson tokenfuse-openai.ndjson wardryx.ndjson typryx.ndjson vouchryx.ndjson; do
           [ -e "/vol/events/$$f" ] || : > "/vol/events/$$f"
           chown 10001:10001 "/vol/events/$$f" && chmod 0664 "/vol/events/$$f"
         done
@@ -235,12 +250,17 @@ services:
     <<: *restart
     image: ${IDRYX_IMAGE:-ghcr.io/taipanbox/idryx:v1.2.0}
     user: "65532:10001"
+    # Both gateways' files, on every box: the OpenAI door's (opt-in) is
+    # pre-created empty by init-volumes, and an empty file loads as an empty log.
+    # idryx v1.2.0 is the first that takes tokenfuse-openai.ndjson as tokenfuse.
     command:
       - serve
       - --addr
       - 0.0.0.0:8081
       - --load
       - tokenfuse:/var/lib/stack/events/tokenfuse.ndjson
+      - --load
+      - tokenfuse:/var/lib/stack/events/tokenfuse-openai.ndjson
     volumes:
       - events:/var/lib/stack/events:ro
     depends_on:
@@ -1033,6 +1053,90 @@ services:
       wardryx:
         condition: service_started
 
+  # ---- money: a second door, on the OpenAI wire (opt-in) ---------------------
+  # The same gateway binary a second time, serving `POST /v1/chat/completions`
+  # in front of an OpenAI-compatible upstream the operator names, for agents
+  # whose SDK speaks that wire. Off unless asked: profile `openai-door`, which
+  # only `OPENAI_DOOR=1 ./install.sh` passes (CLAUDE.md invariant 32), and
+  # install.sh refuses that without an upstream, a keys file and an identity
+  # map, before it installs anything.
+  #
+  # Every hardened line of the gateway above is written out again here, by
+  # hand, and on purpose not through a YAML anchor: the gates that hold those
+  # lines (cache, declassify key, budget ceiling, firewall, PII) find their
+  # subjects by this image and this bare command and read each block line by
+  # line, so an anchored line would be invisible to them. What differs, and why:
+  #
+  #   TOKENFUSE_WIRE openai, and its own upstream. The caller's Authorization
+  #     header is forwarded upstream, so no provider key is kept on this box: a
+  #     metered upstream bills whoever's key the caller sends.
+  #   Its own client keys and identity map, apart from the gateway's: a unit's
+  #     month counter lives in one gateway process, so a unit in both maps would
+  #     get its cap once on each door. install.sh refuses two maps that share a
+  #     unit.
+  #   Its own events file and data directory: two gateways on one chained file
+  #     would fork the chain, and two in one data directory would share one
+  #     retained-reservation journal.
+  #   Port 4110 on the operator's own bind, the identical expression the
+  #     gateway's 4100 uses, so a box that never widened GATEWAY_BIND never
+  #     widens this door either.
+  #   No delegation and no closure: a hand-off proof's DPoP `htu` is checked
+  #     against the gateway's 4100 origin, and the console closes reservations
+  #     through one gateway only. Both stay off here, which is tokenfuse's
+  #     reading of the variables being absent.
+  tokenfuse-gateway-openai:
+    <<: *restart
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.13.1}
+    command: ["/usr/local/bin/tokenfuse"]
+    profiles: ["openai-door"]
+    environment:
+      TOKENFUSE_ADDR: 0.0.0.0:4100
+      TOKENFUSE_ADMIN_KEYS: ${GATEWAY_ADMIN:?set by install.sh}
+      TOKENFUSE_DECLASSIFY_KEY: ${GATEWAY_DECLASSIFY_KEY:?set by install.sh}
+      TOKENFUSE_MODE: enforce
+      TOKENFUSE_FIREWALL: ${TOKENFUSE_FIREWALL:-enforce}
+      TOKENFUSE_DLP_PII: ${TOKENFUSE_DLP_PII:-shadow}
+      TOKENFUSE_MAX_RUN_BUDGET_USD: ${RUN_BUDGET_CEILING_USD:-5.00}
+      TOKENFUSE_DATA_DIR: /var/lib/stack/traces/gateway-openai
+      TOKENFUSE_CACHE: "off"
+      TOKENFUSE_EVENTS_PATH: /var/lib/stack/events/tokenfuse-openai.ndjson
+      TOKENFUSE_WIRE: openai
+      # The upstream only when the client keys AND the identity map are set,
+      # empty otherwise, and tokenfuse refuses to start with no upstream (exit
+      # 2). That is how this door is never opened without keys, held here as
+      # well as in install.sh. Not `${VAR:?}`: compose reads a required variable
+      # of every service, a profile's too, so a `:?` here would stop `docker
+      # compose up` on every box that never asked for this door (measured on
+      # Compose 5.6.0, 2026-10-14).
+      TOKENFUSE_UPSTREAM: ${OPENAI_DOOR_CLIENT_KEYS:+${OPENAI_DOOR_IDENTITY_MAP:+${OPENAI_DOOR_UPSTREAM:-}}}
+      TOKENFUSE_CLOUD_URL: http://tokenfuse-cloud:8080
+      TOKENFUSE_CLOUD_KEY: ${CLOUD_ADMIN:?set by install.sh}
+      TOKENFUSE_WARDRYX_MODE: enforce
+      TOKENFUSE_WARDRYX_URL: http://wardryx:8090
+      TOKENFUSE_WARDRYX_KEY: ${WARDRYX_GATEWAY:?set by install.sh}
+      TOKENFUSE_WARDRYX_FAILMODE: closed
+      TOKENFUSE_WARDRYX_TIMEOUT_MS: "250"
+      TOKENFUSE_WARDRYX_CACHE_TTL_MS: "3000"
+      # The door's own pair, written by install.sh only after the gateway image
+      # read it (sections 0f and 3e, run for this door by name).
+      TOKENFUSE_CLIENT_KEYS: ${OPENAI_DOOR_CLIENT_KEYS:-}
+      TOKENFUSE_IDENTITY_MAP: ${OPENAI_DOOR_IDENTITY_MAP:-}
+    ports:
+      - "${GATEWAY_BIND:-127.0.0.1}:4110:4100"
+    volumes:
+      - events:/var/lib/stack/events
+      - traces:/var/lib/stack/traces
+      # Its own map, at the same path inside as the gateway's, so the one
+      # GATEWAY_IDENTITY_MAP-style value install.sh writes names the file here too.
+      - ./identity-openai:/etc/tokenfuse/identity:ro
+    depends_on:
+      init-volumes:
+        condition: service_completed_successfully
+      tokenfuse-cloud:
+        condition: service_started
+      wardryx:
+        condition: service_started
+
   # ---- the console ---------------------------------------------------------
   # Loopback only. It arrives over the operator's own tunnel, never off the
   # open internet, which is the same posture the cluster deployment takes.
@@ -1423,6 +1527,8 @@ services:
       - detect
       - --load
       - tokenfuse:/var/lib/stack/events/tokenfuse.ndjson
+      - --load
+      - tokenfuse:/var/lib/stack/events/tokenfuse-openai.ndjson
       - --format
       - human
     volumes:

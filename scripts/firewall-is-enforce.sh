@@ -32,9 +32,11 @@
 #      earlier line; every other value refuses before .env is touched, names the
 #      variable, and never echoes what it was given; a bad value already in .env
 #      refuses too, because tokenfuse would refuse to start on it.
-#   C. RESOLVED. `docker compose config` for a box with nothing set, and for a
-#      .env that sets shadow and then off: the gateway's value is enforce, then
-#      shadow, then off.
+#   C. RESOLVED. `docker compose config`, with the OpenAI door's profile on, for
+#      a box with nothing set, and for a .env that sets shadow and then off: every
+#      gateway's value is enforce, then shadow, then off, and the gateways read back
+#      are the ones section A found, so the OpenAI door (CLAUDE.md invariant 32) is
+#      read as well as the first.
 #
 # AND IT REFUSES TO REPORT OK ON NOTHING
 #
@@ -47,7 +49,8 @@ problems=0
 fail() { printf 'FAIL: %s\n' "$*"; problems=$((problems + 1)); }
 
 # ---- A. compose --------------------------------------------------------------
-python3 - "${1:-compose.yaml}" <<'PY' || problems=$((problems + 1))
+gwlist="$(mktemp)"
+python3 - "${1:-compose.yaml}" "$gwlist" <<'PY' || problems=$((problems + 1))
 import re
 import sys
 
@@ -100,6 +103,7 @@ def env_value(block, key):
 
 
 subjects = sorted(n for n, b in blocks.items() if is_gateway(b))
+open(sys.argv[2], "w").write("".join(n + "\n" for n in subjects))
 if not subjects:
     print("FAIL: no service in compose.yaml both uses the tokenfuse gateway image and runs")
     print("      it with no subcommand, so this gate measured NOTHING about the agent")
@@ -249,19 +253,34 @@ else
   mkdir -p "$cdir/typed" "$cdir/delegation-public" "$cdir/environments"
   : >"$cdir/policy.yaml"
   grep -o '\${[A-Z_]*:?' compose.yaml | tr -d '${:?' | sort -u | sed 's/$/=fake-not-a-secret/' >"$cdir/base.env"
-  mode_of() { # extra .env lines on stdin
+  # Every gateway, read back from the resolved configuration with the OpenAI
+  # door's profile on (CLAUDE.md invariant 32): "service=value" for each service
+  # that runs the tokenfuse gateway image with no subcommand. Compared with the
+  # gateways section A derived from compose.yaml, so a gateway the resolved read
+  # does not hold is a failure, not a smaller subject.
+  values_of() { # KEY; extra .env lines on stdin
     cat "$cdir/base.env" - >"$cdir/.env"
-    env -u TOKENFUSE_FIREWALL docker compose --project-directory "$cdir" -f "$cdir/compose.yaml" config --format json 2>"$cdir/err" |
-      python3 -c "import json,sys; print(json.load(sys.stdin)['services']['tokenfuse-gateway']['environment'].get('TOKENFUSE_FIREWALL',''))" 2>>"$cdir/err"
+    env -u TOKENFUSE_FIREWALL docker compose --project-directory "$cdir" -f "$cdir/compose.yaml" --profile openai-door config --format json 2>"$cdir/err" |
+      python3 -c '
+import json, sys
+s = json.load(sys.stdin)["services"]
+for n in sorted(s):
+    v = s[n]
+    if str(v.get("image", "")).startswith("ghcr.io/taipanbox/tokenfuse:") and v.get("command") == ["/usr/local/bin/tokenfuse"]:
+        print("%s=%s" % (n, (v.get("environment") or {}).get(sys.argv[1], "")))
+' "$1" 2>>"$cdir/err"
   }
-  got="$(mode_of </dev/null)"
-  [ "$got" = "enforce" ] || fail "resolved: a default box's gateway has TOKENFUSE_FIREWALL='$got', not enforce ($(head -1 "$cdir/err"))"
-  got="$(mode_of <<<"TOKENFUSE_FIREWALL=shadow")"
-  [ "$got" = "shadow" ] || fail "resolved: a box whose .env sets shadow has TOKENFUSE_FIREWALL='$got', so the switch moves nothing"
-  got="$(mode_of <<<"TOKENFUSE_FIREWALL=off")"
-  [ "$got" = "off" ] || fail "resolved: a box whose .env sets off has TOKENFUSE_FIREWALL='$got', so the switch moves nothing"
+  want_all() { [ -n "$gateways" ] && sed "s/\$/=$1/" <<<"$gateways"; }
+  gateways="$(cat "$gwlist")"
+  got="$(values_of TOKENFUSE_FIREWALL </dev/null)"
+  [ "$got" = "$(want_all enforce)" ] || fail "resolved: a default box's gateways read '$(tr '\n' ' ' <<<"$got")', not enforce on each of $(tr '\n' ' ' <<<"$gateways")($(head -1 "$cdir/err"))"
+  got="$(values_of TOKENFUSE_FIREWALL <<<"TOKENFUSE_FIREWALL=shadow")"
+  [ "$got" = "$(want_all shadow)" ] || fail "resolved: a box whose .env sets shadow reads '$(tr '\n' ' ' <<<"$got")', so the switch does not move every gateway"
+  got="$(values_of TOKENFUSE_FIREWALL <<<"TOKENFUSE_FIREWALL=off")"
+  [ "$got" = "$(want_all off)" ] || fail "resolved: a box whose .env sets off reads '$(tr '\n' ' ' <<<"$got")', so the switch does not move every gateway"
   rm -rf "$cdir"
 fi
+rm -f "$gwlist"
 
 if [ "$problems" -gt 0 ]; then
   echo

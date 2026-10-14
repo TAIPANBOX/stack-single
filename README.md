@@ -255,6 +255,7 @@ names resolve the same way in both:
 | `scopyx` | none | **opt-in, off unless you ask for it.** Inside the compose network only. See below |
 | `typryx` | none | **opt-in, off unless you ask for it.** Inside the compose network only. See below |
 | `tokenfuse-mcp-broker` | 4200 | **opt-in, off unless you ask for it.** `GATEWAY_BIND` decides where, same as the gateway. See below |
+| `tokenfuse-gateway-openai` | 4110 | **opt-in, off unless you ask for it** (`OPENAI_DOOR=1`). A second gateway for agents that speak the OpenAI wire; `GATEWAY_BIND` decides where, same as the gateway. See "A second door on the OpenAI wire" below |
 | `typryx-wardryx-proxy` | none | **opt-in twice, off unless you ask for it** (typed answers on, and `TYPED_RISK_SIGNAL=1`). Reachable only from the broker and wardryx. See "A risk signal on tool calls" below |
 | `vouchryx` | none | **opt-in, off unless you ask for it.** Inside the compose network only. See "Delegation" below |
 | `costcrew` | 8321 | **opt-in, off unless you ask for it** (profile `finops`; `install.sh` never starts it). Loopback only. See "The FinOps console" below |
@@ -457,6 +458,84 @@ with it empty, the gateway answered 401. To give Felyx a key:
 
 Left empty, the default, Felyx sends no key, as before, and with client keys on
 its calls are refused 401.
+
+### A second door on the OpenAI wire (opt-in, off by default)
+
+The gateway on 4100 speaks Anthropic's wire, `POST /v1/messages`. An agent whose
+SDK speaks OpenAI's, `POST /v1/chat/completions` (an OpenAI SDK, an Ollama or vLLM
+client, a small agent on a router), needs a gateway in front of an upstream that
+speaks that wire: tokenfuse serves one wire per process and translates nothing
+between the two. `OPENAI_DOOR=1` runs that second gateway,
+`tokenfuse-gateway-openai`, on port 4110:
+
+```bash
+OPENAI_DOOR=1 \
+OPENAI_DOOR_UPSTREAM=https://api.openai.com/v1/chat/completions \
+OPENAI_DOOR_CLIENT_KEYS_FILE=/path/door-keys.txt \
+OPENAI_DOOR_IDENTITY_MAP_FILE=/path/door-identity.json \
+./install.sh
+```
+
+- `OPENAI_DOOR_UPSTREAM` is the full endpoint the door forwards to, ending in
+  `/chat/completions` (`https://openrouter.ai/api/v1/chat/completions`,
+  `http://<host>:11434/v1/chat/completions` for an Ollama), not a base URL: http or
+  https, a host and an optional port, no credentials, no query, no fragment.
+- The keys file and the identity map have the formats of "Client keys and the
+  identity map" above, and they are the door's own, not the gateway's. The
+  installer refuses `OPENAI_DOOR=1` without an upstream, a keys file or a map,
+  before it installs anything: the door hands each caller's provider key to the
+  upstream, so it never opens to callers it cannot name.
+- Give the door units of its own. A unit's monthly counter lives in one gateway
+  process, so a unit in both maps would get its cap once on each door. The
+  installer compares the two maps (python3 in a throwaway container of the
+  console's image, with no network) and refuses two that declare the same unit id.
+
+The door is the gateway's own image a second time, with every hardened setting
+the gateway has: the cache off, its declassify key, the run-budget ceiling, the
+agent firewall in enforce, PII in shadow, the policy plane in enforce and failing
+closed, the same admin key. It is published on `${GATEWAY_BIND}:4110`, so loopback
+until you widen the bind, and never wider than the gateway. It writes its own
+stream, `tokenfuse-openai.ndjson` (heraldyx v0.5.0 and idryx v1.2.0 read it as
+tokenfuse, so its agents reach the notifier and the identity graph), keeps its own
+data directory, and reads its map from `./identity-openai`.
+
+What an agent sends to the door, with its base URL set to
+`http://<this box>:4110/v1`:
+
+| Header | Value |
+|---|---|
+| `Authorization` | its own provider key, `Bearer ...`; the door passes it to the upstream |
+| `x-fuse-key` | its secret from the door's keys file |
+| `x-fuse-agent-id` | an id the door's map binds to that key |
+| `x-fuse-run-id` | its run |
+
+**Who pays.** The door keeps no provider key. Each call reaches the upstream with
+the caller's own `Authorization`, so a metered upstream bills whoever's key the
+caller sends. The run-budget ceiling and the unit caps limit what a key spends
+through the door; they do not change whose account pays.
+
+A re-run that names nothing keeps the door on, with its upstream, keys and map. A
+new map restarts the door. `OPENAI_DOOR=0 ./install.sh` removes its container and
+keeps its lines in `.env` for a later `OPENAI_DOOR=1`; to forget them, delete the
+`OPENAI_DOOR_` lines. At the end of every run, a box with the door on is asked
+what the gateway is asked: it answers on 4110 on your bind and nowhere wider,
+serves the OpenAI wire, exports its events, clamps a run budget, holds its keys
+and map, and refuses a call with no key and with an unknown key (401).
+
+What the door does not do, so you can decide before you turn it on:
+
+- **Its spend is not in the FOCUS export.** `focus-export` reads the gateway's
+  traces only, and the door's are in their own directory (stack-single#61).
+- **The console shows the gateway's runs, not the door's.** It reaches one
+  gateway's admin routes, the 4100 one. A run through 4110 is visible in the
+  Cloud and on the bus, not in the console's runs view.
+- **Counters are per gateway process.** A unit is counted by the door whose map
+  declares it, which is why the two maps may not share one. A run id used on both
+  doors gets a run budget on each: two budgets, not one.
+- **No delegation and no closure on the door.** A hand-off proof's DPoP `htu` is
+  checked against the gateway's 4100 origin, and the console closes retained
+  reservations through the gateway only.
+- **One box only.** stack-k8s and stack-up have no such door yet.
 
 ### The chain verifier
 
