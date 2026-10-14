@@ -1474,6 +1474,13 @@ assert "hold_if_signal" in s
 open("README.md", "w").write(s.replace("hold_if_signal", "hold_if_a_signal"))')" \
 	"shows no hold_if_signal example"
 
+run_case "typed-risk-signal: the README drops when_absent from its example" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 's = open("README.md").read()
+assert "when_absent: hold" in s
+open("README.md", "w").write(s.replace("when_absent: hold", "when_absent_gone: hold"))')" \
+	"shows no when_absent: hold"
+
 run_case "typed-risk-signal: typryx is pinned before the proxy existed" fail \
 	'./scripts/typed-risk-signal.sh' \
 	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/typryx:v0.4.1}", "ghcr.io/taipanbox/typryx:v0.3.0}")')" \
@@ -1483,6 +1490,11 @@ run_case "typed-risk-signal: wardryx is pinned before it read signals" fail \
 	'./scripts/typed-risk-signal.sh' \
 	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v1.5.0}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
 	"hold_if_signal and signals on /v1/decide do not exist before it"
+
+run_case "typed-risk-signal: wardryx is pinned before when_absent" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v1.5.0}", "ghcr.io/taipanbox/wardryx:v1.3.2}")')" \
+	"needs v1.4.0 or later"
 
 run_case "typed-risk-signal: tokenfuse is pinned before it sent the tool call" fail \
 	'./scripts/typed-risk-signal.sh' \
