@@ -1794,7 +1794,7 @@ run_case "bus-names: the idryx pin goes back before the OpenAI door's row" fail 
 
 run_case "bus-names: the heraldyx pin goes back before the OpenAI door's row" fail \
 	'./scripts/bus-names-match-their-source.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/heraldyx:v0.6.0", "ghcr.io/taipanbox/heraldyx:v0.4.0")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/heraldyx:v0.7.0", "ghcr.io/taipanbox/heraldyx:v0.4.0")')" \
 	"older than v0.5.0"
 
 echo "=== and what they must NOT catch ==="
