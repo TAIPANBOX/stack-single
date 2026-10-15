@@ -578,7 +578,13 @@ PY
     || [ "$restart_line" -lt "${main_up:-0}" ] || [ "$restart_line" -gt "${verify_line:-0}" ]; then
     fail "install.sh does not restart tokenfuse-gateway-openai for a new door map after 'up' and before 'verify', so the old map stays in force"
   fi
-  section8="$(sed -n "${verify_line:-1},\$p" install.sh)"
+  section8="$(sed -n '/^stack_checks() {$/,/^# ---- status: /p' install.sh)"
+  # The checks live in stack_checks, and section 8 calls it after `say "verify"`:
+  # read the function, then require the call to come after verify.
+  stack_call="$(awk '/^stack_checks( |$)/{print NR; exit}' install.sh)"
+  if [ -z "$stack_call" ] || [ -z "$verify_line" ] || [ "$stack_call" -lt "$verify_line" ]; then
+    fail "section 8 no longer calls stack_checks after verify, so its checks do not run in the install"
+  fi
   door8="$(awk '/^if \[ "\$DOOR_ON" = 1 \]; then$/{inside=1} inside{print} inside && /^fi$/{exit}' <<<"$section8")"
   for want in 'check "openai door answers on $GATEWAY_PROBE:4110"' 'check "openai door is NOT on loopback"' \
               'check "openai door published on $GATEWAY_BIND only"' 'check "openai door: a call with no key is refused"' \

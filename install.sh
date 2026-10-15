@@ -7,6 +7,9 @@
 #
 #   ./install.sh
 #
+# Once it is installed, `./install.sh status` runs the same checks again against the
+# running stack and changes nothing. See the README, "Checking an installed box again".
+#
 # What this is NOT: `stack-up`, which is the local sandbox. That one needs
 # Rust, Go and Node on your machine to build from source and stops when you
 # press Ctrl-C. This one is for a box you will point real agents at: the
@@ -176,6 +179,506 @@ trap 'rc=$?; { [ $rc -eq 0 ] || [ "${EXPLAINED:-0}" = 1 ]; } && exit $rc
       [ $rc -eq 141 ] && printf "   exit 141 is SIGPIPE: a pipeline ended early. This is a bug in the installer, please report it.\n" >&2
       printf "   Nothing is half-configured that a re-run will not redo: this script is safe to run again.\n" >&2
       exit $rc' EXIT
+
+# Whether the compose project has a service called NAME, for the `if` that
+# decides whether a group of checks or a step applies at all. The list is read to
+# its end before anything looks at it, and not piped into `grep -q`: grep exits at
+# its first match, compose is still writing the rest of the list, hits the closed
+# pipe and exits non-zero, and under `set -o pipefail` that fails the pipeline
+# although the name was there (check() in section 8 has the measured case, for a
+# log). Here a false answer is quieter than a red check: the console's checks, or
+# the broker's, are skipped, and the run still ends "every check passed".
+# (gate: scripts/checks-survive-a-closed-pipe.sh lifts this and runs it.)
+# compose-has: begin
+compose_has() { # NAME
+  local out
+  out="$("${COMPOSE[@]}" ps --services 2>/dev/null)" || return 1
+  grep -qx -- "$1" <<<"$out"
+}
+# compose-has: end
+
+# A check's command string is evaluated with pipefail OFF, in a subshell, and that
+# is deliberate. Several checks read a container's log through a pipe,
+# `$DC logs svc 2>&1 | grep -q PATTERN`, and `grep -q` exits at its first match.
+# `docker compose logs` is still writing, hits the closed pipe and exits 255, and
+# under the `set -o pipefail` this script runs with, that failed the pipeline
+# although the line WAS in the log. Measured 2026-10-13 on Debian 13 (Docker
+# 26.1.5, Compose 2.26.1): `set -o pipefail; docker compose logs tokenfuse-gateway
+# 2>&1 | grep -qF 'client auth: ON (3 key(s))'`, five times, returned 0 255 255 0
+# 255; the same without -q, where grep reads everything, 0 five times. It made two
+# installs report `FAIL client keys: the gateway holds 3` and `FAIL identity map:
+# the gateway reads it` on a healthy box, and it is a race a CI runner happens to
+# win. The other direction is worse: a check written the negative way,
+# `! $DC logs svc 2>&1 | grep -qE BAD`, read ok while the bad line WAS in the log,
+# because the 255 failed the pipeline and `!` turned that into a pass.
+#
+# So the verdict of a check is its reader's, the last command's, which is what a
+# pipeline's status is without pipefail: grep found the line, or it did not. A
+# producer that could not run at all leaves the reader nothing to find, so a
+# positive check still FAILs, and the one negative check that would read ok on an
+# unreadable log (identity map: every key is bound) is paired, on the same log,
+# with a positive one that does not. Fixed here once rather than at each pipeline,
+# so a check added next month cannot bring the race back.
+# (gate: scripts/checks-survive-a-closed-pipe.sh lifts both helpers and runs this
+# file's own log checks against a stub docker that exits 255 when its reader goes.)
+# check-helpers: begin
+check() { # name, command
+  [ "$#" -eq 2 ] || die "internal: check() got $# arguments, expected 2 (\$1='${1:-}')"
+  if ( set +o pipefail; eval "$2" ) >/dev/null 2>&1; then printf '   ok    %s\n' "$1"; else printf '   FAIL  %s\n' "$1"; fail=$((fail+1)); fi
+}
+# The same, for a check that reads a container's LOG: retried for up to ten
+# seconds. A log line is written once, some milliseconds after the process
+# starts, and `docker compose logs` read moments after `up` has once come
+# back without a line that was there a minute later: 2026-09-14, an arm64
+# box, `gateway exports agent events` FAIL on run 1 with the line stamped
+# nine seconds before the check, ok on run 2 with the same container and no
+# restart. A one-shot read of a log is a race with the log driver; a check
+# that stays red for ten seconds is a real absence.
+check_log() { # name, command
+  [ "$#" -eq 2 ] || die "internal: check_log() got $# arguments, expected 2 (\$1='${1:-}')"
+  local left=10
+  while [ "$left" -gt 0 ]; do
+    if ( set +o pipefail; eval "$2" ) >/dev/null 2>&1; then printf '   ok    %s\n' "$1"; return 0; fi
+    sleep 1; left=$((left - 1))
+  done
+  printf '   FAIL  %s\n' "$1"; fail=$((fail+1))
+}
+# check-helpers: end
+
+# shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
+probe() { docker run --rm --network "$NET" busybox:1.36 wget -q -T5 -O /dev/null "$1"; }
+# Prints the HTTP status only, so a check can assert 401 and 403 as PASSES.
+# shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
+code() { docker run --rm --network "$NET" busybox:1.36 \
+           wget -S -q -T5 -O /dev/null --header="Authorization: Bearer $2" "$1" 2>&1 \
+         | awk '/^  HTTP\//{c=$2} END{print c+0}'; }
+# Same as code(), minus the header entirely: an empty bearer token is still a
+# credential, and the point of this one is that none was presented at all.
+# shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
+codenokey() { docker run --rm --network "$NET" busybox:1.36 \
+           wget -S -q -T5 -O /dev/null "$1" 2>&1 \
+         | awk '/^  HTTP\//{c=$2} END{print c+0}'; }
+
+# install_only check|check_log NAME COMMAND: a check that writes to the stack, or sends it a
+# request the stack records. The install runs it; `status` says it skipped it and runs nothing.
+install_only() {
+  if [ "${STATUS:-0}" = 1 ]; then printf '   skip  %s  (install only: it writes to the stack)\n' "$2"; return 0; fi
+  "$@"
+}
+
+# every check the verification runs, in the order it runs them. section 8 calls it
+# after the install; `status` calls it against a stack that is already up. The list is
+# written once, here, and both callers run this function (see status_main below).
+stack_checks() {
+# One word, not an array. `"${COMPOSE[@]}"` inside a larger quoted string does
+# not stay one argument: it word-splits, check() silently receives three
+# arguments instead of two, `$2` becomes the fragment `"docker`, and every
+# container-side check reports FAIL on a perfectly healthy stack. `[*]` joins
+# the elements into the single string eval actually needs. The argument-count
+# assertion above is there so this can never be silent again.
+DC="${COMPOSE[*]}"
+
+# Not `docker compose exec ... curl`: none of these images HAS curl, and two of
+# them have no shell either, because they are distroless on purpose. A check
+# that needs a tool the image deliberately omits fails on a perfectly healthy
+# stack and is indistinguishable from a real failure. So the probe is a
+# throwaway busybox attached to the same network, which is what a neighbouring
+# container sees and therefore what the check should be asking about.
+NET="agent-stack_default"
+docker network inspect "$NET" >/dev/null 2>&1 || die "network $NET is missing: the stack did not start."
+# Where the gateway is probed: the address the operator chose, not loopback.
+# With GATEWAY_BIND set to ONE address (a tailnet address is the shape an
+# appliance wants: reachable from the customer's clouds over a private mesh,
+# not from the LAN) Docker publishes on that address only, so loopback
+# refuses, and this line read FAIL twice on a healthy box while the same probe
+# against that address answered 200 and "published on $GATEWAY_BIND only"
+# below passed (#54, measured 2026-09-17). GATEWAY_PROBE itself comes from
+# gateway_probe_resolve at the top of this file, called again after each read of
+# .env, so on a re-run it follows the bind the box has, not the run's default.
+check "gateway answers on $GATEWAY_PROBE:4100" "curl -fsS -m5 -o /dev/null http://$GATEWAY_PROBE:4100/healthz"
+# The bus half of the stack. tokenfuse logs this line once at start when
+# TOKENFUSE_EVENTS_PATH is set and the file could be opened; without it the
+# exporter is off and idryx loads an empty log forever. Read from the
+# gateway's own log rather than the file: a fresh box has served no traffic,
+# so the file is legitimately empty and its size proves nothing yet.
+check_log "gateway exports agent events" "$DC logs tokenfuse-gateway 2>&1 | grep -q 'NDJSON export enabled'"
+# The run-budget ceiling (section 0c) is read from the gateway's own start-up
+# line, not from the variable: tokenfuse 1.5.0 logs it once when the clamp is
+# armed, so a gateway older than 1.5.0, or one that read no ceiling, has no such
+# line and this goes red. Reading compose's environment instead would call a
+# box green whose gateway ignored the setting.
+check_log "gateway clamps a run budget to a ceiling" \
+      "$DC logs tokenfuse-gateway 2>&1 | grep -q 'run budget ceiling: a caller-declared or default budget is clamped to it'"
+check "cloud answers inside"         "probe http://tokenfuse-cloud:8080/healthz"
+check "wardryx answers inside"       "probe http://wardryx:8090/healthz"
+check "idryx answers inside"         "probe http://idryx:8081/healthz"
+check "policy store is up"           "$DC exec -T policy-db pg_isready -U wardryx -d wardryx"
+# Not the same question as the line above. pg_isready asks the database;
+# /readyz asks wardryx whether IT can reach the store with the DSN and the
+# network it was given (wardryx 1.0.3, #63), answering 503 when it cannot,
+# while /healthz stays 200 and a policy write fails. A wrong WARDRYX_DB, or a
+# store the plane cannot resolve, passes both checks above and fails here.
+check "policy plane reaches its store" "probe http://wardryx:8090/readyz"
+
+# The three below are about the KEYS, and they exist because a plane with a
+# malformed key spec starts cleanly, authenticates nobody, and answers 401 to
+# its own console. Reachability alone would have called that deployment green.
+check "policy plane accepts its admin key"   "[ \"\$(code http://wardryx:8090/v1/policies '$WARDRYX_ADMIN')\" = 200 ]"
+check "policy plane rejects an unknown key"  "[ \"\$(code http://wardryx:8090/v1/policies nonsense-not-a-key)\" = 401 ]"
+check "gateway's key cannot write policy"    "[ \"\$(code http://wardryx:8090/v1/policies '$WARDRYX_GATEWAY')\" = 403 ]"
+
+# The gateway's own admin key, the same shape of check for the same reason:
+# this one MUST fail to pass, exactly like the "not reachable from the host"
+# checks below. A gateway that answers /v1/runs to nobody in particular has
+# reopened the routes TOKENFUSE_ALLOW_OPEN_OBS used to hold open on purpose.
+check "gateway refuses /v1/runs without the admin key" \
+      "c=\$(codenokey http://tokenfuse-gateway:4100/v1/runs); case \"\$c\" in 401|403) true ;; *) false ;; esac"
+check "gateway serves /v1/runs with the admin key" \
+      "[ \"\$(code http://tokenfuse-gateway:4100/v1/runs '$GATEWAY_ADMIN')\" = 200 ]"
+
+# Client keys and the identity map (sections 0f and 3e), only on a box that has
+# them. Read from the running gateway, not from .env: its own start-up lines, and
+# two calls it must refuse 401. A gateway that did NOT hold the keys refuses the
+# same call before anything reaches a provider, so a 401 here can only be the
+# gateway asking for a key, never a provider's: measured 2026-10-13 on a gateway
+# with the keys taken out, 400 identity_required (no agent id while the policy
+# plane enforces), and 402 with an agent id, because each call also declares a
+# budget of one micro-dollar. busybox wget prints no header after an error
+# status, so the status is all there is to read. No call
+# here names an agent: a mismatch would be a high-severity event on the bus, and
+# an installer must not page its operator on every run (CI's identity leg sends
+# that one, see .github/workflows/install.yml).
+# shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
+fuse_refusal() { # client key or "" for none, then main (default) or openai: prints the status of a metered call
+  local hdrs=(--header="Content-Type: application/json" --header="x-fuse-run-id: install-check" --header="x-fuse-budget-usd: 0.000001")
+  local url=http://tokenfuse-gateway:4100/v1/messages
+  local body='{"model":"claude-haiku-4-5","max_tokens":1,"messages":[{"role":"user","content":"install check"}]}'
+  if [ "${2:-main}" = openai ]; then
+    # The OpenAI door's own route and body shape: the other route answers 400 on
+    # this door before any key is asked for.
+    url=http://tokenfuse-gateway-openai:4100/v1/chat/completions
+    body='{"model":"gpt-4o-mini","max_tokens":1,"messages":[{"role":"user","content":"install check"}]}'
+  fi
+  [ -z "$1" ] || hdrs+=(--header="x-fuse-key: $1")
+  docker run --rm --network "$NET" busybox:1.36 wget -S -q -T5 -O /dev/null "${hdrs[@]}" \
+      --post-data="$body" "$url" 2>&1 \
+    | awk '/^  HTTP\//{c=$2} END{print c+0}'
+}
+if [ "$IDENTITY_KEYS_COUNT" -gt 0 ]; then
+  check_log "client keys: the gateway holds $IDENTITY_KEYS_COUNT" \
+        "$DC logs tokenfuse-gateway 2>&1 | grep -qF 'client auth: ON ($IDENTITY_KEYS_COUNT key(s))'"
+  install_only check "client keys: a call with no key is refused" \
+        "[ \"\$(fuse_refusal '')\" = 401 ]"
+  install_only check "client keys: a call with an unknown key is refused" \
+        "[ \"\$(fuse_refusal install-check-not-a-client-key)\" = 401 ]"
+fi
+if [ "$IDENTITY_MAP_ON" = 1 ]; then
+  check_log "identity map: the gateway reads it" \
+        "$DC logs tokenfuse-gateway 2>&1 | grep -qF 'identity map: ON ('"
+  check "identity map: every key is bound and every binding has a key" \
+        "! $DC logs tokenfuse-gateway 2>&1 | grep -qE 'has no keys\\[\\] binding|has no matching TOKENFUSE_CLIENT_KEYS entry'"
+fi
+
+# The OpenAI door (OPENAI_DOOR=1, section 0g), on every box that asked for it and
+# never skipped there: a door that did not come up must turn these red. The same
+# questions the gateway is asked: it answers on the operator's bind and nowhere
+# wider, serves the OpenAI wire, exports to its own file, clamps a run budget, holds
+# its own keys and map, and refuses a call with no key or an unknown one before
+# anything reaches the upstream (the call's budget is one micro-dollar, and no agent
+# is named, for the reason the gateway's checks above give).
+if [ "$DOOR_ON" = 1 ]; then
+  check "openai door answers on $GATEWAY_PROBE:4110" "curl -fsS -m5 -o /dev/null http://$GATEWAY_PROBE:4110/healthz"
+  case "$GATEWAY_BIND" in
+    127.0.0.1|localhost|::1|0.0.0.0) ;;
+    *) check "openai door is NOT on loopback" "! curl -fsS -m3 -o /dev/null http://127.0.0.1:4110/healthz" ;;
+  esac
+  check "openai door published on $GATEWAY_BIND only" \
+        "$DC port tokenfuse-gateway-openai 4100 | grep -q '^${GATEWAY_BIND}:'"
+  check_log "openai door serves the OpenAI wire" \
+        "$DC logs tokenfuse-gateway-openai 2>&1 | grep -q 'serving one door.*/v1/chat/completions'"
+  check_log "openai door exports agent events" \
+        "$DC logs tokenfuse-gateway-openai 2>&1 | grep -q 'NDJSON export enabled'"
+  check_log "openai door clamps a run budget to a ceiling" \
+        "$DC logs tokenfuse-gateway-openai 2>&1 | grep -q 'run budget ceiling: a caller-declared or default budget is clamped to it'"
+  check_log "openai door: client keys: the door holds ${IDENTITY_openai_KEYS_COUNT:-0}" \
+        "$DC logs tokenfuse-gateway-openai 2>&1 | grep -qF 'client auth: ON (${IDENTITY_openai_KEYS_COUNT:-0} key(s))'"
+  check_log "openai door: identity map: the door reads it" \
+        "$DC logs tokenfuse-gateway-openai 2>&1 | grep -qF 'identity map: ON ('"
+  check "openai door: every key is bound and every binding has a key" \
+        "! $DC logs tokenfuse-gateway-openai 2>&1 | grep -qE 'has no keys\\[\\] binding|has no matching TOKENFUSE_CLIENT_KEYS entry'"
+  install_only check "openai door: a call with no key is refused" \
+        "[ \"\$(fuse_refusal '' openai)\" = 401 ]"
+  install_only check "openai door: a call with an unknown key is refused" \
+        "[ \"\$(fuse_refusal install-check-not-a-client-key openai)\" = 401 ]"
+fi
+
+check "cloud is NOT on the host"     "! curl -fsS -m3 -o /dev/null http://127.0.0.1:8080/healthz"
+check "wardryx is NOT on the host"   "! curl -fsS -m3 -o /dev/null http://127.0.0.1:8090/healthz"
+# The companion of the first check, for a bind that is one address rather
+# than every address: loopback must then REFUSE, the way the cloud and wardryx
+# must refuse above, and this one has to fail to pass for the same reason. A
+# gateway that answers on an address the operator did not name is published
+# wider than they decided, and the check below reads Docker's rule for the
+# named address without asking whether another one answers as well.
+case "$GATEWAY_BIND" in
+  127.0.0.1|localhost|::1|0.0.0.0) ;;
+  *) check "gateway is NOT on loopback" "! curl -fsS -m3 -o /dev/null http://127.0.0.1:4100/healthz" ;;
+esac
+# Whether a mapping EXISTS at all, read from the container Docker is actually
+# running, apart from whether it is on the right address (the next check).
+# On 2026-09-17, after a reboot had failed the gateway's first bind, `up -d`
+# printed `Started` for a container with no port mapping: healthz unreachable
+# and `docker port` empty until `up -d --force-recreate tokenfuse-gateway`
+# (#56). `Started` is compose's word for the container; this is Docker's
+# word for the port.
+check "gateway has a port mapping" \
+      "docker port \"\$($DC ps -q tokenfuse-gateway)\" 4100/tcp | grep -q ."
+# Not the variable, the rule Docker actually wrote. A default that says
+# loopback while the published port says otherwise is worse than no default at
+# all, because the banner then tells you the box is closed while it is open.
+check "gateway published on $GATEWAY_BIND only" \
+      "$DC port tokenfuse-gateway 4100 | grep -q '^${GATEWAY_BIND}:'"
+
+# The chain verifier (agent-conform watch-dir). Two questions, because "running"
+# is not "verifying". It has to be up and its first pass must have printed a line
+# for a stream (PASS, or NOTE for an empty one: a fresh box has served no traffic
+# and only empty streams): a verifier that exited 2 on a bus it could not read
+# is restarting and prints errors instead. And its account must be able to write
+# its own stream and nothing else on the bus, which is the only thing that
+# contains it (compose cannot mount one file of a volume): both are asked of a
+# throwaway busybox run as the verifier's own uid against the live volume, the
+# second one a check that must fail to pass.
+check_log "chain verifier is running and has read the bus" \
+      "$DC ps --status running --services | grep -qx agent-conform && $DC logs agent-conform 2>&1 | grep -qE '(PASS|NOTE) [a-z-]+\\.ndjson'"
+install_only check "chain verifier can write its own stream" \
+      "docker run --rm --user 10002:10002 -v agent-stack_events:/e busybox:1.36 sh -c ': >> /e/agent-conform.ndjson'"
+install_only check "chain verifier cannot write another plane's stream" \
+      "! docker run --rm --user 10002:10002 -v agent-stack_events:/e busybox:1.36 sh -c ': >> /e/wardryx.ndjson'"
+install_only check "chain verifier cannot create a file on the bus" \
+      "! docker run --rm --user 10002:10002 -v agent-stack_events:/e busybox:1.36 sh -c ': > /e/not-its-own.ndjson'"
+
+# The operator's tunnel. Checked from the CONSOLE's side rather than the wg
+# container's: what matters is not that a socket exists somewhere, it is that
+# the unprivileged console can actually manage peers through it. A tunnel that
+# is up while the console cannot reach its socket is the exact failure this
+# split was built to avoid, and it looks perfectly healthy from outside.
+check "wireguard interface is up" \
+      "$DC exec -T wg wg show ${WG_IFACE:-wg-op} public-key"
+# Only when a console is actually installed. The stack runs perfectly well
+# without one (the planes enforce with or without a UI), and an unconditional
+# check here would fail on a deployment that is entirely correct.
+#
+# The RELAY, not the daemon's own socket: wireguard-go requires its socket to
+# stay 0700 and stops answering if that changes, so the console is given a
+# group-readable forwarder instead. Checked from the console's side, because a
+# tunnel that is up while the console cannot reach it looks healthy from
+# everywhere else.
+if compose_has console; then
+  check "console can manage peers over UAPI" \
+        "$DC exec -T console test -r /var/run/wireguard/console.sock"
+fi
+
+# `--protocol udp <port>`, not `<port>/udp`: compose parses the argument as a
+# bare integer and fails with "strconv.ParseUint: invalid syntax" on the form
+# `docker port` accepts, so the check reported a healthy tunnel as broken.
+# TLS, checked from inside the tunnel's own network rather than the host: this
+# is deliberately not reachable from anywhere else, so a check that could see
+# it from the host would mean the boundary had failed.
+# A TCP check, not an HTTPS one. The certificate is issued for the console's
+# domain, so a request that arrives with any other server name is refused by
+# design - which means a naive `wget https://caddy/...` fails on a perfectly
+# healthy deployment and would teach the reader to ignore a red line.
+check "console TLS is listening" "$DC exec -T wg nc -z caddy 443"
+check "console TLS names ${CONSOLE_DOMAIN:-the configured domain}" \
+      "$DC exec -T caddy sh -c 'grep -q \"^${CONSOLE_DOMAIN}\" /etc/caddy/Caddyfile'"
+check "tunnel accepts on ${WG_LISTEN_PORT:-51820}/udp" \
+      "$DC port --protocol udp wg ${WG_LISTEN_PORT:-51820} | grep -q ':${WG_LISTEN_PORT:-51820}$'"
+if compose_has console; then
+  check "console answers on loopback" "curl -fsS -m5 -o /dev/null http://127.0.0.1:7420/healthz"
+  # Reachability is not usefulness. The console comes up perfectly whether or
+  # not it can resolve the planes behind it, and the difference is only visible
+  # as an Overview that says "No environment found" after you sign in - which
+  # is exactly the moment it is most expensive to discover.
+  check "console resolves the money plane" \
+        "$DC exec -T console printenv TOKENFUSE_CLOUD_ADMIN_KEY"
+  check "console resolves the policy plane" \
+        "$DC exec -T console printenv WARDRYX_ADMIN_KEY"
+  # Resolving the planes is still not the bus. The console keeps its history
+  # in a store it has to CREATE at startup; with TAIPAN_HOME pointed at a
+  # root-owned config directory it could not, logged one line and served on
+  # with an empty Bus Explorer, on every install from 2026-08-31 to
+  # 2026-09-14, and the two checks above were green throughout (genaryx#71,
+  # #49). The console's own startup line is the only place this shows.
+  check_log "console's bus is live" \
+        "$DC logs console 2>&1 | grep -q 'bus LIVE' && ! $DC logs console 2>&1 | grep -q 'bus startup failed'"
+  # The password section 7 printed has to work. The console reads whether it
+  # has an operator once, at startup (stack-k8s GOTCHAS 50), and section 7 sets
+  # one on a console that is already running, so a fresh box answered
+  # `"configured":false` here and refused every sign-in with 503 while the
+  # password was still on the screen. Retried like a log check: the console
+  # was restarted moments ago.
+  check_log "console knows its operator" \
+        "curl -fsS -m5 http://127.0.0.1:7420/api/auth/session | grep -q '\"configured\":true'"
+fi
+
+# The typed plane's own door, only when WITH_TYPED actually brought it up
+# (section 5): a check that asked a service nothing started would prove
+# nothing, the same reasoning every other opt-in check here follows.
+if compose_has tokenfuse-mcp-broker; then
+  # Not `docker compose exec ... curl`: the same reason as the money and
+  # policy planes above, this image has neither curl nor a shell. The MCP
+  # wire is JSON-RPC over HTTP, so this is one wget POST with the right
+  # headers, from the same throwaway busybox that probes everything else
+  # here.
+  # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
+  mcp_status() { # url, key (may be empty), method
+    local url="$1" key="${2:-}" method="$3"
+    local hdrs=(--header="Content-Type: application/json" --header="X-Fuse-Mcp-Upstream: typryx")
+    [ -n "$key" ] && hdrs+=(--header="x-fuse-key: $key")
+    docker run --rm --network "$NET" busybox:1.36 wget -S -q -T5 -O /dev/null \
+        "${hdrs[@]}" --post-data="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"$method\"}" "$url" 2>&1 \
+      | awk '/^  HTTP\//{c=$2} END{print c+0}'
+  }
+  MCP_BROKER_KEY="$(sed -n 's/^TOKENFUSE_MCP_KEYS=\([^:]*\):.*/\1/p' .env 2>/dev/null | head -1)"
+  # Named "reaches typryx", not "answers": the MCP wire reports an upstream
+  # refusal as a JSON-RPC error object over HTTP 200, so this proves only that
+  # the broker is up, authenticated the caller and forwarded to typryx.
+  check "typed plane: broker reaches typryx for tools/list" \
+        "[ \"\$(mcp_status http://tokenfuse-mcp-broker:4200/mcp '$MCP_BROKER_KEY' tools/list)\" = 200 ]"
+  # The answer itself, read from the body: an `ask` whose typryx credential
+  # travels only as the handle {{secret:typryx_key}}, resolved from the
+  # broker's vault, must come back as a result with "isError":false. This is
+  # the whole path (broker door, vault, _meta credential, typryx's own door,
+  # a template, the stub backend), and it needs typryx v0.2.0 or later:
+  # _meta credential reading is typryx#6, not in v0.1.0.
+  # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
+  mcp_ask_answered() { # url, key
+    local hdrs=(--header="Content-Type: application/json" --header="X-Fuse-Mcp-Upstream: typryx" --header="x-fuse-key: $2")
+    # With the typed risk signal on, the broker is a policy enforcement point
+    # and judges only a call it can attribute: without x-fuse-agent-id it
+    # refuses, which is the right answer for an unattributed call and the wrong
+    # one for this check. Off, the request is byte for byte what it always was.
+    if [ "$TYPED_RISK_ON" = 1 ]; then hdrs+=(--header="x-fuse-agent-id: agent://local.invalid/install-check"); fi
+    docker run --rm --network "$NET" busybox:1.36 wget -q -T5 -O - \
+        "${hdrs[@]}" \
+        --post-data='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ask","arguments":{"template":"eval.outcome_met","state":{"task":"2+2","final_answer":"4"}},"_meta":{"typryx/key":"{{secret:typryx_key}}"}}}' \
+        "$1" 2>/dev/null | grep -q '"isError":false'
+  }
+  if [ "$TYPED_PLANE" = jev ]; then
+    # Not asked on purpose: this ask would go to TypeSafe's API, on every run
+    # of this installer, spending on the operator's account and sending them a
+    # question they did not write. typryx refuses to start on a missing or
+    # empty key file (exit 2), so "typryx is running" below is what a wrong
+    # key PATH looks like; a wrong key VALUE shows on the first real ask.
+    [ "${STATUS:-0}" = 1 ] || note "jev: the ask check is skipped, it would send a question to TypeSafe and spend on every run"
+  else
+    install_only check "typed plane: an ask through the broker is answered" \
+          "mcp_ask_answered http://tokenfuse-mcp-broker:4200/mcp '$MCP_BROKER_KEY'"
+  fi
+  if [ "$TYPED_PLANE" = jev ] || [ "$TYPED_PLANE" = own-model ]; then
+    check_log "typed plane: typryx is running on its $TYPED_PLANE backend" \
+          "$DC ps --status running --services | grep -qx typryx"
+  fi
+  # The typed risk signal (TYPED_RISK_SIGNAL=1), only when its proxy actually
+  # came up. Three things are asked, none of which the broker's own checks
+  # above can see. The proxy answers on the network it is meant to be on
+  # (through it, wardryx's /healthz: a 200 here is the proxy AND its upstream).
+  # It does NOT answer from the default network and is not on the host: both
+  # must fail to pass, because the proxy runs without a credential and who can
+  # reach it is its only protection. And only the broker's policy client was
+  # pointed at it: the LLM gateway keeps asking wardryx directly.
+  if compose_has typryx-wardryx-proxy; then
+    # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
+    risk_probe() { docker run --rm --network agent-stack_risk-signal busybox:1.36 wget -q -T5 -O /dev/null "$1"; }
+    check "typed risk signal: the proxy answers on its own network" \
+          "risk_probe http://typryx-wardryx-proxy:4330/healthz"
+    check "typed risk signal: the proxy is NOT reachable from the default network" \
+          "! probe http://typryx-wardryx-proxy:4330/healthz"
+    check "typed risk signal: the proxy is NOT on the host" \
+          "! curl -fsS -m3 -o /dev/null http://127.0.0.1:4330/healthz"
+    check "typed risk signal: only the broker's policy client points at the proxy" \
+          "[ \"\$($DC exec -T tokenfuse-mcp-broker printenv TOKENFUSE_WARDRYX_URL)\" = http://typryx-wardryx-proxy:4330 ] && [ \"\$($DC exec -T tokenfuse-gateway printenv TOKENFUSE_WARDRYX_URL)\" = http://wardryx:8090 ]"
+    if [ "$TYPED_PLANE" = stub ]; then
+      # The whole path, read off the bus: the ask check above made the broker
+      # call wardryx through the proxy, and a decision wardryx recorded carries
+      # the signal typryx added. Only on the stub, whose answer is immediate:
+      # a real backend can miss the proxy's deadline, and a missing signal is
+      # then correct, so the same read would fail a healthy box.
+      install_only check_log "typed risk signal: a tool call's decision carries typryx's signal" \
+            "docker run --rm -v agent-stack_events:/e:ro busybox:1.36 grep -q action.risk_class /e/wardryx.ndjson"
+    else
+      [ "${STATUS:-0}" = 1 ] || note "$TYPED_PLANE: whether a signal arrives is not checked, it depends on the backend answering inside the proxy's deadline"
+    fi
+  fi
+  # Must fail to pass, like the admin-key checks above: a call this broker
+  # would forward with nobody's key on it is the same open door those checks
+  # exist to catch on a different plane.
+  install_only check "typed plane: a tools/call with no broker key is refused" \
+        "c=\$(mcp_status http://tokenfuse-mcp-broker:4200/mcp '' tools/call); case \"\$c\" in 401|403) true ;; *) false ;; esac"
+fi
+
+# The delegation plane's own checks, only when WITH_DELEGATION actually
+# brought vouchryx up: the same reasoning as the typed plane above, a check
+# that asked a service nothing started would prove nothing.
+if compose_has vouchryx; then
+  # Must fail to pass, exactly like "cloud is NOT on the host" above: vouchryx
+  # is a real running service, deliberately never published (compose.yaml's
+  # own comment on it says so), and a reachable JWKS endpoint on the host
+  # would be the same open door those checks exist to catch on the money and
+  # policy planes.
+  check "vouchryx is NOT on the host" \
+        "! curl -fsS -m3 -o /dev/null http://127.0.0.1:4310/.well-known/jwks.json"
+  check "vouchryx answers inside" "probe http://vouchryx:4310/.well-known/jwks.json"
+  # Reachability is not the same as the gateway actually trusting it: this
+  # reads the environment variable this run wrote, the same shape "console
+  # resolves the money plane" checks a wired value rather than a live call.
+  check "gateway resolves the delegation door" \
+        "$DC exec -T tokenfuse-gateway printenv TOKENFUSE_DELEGATION_ISSUER"
+fi
+}
+
+# ---- status: the same checks, against the stack already installed -------------
+# `./install.sh status` changes nothing. It reads .env and the running stack, runs
+# stack_checks (the list section 8 runs, not a copy of it), and prints one line per
+# check. No package, image, container or file is touched; the checks that would write
+# are skipped and marked so. It runs as root or as a user in the docker group.
+status_facts() { # what the install decided, read back from .env and the running stack
+  IDENTITY_KEYS_COUNT=0; IDENTITY_MAP_ON=0; IDENTITY_openai_KEYS_COUNT=0
+  DOOR_ON=0; TYPED_PLANE=off; TYPED_RISK_ON=0
+  if [ -n "${GATEWAY_CLIENT_KEYS:-}" ]; then
+    IDENTITY_KEYS_COUNT=$(( $(printf '%s' "$GATEWAY_CLIENT_KEYS" | tr -cd ',' | wc -c) + 1 ))
+  fi
+  if [ -n "${GATEWAY_IDENTITY_MAP:-}" ]; then IDENTITY_MAP_ON=1; fi
+  if [ -n "${OPENAI_DOOR_CLIENT_KEYS:-}" ]; then
+    IDENTITY_openai_KEYS_COUNT=$(( $(printf '%s' "$OPENAI_DOOR_CLIENT_KEYS" | tr -cd ',' | wc -c) + 1 ))
+  fi
+  if compose_has tokenfuse-gateway-openai; then DOOR_ON=1; fi
+  if compose_has typryx; then
+    TYPED_PLANE=stub
+    case "${TYPED_MODE:-}" in jev) TYPED_PLANE=jev ;; own-model) TYPED_PLANE=own-model ;; esac
+  fi
+  if compose_has typryx-wardryx-proxy; then TYPED_RISK_ON=1; fi
+}
+status_main() {
+  STATUS=1
+  [ -f "$STACK_DIR/.env" ] || die "nothing is installed in $STACK_DIR (there is no .env there), so there is no stack to check. Set STACK_DIR if it lives elsewhere. Nothing was changed."
+  cd "$STACK_DIR"
+  # shellcheck disable=SC1091  # generated at install time, not in this repo
+  . ./.env
+  gateway_probe_resolve
+  if docker compose version >/dev/null 2>&1; then COMPOSE=(docker compose)
+  elif command -v docker-compose >/dev/null 2>&1; then COMPOSE=(docker-compose)
+  else die "no docker compose on this machine, so the stack cannot be read. Nothing was changed."; fi
+  status_facts
+  printf 'status of the stack in %s\n' "$STACK_DIR"
+  fail=0
+  stack_checks
+  EXPLAINED=1
+  if [ "$fail" -eq 0 ]; then printf '\nevery check passed\n'; exit 0; fi
+  printf '\n%s check(s) failed\n' "$fail"
+  exit 1
+}
+if [ "${1:-}" = status ]; then status_main; fi
 
 # ---- 0. preflight -----------------------------------------------------------
 [ "$(id -u)" = "0" ] || die "run as root: this installs packages and a firewall rule."
@@ -1304,22 +1807,6 @@ else
 fi
 note "docker $(docker --version | awk '{print $3}' | tr -d ,), compose present"
 
-# Whether the compose project has a service called NAME, for the `if` that
-# decides whether a group of checks or a step applies at all. The list is read to
-# its end before anything looks at it, and not piped into `grep -q`: grep exits at
-# its first match, compose is still writing the rest of the list, hits the closed
-# pipe and exits non-zero, and under `set -o pipefail` that fails the pipeline
-# although the name was there (check() in section 8 has the measured case, for a
-# log). Here a false answer is quieter than a red check: the console's checks, or
-# the broker's, are skipped, and the run still ends "every check passed".
-# (gate: scripts/checks-survive-a-closed-pipe.sh lifts this and runs it.)
-# compose-has: begin
-compose_has() { # NAME
-  local out
-  out="$("${COMPOSE[@]}" ps --services 2>/dev/null)" || return 1
-  grep -qx -- "$1" <<<"$out"
-}
-# compose-has: end
 
 # ---- 1. this repo, whether cloned or piped ----------------------------------
 # C here is `true`, so the fallback is an empty HERE, which the next line handles.
@@ -2395,274 +2882,7 @@ fi
 # ---- 8. does it actually work -------------------------------------------------
 say "verify"
 fail=0
-# A check's command string is evaluated with pipefail OFF, in a subshell, and that
-# is deliberate. Several checks read a container's log through a pipe,
-# `$DC logs svc 2>&1 | grep -q PATTERN`, and `grep -q` exits at its first match.
-# `docker compose logs` is still writing, hits the closed pipe and exits 255, and
-# under the `set -o pipefail` this script runs with, that failed the pipeline
-# although the line WAS in the log. Measured 2026-10-13 on Debian 13 (Docker
-# 26.1.5, Compose 2.26.1): `set -o pipefail; docker compose logs tokenfuse-gateway
-# 2>&1 | grep -qF 'client auth: ON (3 key(s))'`, five times, returned 0 255 255 0
-# 255; the same without -q, where grep reads everything, 0 five times. It made two
-# installs report `FAIL client keys: the gateway holds 3` and `FAIL identity map:
-# the gateway reads it` on a healthy box, and it is a race a CI runner happens to
-# win. The other direction is worse: a check written the negative way,
-# `! $DC logs svc 2>&1 | grep -qE BAD`, read ok while the bad line WAS in the log,
-# because the 255 failed the pipeline and `!` turned that into a pass.
-#
-# So the verdict of a check is its reader's, the last command's, which is what a
-# pipeline's status is without pipefail: grep found the line, or it did not. A
-# producer that could not run at all leaves the reader nothing to find, so a
-# positive check still FAILs, and the one negative check that would read ok on an
-# unreadable log (identity map: every key is bound) is paired, on the same log,
-# with a positive one that does not. Fixed here once rather than at each pipeline,
-# so a check added next month cannot bring the race back.
-# (gate: scripts/checks-survive-a-closed-pipe.sh lifts both helpers and runs this
-# file's own log checks against a stub docker that exits 255 when its reader goes.)
-# check-helpers: begin
-check() { # name, command
-  [ "$#" -eq 2 ] || die "internal: check() got $# arguments, expected 2 (\$1='${1:-}')"
-  if ( set +o pipefail; eval "$2" ) >/dev/null 2>&1; then printf '   ok    %s\n' "$1"; else printf '   FAIL  %s\n' "$1"; fail=$((fail+1)); fi
-}
-# The same, for a check that reads a container's LOG: retried for up to ten
-# seconds. A log line is written once, some milliseconds after the process
-# starts, and `docker compose logs` read moments after `up` has once come
-# back without a line that was there a minute later: 2026-09-14, an arm64
-# box, `gateway exports agent events` FAIL on run 1 with the line stamped
-# nine seconds before the check, ok on run 2 with the same container and no
-# restart. A one-shot read of a log is a race with the log driver; a check
-# that stays red for ten seconds is a real absence.
-check_log() { # name, command
-  [ "$#" -eq 2 ] || die "internal: check_log() got $# arguments, expected 2 (\$1='${1:-}')"
-  local left=10
-  while [ "$left" -gt 0 ]; do
-    if ( set +o pipefail; eval "$2" ) >/dev/null 2>&1; then printf '   ok    %s\n' "$1"; return 0; fi
-    sleep 1; left=$((left - 1))
-  done
-  printf '   FAIL  %s\n' "$1"; fail=$((fail+1))
-}
-# check-helpers: end
-# One word, not an array. `"${COMPOSE[@]}"` inside a larger quoted string does
-# not stay one argument: it word-splits, check() silently receives three
-# arguments instead of two, `$2` becomes the fragment `"docker`, and every
-# container-side check reports FAIL on a perfectly healthy stack. `[*]` joins
-# the elements into the single string eval actually needs. The argument-count
-# assertion above is there so this can never be silent again.
-DC="${COMPOSE[*]}"
-
-# Not `docker compose exec ... curl`: none of these images HAS curl, and two of
-# them have no shell either, because they are distroless on purpose. A check
-# that needs a tool the image deliberately omits fails on a perfectly healthy
-# stack and is indistinguishable from a real failure. So the probe is a
-# throwaway busybox attached to the same network, which is what a neighbouring
-# container sees and therefore what the check should be asking about.
-NET="agent-stack_default"
-docker network inspect "$NET" >/dev/null 2>&1 || die "network $NET is missing: the stack did not start."
-# shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
-probe() { docker run --rm --network "$NET" busybox:1.36 wget -q -T5 -O /dev/null "$1"; }
-# Prints the HTTP status only, so a check can assert 401 and 403 as PASSES.
-# shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
-code() { docker run --rm --network "$NET" busybox:1.36 \
-           wget -S -q -T5 -O /dev/null --header="Authorization: Bearer $2" "$1" 2>&1 \
-         | awk '/^  HTTP\//{c=$2} END{print c+0}'; }
-# Same as code(), minus the header entirely: an empty bearer token is still a
-# credential, and the point of this one is that none was presented at all.
-# shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
-codenokey() { docker run --rm --network "$NET" busybox:1.36 \
-           wget -S -q -T5 -O /dev/null "$1" 2>&1 \
-         | awk '/^  HTTP\//{c=$2} END{print c+0}'; }
-
-# Where the gateway is probed: the address the operator chose, not loopback.
-# With GATEWAY_BIND set to ONE address (a tailnet address is the shape an
-# appliance wants: reachable from the customer's clouds over a private mesh,
-# not from the LAN) Docker publishes on that address only, so loopback
-# refuses, and this line read FAIL twice on a healthy box while the same probe
-# against that address answered 200 and "published on $GATEWAY_BIND only"
-# below passed (#54, measured 2026-09-17). GATEWAY_PROBE itself comes from
-# gateway_probe_resolve at the top of this file, called again after each read of
-# .env, so on a re-run it follows the bind the box has, not the run's default.
-check "gateway answers on $GATEWAY_PROBE:4100" "curl -fsS -m5 -o /dev/null http://$GATEWAY_PROBE:4100/healthz"
-# The bus half of the stack. tokenfuse logs this line once at start when
-# TOKENFUSE_EVENTS_PATH is set and the file could be opened; without it the
-# exporter is off and idryx loads an empty log forever. Read from the
-# gateway's own log rather than the file: a fresh box has served no traffic,
-# so the file is legitimately empty and its size proves nothing yet.
-check_log "gateway exports agent events" "$DC logs tokenfuse-gateway 2>&1 | grep -q 'NDJSON export enabled'"
-# The run-budget ceiling (section 0c) is read from the gateway's own start-up
-# line, not from the variable: tokenfuse 1.5.0 logs it once when the clamp is
-# armed, so a gateway older than 1.5.0, or one that read no ceiling, has no such
-# line and this goes red. Reading compose's environment instead would call a
-# box green whose gateway ignored the setting.
-check_log "gateway clamps a run budget to a ceiling" \
-      "$DC logs tokenfuse-gateway 2>&1 | grep -q 'run budget ceiling: a caller-declared or default budget is clamped to it'"
-check "cloud answers inside"         "probe http://tokenfuse-cloud:8080/healthz"
-check "wardryx answers inside"       "probe http://wardryx:8090/healthz"
-check "idryx answers inside"         "probe http://idryx:8081/healthz"
-check "policy store is up"           "$DC exec -T policy-db pg_isready -U wardryx -d wardryx"
-# Not the same question as the line above. pg_isready asks the database;
-# /readyz asks wardryx whether IT can reach the store with the DSN and the
-# network it was given (wardryx 1.0.3, #63), answering 503 when it cannot,
-# while /healthz stays 200 and a policy write fails. A wrong WARDRYX_DB, or a
-# store the plane cannot resolve, passes both checks above and fails here.
-check "policy plane reaches its store" "probe http://wardryx:8090/readyz"
-
-# The three below are about the KEYS, and they exist because a plane with a
-# malformed key spec starts cleanly, authenticates nobody, and answers 401 to
-# its own console. Reachability alone would have called that deployment green.
-check "policy plane accepts its admin key"   "[ \"\$(code http://wardryx:8090/v1/policies '$WARDRYX_ADMIN')\" = 200 ]"
-check "policy plane rejects an unknown key"  "[ \"\$(code http://wardryx:8090/v1/policies nonsense-not-a-key)\" = 401 ]"
-check "gateway's key cannot write policy"    "[ \"\$(code http://wardryx:8090/v1/policies '$WARDRYX_GATEWAY')\" = 403 ]"
-
-# The gateway's own admin key, the same shape of check for the same reason:
-# this one MUST fail to pass, exactly like the "not reachable from the host"
-# checks below. A gateway that answers /v1/runs to nobody in particular has
-# reopened the routes TOKENFUSE_ALLOW_OPEN_OBS used to hold open on purpose.
-check "gateway refuses /v1/runs without the admin key" \
-      "c=\$(codenokey http://tokenfuse-gateway:4100/v1/runs); case \"\$c\" in 401|403) true ;; *) false ;; esac"
-check "gateway serves /v1/runs with the admin key" \
-      "[ \"\$(code http://tokenfuse-gateway:4100/v1/runs '$GATEWAY_ADMIN')\" = 200 ]"
-
-# Client keys and the identity map (sections 0f and 3e), only on a box that has
-# them. Read from the running gateway, not from .env: its own start-up lines, and
-# two calls it must refuse 401. A gateway that did NOT hold the keys refuses the
-# same call before anything reaches a provider, so a 401 here can only be the
-# gateway asking for a key, never a provider's: measured 2026-10-13 on a gateway
-# with the keys taken out, 400 identity_required (no agent id while the policy
-# plane enforces), and 402 with an agent id, because each call also declares a
-# budget of one micro-dollar. busybox wget prints no header after an error
-# status, so the status is all there is to read. No call
-# here names an agent: a mismatch would be a high-severity event on the bus, and
-# an installer must not page its operator on every run (CI's identity leg sends
-# that one, see .github/workflows/install.yml).
-# shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
-fuse_refusal() { # client key or "" for none, then main (default) or openai: prints the status of a metered call
-  local hdrs=(--header="Content-Type: application/json" --header="x-fuse-run-id: install-check" --header="x-fuse-budget-usd: 0.000001")
-  local url=http://tokenfuse-gateway:4100/v1/messages
-  local body='{"model":"claude-haiku-4-5","max_tokens":1,"messages":[{"role":"user","content":"install check"}]}'
-  if [ "${2:-main}" = openai ]; then
-    # The OpenAI door's own route and body shape: the other route answers 400 on
-    # this door before any key is asked for.
-    url=http://tokenfuse-gateway-openai:4100/v1/chat/completions
-    body='{"model":"gpt-4o-mini","max_tokens":1,"messages":[{"role":"user","content":"install check"}]}'
-  fi
-  [ -z "$1" ] || hdrs+=(--header="x-fuse-key: $1")
-  docker run --rm --network "$NET" busybox:1.36 wget -S -q -T5 -O /dev/null "${hdrs[@]}" \
-      --post-data="$body" "$url" 2>&1 \
-    | awk '/^  HTTP\//{c=$2} END{print c+0}'
-}
-if [ "$IDENTITY_KEYS_COUNT" -gt 0 ]; then
-  check_log "client keys: the gateway holds $IDENTITY_KEYS_COUNT" \
-        "$DC logs tokenfuse-gateway 2>&1 | grep -qF 'client auth: ON ($IDENTITY_KEYS_COUNT key(s))'"
-  check "client keys: a call with no key is refused" \
-        "[ \"\$(fuse_refusal '')\" = 401 ]"
-  check "client keys: a call with an unknown key is refused" \
-        "[ \"\$(fuse_refusal install-check-not-a-client-key)\" = 401 ]"
-fi
-if [ "$IDENTITY_MAP_ON" = 1 ]; then
-  check_log "identity map: the gateway reads it" \
-        "$DC logs tokenfuse-gateway 2>&1 | grep -qF 'identity map: ON ('"
-  check "identity map: every key is bound and every binding has a key" \
-        "! $DC logs tokenfuse-gateway 2>&1 | grep -qE 'has no keys\\[\\] binding|has no matching TOKENFUSE_CLIENT_KEYS entry'"
-fi
-
-# The OpenAI door (OPENAI_DOOR=1, section 0g), on every box that asked for it and
-# never skipped there: a door that did not come up must turn these red. The same
-# questions the gateway is asked: it answers on the operator's bind and nowhere
-# wider, serves the OpenAI wire, exports to its own file, clamps a run budget, holds
-# its own keys and map, and refuses a call with no key or an unknown one before
-# anything reaches the upstream (the call's budget is one micro-dollar, and no agent
-# is named, for the reason the gateway's checks above give).
-if [ "$DOOR_ON" = 1 ]; then
-  check "openai door answers on $GATEWAY_PROBE:4110" "curl -fsS -m5 -o /dev/null http://$GATEWAY_PROBE:4110/healthz"
-  case "$GATEWAY_BIND" in
-    127.0.0.1|localhost|::1|0.0.0.0) ;;
-    *) check "openai door is NOT on loopback" "! curl -fsS -m3 -o /dev/null http://127.0.0.1:4110/healthz" ;;
-  esac
-  check "openai door published on $GATEWAY_BIND only" \
-        "$DC port tokenfuse-gateway-openai 4100 | grep -q '^${GATEWAY_BIND}:'"
-  check_log "openai door serves the OpenAI wire" \
-        "$DC logs tokenfuse-gateway-openai 2>&1 | grep -q 'serving one door.*/v1/chat/completions'"
-  check_log "openai door exports agent events" \
-        "$DC logs tokenfuse-gateway-openai 2>&1 | grep -q 'NDJSON export enabled'"
-  check_log "openai door clamps a run budget to a ceiling" \
-        "$DC logs tokenfuse-gateway-openai 2>&1 | grep -q 'run budget ceiling: a caller-declared or default budget is clamped to it'"
-  check_log "openai door: client keys: the door holds ${IDENTITY_openai_KEYS_COUNT:-0}" \
-        "$DC logs tokenfuse-gateway-openai 2>&1 | grep -qF 'client auth: ON (${IDENTITY_openai_KEYS_COUNT:-0} key(s))'"
-  check_log "openai door: identity map: the door reads it" \
-        "$DC logs tokenfuse-gateway-openai 2>&1 | grep -qF 'identity map: ON ('"
-  check "openai door: every key is bound and every binding has a key" \
-        "! $DC logs tokenfuse-gateway-openai 2>&1 | grep -qE 'has no keys\\[\\] binding|has no matching TOKENFUSE_CLIENT_KEYS entry'"
-  check "openai door: a call with no key is refused" \
-        "[ \"\$(fuse_refusal '' openai)\" = 401 ]"
-  check "openai door: a call with an unknown key is refused" \
-        "[ \"\$(fuse_refusal install-check-not-a-client-key openai)\" = 401 ]"
-fi
-
-check "cloud is NOT on the host"     "! curl -fsS -m3 -o /dev/null http://127.0.0.1:8080/healthz"
-check "wardryx is NOT on the host"   "! curl -fsS -m3 -o /dev/null http://127.0.0.1:8090/healthz"
-# The companion of the first check, for a bind that is one address rather
-# than every address: loopback must then REFUSE, the way the cloud and wardryx
-# must refuse above, and this one has to fail to pass for the same reason. A
-# gateway that answers on an address the operator did not name is published
-# wider than they decided, and the check below reads Docker's rule for the
-# named address without asking whether another one answers as well.
-case "$GATEWAY_BIND" in
-  127.0.0.1|localhost|::1|0.0.0.0) ;;
-  *) check "gateway is NOT on loopback" "! curl -fsS -m3 -o /dev/null http://127.0.0.1:4100/healthz" ;;
-esac
-# Whether a mapping EXISTS at all, read from the container Docker is actually
-# running, apart from whether it is on the right address (the next check).
-# On 2026-09-17, after a reboot had failed the gateway's first bind, `up -d`
-# printed `Started` for a container with no port mapping: healthz unreachable
-# and `docker port` empty until `up -d --force-recreate tokenfuse-gateway`
-# (#56). `Started` is compose's word for the container; this is Docker's
-# word for the port.
-check "gateway has a port mapping" \
-      "docker port \"\$($DC ps -q tokenfuse-gateway)\" 4100/tcp | grep -q ."
-# Not the variable, the rule Docker actually wrote. A default that says
-# loopback while the published port says otherwise is worse than no default at
-# all, because the banner then tells you the box is closed while it is open.
-check "gateway published on $GATEWAY_BIND only" \
-      "$DC port tokenfuse-gateway 4100 | grep -q '^${GATEWAY_BIND}:'"
-
-# The chain verifier (agent-conform watch-dir). Two questions, because "running"
-# is not "verifying". It has to be up and its first pass must have printed a line
-# for a stream (PASS, or NOTE for an empty one: a fresh box has served no traffic
-# and only empty streams): a verifier that exited 2 on a bus it could not read
-# is restarting and prints errors instead. And its account must be able to write
-# its own stream and nothing else on the bus, which is the only thing that
-# contains it (compose cannot mount one file of a volume): both are asked of a
-# throwaway busybox run as the verifier's own uid against the live volume, the
-# second one a check that must fail to pass.
-check_log "chain verifier is running and has read the bus" \
-      "$DC ps --status running --services | grep -qx agent-conform && $DC logs agent-conform 2>&1 | grep -qE '(PASS|NOTE) [a-z-]+\\.ndjson'"
-check "chain verifier can write its own stream" \
-      "docker run --rm --user 10002:10002 -v agent-stack_events:/e busybox:1.36 sh -c ': >> /e/agent-conform.ndjson'"
-check "chain verifier cannot write another plane's stream" \
-      "! docker run --rm --user 10002:10002 -v agent-stack_events:/e busybox:1.36 sh -c ': >> /e/wardryx.ndjson'"
-check "chain verifier cannot create a file on the bus" \
-      "! docker run --rm --user 10002:10002 -v agent-stack_events:/e busybox:1.36 sh -c ': > /e/not-its-own.ndjson'"
-
-# The operator's tunnel. Checked from the CONSOLE's side rather than the wg
-# container's: what matters is not that a socket exists somewhere, it is that
-# the unprivileged console can actually manage peers through it. A tunnel that
-# is up while the console cannot reach its socket is the exact failure this
-# split was built to avoid, and it looks perfectly healthy from outside.
-check "wireguard interface is up" \
-      "$DC exec -T wg wg show ${WG_IFACE:-wg-op} public-key"
-# Only when a console is actually installed. The stack runs perfectly well
-# without one (the planes enforce with or without a UI), and an unconditional
-# check here would fail on a deployment that is entirely correct.
-#
-# The RELAY, not the daemon's own socket: wireguard-go requires its socket to
-# stay 0700 and stops answering if that changes, so the console is given a
-# group-readable forwarder instead. Checked from the console's side, because a
-# tunnel that is up while the console cannot reach it looks healthy from
-# everywhere else.
-if compose_has console; then
-  check "console can manage peers over UAPI" \
-        "$DC exec -T console test -r /var/run/wireguard/console.sock"
-fi
+stack_checks                                 # the checks, below: section 8 runs them here
 
 # ---- 8b. your first device ---------------------------------------------------
 # With GENARYX_WEB_REQUIRE_PASSKEY=1 (compose.yaml), the five sensitive console
@@ -2716,143 +2936,8 @@ if compose_has console; then
   fi
 fi
 
-# `--protocol udp <port>`, not `<port>/udp`: compose parses the argument as a
-# bare integer and fails with "strconv.ParseUint: invalid syntax" on the form
-# `docker port` accepts, so the check reported a healthy tunnel as broken.
-# TLS, checked from inside the tunnel's own network rather than the host: this
-# is deliberately not reachable from anywhere else, so a check that could see
-# it from the host would mean the boundary had failed.
-# A TCP check, not an HTTPS one. The certificate is issued for the console's
-# domain, so a request that arrives with any other server name is refused by
-# design - which means a naive `wget https://caddy/...` fails on a perfectly
-# healthy deployment and would teach the reader to ignore a red line.
-check "console TLS is listening" "$DC exec -T wg nc -z caddy 443"
-check "console TLS names ${CONSOLE_DOMAIN:-the configured domain}" \
-      "$DC exec -T caddy sh -c 'grep -q \"^${CONSOLE_DOMAIN}\" /etc/caddy/Caddyfile'"
-check "tunnel accepts on ${WG_LISTEN_PORT:-51820}/udp" \
-      "$DC port --protocol udp wg ${WG_LISTEN_PORT:-51820} | grep -q ':${WG_LISTEN_PORT:-51820}$'"
-if compose_has console; then
-  check "console answers on loopback" "curl -fsS -m5 -o /dev/null http://127.0.0.1:7420/healthz"
-  # Reachability is not usefulness. The console comes up perfectly whether or
-  # not it can resolve the planes behind it, and the difference is only visible
-  # as an Overview that says "No environment found" after you sign in - which
-  # is exactly the moment it is most expensive to discover.
-  check "console resolves the money plane" \
-        "$DC exec -T console printenv TOKENFUSE_CLOUD_ADMIN_KEY"
-  check "console resolves the policy plane" \
-        "$DC exec -T console printenv WARDRYX_ADMIN_KEY"
-  # Resolving the planes is still not the bus. The console keeps its history
-  # in a store it has to CREATE at startup; with TAIPAN_HOME pointed at a
-  # root-owned config directory it could not, logged one line and served on
-  # with an empty Bus Explorer, on every install from 2026-08-31 to
-  # 2026-09-14, and the two checks above were green throughout (genaryx#71,
-  # #49). The console's own startup line is the only place this shows.
-  check_log "console's bus is live" \
-        "$DC logs console 2>&1 | grep -q 'bus LIVE' && ! $DC logs console 2>&1 | grep -q 'bus startup failed'"
-  # The password section 7 printed has to work. The console reads whether it
-  # has an operator once, at startup (stack-k8s GOTCHAS 50), and section 7 sets
-  # one on a console that is already running, so a fresh box answered
-  # `"configured":false` here and refused every sign-in with 503 while the
-  # password was still on the screen. Retried like a log check: the console
-  # was restarted moments ago.
-  check_log "console knows its operator" \
-        "curl -fsS -m5 http://127.0.0.1:7420/api/auth/session | grep -q '\"configured\":true'"
-fi
-
-# The typed plane's own door, only when WITH_TYPED actually brought it up
-# (section 5): a check that asked a service nothing started would prove
-# nothing, the same reasoning every other opt-in check here follows.
+# The notes below are the install's own output. The checks above are shared with status.
 if compose_has tokenfuse-mcp-broker; then
-  # Not `docker compose exec ... curl`: the same reason as the money and
-  # policy planes above, this image has neither curl nor a shell. The MCP
-  # wire is JSON-RPC over HTTP, so this is one wget POST with the right
-  # headers, from the same throwaway busybox that probes everything else
-  # here.
-  # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
-  mcp_status() { # url, key (may be empty), method
-    local url="$1" key="${2:-}" method="$3"
-    local hdrs=(--header="Content-Type: application/json" --header="X-Fuse-Mcp-Upstream: typryx")
-    [ -n "$key" ] && hdrs+=(--header="x-fuse-key: $key")
-    docker run --rm --network "$NET" busybox:1.36 wget -S -q -T5 -O /dev/null \
-        "${hdrs[@]}" --post-data="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"$method\"}" "$url" 2>&1 \
-      | awk '/^  HTTP\//{c=$2} END{print c+0}'
-  }
-  MCP_BROKER_KEY="$(sed -n 's/^TOKENFUSE_MCP_KEYS=\([^:]*\):.*/\1/p' .env 2>/dev/null | head -1)"
-  # Named "reaches typryx", not "answers": the MCP wire reports an upstream
-  # refusal as a JSON-RPC error object over HTTP 200, so this proves only that
-  # the broker is up, authenticated the caller and forwarded to typryx.
-  check "typed plane: broker reaches typryx for tools/list" \
-        "[ \"\$(mcp_status http://tokenfuse-mcp-broker:4200/mcp '$MCP_BROKER_KEY' tools/list)\" = 200 ]"
-  # The answer itself, read from the body: an `ask` whose typryx credential
-  # travels only as the handle {{secret:typryx_key}}, resolved from the
-  # broker's vault, must come back as a result with "isError":false. This is
-  # the whole path (broker door, vault, _meta credential, typryx's own door,
-  # a template, the stub backend), and it needs typryx v0.2.0 or later:
-  # _meta credential reading is typryx#6, not in v0.1.0.
-  # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
-  mcp_ask_answered() { # url, key
-    local hdrs=(--header="Content-Type: application/json" --header="X-Fuse-Mcp-Upstream: typryx" --header="x-fuse-key: $2")
-    # With the typed risk signal on, the broker is a policy enforcement point
-    # and judges only a call it can attribute: without x-fuse-agent-id it
-    # refuses, which is the right answer for an unattributed call and the wrong
-    # one for this check. Off, the request is byte for byte what it always was.
-    if [ "$TYPED_RISK_ON" = 1 ]; then hdrs+=(--header="x-fuse-agent-id: agent://local.invalid/install-check"); fi
-    docker run --rm --network "$NET" busybox:1.36 wget -q -T5 -O - \
-        "${hdrs[@]}" \
-        --post-data='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ask","arguments":{"template":"eval.outcome_met","state":{"task":"2+2","final_answer":"4"}},"_meta":{"typryx/key":"{{secret:typryx_key}}"}}}' \
-        "$1" 2>/dev/null | grep -q '"isError":false'
-  }
-  if [ "$TYPED_PLANE" = jev ]; then
-    # Not asked on purpose: this ask would go to TypeSafe's API, on every run
-    # of this installer, spending on the operator's account and sending them a
-    # question they did not write. typryx refuses to start on a missing or
-    # empty key file (exit 2), so "typryx is running" below is what a wrong
-    # key PATH looks like; a wrong key VALUE shows on the first real ask.
-    note "jev: the ask check is skipped, it would send a question to TypeSafe and spend on every run"
-  else
-    check "typed plane: an ask through the broker is answered" \
-          "mcp_ask_answered http://tokenfuse-mcp-broker:4200/mcp '$MCP_BROKER_KEY'"
-  fi
-  if [ "$TYPED_PLANE" = jev ] || [ "$TYPED_PLANE" = own-model ]; then
-    check_log "typed plane: typryx is running on its $TYPED_PLANE backend" \
-          "$DC ps --status running --services | grep -qx typryx"
-  fi
-  # The typed risk signal (TYPED_RISK_SIGNAL=1), only when its proxy actually
-  # came up. Three things are asked, none of which the broker's own checks
-  # above can see. The proxy answers on the network it is meant to be on
-  # (through it, wardryx's /healthz: a 200 here is the proxy AND its upstream).
-  # It does NOT answer from the default network and is not on the host: both
-  # must fail to pass, because the proxy runs without a credential and who can
-  # reach it is its only protection. And only the broker's policy client was
-  # pointed at it: the LLM gateway keeps asking wardryx directly.
-  if compose_has typryx-wardryx-proxy; then
-    # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
-    risk_probe() { docker run --rm --network agent-stack_risk-signal busybox:1.36 wget -q -T5 -O /dev/null "$1"; }
-    check "typed risk signal: the proxy answers on its own network" \
-          "risk_probe http://typryx-wardryx-proxy:4330/healthz"
-    check "typed risk signal: the proxy is NOT reachable from the default network" \
-          "! probe http://typryx-wardryx-proxy:4330/healthz"
-    check "typed risk signal: the proxy is NOT on the host" \
-          "! curl -fsS -m3 -o /dev/null http://127.0.0.1:4330/healthz"
-    check "typed risk signal: only the broker's policy client points at the proxy" \
-          "[ \"\$($DC exec -T tokenfuse-mcp-broker printenv TOKENFUSE_WARDRYX_URL)\" = http://typryx-wardryx-proxy:4330 ] && [ \"\$($DC exec -T tokenfuse-gateway printenv TOKENFUSE_WARDRYX_URL)\" = http://wardryx:8090 ]"
-    if [ "$TYPED_PLANE" = stub ]; then
-      # The whole path, read off the bus: the ask check above made the broker
-      # call wardryx through the proxy, and a decision wardryx recorded carries
-      # the signal typryx added. Only on the stub, whose answer is immediate:
-      # a real backend can miss the proxy's deadline, and a missing signal is
-      # then correct, so the same read would fail a healthy box.
-      check_log "typed risk signal: a tool call's decision carries typryx's signal" \
-            "docker run --rm -v agent-stack_events:/e:ro busybox:1.36 grep -q action.risk_class /e/wardryx.ndjson"
-    else
-      note "$TYPED_PLANE: whether a signal arrives is not checked, it depends on the backend answering inside the proxy's deadline"
-    fi
-  fi
-  # Must fail to pass, like the admin-key checks above: a call this broker
-  # would forward with nobody's key on it is the same open door those checks
-  # exist to catch on a different plane.
-  check "typed plane: a tools/call with no broker key is refused" \
-        "c=\$(mcp_status http://tokenfuse-mcp-broker:4200/mcp '' tools/call); case \"\$c\" in 401|403) true ;; *) false ;; esac"
   say "the typed plane, through tokenfuse's MCP broker"
   note "an agent reaches typryx at http://<this box>:4200/mcp ($GATEWAY_BIND unless you widen it)"
   note "  with the header X-Fuse-Mcp-Upstream: typryx and its own client key in x-fuse-key"
@@ -2874,23 +2959,7 @@ if compose_has tokenfuse-mcp-broker; then
   fi
 fi
 
-# The delegation plane's own checks, only when WITH_DELEGATION actually
-# brought vouchryx up: the same reasoning as the typed plane above, a check
-# that asked a service nothing started would prove nothing.
 if compose_has vouchryx; then
-  # Must fail to pass, exactly like "cloud is NOT on the host" above: vouchryx
-  # is a real running service, deliberately never published (compose.yaml's
-  # own comment on it says so), and a reachable JWKS endpoint on the host
-  # would be the same open door those checks exist to catch on the money and
-  # policy planes.
-  check "vouchryx is NOT on the host" \
-        "! curl -fsS -m3 -o /dev/null http://127.0.0.1:4310/.well-known/jwks.json"
-  check "vouchryx answers inside" "probe http://vouchryx:4310/.well-known/jwks.json"
-  # Reachability is not the same as the gateway actually trusting it: this
-  # reads the environment variable this run wrote, the same shape "console
-  # resolves the money plane" checks a wired value rather than a live call.
-  check "gateway resolves the delegation door" \
-        "$DC exec -T tokenfuse-gateway printenv TOKENFUSE_DELEGATION_ISSUER"
   say "delegation"
   note "vouchryx issues delegation tokens and answers revocations on the compose"
   note "  network only, never published to the host (see the service's own comment"

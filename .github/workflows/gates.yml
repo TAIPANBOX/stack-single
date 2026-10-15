@@ -88,6 +88,10 @@ jobs:
         run: ./scripts/openai-door.sh
       - name: every scenario is bound to a test that exists, and every binding to a scenario
         run: ./scripts/features-are-bound.sh
+      - name: status checks the installed stack and changes nothing
+        run: ./scripts/status-is-read-only.sh
+      - name: Docker watches every service with a health path, and no distroless one
+        run: ./scripts/health-checks-are-declared.sh
 
       # Last, because it mutates tracked files and restores them. It needs a
       # clean tree and says so plainly, so it also reports any earlier step

@@ -69,6 +69,8 @@ change here is a change to something with root on somebody else's box.
 ./scripts/gen-is-bounded.sh
 ./scripts/openai-door.sh
 ./scripts/features-are-bound.sh
+./scripts/status-is-read-only.sh
+./scripts/health-checks-are-declared.sh
 ./scripts/gates-have-teeth.sh   # invariant 8; needs a clean tree
 ```
 
@@ -1151,6 +1153,26 @@ an absent invariant.
     metered upstream, a streamed call through the door, a box with a one-address
     bind, `docker-compose` v1, and the forge upgrade from its hand-written
     override, which is an operator step.)*
+
+33. **`status` reads the installed stack and changes nothing.** `./install.sh status`
+    runs the verification list section 8 runs, from one function, `stack_checks`,
+    which both callers run, against a stack that is already up. It installs,
+    pulls, starts, stops, restarts and removes nothing, issues no device, sends no
+    mail, and writes nothing to the event bus: the checks that would are marked
+    `install_only` and print as `skip` under status. It refuses a directory with no
+    `.env` before it calls any tool. *(gate: `scripts/status-is-read-only.sh`, a
+    stub docker, curl, apt-get, systemctl and ufw that log every call; 10 teeth
+    cases in `scripts/gates-have-teeth.sh`; scenarios in
+    `features/status-checks-the-installed-stack.feature`.)*
+
+34. **Docker watches every service that exposes a health path, and no distroless
+    one.** Each service the installer probes at `/healthz` (the gateway, the
+    OpenAI door, the cloud and the console) has a compose healthcheck that asks the
+    same path on the port it listens on, with a tool its image already has (bash's
+    `/dev/tcp`). `wardryx`, `idryx`, `typryx-wardryx-proxy` and `vouchryx` are
+    distroless and carry no healthcheck, by a list in the gate. *(gate:
+    `scripts/health-checks-are-declared.sh`, 6 teeth cases; scenarios in
+    `features/docker-watches-the-services-with-a-health-path.feature`.)*
 
 ## Decisions that have no gate yet
 
