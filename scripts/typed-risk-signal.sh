@@ -152,13 +152,9 @@ else
     printf '%s' "$out" | grep -q 'hold_if_signal' || fail "$label: the run does not say that nothing seeds a hold_if_signal policy"
     if grep -qF -- "$FAKEKEY" "$d/.env"; then fail "$label: the key's bytes are in .env"; fi
     before="$(cat "$d/.env")"
-    # A re-run says nothing about the flag. The stub is the one plane that is not
-    # saved (WITH_TYPED=1 is how it is asked for, every run), so only it repeats
-    # that word; jev and own-model are remembered in .env.
-    rerun=""
-    [ "$label" != stub ] || rerun="WITH_TYPED=1"
-    # shellcheck disable=SC2086
-    out="$(run "$d" $rerun)"
+    # A re-run says nothing about the flag, and nothing about the mode either: all
+    # three planes are remembered in .env, the stub included (TYPED_MODE=stub).
+    out="$(run "$d")"
     [ "$(rc_of "$out")" = 0 ] && [ "$(cat "$d/.env")" = "$before" ] && [ "$(risk_of "$out")" = 1 ] \
       || fail "$label: a re-run with nothing set changed the box or turned the signal off: $out"
   done

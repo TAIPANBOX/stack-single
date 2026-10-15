@@ -82,7 +82,8 @@
 #   TYPED_MODE=off        typryx is not installed (the default)
 #
 # WITH_TYPED=1 with no TYPED_MODE is unchanged: typryx on its free, deterministic
-# stub backend, which makes no outbound call. With a terminal and nothing set,
+# stub backend, which makes no outbound call, recorded as TYPED_MODE=stub. With a
+# terminal and nothing set,
 # the installer asks. Without one, the choice is the environment's alone.
 #
 # WITH_TYPED=1 also brings up tokenfuse's MCP broker in front of it
@@ -704,7 +705,9 @@ esac
 #   TYPED_MODE=off        typryx is not installed. The default.
 #
 # WITH_TYPED=1 with no TYPED_MODE is exactly what it was before this existed:
-# typryx on its stub backend, which makes no outbound call.
+# typryx on its stub backend, which makes no outbound call. The installer records
+# that as TYPED_MODE=stub in .env, so a plain re-run keeps the stub, and
+# TYPED_MODE=off turns it off.
 #
 # TYPED_TRAINING=1 (@decided 2026-09-30, off by default) sets typryx's
 # TYPRYX_TRAINING_DIR to a directory inside the typryxdata volume, beside the
@@ -815,8 +818,8 @@ typed_resolve() {
 
   TYPED_SAVED_MODE="$(typed_env_get TYPED_MODE)"
   case "$TYPED_SAVED_MODE" in
-    ""|jev|own-model|off) ;;
-    *) die ".env holds an unknown TYPED_MODE; it must be jev, own-model or off. Nothing was changed." ;;
+    ""|jev|own-model|stub|off) ;;
+    *) die ".env holds an unknown TYPED_MODE; it must be jev, own-model, stub or off. Nothing was changed." ;;
   esac
   case "$want" in
     ""|jev|own-model|off) ;;
@@ -849,14 +852,14 @@ typed_resolve() {
   fi
 
   # The order: this run's TYPED_MODE, then a jev or own-model choice an earlier
-  # run saved, then WITH_TYPED=1 (the stub), then off. A saved `off` is the
-  # weakest of these on purpose: an explicit WITH_TYPED=1 is a newer, louder
-  # answer than "not asked for yet".
+  # run saved, then WITH_TYPED=1 or a stub an earlier run saved, then off. A
+  # saved `off` is the weakest of these on purpose: an explicit WITH_TYPED=1 is a
+  # newer, louder answer than "not asked for yet".
   if [ -n "$want" ]; then
     mode="$want"
   elif [ "$TYPED_SAVED_MODE" = jev ] || [ "$TYPED_SAVED_MODE" = own-model ]; then
     mode="$TYPED_SAVED_MODE"
-  elif [ -n "${WITH_TYPED:-}" ]; then
+  elif [ -n "${WITH_TYPED:-}" ] || [ "$TYPED_SAVED_MODE" = stub ]; then
     mode=stub
   else
     mode=off
@@ -892,7 +895,11 @@ typed_resolve() {
       fi
       ;;
     stub)
-      note "typed answers: WITH_TYPED=1 with no TYPED_MODE, so typryx runs on its stub backend (no outbound call), as before TYPED_MODE existed"
+      if [ -n "${WITH_TYPED:-}" ]; then
+        note "typed answers: WITH_TYPED=1 with no TYPED_MODE, so typryx runs on its stub backend (no outbound call), as before TYPED_MODE existed"
+      else
+        note "typed answers: the stub backend (no outbound call), kept from an earlier run. TYPED_MODE=off turns it off"
+      fi
       ;;
     jev)
       if [ -n "${TYPED_JEV_KEY_FILE:-}" ]; then
@@ -953,8 +960,13 @@ typed_apply() {
     stub)
       # A box whose mode this block has managed goes back to compose's own
       # default, the stub. A box it never managed keeps what its operator
-      # wrote in .env, which is what WITH_TYPED=1 has always done.
-      [ -z "$TYPED_SAVED_MODE" ] || typed_forget_env "${TYPED_OWNED[@]}"
+      # wrote in .env, which is what WITH_TYPED=1 has always done. The stub is
+      # recorded as TYPED_MODE=stub, so a plain re-run keeps it (invariant 18);
+      # a box that already records it is left as it is.
+      if [ "$TYPED_SAVED_MODE" != stub ]; then
+        [ -z "$TYPED_SAVED_MODE" ] || typed_forget_env "${TYPED_OWNED[@]}"
+        typed_set_env TYPED_MODE stub
+      fi
       mkdir -p "$STACK_DIR/typed" || die "could not create $STACK_DIR/typed"
       ;;
     jev)
