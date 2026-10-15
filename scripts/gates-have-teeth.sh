@@ -727,6 +727,30 @@ run_case "typed-data-mode: switching mode leaves the old mode's lines" fail \
 	"$(py 'edit("install.sh", "        typed_forget_env \"${TYPED_OWNED[@]}\"\n        typed_set_env TYPED_MODE jev", "        typed_set_env TYPED_MODE jev")')" \
 	"left the own-model lines"
 
+# The stub is recorded, so a plain re-run keeps it (invariant 18). Each case plants
+# the fault that would bring back the downgrade: the stub not written down, a
+# saved stub not read back, an explicit off that does not stick, and the same
+# read-back for own-model, which had none.
+run_case "typed-data-mode: WITH_TYPED=1 stops recording the stub" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("install.sh", "        typed_set_env TYPED_MODE stub", "        :")')" \
+	"WITH_TYPED=1 alone: TYPED_MODE='stub' is not the one line written to .env"
+
+run_case "typed-data-mode: a plain re-run forgets a saved stub" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("install.sh", "  elif [ -n \"${WITH_TYPED:-}\" ] || [ \"$TYPED_SAVED_MODE\" = stub ]; then", "  elif [ -n \"${WITH_TYPED:-}\" ]; then")')" \
+	"stub re-run with nothing set: the plane is"
+
+run_case "typed-data-mode: an explicit TYPED_MODE=off does not stick over a stub" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("install.sh", "      [ \"$TYPED_EXPLICIT\" = 0 ] || typed_set_env TYPED_MODE off", "      :")')" \
+	"TYPED_MODE=off over a stub box was not recorded"
+
+run_case "typed-data-mode: a re-run forgets a saved own-model" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("install.sh", "  elif [ \"$TYPED_SAVED_MODE\" = jev ] || [ \"$TYPED_SAVED_MODE\" = own-model ]; then", "  elif [ \"$TYPED_SAVED_MODE\" = jev ]; then")')" \
+	"own-model re-run with a new URL"
+
 # The training log and the pin (typryx; the log needs v0.3.0 or later, and the
 # risk-signal proxy v0.4.0, and v0.4.1 is the pin now). Each case plants the fault the
 # matching check in scripts/typed-data-mode.sh exists for.
@@ -1520,6 +1544,11 @@ run_case "typed-risk-signal: no proxy service left to judge" fail \
 	'./scripts/typed-risk-signal.sh' \
 	"$(py 'edit("compose.yaml", "  typryx-wardryx-proxy:\n    <<: *restart", "  typryx-wardryx-prox:\n    <<: *restart")')" \
 	"so this measured nothing"
+
+run_case "typed-risk-signal: a plain re-run of the stub turns the signal off" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 'edit("install.sh", "        typed_set_env TYPED_MODE stub", "        :")')" \
+	"a re-run with nothing set changed the box or turned the signal off"
 
 run_case "typed-risk-signal: the typed-mode block never reads the flag" fail \
 	'./scripts/typed-risk-signal.sh' \

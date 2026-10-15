@@ -22,7 +22,8 @@
 #   A. BEHAVIOUR. The functions between `# typed-mode: begin` and
 #      `# typed-mode: end` in install.sh are lifted out and run, in a scratch
 #      STACK_DIR, for every case that matters: nothing set stays off and leaves
-#      .env untouched; WITH_TYPED=1 alone is the stub, untouched; jev with no
+#      .env untouched; WITH_TYPED=1 alone is the stub, recorded as TYPED_MODE=stub,
+#      and a plain re-run keeps that stub; jev with no
 #      key file, a missing one, an empty one, or the key passed as the VALUE
 #      each refuse (and the last never echoes what it was given); own-model
 #      with no URL, a URL not ending in /v1, or no model each refuse; a good
@@ -132,7 +133,8 @@ else
   d="$(mk)"
   out="$(run "$d" WITH_TYPED=1)"
   [ "$(plane_of "$out")" = stub ] || fail "WITH_TYPED=1 alone: the plane is '$(plane_of "$out")', not stub"
-  [ "$(cat "$d/.env")" = "SENTINEL=1" ] || fail "WITH_TYPED=1 alone: .env was changed, so it is no longer today's behaviour"
+  [ "$(cat "$d/.env")" = "SENTINEL=1
+TYPED_MODE='stub'" ] || fail "WITH_TYPED=1 alone: TYPED_MODE='stub' is not the one line written to .env, so a plain ./install.sh turns the typed plane off"
   printf '%s' "$out" | grep -q 'stub' || fail "WITH_TYPED=1 alone: it does not say it is the stub backend"
 
   # 3. off wins over WITH_TYPED, and says so.
@@ -188,6 +190,33 @@ else
   run "$d" TYPED_MODE=off >/dev/null
   out="$(run "$d" WITH_TYPED=1)"
   [ "$(plane_of "$out")" = stub ] || fail "saved off plus WITH_TYPED=1: the plane is '$(plane_of "$out")', not stub"
+
+  # 10b. the stub is remembered (invariant 2). WITH_TYPED=1 records it, so a plain
+  #      re-run keeps the typed plane the box runs; only an explicit off turns it off.
+  d="$(mk)"
+  run "$d" WITH_TYPED=1 >/dev/null
+  before="$(cat "$d/.env")"
+  out="$(run "$d")"
+  [ "$(rc_of "$out")" = 0 ] && [ "$(plane_of "$out")" = stub ] || fail "stub re-run with nothing set: the plane is '$(plane_of "$out")', not stub, so a plain ./install.sh turns the typed plane off: $out"
+  [ "$(cat "$d/.env")" = "$before" ] || fail "stub re-run with nothing set changed .env, and a re-run that chose nothing must change nothing"
+  out="$(run "$d" WITH_TYPED=1)"
+  [ "$(plane_of "$out")" = stub ] && [ "$(cat "$d/.env")" = "$before" ] || fail "stub re-run with WITH_TYPED=1 changed the box: $out"
+  out="$(run "$d" TYPED_MODE=off)"
+  [ "$(rc_of "$out")" = 0 ] && [ "$(plane_of "$out")" = off ] || fail "explicit TYPED_MODE=off over a stub box: the plane is '$(plane_of "$out")', not off"
+  envhas "$d" "^TYPED_MODE='off'" || fail "TYPED_MODE=off over a stub box was not recorded, so the next plain run would bring the stub back"
+  out="$(run "$d")"
+  [ "$(plane_of "$out")" = off ] || fail "TYPED_MODE=off recorded, then a plain re-run: the plane is '$(plane_of "$out")', not off"
+  # a key file with no mode is still refused on a stub box, as on any other box
+  d="$(mk)"
+  run "$d" WITH_TYPED=1 >/dev/null
+  out="$(run "$d" TYPED_JEV_KEY_FILE="$scratch/jev.key")"
+  [ "$(rc_of "$out")" != 0 ] || fail "a key file with no mode on a stub box was accepted: $out"
+  # a stub box that names jev switches, and leaves no stub line behind
+  d="$(mk)"
+  run "$d" WITH_TYPED=1 >/dev/null
+  out="$(run "$d" TYPED_MODE=jev TYPED_JEV_KEY_FILE="$scratch/jev.key")"
+  [ "$(rc_of "$out")" = 0 ] && [ "$(plane_of "$out")" = jev ] && envhas "$d" "^TYPED_MODE='jev'" || fail "a stub box naming jev: $out"
+  if grep -q "^TYPED_MODE='stub'" "$d/.env"; then fail "a stub box naming jev left TYPED_MODE='stub' in .env"; fi
 
   # 11. own-model: every way of not having a server.
   refuses "own-model with no URL" "$(mk)" "TYPED_MODEL_URL" TYPED_MODE=own-model TYPED_MODEL_NAME=qwen2.5:7b

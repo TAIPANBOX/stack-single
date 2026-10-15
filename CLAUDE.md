@@ -440,7 +440,11 @@ an absent invariant.
     chosen for them.** `@decided 2026-09-30`: `TYPED_MODE` is `jev`,
     `own-model` or `off`, and off is the default, so a default install has no
     typryx, exactly as before. `WITH_TYPED=1` with no `TYPED_MODE` is unchanged:
-    typryx on its stub backend, which makes no outbound call. `jev` needs
+    typryx on its stub backend, which makes no outbound call. `@claude
+    2026-10-15`: that choice is written to `.env` as `TYPED_MODE='stub'`, and a
+    re-run with nothing set keeps it; until then a plain re-run read no mode and
+    turned the plane off, so the README's promise that a box keeps its mode was
+    false for the stub. Only `TYPED_MODE=off` turns the stub off. `jev` needs
     `TYPED_JEV_KEY_FILE`, the PATH of a file holding the key; `own-model` needs
     `TYPED_MODEL_URL` (ending in `/v1`) and `TYPED_MODEL_NAME`. A missing input
     refuses in section 0b, before a package is installed or a file written, and

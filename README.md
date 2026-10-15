@@ -913,7 +913,9 @@ only ever goes where the mode you chose says.
 
 `WITH_TYPED=1` with no `TYPED_MODE` keeps what it has always done: typryx on
 its stub backend, which makes no outbound call. That is the one path that does
-not ask you to choose, and it exists so nobody's existing install changes.
+not ask you to choose, and it exists so nobody's existing install changes. The
+installer writes `TYPED_MODE='stub'` into `.env` when it runs this way, so a
+later run keeps the stub without `WITH_TYPED=1` again.
 
 ```bash
 # your own model, here an Ollama on this box (nothing leaves the machine)
@@ -931,9 +933,18 @@ Run on a terminal with none of these set, the installer asks the same question
 (`jev / own-model / off`, one line on what leaves the box for each) and records
 the answer, so the next run does not ask again. With no terminal it asks
 nothing: the environment is the only way to choose. An existing box keeps its
-mode on a re-run; to change it, run the installer again with the new
+mode on a re-run, the stub included: a plain `./install.sh` with nothing set
+changes nothing. To change the mode, run the installer again with the new
 `TYPED_MODE` (and its variables), which replaces the old mode's settings rather
 than adding to them.
+
+To turn the stub off, run `TYPED_MODE=off ./install.sh`. That is the only way:
+a later run without a mode keeps `off` as well.
+
+A box installed before this change may show `TYPED_MODE='off'` in `.env` while
+its stub runs, because the earlier installer did not record the stub. Run
+`WITH_TYPED=1 ./install.sh` once on this release to record it. Until then, a
+plain re-run takes the typed plane away, as it did before.
 
 **It refuses before it touches anything.** `jev` with no key file, a missing or
 empty one, or a key pasted where the path goes; `own-model` with no URL, a URL
