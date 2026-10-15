@@ -61,6 +61,8 @@ step "a check reports the box, not which of a producer and its reader finished f
 step "a secret is minted from a bounded read, whatever SIGPIPE is" "./scripts/gen-is-bounded.sh"
 step "the OpenAI door is opt-in, a gateway like the first, on its own keys and map" "./scripts/openai-door.sh"
 step "every scenario is bound to a test" "./scripts/features-are-bound.sh"
+step "status checks the installed stack and changes nothing" "./scripts/status-is-read-only.sh"
+step "Docker watches every service with a health path, and no distroless one" "./scripts/health-checks-are-declared.sh"
 # Reaches the network (a tarball from the sibling repo), which is why it is
 # last: everything that can be judged offline has already spoken by here.
 step "every image has the files it copies" "./scripts/build-context-complete.sh"

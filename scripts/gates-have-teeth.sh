@@ -2489,6 +2489,100 @@ run_case "felyx-through-the-gateway: the closing report's note is reworded" pass
 	'./scripts/felyx-through-the-gateway.sh' \
 	"$(py 'edit("install.sh", "calls this gateway too. GENARYX_COPILOT_FUSE_KEY is", "also calls this gateway. GENARYX_COPILOT_FUSE_KEY is")')"
 
+# status: `./install.sh status` checks the installed stack and changes nothing
+# (scripts/status-is-read-only.sh). Each fault is one way status could stop being a read.
+run_case "status-is-read-only: status brings the stack up first" fail \
+	'./scripts/status-is-read-only.sh' \
+	"$(py 'edit("install.sh", "  status_facts\n  printf '"'"'status of the stack", "  status_facts\n  \"${COMPOSE[@]}\" up -d >/dev/null 2>&1 || true\n  printf '"'"'status of the stack")')" \
+	"changed the stack"
+
+run_case "status-is-read-only: status issues the first device" fail \
+	'./scripts/status-is-read-only.sh' \
+	"$(py 'edit("install.sh", "  status_facts\n  printf '"'"'status of the stack", "  status_facts\n  \"${COMPOSE[@]}\" exec -T console /usr/local/bin/genaryx-web issue-device >/dev/null 2>&1 || true\n  printf '"'"'status of the stack")')" \
+	"changed the stack"
+
+run_case "status-is-read-only: status runs the package step" fail \
+	'./scripts/status-is-read-only.sh' \
+	"$(py 'edit("install.sh", "  status_facts\n  printf '"'"'status of the stack", "  status_facts\n  apt-get install -y -qq jq >/dev/null 2>&1 || true\n  printf '"'"'status of the stack")')" \
+	"changed the stack"
+
+run_case "status-is-read-only: a write probe runs in status" fail \
+	'./scripts/status-is-read-only.sh' \
+	"$(py 'edit("install.sh", "install_only check \"chain verifier can write its own stream\"", "check \"chain verifier can write its own stream\"")')" \
+	"changed the stack"
+
+run_case "status-is-read-only: a refused metered call is sent by status" fail \
+	'./scripts/status-is-read-only.sh' \
+	"$(py 'edit("install.sh", "install_only check \"client keys: a call with no key is refused\"", "check \"client keys: a call with no key is refused\"")')" \
+	"changed the stack"
+
+run_case "status-is-read-only: status runs on a directory with no .env" fail \
+	'./scripts/status-is-read-only.sh' \
+	"$(py 'edit("install.sh", "  [ -f \"$STACK_DIR/.env\" ] || die \"nothing is installed", "  true || die \"nothing is installed")')" \
+	"did not say that nothing is installed"
+
+run_case "status-is-read-only: the status entry point is gone" fail \
+	'./scripts/status-is-read-only.sh' \
+	"$(py 'edit("install.sh", "if [ \"${1:-}\" = status ]; then status_main; fi", "# no status entry point")')" \
+	"no status entry point"
+
+run_case "status-is-read-only: the verdict line is reworded" fail \
+	'./scripts/status-is-read-only.sh' \
+	"$(py 'edit("install.sh", "printf '"'"'\\nevery check passed\\n'"'"'; exit 0", "printf '"'"'\\nall fine\\n'"'"'; exit 0")')" \
+	"does not print the success verdict"
+
+run_case "status-is-read-only: a comment in the status block is reworded" pass \
+	'./scripts/status-is-read-only.sh' \
+	"$(py 'edit("install.sh", "# check. No package, image, container or file is touched;", "# check. Nothing on the box is touched;")')"
+
+run_case "status-is-read-only: a comment in the shared check list is reworded" pass \
+	'./scripts/status-is-read-only.sh' \
+	"$(py 'edit("install.sh", "# every check the verification runs, in the order it runs them.", "# every check the verification runs, in the order they run.")')"
+
+# health-checks: Docker watches every service that exposes a health path, and no
+# distroless one (scripts/health-checks-are-declared.sh).
+run_case "health-checks-are-declared: the console has no healthcheck" fail \
+	'./scripts/health-checks-are-declared.sh' \
+	"$(py 'import sys
+s = open("compose.yaml").read()
+i = s.index("\n  console:\n")
+j = s.index("    healthcheck:", i)
+k = s.index("      start_period: 15s\n", j) + len("      start_period: 15s\n")
+open("compose.yaml", "w").write(s[:j] + s[k:])')" \
+	"console: no healthcheck"
+
+run_case "health-checks-are-declared: the gateway probes the wrong port" fail \
+	'./scripts/health-checks-are-declared.sh' \
+	"$(py 'edit("compose.yaml", "exec 3<>/dev/tcp/127.0.0.1/4100 &&", "exec 3<>/dev/tcp/127.0.0.1/4101 &&")')" \
+	"tokenfuse-gateway: healthcheck does not probe 127.0.0.1:4100"
+
+run_case "health-checks-are-declared: the console asks for a path that is not /healthz" fail \
+	'./scripts/health-checks-are-declared.sh' \
+	"$(py 's = open("compose.yaml").read()
+i = s.index("\n  console:\n")
+j = s.index("GET /healthz", i)
+open("compose.yaml", "w").write(s[:j] + "GET /status" + s[j + len("GET /healthz"):])')" \
+	"console: healthcheck does not ask for /healthz"
+
+run_case "health-checks-are-declared: a distroless service gets a healthcheck" fail \
+	'./scripts/health-checks-are-declared.sh' \
+	"$(py 'edit("compose.yaml", "  wardryx:\n    <<: *restart\n", "  wardryx:\n    <<: *restart\n    healthcheck:\n      test: [\"CMD\", \"/usr/local/bin/service\", \"version\"]\n      interval: 30s\n")')" \
+	"wardryx is distroless"
+
+run_case "health-checks-are-declared: the installer stops asking for the gateway's health path" fail \
+	'./scripts/health-checks-are-declared.sh' \
+	"$(py 'edit_all("install.sh", ":4100/healthz", ":4199/healthz")')" \
+	"install.sh no longer asks for :4100/healthz"
+
+run_case "health-checks-are-declared: compose.yaml has no services to read" fail \
+	'./scripts/health-checks-are-declared.sh' \
+	"$(py 'edit("compose.yaml", "\nservices:\n", "\nservicez:\n")')" \
+	"measured NOTHING"
+
+run_case "health-checks-are-declared: a comment in the healthcheck block is reworded" pass \
+	'./scripts/health-checks-are-declared.sh' \
+	"$(py 'edit("compose.yaml", "# bash, not curl: these images ship bash", "# bash, not curl: these images carry bash")')"
+
 echo
 if [ -n "$(git status --porcelain)" ]; then
 	printf 'FAIL: this script left the tree dirty, so it cannot be trusted about anything above\n'

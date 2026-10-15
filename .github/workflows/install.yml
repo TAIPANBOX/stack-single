@@ -7,6 +7,8 @@
 # second pass is the re-run an operator does after an upgrade, which is where
 # the installer's own second-run faults have shown up before.
 #
+# Each leg ends by reading the stack it installed with `install.sh status`, and
+# checks that the read changed nothing (containers, start times, .env).
 # Public repo, so standard runners cost nothing.
 name: install
 
@@ -258,6 +260,34 @@ jobs:
           cd /opt/agent-stack
           if sudo grep -q '^OPENAI_DOOR=' .env; then echo "::error::OPENAI_DOOR is still in .env after OPENAI_DOOR=0"; exit 1; fi
           sudo grep -q '^OPENAI_DOOR_CLIENT_KEYS=' .env || { echo "::error::OPENAI_DOOR=0 dropped the door's keys"; exit 1; }
+
+      # Every leg ends by reading the stack it just installed with `status`, the
+      # same checks the install ran, minus the ones that would write. A snapshot
+      # before and after shows the read changed nothing: the containers, their
+      # start times and restart counts, and .env, byte for byte.
+      - name: snapshot the stack before status
+        run: |
+          cd /opt/agent-stack
+          sudo sha256sum .env >"$RUNNER_TEMP/before.txt"
+          sudo docker compose ps -a --format '{{.Name}} {{.State}} {{.Image}}' | sort >>"$RUNNER_TEMP/before.txt"
+          for id in $(sudo docker compose ps -aq | sort); do
+            sudo docker inspect -f '{{.Name}} {{.State.StartedAt}} {{.RestartCount}}' "$id"
+          done >>"$RUNNER_TEMP/before.txt"
+
+      - name: install.sh status passes on the stack this leg installed
+        run: |
+          set -o pipefail
+          sudo env STACK_DIR=/opt/agent-stack ./install.sh status 2>&1 | tee "$RUNNER_TEMP/status.log"
+
+      - name: status changed nothing
+        run: |
+          cd /opt/agent-stack
+          sudo sha256sum .env >"$RUNNER_TEMP/after.txt"
+          sudo docker compose ps -a --format '{{.Name}} {{.State}} {{.Image}}' | sort >>"$RUNNER_TEMP/after.txt"
+          for id in $(sudo docker compose ps -aq | sort); do
+            sudo docker inspect -f '{{.Name}} {{.State.StartedAt}} {{.RestartCount}}' "$id"
+          done >>"$RUNNER_TEMP/after.txt"
+          diff "$RUNNER_TEMP/before.txt" "$RUNNER_TEMP/after.txt" || { echo "::error::status changed the stack"; exit 1; }
 
       - name: state on failure
         if: failure()

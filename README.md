@@ -34,6 +34,24 @@ On a box that is already installed, edit `GATEWAY_BIND` in
 will NOT widen it: `.env` is left alone once it exists, which is the same
 property that stops a re-run rotating your credentials.
 
+## Checking an installed box again: `./install.sh status`
+
+Running the installer changes a box. To check the box without changing it, run
+`status`. It runs the same checks the install runs at its end, against the stack
+that is already up, and prints one line per check:
+
+```bash
+cd /opt/agent-stack     # any copy of install.sh works; STACK_DIR names the stack
+STACK_DIR=/opt/agent-stack ./install.sh status
+```
+
+It exits 0 when every check passes and 1 when one fails. It installs nothing,
+pulls no image, starts, stops or restarts no container, issues no device and
+sends no mail. The checks that would write to the event bus, or send a call the
+stack records (a refused metered call, a typed question), are printed as `skip`
+and run only by the install. Run it as root, or as a user in the `docker` group.
+If the box has no `.env`, `status` says so and stops before it calls anything.
+
 ## This is not the sandbox
 
 [`stack-up`](https://github.com/TAIPANBOX/stack-up) is the local try: it binds
@@ -259,6 +277,17 @@ names resolve the same way in both:
 | `typryx-wardryx-proxy` | none | **opt-in twice, off unless you ask for it** (typed answers on, and `TYPED_RISK_SIGNAL=1`). Reachable only from the broker and wardryx. See "A risk signal on tool calls" below |
 | `vouchryx` | none | **opt-in, off unless you ask for it.** Inside the compose network only. See "Delegation" below |
 | `costcrew` | 8321 | **opt-in, off unless you ask for it** (profile `finops`; `install.sh` never starts it). Loopback only. See "The FinOps console" below |
+
+Docker watches the services the installer checks on their health paths:
+`tokenfuse-gateway`, `tokenfuse-gateway-openai` (when the door is on),
+`tokenfuse-cloud` and `console`. `docker compose ps` shows each as `healthy` or
+`unhealthy`, and the installer's checks are no longer the only look at them. A
+healthcheck only reports: compose still restarts a service by its own rule, and
+nothing here restarts one because of a failed check. `wardryx`, `idryx`,
+`typryx` and `vouchryx` have no healthcheck, because their images are distroless:
+they have no shell and no curl or wget to ask with, and this installer does not
+add a tool to an image it does not build. `./install.sh status` is the check that
+covers them.
 
 The gateway's own observability and kill routes (`/v1/runs`, `/v1/keys` and
 three more) take a per-install admin key: `GATEWAY_ADMIN` in `.env`, minted

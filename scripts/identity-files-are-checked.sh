@@ -648,7 +648,13 @@ if [ "$block_ok" = 1 ]; then
   fi
   # Here-strings, not `sed | grep -q`: under pipefail grep's early exit is a
   # SIGPIPE for sed, and the check would read a present line as missing.
-  section8="$(sed -n "${verify_line:-1},\$p" install.sh)"
+  section8="$(sed -n '/^stack_checks() {$/,/^# ---- status: /p' install.sh)"
+  # The checks live in stack_checks, and section 8 calls it after `say "verify"`:
+  # read the function, then require the call to come after verify.
+  stack_call="$(awk '/^stack_checks( |$)/{print NR; exit}' install.sh)"
+  if [ -z "$stack_call" ] || [ -z "$verify_line" ] || [ "$stack_call" -lt "$verify_line" ]; then
+    fail "section 8 no longer calls stack_checks after verify, so its checks do not run in the install"
+  fi
   if [ -z "$verify_line" ] || ! grep -qF 'check "client keys: a call with no key is refused"' <<<"$section8" \
     || ! grep -qF 'check_log "identity map: the gateway reads it"' <<<"$section8"; then
     fail "section 8 no longer asks the running gateway whether it refuses a call with no key and reads its map, so a box whose gateway ignored both would pass"
