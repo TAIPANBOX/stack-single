@@ -319,6 +319,14 @@ services:
       # rather than carrying a dead one.
       HERALDYX_CONSOLE_URL: ${ALERT_CONSOLE_URL:-https://${CONSOLE_DOMAIN:-console.genaryx.internal}}
       HERALDYX_BOX: ${CONSOLE_DOMAIN:-agent stack}
+      # The daily pulse (heraldyx 0.7.0): one mail every this many hours saying the
+      # notifier is alive, `0` turns it off. On by default, once a recipient is set.
+      HERALDYX_PULSE_HOURS: ${HERALDYX_PULSE_HOURS:-24}
+      # Quiet hours as HH:MM-HH:MM, read in HERALDYX_TZ (an IANA zone such as
+      # Europe/London). Empty is off. Alerts below critical are held and reported
+      # when the hours end; a critical is always sent.
+      HERALDYX_QUIET: ${HERALDYX_QUIET:-}
+      HERALDYX_TZ: ${HERALDYX_TZ:-}
     volumes:
       - events:/var/lib/stack/events:ro
       - heraldyxstate:/var/lib/stack/heraldyx

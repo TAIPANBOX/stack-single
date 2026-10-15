@@ -208,6 +208,23 @@ Two details worth knowing rather than discovering:
   installer from the console's side, because a tunnel that is up while the
   console cannot reach its socket looks perfectly healthy from outside.
 
+### The notifier's daily pulse and quiet hours (set in `.env`)
+
+Once a recipient is set (`ALERT_TO`), the notifier sends one mail a day saying it is alive, with
+the numbers it saw. If that mail stops arriving, the notifier or its mail path is down. Three
+settings in `.env` change how it behaves. Without them you get the defaults shown:
+
+```
+HERALDYX_PULSE_HOURS=24       # how often the pulse goes out; 0 turns it off
+HERALDYX_QUIET=22:00-07:00    # quiet hours as HH:MM-HH:MM; empty is off
+HERALDYX_TZ=Europe/London     # the IANA zone the quiet hours are read in
+```
+
+During quiet hours, alerts below critical are held and reported in one mail when the hours end.
+A critical is always sent at once. If `HERALDYX_TZ` is empty, the hours are read in the
+notifier's own zone, so set it to be sure. A value the notifier cannot read turns quiet hours off
+and says why in its log.
+
 ## Giving the console a real name, so passkeys work
 
 The tunnel is enough to reach the console, and not enough to secure it. A
