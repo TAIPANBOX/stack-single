@@ -633,7 +633,9 @@ services:
   #
   # Bound the same way the gateway is, `${GATEWAY_BIND:-127.0.0.1}`: closed by
   # default, and a box that never widened GATEWAY_BIND never widens this door
-  # either, with no second variable to remember. `gateway-cache-is-off.sh`
+  # either, with no second variable to remember. Not tokenfuse's defaults: it
+  # blocks raw secrets and flagged tool listings and asks the policy plane
+  # about every tool call (CLAUDE.md invariant 36, below). `gateway-cache-is-off.sh`
   # does not judge this service: its command line carries the `mcp-broker`
   # subcommand, not the bare binary, the same shape focus-export already sits
   # outside that gate for.
@@ -678,24 +680,33 @@ services:
       # typryx's own: two appenders on one file is a race with no lock, the
       # same reason the money plane's two writers each name their own file.
       TOKENFUSE_EVENTS_PATH: /var/lib/stack/events/tokenfuse-mcp.ndjson
-      # The typed risk signal (TYPED_RISK_SIGNAL=1, opt-in, off by default).
-      # The broker has no policy plane of its own: it asks wardryx about each
-      # tools/call only when TOKENFUSE_WARDRYX_MODE and _URL are both set, and
-      # on this launcher neither was, so a tool call was never judged. All
-      # three values below are empty, which is that hook off, unless
-      # install.sh wrote them into .env for a box that asked for the signal;
-      # then the URL is the typryx wardryx-proxy (never wardryx itself) and
-      # the mode is `enforce`. ONLY the broker is pointed there: the LLM
-      # gateway keeps asking wardryx directly, because a model call has no
-      # pending tool call to classify and the proxy's ask would add latency to
-      # a path with a 250 ms deadline (J2-DESIGN). The key is the gateway's
-      # own viewer key, which may call /v1/decide and nothing else, and the
-      # proxy forwards it to wardryx unchanged.
-      TOKENFUSE_WARDRYX_MODE: ${TYPED_RISK_WARDRYX_MODE:-off}
-      TOKENFUSE_WARDRYX_URL: ${TYPED_RISK_WARDRYX_URL:-}
-      TOKENFUSE_WARDRYX_KEY: ${WARDRYX_GATEWAY:-}
-      # closed, like the gateway: with the signal on, a broker that cannot
-      # reach the policy plane refuses the call rather than waving it through.
+      # A raw secret found in tool arguments is refused (-32002), not forwarded,
+      # and a tool listing the scanner flags is refused, not passed with a log
+      # line. tokenfuse's own defaults are shadow and warn, which forward the
+      # secret and the listing (finding F-009 of the 2026-10-17 review, measured
+      # on this launcher's environment). A {{secret:NAME}} handle is not a raw
+      # secret: the vault resolves it on the way out, as before.
+      # `broker-blocks-raw-secrets.sh` holds these and the policy hook below.
+      TOKENFUSE_MCP_DLP: block
+      TOKENFUSE_MCP_SCAN: block
+      # The broker's policy hook: it asks wardryx about every tools/call, in
+      # enforce, so policy.yaml judges tool calls as it judges model calls, and
+      # a call it cannot attribute (no x-fuse-agent-id) is refused. Until
+      # 2026-10-17 the hook was off unless the typed risk signal was on, so a
+      # tool the policy denied was called anyway. With the signal on
+      # (TYPED_RISK_SIGNAL=1), install.sh writes the two TYPED_RISK_ values
+      # into .env and the URL is the typryx wardryx-proxy instead; ONLY the
+      # broker is pointed there: the LLM gateway keeps asking wardryx
+      # directly, because a model call has no pending tool call to classify
+      # and the proxy's ask would add latency to a path with a 250 ms deadline
+      # (J2-DESIGN). The key is the gateway's own viewer key, which may call
+      # /v1/decide and nothing else, and the proxy forwards it to wardryx
+      # unchanged.
+      TOKENFUSE_WARDRYX_MODE: ${TYPED_RISK_WARDRYX_MODE:-enforce}
+      TOKENFUSE_WARDRYX_URL: ${TYPED_RISK_WARDRYX_URL:-http://wardryx:8090}
+      TOKENFUSE_WARDRYX_KEY: ${WARDRYX_GATEWAY:?set by install.sh}
+      # closed, like the gateway: a broker that cannot reach the policy plane
+      # refuses the call rather than waving it through.
       TOKENFUSE_WARDRYX_FAILMODE: closed
       # A decide that carries a tool call waits this long (tokenfuse 1.5.0),
       # more than the shared 250 ms, because the proxy asks a typed backend
@@ -1032,19 +1043,23 @@ services:
       # gateway does not need it to be.
       TOKENFUSE_DELEGATION_REVOCATIONS: ${TOKENFUSE_DELEGATION_REVOCATIONS:-}
       TOKENFUSE_DELEGATION_REVOCATIONS_INTERVAL_MS: ${TOKENFUSE_DELEGATION_REVOCATIONS_INTERVAL_MS:-}
-      # Client keys and the identity map (tokenfuse docs/20), opt-in: who may call
-      # this gateway (`x-fuse-key`), which agent ids each key may speak as, and
-      # which unit pays. Both `:-` with an EMPTY fallback, which tokenfuse reads as
-      # off, so a box that never gave install.sh CLIENT_KEYS_FILE or
-      # IDENTITY_MAP_FILE runs exactly as before. install.sh writes the two .env
-      # lines only after the gateway image itself has read the pair (sections 0f
-      # and 3e). Set, the gateway refuses every call with no key or an unknown
-      # one (401), and under strict=enforce, tokenfuse's default and never set
-      # otherwise here, a key speaking as an agent its binding does not name
-      # (403 identity_mismatch). CLAUDE.md invariant 29;
-      # `identity-files-are-checked.sh` holds this.
-      TOKENFUSE_CLIENT_KEYS: ${GATEWAY_CLIENT_KEYS:-}
+      # Client keys and the identity map (tokenfuse docs/20): who may call this
+      # gateway (`x-fuse-key`), which agent ids each key may speak as, and which
+      # unit pays. The keys are REQUIRED: with none, tokenfuse admits every
+      # caller and takes the agent id a caller writes, so one agent can speak as
+      # another (finding F-001 of the 2026-10-17 review). install.sh writes them:
+      # from the operator's CLIENT_KEYS_FILE, or, given none, keys it mints for
+      # the console's copilot and for the operator's agents, each bound in the
+      # map to its own ids (sections 0f and 3e, CLAUDE.md invariants 29 and 35).
+      # A box whose .env lacks them does not start a gateway, the way a missing
+      # declassify key stops it. The map stays `:-`: an operator may bring keys
+      # with no map. Strict is written out rather than left to tokenfuse's
+      # default: a key speaking as an agent its binding does not name is refused
+      # 403 identity_mismatch. `metered-doors-require-keys.sh` and
+      # `identity-files-are-checked.sh` hold this.
+      TOKENFUSE_CLIENT_KEYS: ${GATEWAY_CLIENT_KEYS:?set by install.sh, which mints them when no keys file is given}
       TOKENFUSE_IDENTITY_MAP: ${GATEWAY_IDENTITY_MAP:-}
+      TOKENFUSE_IDENTITY_STRICT: enforce
     ports:
       # Loopback if the variable is absent, matching install.sh. The fallback
       # matters on its own: someone running `docker compose up` by hand
@@ -1150,9 +1165,12 @@ services:
       TOKENFUSE_WARDRYX_TIMEOUT_MS: "250"
       TOKENFUSE_WARDRYX_CACHE_TTL_MS: "3000"
       # The door's own pair, written by install.sh only after the gateway image
-      # read it (sections 0f and 3e, run for this door by name).
+      # read it (sections 0f and 3e, run for this door by name). `:-`, not `:?`:
+      # compose reads a profile's variables on every box; the upstream above is
+      # what keeps the door shut without them.
       TOKENFUSE_CLIENT_KEYS: ${OPENAI_DOOR_CLIENT_KEYS:-}
       TOKENFUSE_IDENTITY_MAP: ${OPENAI_DOOR_IDENTITY_MAP:-}
+      TOKENFUSE_IDENTITY_STRICT: enforce
     ports:
       - "${GATEWAY_BIND:-127.0.0.1}:4110:4100"
     volumes:
@@ -1267,15 +1285,17 @@ services:
       GENARYX_COPILOT_AGENT_ID: agent://${RECORD_TRUST_DOMAIN:-local}/genaryx/felyx
       GENARYX_COPILOT_API_KEY_REF: env:GENARYX_COPILOT_KEY
       GENARYX_COPILOT_KEY: ${GENARYX_COPILOT_KEY:-}
-      # Felyx's own gateway client key (genaryx invariant 24): with client keys
-      # on, this gateway answers 401 to any call without a key it holds,
-      # Felyx's included. A console carrying that invariant reads the key
-      # through this reference and sends it as x-fuse-key. The console pinned
-      # here carries it (genaryx-console v1.1.45 and later, which read this
-      # reference in crates/api/src/copilot/state.rs); a console older than
-      # that ignores both lines. Give Felyx its own line in the keys file, put the
-      # same secret in .env as GENARYX_COPILOT_FUSE_KEY (single-quoted), and
-      # `docker compose up -d console`. Empty, the default, sends no key.
+      # Felyx's own gateway client key (genaryx invariant 24): the gateway
+      # answers 401 to any call without a key it holds, Felyx's included. A
+      # console carrying that invariant reads the key through this reference
+      # and sends it as x-fuse-key. The console pinned here carries it
+      # (genaryx-console v1.1.45 and later, which read this reference in
+      # crates/api/src/copilot/state.rs); a console older than that ignores
+      # both lines. On a box given no keys file, install.sh mints this key and
+      # binds it in the identity map to Felyx's agent id alone (CLAUDE.md
+      # invariant 35); with the operator's own files, give Felyx its own line
+      # in the keys file and put the same secret in .env here. `:-` because
+      # the gateway, not the console, is what refuses a call without it.
       GENARYX_COPILOT_FUSE_KEY_REF: env:GENARYX_COPILOT_FUSE_KEY
       GENARYX_COPILOT_FUSE_KEY: ${GENARYX_COPILOT_FUSE_KEY:-}
       TOKENFUSE_CLOUD_URL: http://tokenfuse-cloud:8080

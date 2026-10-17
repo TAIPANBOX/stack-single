@@ -71,6 +71,8 @@ change here is a change to something with root on somebody else's box.
 ./scripts/features-are-bound.sh
 ./scripts/status-is-read-only.sh
 ./scripts/health-checks-are-declared.sh
+./scripts/metered-doors-require-keys.sh
+./scripts/broker-blocks-raw-secrets.sh
 ./scripts/gates-have-teeth.sh   # invariant 8; needs a clean tree
 ```
 
@@ -424,6 +426,9 @@ an absent invariant.
     `git merge-base --is-ancestor 60ade51 d994ce5` in the genaryx checkout, 2026-10-13, exit 0,
     and `git merge-base --is-ancestor 60ade51 fd7a1ab` in the same checkout, 2026-10-14, exit 0,
     where fd7a1ab is the source label of v1.1.45.)*
+    `@claude 2026-10-17`: since invariant 35 a box given no keys file mints
+    `GENARYX_COPILOT_FUSE_KEY` and binds it to Felyx's id alone, and the closing
+    note says the key is minted and bound rather than asking the operator to do it.
 
 17. **The installer is run for real on every change, first install and
     re-run.** Every script gate here reads files; from v1.1.9 to v1.1.12 every
@@ -623,7 +628,8 @@ an absent invariant.
     single-use (`WARDRYX_APPROVAL_SINGLE_USE` unset, the default) one approval
     lets exactly one padded call through. `@claude`: the
     broker was NOT a policy enforcement point on this launcher before (it never
-    set `TOKENFUSE_WARDRYX_URL`), so turning the signal on makes every tool call
+    set `TOKENFUSE_WARDRYX_URL`; since invariant 36 it is one on every box, and the
+    signal changes only where it asks), so turning the signal on makes every tool call
     subject to the operator's whole `policy.yaml`, requires `x-fuse-agent-id`
     (@measured `wget` through the broker of a scratch compose project with the signal on, 2026-10-04: no header came back `400 Bad Request`, with the header the call was answered) and fails closed. The proxy
     runs open on purpose: with `TYPRYX_KEYS` it demands an `X-Typryx-Key` the
@@ -919,6 +925,11 @@ an absent invariant.
     them again; one that names a file replaces what it names and is checked
     against the kept other half; a changed map restarts the gateway, which reads
     the map only at start. Turning either off is removing its `.env` line.
+    `@claude 2026-10-17`: that holds for the map only now. Invariant 35 makes the
+    keys required on the gateway every box runs, mints them when no file is given,
+    and writes `TOKENFUSE_IDENTITY_STRICT: enforce` out on every gateway, so the
+    sentence above about this launcher never setting it is history; a map can no
+    longer come without keys.
 
     Section 8 reads the running gateway: its own start-up lines, and two calls it
     must refuse 401 (no key, an unknown key). It names no agent, because a
@@ -1177,6 +1188,101 @@ an absent invariant.
     distroless and carry no healthcheck, by a list in the gate. *(gate:
     `scripts/health-checks-are-declared.sh`, 6 teeth cases; scenarios in
     `features/docker-watches-the-services-with-a-health-path.feature`.)*
+
+35. **The gateway never answers an unnamed caller: it requires client keys on
+    every box, its identity map is strict, and a box given no keys file gets keys
+    the installer mints, each bound to its own agent ids.** `@decided 2026-10-17`
+    (paraphrased): close the agent-security findings of the 2026-10-17 review,
+    starting with the defaults; here finding F-001's launcher half. `@claude
+    2026-10-17`: with `TOKENFUSE_CLIENT_KEYS` unset tokenfuse admits every caller
+    and takes `x-fuse-agent-id` as written, so an agent could speak as another and
+    take its policy, its budget and its place in the record; compose passed
+    `${GATEWAY_CLIENT_KEYS:-}` and the installer set keys only from an operator's
+    file (invariant 29).
+
+    So compose passes `TOKENFUSE_CLIENT_KEYS: ${GATEWAY_CLIENT_KEYS:?...}` on the
+    gateway every box runs (the declassify key's shape, invariant 19; the OpenAI
+    door keeps `:-` because compose reads a profile's variables on every box, and
+    its upstream already keeps it shut), and `TOKENFUSE_IDENTITY_STRICT: enforce`
+    on every gateway, written out rather than left to tokenfuse's default. The
+    built-in callers of the metered doors, read from compose.yaml, are one: Felyx,
+    the console's copilot, which presents `GENARYX_COPILOT_FUSE_KEY` (genaryx
+    invariant 24, console v1.1.45 on). Given no keys file, `install.sh` (the
+    `# identity-mint:` block after section 0f) mints two keys: `felyx`, bound to
+    exactly `agent://<td>/genaryx/felyx` in unit `console`, its secret
+    `GENARYX_COPILOT_FUSE_KEY` in `.env`; and `agents`, bound to
+    `agent://<td>/agents/*` in unit `agents`, its secret `GATEWAY_AGENT_KEY` in
+    `.env` and in `$STACK_DIR/agent-key` (0600), whose path, never the value, the
+    closing report prints with the namespace and the headers. `<td>` is
+    `RECORD_TRUST_DOMAIN` (`.env`, else the environment, else `local`, compose's own
+    default for Felyx's id), refused before any package unless it is a name. The
+    agents' pattern stops short of Felyx's id. The map carries no budget and no
+    prefixes: it binds and attributes, and a budget is the operator's decision.
+
+    A secret already in `.env` is never rewritten; an absent or empty one is minted
+    with `gen 40`. The spec and the map are rebuilt from `.env` on every run, the
+    same bytes each time, and pass through section 3e like an operator's files, so
+    the gateway image reads them before anything restarts and a re-run restarts
+    nothing. `GATEWAY_IDENTITY_MINTED=1` marks the keys as the installer's. An
+    operator's own files replace them, both together on a minted box (the minted map
+    binds the minted key ids only); a map with no keys, and a map-only box, are
+    refused before anything is installed, naming what to give. Section 3c's pull and
+    3e's image lookup read the configuration before the keys are written, so each
+    hands compose a stand-in for that read alone. Section 8 checks the agents' key
+    file (0600, the key `.env` holds) and that Felyx holds its key, bound to the id
+    the console names it with; it names no agent, and CI's install legs send the
+    calls. `./install.sh status` refuses a `.env` with no keys, naming the re-run.
+    Breaking, on purpose: an agent that called with no key is refused 401 after the
+    first run of this release, and `docker compose up` on a `.env` from before it
+    stops at the missing variable.
+    *(gate: `scripts/metered-doors-require-keys.sh`: the compose subjects from their
+    image and command lines, the resolved configuration with and without the keys,
+    the lifted `# gen:`, `# identity-files:` and `# identity-mint:` blocks run in
+    scratch directories (first install, re-run, a Felyx key set by hand or empty, the
+    trust domain, the operator's own keys, the four refusals, the operator taking
+    over), the minted pair read by the pinned gateway image, and the order in
+    `install.sh`; refuses OK on no gateway, no mint block or no Docker;
+    `features/the-metered-doors-need-a-key.feature`; teeth in
+    `scripts/gates-have-teeth.sh`; CI's install legs call the gateway with and
+    without the minted keys. Not covered: one key for all of the operator's agents
+    (an agent holding it can speak as any id under `agents/`), rotation (empty a
+    line and re-run), a hand-edited minted map (rebuilt on the next run), stack-k8s
+    and stack-up.)*
+
+36. **The MCP broker blocks raw secrets and flagged tool listings, and asks the
+    policy plane about every tool call, failing closed.** `@decided 2026-10-17`
+    (paraphrased, as invariant 35); here finding F-009's launcher half. `@claude
+    2026-10-17`: unset, tokenfuse's broker runs `TOKENFUSE_MCP_DLP` shadow (it
+    forwards a raw secret it found in tool arguments), `TOKENFUSE_MCP_SCAN` warn
+    (it passes a tool listing its scanner flags) and its wardryx hook off, and this
+    launcher set none of them, so a denied tool was called and a raw AWS key id was
+    forwarded (the review's live rows G5.6 and G6.6, 2026-10-17). So the broker sets
+    DLP and the scan to `block`, `TOKENFUSE_WARDRYX_MODE` to
+    `${TYPED_RISK_WARDRYX_MODE:-enforce}`, `TOKENFUSE_WARDRYX_URL` to
+    `${TYPED_RISK_WARDRYX_URL:-http://wardryx:8090}` (the typed risk signal still
+    points it at its proxy, invariant 22), `TOKENFUSE_WARDRYX_FAILMODE: closed` and
+    a required `TOKENFUSE_WARDRYX_KEY`. Every `tools/call` therefore carries
+    `x-fuse-agent-id`, `policy.yaml` judges tool calls, and an unreachable policy
+    plane refuses them. A `{{secret:NAME}}` handle is not a raw secret and resolves
+    as before. `TOKENFUSE_MCP_LOCK` stays unset: pinning tool definitions needs a
+    lock file somebody approved. @measured scratch compose project from this
+    compose.yaml (`docker compose -p ssbroker --profile typed up -d init-volumes
+    policy-db wardryx typryx tokenfuse-mcp-broker`, tokenfuse v1.14.0, typryx
+    v0.4.1, wardryx v1.5.0, probed from a busybox on its network) 2026-10-17:
+    `tools/list` 200 with typryx's tools under the block scan, an `ask` with an agent
+    id answered, without one 400, a raw AWS example key id `-32002`, no broker key
+    401, `shell_exec` for a drill identity `-32004` by the starter policy, and with
+    wardryx stopped `-32004 ... failmode=Closed applied`.
+    *(gate: `scripts/broker-blocks-raw-secrets.sh`: the compose subjects from their
+    image and `mcp-broker` command, the resolved configuration with nothing set, and
+    the image compose resolves run with those switches and no network, which must
+    refuse a raw AWS key id `-32002` and a harmless call `-32004` closed; refuses OK
+    on no broker, no Docker or an image that never answered;
+    `features/the-mcp-broker-blocks-raw-secrets.feature`; teeth in
+    `scripts/gates-have-teeth.sh`. Not covered: the scan's block mode in the running
+    image (no upstream serves it a poisoned listing here; held by the static and
+    resolved halves and the measurement above), tool pinning, a real typed backend
+    behind the broker, and stack-k8s's broker manifest.)*
 
 ## Decisions that have no gate yet
 

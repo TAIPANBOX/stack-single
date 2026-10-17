@@ -92,6 +92,10 @@ jobs:
         run: ./scripts/status-is-read-only.sh
       - name: Docker watches every service with a health path, and no distroless one
         run: ./scripts/health-checks-are-declared.sh
+      - name: the gateway every box runs requires client keys, minted when none are given
+        run: ./scripts/metered-doors-require-keys.sh
+      - name: the MCP broker blocks raw secrets and asks the policy plane, failing closed
+        run: ./scripts/broker-blocks-raw-secrets.sh
 
       # Last, because it mutates tracked files and restores them. It needs a
       # clean tree and says so plainly, so it also reports any earlier step
