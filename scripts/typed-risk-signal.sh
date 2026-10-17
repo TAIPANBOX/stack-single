@@ -41,7 +41,7 @@
 #      three lines and only them; a value that is neither 1 nor 0 refuses; a
 #      saved flag does nothing while typed answers are off.
 #   B. COMPOSE, resolved: without the flag no proxy exists and the broker's
-#      policy client is off; with it the proxy, its network, its lack of a port
+#      policy client asks wardryx directly (invariant 36); with it the proxy, its network, its lack of a port
 #      and of a key, the broker's URL and the gateway's untouched URL are each
 #      what is said above, and the network has exactly three members.
 #   C. STATIC. install.sh passes `--profile typed-risk-signal` only on a line
@@ -256,12 +256,14 @@ $snippet
     fi
   }
 
-  check_cfg "without the flag there is no proxy, and the broker's policy client is off" "
+  # Without the flag the broker still asks the policy plane, directly: since
+  # invariant 36 its hook is on by default. What the flag changes is where it asks.
+  check_cfg "without the flag there is no proxy, and the broker asks wardryx directly" "
 assert 'tokenfuse-mcp-broker' in svc, 'no broker in the resolved configuration with --profile typed, so this measured nothing'
 assert 'typryx-wardryx-proxy' not in svc, 'the proxy is in the set without the typed-risk-signal profile'
 e = svc['tokenfuse-mcp-broker']['environment']
-assert not e.get('TOKENFUSE_WARDRYX_URL'), 'the broker has a policy plane URL by default: ' + repr(e.get('TOKENFUSE_WARDRYX_URL'))
-assert e.get('TOKENFUSE_WARDRYX_MODE') == 'off', 'the broker enforces by default: ' + repr(e.get('TOKENFUSE_WARDRYX_MODE'))
+assert e.get('TOKENFUSE_WARDRYX_URL') == 'http://wardryx:8090', 'without the flag the broker asks ' + repr(e.get('TOKENFUSE_WARDRYX_URL')) + ', not wardryx directly'
+assert 'typryx-wardryx-proxy' not in json.dumps(e), 'the broker names the proxy without the flag'
 " --profile typed </dev/null
 
   check_cfg "default set has no proxy and no broker" "

@@ -59,8 +59,11 @@
 #     default), shadow or off; see section 0d and the README
 #   CLIENT_KEYS_FILE=/path/keys.txt IDENTITY_MAP_FILE=/path/identity.json ./install.sh
 #     # who may call the gateway (secret:key_id lines) and which agent ids and
-#     # unit each key speaks for; off unless given, kept on a re-run, checked by
-#     # the gateway image itself before anything restarts. See section 0f.
+#     # unit each key speaks for; kept on a re-run, checked by the gateway image
+#     # itself before anything restarts. Given neither, the installer mints a key
+#     # for the console's copilot and one for your agents (written to
+#     # $STACK_DIR/agent-key), each bound to its own agent ids: the gateway never
+#     # answers a caller without a key. See section 0f.
 #   OPENAI_DOOR=1 OPENAI_DOOR_UPSTREAM=https://api.openai.com/v1/chat/completions \
 #     OPENAI_DOOR_CLIENT_KEYS_FILE=/path/keys.txt OPENAI_DOOR_IDENTITY_MAP_FILE=/path/map.json ./install.sh
 #     # a second gateway on port 4110 for agents that speak the OpenAI wire, with
@@ -379,6 +382,29 @@ if [ "$IDENTITY_MAP_ON" = 1 ]; then
   check "identity map: every key is bound and every binding has a key" \
         "! $DC logs tokenfuse-gateway 2>&1 | grep -qE 'has no keys\\[\\] binding|has no matching TOKENFUSE_CLIENT_KEYS entry'"
 fi
+# The keys this installer minted (section 0f, CLAUDE.md invariant 35), only on a box
+# that runs them. The agents' key is in its file, which only its owner can read, and
+# is the one .env holds; Felyx holds its own key, and the id the console names it
+# with is the one the minted map binds that key to (a RECORD_TRUST_DOMAIN changed
+# by hand after the install turns this red until the installer runs again).
+# shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
+agent_key_file_ok() {
+  local f="$STACK_DIR/agent-key"
+  [ -n "${GATEWAY_AGENT_KEY:-}" ] && [ -f "$f" ] && [ "$(stat -c %a "$f")" = 600 ] && [ "$(cat "$f")" = "$GATEWAY_AGENT_KEY" ]
+}
+# shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
+felyx_key_bound() {
+  local id
+  [ -n "$("${COMPOSE[@]}" exec -T console printenv GENARYX_COPILOT_FUSE_KEY 2>/dev/null)" ] || return 1
+  id="$("${COMPOSE[@]}" exec -T console printenv GENARYX_COPILOT_AGENT_ID 2>/dev/null)" || return 1
+  [ -n "$id" ] && grep -qF "{\"key_id\": \"felyx\", \"unit\": \"console\", \"agents\": [\"$id\"]}" "$STACK_DIR/identity/identity.json"
+}
+if [ "${IDENTITY_MINTED:-0}" = 1 ]; then
+  check "client keys: the agents' key is in $STACK_DIR/agent-key, readable by its owner alone" "agent_key_file_ok"
+  if compose_has console; then
+    check "client keys: Felyx holds its own key, bound to the id the console names it with" "felyx_key_bound"
+  fi
+fi
 
 # The OpenAI door (OPENAI_DOOR=1, section 0g), on every box that asked for it and
 # never skipped there: a door that did not come up must turn these red. The same
@@ -555,11 +581,11 @@ if compose_has tokenfuse-mcp-broker; then
   # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
   mcp_ask_answered() { # url, key
     local hdrs=(--header="Content-Type: application/json" --header="X-Fuse-Mcp-Upstream: typryx" --header="x-fuse-key: $2")
-    # With the typed risk signal on, the broker is a policy enforcement point
-    # and judges only a call it can attribute: without x-fuse-agent-id it
-    # refuses, which is the right answer for an unattributed call and the wrong
-    # one for this check. Off, the request is byte for byte what it always was.
-    if [ "$TYPED_RISK_ON" = 1 ]; then hdrs+=(--header="x-fuse-agent-id: agent://local.invalid/install-check"); fi
+    # The broker is a policy enforcement point on every box (invariant 36): it
+    # asks wardryx about each tools/call and refuses one it cannot attribute, so
+    # the check names an agent. No starter rule targets this id, so wardryx
+    # allows it.
+    hdrs+=(--header="x-fuse-agent-id: agent://local.invalid/install-check")
     docker run --rm --network "$NET" busybox:1.36 wget -q -T5 -O - \
         "${hdrs[@]}" \
         --post-data='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ask","arguments":{"template":"eval.outcome_met","state":{"task":"2+2","final_answer":"4"}},"_meta":{"typryx/key":"{{secret:typryx_key}}"}}}' \
@@ -644,8 +670,9 @@ fi
 # check. No package, image, container or file is touched; the checks that would write
 # are skipped and marked so. It runs as root or as a user in the docker group.
 status_facts() { # what the install decided, read back from .env and the running stack
-  IDENTITY_KEYS_COUNT=0; IDENTITY_MAP_ON=0; IDENTITY_openai_KEYS_COUNT=0
+  IDENTITY_KEYS_COUNT=0; IDENTITY_MAP_ON=0; IDENTITY_openai_KEYS_COUNT=0; IDENTITY_MINTED=0
   DOOR_ON=0; TYPED_PLANE=off; TYPED_RISK_ON=0
+  if [ "${GATEWAY_IDENTITY_MINTED:-}" = 1 ]; then IDENTITY_MINTED=1; fi
   if [ -n "${GATEWAY_CLIENT_KEYS:-}" ]; then
     IDENTITY_KEYS_COUNT=$(( $(printf '%s' "$GATEWAY_CLIENT_KEYS" | tr -cd ',' | wc -c) + 1 ))
   fi
@@ -667,6 +694,8 @@ status_main() {
   # shellcheck disable=SC1091  # generated at install time, not in this repo
   . ./.env
   gateway_probe_resolve
+  [ -n "${GATEWAY_CLIENT_KEYS:-}" ] \
+    || die "$STACK_DIR/.env holds no client keys: this box was installed before the gateway required them, and compose will not start it without them. Run ./install.sh once to mint them. Nothing was changed."
   if docker compose version >/dev/null 2>&1; then COMPOSE=(docker compose)
   elif command -v docker-compose >/dev/null 2>&1; then COMPOSE=(docker-compose)
   else die "no docker compose on this machine, so the stack cannot be read. Nothing was changed."; fi
@@ -1200,8 +1229,10 @@ pii_resolve
 
 # ---- 0f. client keys and the identity map ------------------------------------
 # Who may call the gateway, which agent ids each caller may speak as, and which
-# business unit its spend lands in (tokenfuse docs/20). Off by default: with no
-# client key and no map the gateway answers any caller, exactly as before.
+# business unit its spend lands in (tokenfuse docs/20). On by default since
+# 2026-10-17: compose refuses to start the gateway without client keys, and a box
+# given no files gets keys this installer mints (the block after this one,
+# CLAUDE.md invariant 35). The files below are how an operator brings their own.
 #
 # @decided 2026-10-13 (paraphrased): the installer takes the identity map and the
 # client keys as FILES that a person or an onboarding agent prepares, keeps them
@@ -1239,10 +1270,10 @@ pii_resolve
 #     call with it is refused 403).
 # Only then is anything written. A re-run that names neither file keeps both and
 # checks them again; one that names a file replaces what it names, and a changed
-# map restarts the gateway, which reads the map only at start. To turn either off,
-# remove its line from .env (GATEWAY_CLIENT_KEYS, GATEWAY_IDENTITY_MAP) and run
-# docker compose up -d tokenfuse-gateway. (gate: scripts/identity-files-are-checked.sh
-# lifts this block out and runs it.)
+# map restarts the gateway, which reads the map only at start. The map can be
+# turned off by removing GATEWAY_IDENTITY_MAP from .env and running docker compose
+# up -d tokenfuse-gateway; the keys cannot, the gateway requires them. (gate:
+# scripts/identity-files-are-checked.sh lifts this block out and runs it.)
 #
 # The OpenAI door (section 0g) is a second gateway with a keys file and a map of its
 # own, checked by this same block, run once for that door by name: identity_door
@@ -1530,7 +1561,9 @@ identity_apply() {
   mkdir -p "$STACK_DIR/$ID_DIR" || die "could not create $STACK_DIR/$ID_DIR"
   chmod 0755 "$STACK_DIR/$ID_DIR" || die "could not set the mode of $STACK_DIR/$ID_DIR"
   if [ "$IDENTITY_KEYS_GIVEN" = 1 ]; then
-    identity_env_set "$ID_KEYS_ENV" "$IDENTITY_KEYS_NEW"
+    # The same keys again (a re-run of a minted box gives them on every run) leave
+    # the line where it is: a re-run changes nothing it does not have to.
+    [ "$(identity_env_get "$ID_KEYS_ENV")" = "$IDENTITY_KEYS_NEW" ] || identity_env_set "$ID_KEYS_ENV" "$IDENTITY_KEYS_NEW"
     note "client keys ($ID_LABEL): $IDENTITY_KEYS_COUNT key(s), kept in .env as $ID_KEYS_ENV (never printed)"
   fi
   if [ -n "$IDENTITY_MAP_SRC" ]; then
@@ -1557,11 +1590,17 @@ identity_apply() {
 # sends none and the gateway refuses it 401. The note used to say "sends no
 # x-fuse-key" whatever the box held (found 2026-10-13 on a box that had given
 # Felyx a key). Says nothing when client keys are off or Felyx has no provider
-# key, since then it makes no call that could be refused. Prints no key value.
+# key, since then it makes no call that could be refused. On a box whose keys the
+# installer minted (the block below), Felyx's key is one of them and is bound, so
+# the note says so and asks nothing of the operator. Prints no key value.
 # (gate: scripts/felyx-through-the-gateway.sh lifts this and runs it.)
 felyx_gateway_note() {
   [ "$IDENTITY_KEYS_COUNT" -gt 0 ] && [ -n "${GENARYX_COPILOT_KEY:-}" ] || return 0
-  if [ -n "${GENARYX_COPILOT_FUSE_KEY:-}" ]; then
+  if [ "${IDENTITY_MINTED:-0}" = 1 ]; then
+    printf '\n  Felyx, the console'"'"'s copilot, calls this gateway too, with the key this\n'
+    printf '  installer minted for it (GENARYX_COPILOT_FUSE_KEY in .env, sent as x-fuse-key and\n'
+    printf '  not printed here), bound in the identity map to its own agent id and no other.'
+  elif [ -n "${GENARYX_COPILOT_FUSE_KEY:-}" ]; then
     printf '\n  Felyx, the console'"'"'s copilot, calls this gateway too. GENARYX_COPILOT_FUSE_KEY is\n'
     printf '  set, so a console from v1.1.44 on sends that key as x-fuse-key (an older one\n'
     printf '  ignores the setting and sends none). The key has to be one of the secrets in\n'
@@ -1578,6 +1617,156 @@ felyx_gateway_note() {
   fi
 }
 # identity-files: end
+
+# ---- 0f, continued: keys for a box that was given none ---------------------------
+# @decided 2026-10-17 (paraphrased): close the agent-security findings of the
+# 2026-10-17 review, defaults first. The gateway never answers an unnamed caller:
+# compose refuses to start it without GATEWAY_CLIENT_KEYS, and a box given no keys
+# file gets keys this installer mints itself (CLAUDE.md invariant 35):
+#
+#   felyx   the console's copilot, bound to exactly agent://<td>/genaryx/felyx; its
+#           secret is GENARYX_COPILOT_FUSE_KEY in .env, which the console sends
+#   agents  the operator's own agents, bound to agent://<td>/agents/*; its secret is
+#           GATEWAY_AGENT_KEY in .env and the file $STACK_DIR/agent-key (0600), whose
+#           PATH the end of the run prints, never the key
+#
+# <td> is RECORD_TRUST_DOMAIN (from .env, else this run's environment, else local),
+# the domain compose already names Felyx in. The agents' pattern stops short of
+# Felyx's id, so an agent cannot speak as the copilot. The map has a unit each and no
+# budget: it binds and attributes, and a budget is the operator's decision. A secret
+# already in .env is never rewritten; an absent or empty one is minted with gen. The
+# spec and the map are rebuilt from .env on every run, the same bytes each time, so a
+# re-run restarts nothing, and they go through section 3e exactly like an operator's
+# files: the gateway image reads them before anything restarts.
+# GATEWAY_IDENTITY_MINTED=1 in .env says the installer owns them. An operator's own
+# files replace them, both files together, because the minted map binds the minted
+# key ids and nothing else. (gate: scripts/metered-doors-require-keys.sh lifts this
+# block out and runs it.)
+# identity-mint: begin
+MINT_ON=0              # 1 when this run's client keys and map are the installer's own
+MINT_DOMAIN=""         # the trust domain the minted map names
+MINT_MAP=""            # the map composed for section 3e, removed once it is installed
+IDENTITY_MINTED=0      # 1 when the gateway runs minted keys after this run
+
+mint_env_forget() { # NAME: drop NAME's line from .env
+  local tmp
+  tmp="$(mktemp)" || die "could not make a temporary file to update .env"
+  { grep -v "^$1=" "$STACK_DIR/.env" || true; } >"$tmp"
+  cat "$tmp" >"$STACK_DIR/.env" || die "could not update $STACK_DIR/.env"
+  rm -f "$tmp"
+}
+
+# Section 0f, after identity_resolve and before anything is installed: whether this
+# run mints, refusing a pair that cannot work. Writes nothing.
+mint_resolve() {
+  local LC_ALL=C marker keys map td
+  [ "$IDENTITY_DOOR" = main ] || die "internal: mint_resolve ran with the ${IDENTITY_DOOR:-no} door selected"
+  marker="$(identity_env_get GATEWAY_IDENTITY_MINTED)"
+  keys="$(identity_env_get GATEWAY_CLIENT_KEYS)"
+  map="$(identity_env_get GATEWAY_IDENTITY_MAP)"
+  case "$marker" in
+    ""|1) ;;
+    *) die ".env holds a GATEWAY_IDENTITY_MINTED other than 1. Fix or remove that line. Nothing was changed." ;;
+  esac
+  MINT_ON=0
+  if [ "$marker" = 1 ]; then
+    if [ -n "${CLIENT_KEYS_FILE:-}" ] && [ -z "${IDENTITY_MAP_FILE:-}" ]; then
+      die "this box's client keys were minted by the installer, and the map it wrote binds those keys only. Give IDENTITY_MAP_FILE with CLIENT_KEYS_FILE, a map that binds your keys. Nothing was installed."
+    fi
+    if [ -z "${CLIENT_KEYS_FILE:-}" ] && [ -n "${IDENTITY_MAP_FILE:-}" ]; then
+      die "this box's client keys were minted by the installer, and your map would not bind them. Give CLIENT_KEYS_FILE with IDENTITY_MAP_FILE. Nothing was installed."
+    fi
+    [ -n "${CLIENT_KEYS_FILE:-}" ] || MINT_ON=1
+  elif [ -n "${CLIENT_KEYS_FILE:-}" ] || [ -n "$keys" ]; then
+    MINT_ON=0
+  elif [ -n "${IDENTITY_MAP_FILE:-}" ]; then
+    die "IDENTITY_MAP_FILE needs CLIENT_KEYS_FILE: the gateway requires client keys, and a map's bindings name keys this box does not have. Give both, or neither and the installer mints keys and a map. Nothing was installed."
+  elif [ -n "$map" ]; then
+    die ".env names an identity map (GATEWAY_IDENTITY_MAP) and holds no client keys, and the gateway now requires them. Give CLIENT_KEYS_FILE with IDENTITY_MAP_FILE, or remove GATEWAY_IDENTITY_MAP from .env and the installer mints keys and a map. Nothing was changed."
+  else
+    MINT_ON=1
+  fi
+  [ "$MINT_ON" = 1 ] || return 0
+  td="$(identity_env_get RECORD_TRUST_DOMAIN)"
+  [ -n "$td" ] || td="${RECORD_TRUST_DOMAIN:-local}"
+  [[ "$td" =~ ^[A-Za-z0-9.-]{1,253}$ ]] \
+    || die "RECORD_TRUST_DOMAIN must be a name of A-Z a-z 0-9 . and -: the keys this installer mints are bound to agent ids in it. Nothing was installed."
+  MINT_DOMAIN="$td"
+}
+
+# NAME: a secret in .env under NAME, minted when the line is absent or empty. A value
+# already there is kept byte for byte: an agent holding it keeps working.
+mint_env_secret() {
+  [ -z "$(identity_env_get "$1")" ] || return 0
+  identity_env_set "$1" "$(gen 40)"
+  note "minted $1 into .env (never printed)"
+}
+
+# Section 3, once .env exists: the secrets, the spec and the map, handed to section
+# 3e as if they were the operator's files.
+mint_prepare() {
+  local felyx agents why
+  [ "$MINT_ON" = 1 ] || return 0
+  mint_env_secret GENARYX_COPILOT_FUSE_KEY
+  mint_env_secret GATEWAY_AGENT_KEY
+  felyx="$(identity_env_get GENARYX_COPILOT_FUSE_KEY)"
+  agents="$(identity_env_get GATEWAY_AGENT_KEY)"
+  why="$(identity_entry_why "$felyx:felyx")"
+  [ -z "$why" ] || die "GENARYX_COPILOT_FUSE_KEY in .env, Felyx's client key, $why. Empty that line and the installer mints one. Nothing was started."
+  why="$(identity_entry_why "$agents:agents")"
+  [ -z "$why" ] || die "GATEWAY_AGENT_KEY in .env, the agents' client key, $why. Empty that line and the installer mints one. Nothing was started."
+  [ "$felyx" != "$agents" ] \
+    || die "GENARYX_COPILOT_FUSE_KEY and GATEWAY_AGENT_KEY in .env hold the same secret, so an agent could speak as Felyx. Empty one of the two lines and the installer mints a new one. Nothing was started."
+  MINT_MAP="$(mktemp)" || die "could not make a temporary file for the minted identity map"
+  printf '{\n  "units": [\n    {"id": "console", "name": "Felyx, the console copilot"},\n    {"id": "agents", "name": "The operator agents"}\n  ],\n  "keys": [\n    {"key_id": "felyx", "unit": "console", "agents": ["agent://%s/genaryx/felyx"]},\n    {"key_id": "agents", "unit": "agents", "agents": ["agent://%s/agents/*"]}\n  ]\n}\n' \
+    "$MINT_DOMAIN" "$MINT_DOMAIN" >"$MINT_MAP" || die "could not write the minted identity map"
+  IDENTITY_KEYS_NEW="$felyx:felyx,$agents:agents"
+  IDENTITY_KEYS_GIVEN=1
+  IDENTITY_MAP_SRC="$MINT_MAP"
+}
+
+# Section 3e, after identity_apply wrote the spec and installed the map: the agents'
+# key in its own file for the operator, and the marker. On a box the operator took
+# over, the marker goes and the file is left where it is.
+mint_apply() {
+  local f="$STACK_DIR/agent-key" agents
+  [ -z "$MINT_MAP" ] || rm -f "$MINT_MAP"
+  MINT_MAP=""
+  if [ "$MINT_ON" != 1 ]; then
+    IDENTITY_MINTED=0
+    if [ -n "$(identity_env_get GATEWAY_IDENTITY_MINTED)" ]; then
+      mint_env_forget GATEWAY_IDENTITY_MINTED
+      note "client keys: yours now, from the files you gave; the minted keys are no longer accepted ($f is left in place)"
+    fi
+    return 0
+  fi
+  agents="$(identity_env_get GATEWAY_AGENT_KEY)"
+  [ -n "$agents" ] || die "internal: mint_apply found no GATEWAY_AGENT_KEY in .env"
+  if [ ! -f "$f" ] || [ "$(cat "$f")" != "$agents" ]; then
+    ( umask 077; printf '%s\n' "$agents" >"$f.tmp" ) || die "could not write the agents' key to $f"
+    mv -f "$f.tmp" "$f" || die "could not put the agents' key in place at $f"
+    note "the agents' client key: in $f (0600), never printed"
+  fi
+  chmod 0600 "$f" || die "could not set the mode of $f"
+  [ "$(identity_env_get GATEWAY_IDENTITY_MINTED)" = 1 ] || identity_env_set GATEWAY_IDENTITY_MINTED 1
+  IDENTITY_MINTED=1
+}
+
+# What the end of the run says about the minted keys: the file and the ids, never a
+# secret. Says nothing on a box running the operator's own keys.
+mint_reach_note() {
+  [ "${IDENTITY_MINTED:-0}" = 1 ] || return 0
+  printf '\n  Client keys are ON, minted by this installer because it was given no keys file.\n'
+  printf '  Your agents now need a key: every call to the gateway carries\n\n'
+  printf '      x-fuse-key       the secret in %s (it is not printed here)\n' "$STACK_DIR/agent-key"
+  printf '      x-fuse-agent-id  an id under agent://%s/agents/, such as agent://%s/agents/support-bot\n' "$MINT_DOMAIN" "$MINT_DOMAIN"
+  printf '      x-fuse-run-id    its run, as before\n\n'
+  printf '  A call with no key, or one the gateway does not hold, is refused 401, and the key\n'
+  printf '  speaking as an id outside agents/ is refused 403 identity_mismatch. To give each\n'
+  printf '  agent its own key and unit, bring a keys file and an identity map, both together\n'
+  printf '  (README, "Client keys and the identity map").'
+}
+# identity-mint: end
 
 # ---- 0g. a second door, on the OpenAI wire (opt-in) ----------------------------
 # The gateway speaks the Anthropic wire, POST /v1/messages. An agent whose SDK
@@ -1766,6 +1955,7 @@ if [ "$DOOR_ON" = 1 ]; then
   identity_resolve
   identity_door main
 fi
+mint_resolve
 
 say "installing docker and git"
 export DEBIAN_FRONTEND=noninteractive
@@ -2338,6 +2528,10 @@ firewall_apply
 pii_apply
 # The OpenAI door (section 0g): written only when this run said something about it.
 door_apply
+# The gateway's client keys when this box was given none (section 0f, invariant 35):
+# Felyx's and the agents' secrets minted into .env if absent, and the spec and map
+# built from them for section 3e to check and install.
+mint_prepare
 
 # The delegation plane's own door (profile delegation), handled like every
 # other opt-in plane's key above: generated whether or not WITH_DELEGATION is
@@ -2559,6 +2753,10 @@ if [ -z "$BUILD_FROM_SOURCE" ]; then
   # named so that `config --images` resolves the same set docker will run.
   [ "$DOOR_ON" != 1 ] || profiles+=(--profile openai-door)
   pulled=0
+  # The client keys are written in section 3e, after this pull, and compose refuses
+  # to render a file whose gateway has none. So a first install gives this READ of
+  # the configuration a stand-in that is never written anywhere or started with;
+  # the image list does not depend on it. compose_image below does the same.
   while read -r img; do
     case "$img" in
       ghcr.io/*)
@@ -2567,7 +2765,7 @@ if [ -z "$BUILD_FROM_SOURCE" ]; then
         pulled=$((pulled + 1))
         ;;
     esac
-  done < <("${COMPOSE[@]}" "${profiles[@]}" config --images 2>/dev/null | sort -u)
+  done < <(GATEWAY_CLIENT_KEYS="${GATEWAY_CLIENT_KEYS:-not-written-before-section-3e:none}" "${COMPOSE[@]}" "${profiles[@]}" config --images 2>/dev/null | sort -u)
   # A pull loop that pulled nothing is the failure this catches, and it is not
   # hypothetical: `config --images` printing an empty list, or every line
   # missing the `ghcr.io/` prefix after a rename, both leave every plane absent
@@ -2620,7 +2818,7 @@ fi
 compose_image() { # SERVICE [compose options]: the image compose resolves for SERVICE
   local svc="$1"
   shift
-  { "${COMPOSE[@]}" "$@" config 2>/dev/null || true; } \
+  { GATEWAY_CLIENT_KEYS="${GATEWAY_CLIENT_KEYS:-not-written-before-section-3e:none}" "${COMPOSE[@]}" "$@" config 2>/dev/null || true; } \
     | awk -v want="  $svc:" '/^  [^ ]/{s=($0==want)} s&&/^    image: /&&!d{print $2; d=1}'
 }
 IDENTITY_IMAGE="$(compose_image tokenfuse-gateway)"
@@ -2635,6 +2833,7 @@ identity_check "$IDENTITY_IMAGE"
 door_identity_check "$DOOR_IMAGE" "$DOOR_CHECK_IMAGE"
 identity_apply
 door_identity_apply
+mint_apply
 
 # ---- 4. the files the services read -----------------------------------------
 if [ ! -f policy.yaml ]; then
@@ -2952,13 +3151,16 @@ fi
 if compose_has tokenfuse-mcp-broker; then
   say "the typed plane, through tokenfuse's MCP broker"
   note "an agent reaches typryx at http://<this box>:4200/mcp ($GATEWAY_BIND unless you widen it)"
-  note "  with the header X-Fuse-Mcp-Upstream: typryx and its own client key in x-fuse-key"
-  note "  a tools/call then carries the typed-plane credential as"
-  note "  \"_meta\":{\"typryx/key\":\"{{secret:typryx_key}}\"}, never a real key value"
+  note "  with the header X-Fuse-Mcp-Upstream: typryx, its own client key in x-fuse-key, and its"
+  note "  agent id in x-fuse-agent-id: the broker asks wardryx about every tools/call (policy.yaml"
+  note "  judges tool calls too), refuses one it cannot attribute, and refuses when wardryx cannot answer"
+  note "  a tools/call carries the typed-plane credential as"
+  note "  \"_meta\":{\"typryx/key\":\"{{secret:typryx_key}}\"}, never a real key value: a raw secret"
+  note "  in tool arguments is refused, and so is a tool listing the broker's scanner flags"
   if [ "$TYPED_RISK_ON" = 1 ]; then
-    note "the typed risk signal is ON: each tools/call also needs the header x-fuse-agent-id, because the"
-    note "  broker now asks wardryx about it (through typryx's proxy) and refuses a call it cannot attribute."
-    note "  Nothing holds a call for a person until you add a hold_if_signal rule to policy.yaml (README)."
+    note "the typed risk signal is ON: the broker asks wardryx through typryx's proxy, which adds the"
+    note "  call's risk class. Nothing holds a call for a person until you add a hold_if_signal rule"
+    note "  to policy.yaml (README)."
   fi
   case "$TYPED_PLANE" in
     stub)      note "answers come from the stub backend: nothing leaves this box" ;;
@@ -3061,7 +3263,9 @@ esac
 # Which headers an agent sends, once client keys or an identity map are on. The
 # secrets are named by where they live, never printed.
 IDENTITY_REACH=""
-if [ "$IDENTITY_KEYS_COUNT" -gt 0 ]; then
+if [ "$IDENTITY_MINTED" = 1 ]; then
+  IDENTITY_REACH="$(mint_reach_note)"
+elif [ "$IDENTITY_KEYS_COUNT" -gt 0 ]; then
   IDENTITY_REACH="
   Client keys are ON ($IDENTITY_KEYS_COUNT): every call carries its agent's own key in the
   x-fuse-key header (the secret on its line of the keys file you gave; it is in
@@ -3074,13 +3278,10 @@ if [ "$IDENTITY_KEYS_COUNT" -gt 0 ]; then
   the map binds to that key, or it is refused 403 identity_mismatch. Its spend
   lands in the unit the map binds the key to."
   fi
-  IDENTITY_REACH="$IDENTITY_REACH$(felyx_gateway_note)"
-elif [ "$IDENTITY_MAP_ON" = 1 ]; then
-  IDENTITY_REACH="
-  The identity map is ON with no client keys: a call's unit comes from the
-  prefixes[] entry its x-fuse-agent-id matches. Nothing authenticates the caller,
-  so nothing is refused for identity."
 fi
+# The gateway always holds client keys now (compose requires them), so the branch
+# for a map with no keys, which used to follow, is gone with it.
+IDENTITY_REACH="$IDENTITY_REACH$(felyx_gateway_note)"
 
 # The OpenAI door, when this box runs it: where an agent points, what it sends,
 # who pays, and what this box does not see of it. Its keys are named by where they

@@ -35,10 +35,13 @@
 #   A. COMPOSE. The subjects are derived from compose.yaml's own image and
 #      command lines, like gateway-cache-is-off.sh: every service whose image is
 #      the tokenfuse gateway image and whose command is the bare binary. Each is
-#      the service of exactly one door, and sets TOKENFUSE_CLIENT_KEYS to
-#      `${<that door's keys line>:-}` and TOKENFUSE_IDENTITY_MAP to
-#      `${<its map line>:-}` (empty is off, so a default box is unchanged; `:?`
-#      would stop every default box) and mounts `./<its directory>:/etc/tokenfuse/identity:ro`,
+#      the service of exactly one door, and sets TOKENFUSE_CLIENT_KEYS to its
+#      door's keys line, required (`${<keys line>:?...}`) on a gateway that starts on
+#      every box (invariant 35: the installer writes the line, minted or given) and
+#      `${<keys line>:-}` on one behind a profile (compose reads a profile's
+#      variables on every box, so `:?` there would stop every box that never asked
+#      for it), TOKENFUSE_IDENTITY_MAP to `${<its map line>:-}` (an operator may
+#      bring keys with no map) and mounts `./<its directory>:/etc/tokenfuse/identity:ro`,
 #      read only. No other service names a door's keys or its directory, and the
 #      path install.sh writes into .env is the file inside that mount.
 #   B. THE INSTALLER'S FIRST HALF, `# identity-files: begin` .. `end` lifted out
@@ -66,7 +69,8 @@
 #      gateway; the end of the run names x-fuse-key and x-fuse-agent-id. The
 #      OpenAI door's own order is scripts/openai-door.sh's.
 #   E. RESOLVED. `docker compose config`, with every profile a gateway sits
-#      behind, for a default box (every door's values empty) and for a .env that
+#      behind, for a default box (the always-on gateway's keys as the installer
+#      writes them, every other value empty) and for a .env that
 #      sets every door's pair (each door's values arrive at that door's gateway
 #      only, and each mount is a read-only bind of its own directory).
 #
@@ -207,6 +211,10 @@ def code_lines(block):
     return [l for l in block if l.strip() and not l.strip().startswith("#")]
 
 
+def profiled(block):
+    return any(re.match(r"^    profiles:", l) for l in block)
+
+
 subjects = sorted(n for n, b in blocks.items() if is_gateway(b))
 if not subjects:
     print("FAIL: no service in compose.yaml both uses the tokenfuse gateway image and runs it")
@@ -234,20 +242,32 @@ for name in subjects:
         bad += 1
         continue
     d = mine[0]
-    want = {
-        "TOKENFUSE_CLIENT_KEYS": "${%s:-}" % d["keys_env"],
-        "TOKENFUSE_IDENTITY_MAP": "${%s:-}" % d["map_env"],
-    }
-    for var, w in want.items():
-        got = env_value(blocks[name], var)
-        if got is None:
-            print(f"FAIL: {name} sets no {var}, so what install.sh writes into .env never reaches it.")
-            bad += 1
-        elif got != w:
-            print(f"FAIL: {name} sets {var}: {got}, not {w}. Empty is the default that keeps")
-            print("      a box that gave no file exactly as it was; `:?` would stop every such box,")
-            print("      and a literal or another variable makes install.sh's line do nothing.")
-            bad += 1
+    keys_re = r"\$\{%s:-\}" % d["keys_env"] if profiled(blocks[name]) else r"\$\{%s:\?[^}]*\}" % d["keys_env"]
+    keys_want = "${%s:-}" % d["keys_env"] if profiled(blocks[name]) else "${%s:?...}" % d["keys_env"]
+    got = env_value(blocks[name], "TOKENFUSE_CLIENT_KEYS")
+    if got is None:
+        print(f"FAIL: {name} sets no TOKENFUSE_CLIENT_KEYS, so what install.sh writes into .env never reaches it.")
+        bad += 1
+    elif not re.fullmatch(keys_re, got):
+        print(f"FAIL: {name} sets TOKENFUSE_CLIENT_KEYS: {got}, not {keys_want}.")
+        if profiled(blocks[name]):
+            print("      It sits behind a profile, and compose reads a profile's variables on every box, so")
+            print("      `:?` would stop every box that never asked for it; a literal or another variable")
+            print("      makes install.sh's line do nothing.")
+        else:
+            print("      It starts on every box, and the installer always writes its keys (invariant 35), so")
+            print("      a box whose .env lacks them must not start a gateway that answers anyone; a literal")
+            print("      or another variable makes install.sh's line do nothing.")
+        bad += 1
+    w = "${%s:-}" % d["map_env"]
+    got = env_value(blocks[name], "TOKENFUSE_IDENTITY_MAP")
+    if got is None:
+        print(f"FAIL: {name} sets no TOKENFUSE_IDENTITY_MAP, so what install.sh writes into .env never reaches it.")
+        bad += 1
+    elif got != w:
+        print(f"FAIL: {name} sets TOKENFUSE_IDENTITY_MAP: {got}, not {w}. An operator may bring keys")
+        print("      with no map, and a literal or another variable makes install.sh's line do nothing.")
+        bad += 1
     mount = "./%s:/etc/tokenfuse/identity:ro" % d["dir"]
     mounts = [v.lstrip("-").strip().strip('"').strip("'") for v in keyed(blocks[name], "volumes")]
     if mount not in mounts:
@@ -281,8 +301,9 @@ elif m.group(1) != "/etc/tokenfuse/identity/identity.json":
 
 if bad:
     sys.exit(1)
+open(sys.argv[3] + ".always", "w").write("".join(f"{d['door']}\n" for d in doors if not profiled(blocks[d["service"]])))
 print("compose: " + ", ".join(f"{d['service']} ({d['door']} door, {d['keys_env']}, ./{d['dir']})" for d in doors)
-      + " read their client keys and identity map from .env, default off, map mounted read only")
+      + " read their client keys and identity map from .env (keys required where the gateway starts on every box), map mounted read only")
 PY
 
 op="$scratch/op"   # where the operator stands when they run install.sh
@@ -725,9 +746,13 @@ for line in open(sys.argv[1]).read().split("\n"):
     print("|".join([door, svc, env.get("TOKENFUSE_CLIENT_KEYS", "<unset>"), env.get("TOKENFUSE_IDENTITY_MAP", "<unset>"), m, ",".join(holders)]))
 ' "$scratch/doors" 2>>"$cdir/err"
   }
-  want_default="$(awk '{ printf "%s|%s|||bind,ro,%s|\n", $1, $2, $7 }' "$scratch/doors")"
-  got="$(resolved </dev/null)"
-  [ "$got" = "$want_default" ] || fail "resolved: a default box reads '$(tr '\n' ' ' <<<"$got")', not empty keys, no map and a read-only bind of each door's own directory ($(head -1 "$cdir/err"))"
+  # A default box: the installer has written the keys of every gateway that starts on
+  # every box (minted or given, invariant 35) and nothing else.
+  always="$(cat "$scratch/doors.always" 2>/dev/null)"
+  default_lines="$(awk -v al=" $(tr '\n' ' ' <<<"$always")" 'index(al, " " $1 " ") { printf "%s=\047gate-resolved-default-%s-aaaaaaaaaaaa:k1\047\n", $5, $1 }' "$scratch/doors")"
+  want_default="$(awk -v al=" $(tr '\n' ' ' <<<"$always")" '{ k = index(al, " " $1 " ") ? "gate-resolved-default-" $1 "-aaaaaaaaaaaa:k1" : ""; printf "%s|%s|%s||bind,ro,%s|\n", $1, $2, k, $7 }' "$scratch/doors")"
+  got="$(resolved <<<"$default_lines")"
+  [ "$got" = "$want_default" ] || fail "resolved: a default box reads '$(tr '\n' ' ' <<<"$got")', not the installer's keys on the gateway every box runs, empty values on the rest, no map and a read-only bind of each door's own directory ($(head -1 "$cdir/err"))"
   set_lines="$(awk -v mp="$MAP_PATH" '{ printf "%s=\047gate-resolved-secret-%s-aaaaaaaaaaaa:k1\047\n%s=\047%s\047\n", $5, $1, $6, mp }' "$scratch/doors")"
   want_set="$(awk -v mp="$MAP_PATH" '{ printf "%s|%s|gate-resolved-secret-%s-aaaaaaaaaaaa:k1|%s|bind,ro,%s|%s\n", $1, $2, $1, mp, $7, $2 }' "$scratch/doors")"
   got="$(resolved <<<"$set_lines")"
@@ -740,8 +765,8 @@ if [ "$problems" -gt 0 ]; then
   echo "$problems problem(s). See CLAUDE.md invariant 29."
   exit 1
 fi
-echo "OK: every gateway reads its door's client keys and identity map from .env, off by default, the map"
-echo "    mounted read only; for every door ($DOORS) install.sh refuses hostile files before anything is"
+echo "OK: every gateway reads its door's client keys and identity map from .env, the keys required on the"
+echo "    gateway every box runs, the map mounted read only; for every door ($DOORS) install.sh refuses hostile files before anything is"
 echo "    installed and lets the pinned gateway image read the pair, on that door's own wire, before"
 echo "    anything restarts, keeps both on a re-run, replaces rather than repeats, never echoes a secret,"
 echo "    keeps each door's state apart, restarts the gateway for a new map, and names the headers."

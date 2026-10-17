@@ -1067,13 +1067,15 @@ run_case "pii-is-shadow: a comment that names off is not the setting" pass \
 # sits inside a shell single-quoted string.
 run_case "identity-files: the gateway loses its client keys setting" fail \
 	'./scripts/identity-files-are-checked.sh' \
-	"$(py 'edit("compose.yaml", "      TOKENFUSE_CLIENT_KEYS: ${GATEWAY_CLIENT_KEYS:-}\n", "")')" \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_CLIENT_KEYS: ${GATEWAY_CLIENT_KEYS:?set by install.sh, which mints them when no keys file is given}\n", "")')" \
 	"sets no TOKENFUSE_CLIENT_KEYS"
 
-run_case "identity-files: the client keys become required" fail \
+# Invariant 35 turned this case around: the gateway every box runs requires its keys,
+# so an empty default is the fault now (a box whose .env lost them would answer anyone).
+run_case "identity-files: the gateway's client keys get an empty default" fail \
 	'./scripts/identity-files-are-checked.sh' \
-	"$(py 'edit("compose.yaml", "TOKENFUSE_CLIENT_KEYS: ${GATEWAY_CLIENT_KEYS:-}", "TOKENFUSE_CLIENT_KEYS: ${GATEWAY_CLIENT_KEYS:?set by install.sh}")')" \
-	"not \${GATEWAY_CLIENT_KEYS:-}"
+	"$(py 'edit("compose.yaml", "TOKENFUSE_CLIENT_KEYS: ${GATEWAY_CLIENT_KEYS:?set by install.sh, which mints them when no keys file is given}", "TOKENFUSE_CLIENT_KEYS: ${GATEWAY_CLIENT_KEYS:-}")')" \
+	"not \${GATEWAY_CLIENT_KEYS:?...}"
 
 run_case "identity-files: the gateway loses its identity map setting" fail \
 	'./scripts/identity-files-are-checked.sh' \
@@ -1227,9 +1229,9 @@ run_case "identity-files: the installer block is gone" fail \
 
 # A comment that names a required form of the setting is not the setting, and a
 # reworded refusal still refuses.
-run_case "identity-files: a comment that names a required setting is not the setting" pass \
+run_case "identity-files: a comment that names another form of the setting is not the setting" pass \
 	'./scripts/identity-files-are-checked.sh' \
-	"$(py 'edit("compose.yaml", "      TOKENFUSE_CLIENT_KEYS: ${GATEWAY_CLIENT_KEYS:-}\n", "      # never TOKENFUSE_CLIENT_KEYS: ${GATEWAY_CLIENT_KEYS:?x}, which stops a default box.\n      TOKENFUSE_CLIENT_KEYS: ${GATEWAY_CLIENT_KEYS:-}\n")')"
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_CLIENT_KEYS: ${GATEWAY_CLIENT_KEYS:?set by install.sh, which mints them when no keys file is given}\n", "      # never TOKENFUSE_CLIENT_KEYS: ${GATEWAY_CLIENT_KEYS:-}, which answers anyone.\n      TOKENFUSE_CLIENT_KEYS: ${GATEWAY_CLIENT_KEYS:?set by install.sh, which mints them when no keys file is given}\n")')"
 
 run_case "identity-files: a reworded refusal still refuses" pass \
 	'./scripts/identity-files-are-checked.sh' \
@@ -1957,7 +1959,7 @@ run_case "felyx-through-the-gateway: Felyx's client key becomes required" fail \
 # the box held, including on a box that had given Felyx a key.
 run_case "felyx-through-the-gateway: the closing report says Felyx sends no key though it has one" fail \
 	'./scripts/felyx-through-the-gateway.sh' \
-	"$(py 'edit("install.sh", "  if [ -n \"${GENARYX_COPILOT_FUSE_KEY:-}\" ]; then\n    printf \x27\\n  Felyx", "  if false; then\n    printf \x27\\n  Felyx")')" \
+	"$(py 'edit("install.sh", "  elif [ -n \"${GENARYX_COPILOT_FUSE_KEY:-}\" ]; then\n    printf \x27\\n  Felyx", "  elif false; then\n    printf \x27\\n  Felyx")')" \
 	"although GENARYX_COPILOT_FUSE_KEY is set"
 
 run_case "felyx-through-the-gateway: the closing report stops saying a keyless Felyx is refused" fail \
@@ -2611,6 +2613,151 @@ run_case "health-checks-are-declared: compose.yaml has no services to read" fail
 run_case "health-checks-are-declared: a comment in the healthcheck block is reworded" pass \
 	'./scripts/health-checks-are-declared.sh' \
 	"$(py 'edit("compose.yaml", "# bash, not curl: these images ship bash", "# bash, not curl: these images carry bash")')"
+
+# ---- metered-doors-require-keys (invariant 35): the gateway every box runs requires
+# client keys, every identity map is strict, and a box given no files gets keys the
+# installer mints, each bound to its own ids. Cases that reach the minting run the
+# lifted block in scratch directories; the last minting case runs the gateway image.
+run_case "metered-doors-require-keys: the gateway's client keys get an empty default" fail \
+	'./scripts/metered-doors-require-keys.sh' \
+	"$(py 'edit("compose.yaml", "TOKENFUSE_CLIENT_KEYS: ${GATEWAY_CLIENT_KEYS:?set by install.sh, which mints them when no keys file is given}", "TOKENFUSE_CLIENT_KEYS: ${GATEWAY_CLIENT_KEYS:-}")')" \
+	"not a required"
+
+run_case "metered-doors-require-keys: TOKENFUSE_CLIENT_KEYS goes missing" fail \
+	'./scripts/metered-doors-require-keys.sh' \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_CLIENT_KEYS: ${GATEWAY_CLIENT_KEYS:?set by install.sh, which mints them when no keys file is given}\n", "")')" \
+	"sets no TOKENFUSE_CLIENT_KEYS"
+
+run_case "metered-doors-require-keys: a gateway's identity map is only warned about" fail \
+	'./scripts/metered-doors-require-keys.sh' \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_IDENTITY_STRICT: enforce\n", "      TOKENFUSE_IDENTITY_STRICT: warn\n")')" \
+	"TOKENFUSE_IDENTITY_STRICT: warn, not enforce"
+
+run_case "metered-doors-require-keys: the installer stops minting the agents' key" fail \
+	'./scripts/metered-doors-require-keys.sh' \
+	"$(py 'edit("install.sh", "  mint_env_secret GATEWAY_AGENT_KEY\n", "")')" \
+	"a box given no keys file and no map was refused"
+
+run_case "metered-doors-require-keys: a re-run mints a new secret over the kept one" fail \
+	'./scripts/metered-doors-require-keys.sh' \
+	"$(py 'edit("install.sh", "  [ -z \"$(identity_env_get \"$1\")\" ] || return 0\n", "")')" \
+	"a re-run minted a new secret over the kept one"
+
+run_case "metered-doors-require-keys: a box with the operator's own keys gets minted keys" fail \
+	'./scripts/metered-doors-require-keys.sh' \
+	"$(py 'edit("install.sh", "  elif [ -n \"${CLIENT_KEYS_FILE:-}\" ] || [ -n \"$keys\" ]; then\n", "  elif [ -n \"${CLIENT_KEYS_FILE:-}\" ]; then\n")')" \
+	"a box with the operator's own keys in .env decided to mint"
+
+run_case "metered-doors-require-keys: the agents' key may speak as Felyx" fail \
+	'./scripts/metered-doors-require-keys.sh' \
+	"$(py 'edit("install.sh", "\"agents\": [\"agent://%s/agents/*\"]", "\"agents\": [\"agent://%s/*\"]")')" \
+	"the agents' key may speak as Felyx"
+
+run_case "metered-doors-require-keys: the agent key file is readable by others" fail \
+	'./scripts/metered-doors-require-keys.sh' \
+	"$(py 'edit("install.sh", "  chmod 0600 \"$f\" || die", "  chmod 0644 \"$f\" || die")')" \
+	"not 600"
+
+run_case "metered-doors-require-keys: the closing report prints the agents' key" fail \
+	'./scripts/metered-doors-require-keys.sh' \
+	"$(py 'edit("install.sh", "printf \x27      x-fuse-key       the secret in %s (it is not printed here)\\n\x27 \"$STACK_DIR/agent-key\"", "printf \x27      x-fuse-key       %s, the secret in %s\\n\x27 \"$(identity_env_get GATEWAY_AGENT_KEY)\" \"$STACK_DIR/agent-key\"")')" \
+	"a minted secret appears"
+
+run_case "metered-doors-require-keys: the closing report stops naming the agents' key file" fail \
+	'./scripts/metered-doors-require-keys.sh' \
+	"$(py 'edit("install.sh", "(it is not printed here)\\n\x27 \"$STACK_DIR/agent-key\"", "(it is not printed here)\\n\x27 \".env\"")')" \
+	"does not name the agents' key file"
+
+run_case "metered-doors-require-keys: a map without keys is accepted" fail \
+	'./scripts/metered-doors-require-keys.sh' \
+	"$(py 'edit("install.sh", "    die \"IDENTITY_MAP_FILE needs CLIENT_KEYS_FILE:", "    : \"IDENTITY_MAP_FILE needs CLIENT_KEYS_FILE:")')" \
+	"a map with no keys file on a box with no keys was accepted"
+
+run_case "metered-doors-require-keys: the minted map binds a key id nobody minted" fail \
+	'./scripts/metered-doors-require-keys.sh' \
+	"$(py 'edit("install.sh", "{\"key_id\": \"agents\", \"unit\": \"agents\"", "{\"key_id\": \"agent\", \"unit\": \"agents\"")')" \
+	"the pinned gateway image refused the pair the installer minted"
+
+run_case "metered-doors-require-keys: no gateway is left to judge" fail \
+	'./scripts/metered-doors-require-keys.sh' \
+	"$(py 'edit_all("compose.yaml", "    command: [\"/usr/local/bin/tokenfuse\"]\n", "    command: [\"/usr/local/bin/tokenfuse\", \"serve\"]\n")')" \
+	"measured NOTHING"
+
+run_case "metered-doors-require-keys: the installer's mint block is gone" fail \
+	'./scripts/metered-doors-require-keys.sh' \
+	"$(py 'edit("install.sh", "# identity-mint: begin\n", "# identity-mint: start\n")')" \
+	"measured nothing about the keys"
+
+run_case "metered-doors-require-keys: a comment beside the client keys is reworded" pass \
+	'./scripts/metered-doors-require-keys.sh' \
+	"$(py 'edit("compose.yaml", "      # 403 identity_mismatch. `metered-doors-require-keys.sh` and", "      # 403 identity_mismatch. `metered-doors-require-keys.sh` with")')"
+
+# A box whose keys the installer minted: the closing note about Felyx says its key is
+# minted and bound, and asks nothing of the operator.
+run_case "felyx-through-the-gateway: the note asks a box with minted keys to bind Felyx by hand" fail \
+	'./scripts/felyx-through-the-gateway.sh' \
+	"$(py 'edit("install.sh", "  if [ \"${IDENTITY_MINTED:-0}\" = 1 ]; then\n    printf \x27\\n  Felyx, the console", "  if false; then\n    printf \x27\\n  Felyx, the console")')" \
+	"asks the operator to do what the installer did"
+
+# Without the typed risk signal the broker asks wardryx itself (invariant 36).
+run_case "typed-risk-signal: the broker points at the proxy without the flag" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 'edit("compose.yaml", "${TYPED_RISK_WARDRYX_URL:-http://wardryx:8090}", "${TYPED_RISK_WARDRYX_URL:-http://typryx-wardryx-proxy:4330}")')" \
+	"not wardryx directly"
+
+# ---- broker-blocks-raw-secrets (invariant 36): the MCP broker blocks raw secrets and
+# flagged tool listings and asks wardryx about every tool call, failing closed. The
+# gate runs the broker image, so these take a few seconds each.
+run_case "broker-blocks-raw-secrets: secrets in tool arguments go back to shadow" fail \
+	'./scripts/broker-blocks-raw-secrets.sh' \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_MCP_DLP: block\n", "      TOKENFUSE_MCP_DLP: shadow\n")')" \
+	"TOKENFUSE_MCP_DLP: shadow, not block"
+
+run_case "broker-blocks-raw-secrets: TOKENFUSE_MCP_DLP goes missing" fail \
+	'./scripts/broker-blocks-raw-secrets.sh' \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_MCP_DLP: block\n", "")')" \
+	"sets no TOKENFUSE_MCP_DLP"
+
+run_case "broker-blocks-raw-secrets: the tool scan only warns" fail \
+	'./scripts/broker-blocks-raw-secrets.sh' \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_MCP_SCAN: block\n", "      TOKENFUSE_MCP_SCAN: warn\n")')" \
+	"TOKENFUSE_MCP_SCAN: warn, not block"
+
+run_case "broker-blocks-raw-secrets: the broker's policy hook is off by default" fail \
+	'./scripts/broker-blocks-raw-secrets.sh' \
+	"$(py 'edit("compose.yaml", "${TYPED_RISK_WARDRYX_MODE:-enforce}", "${TYPED_RISK_WARDRYX_MODE:-off}")')" \
+	"not enforce with nothing set"
+
+run_case "broker-blocks-raw-secrets: the broker's policy URL is empty by default" fail \
+	'./scripts/broker-blocks-raw-secrets.sh' \
+	"$(py 'edit("compose.yaml", "${TYPED_RISK_WARDRYX_URL:-http://wardryx:8090}", "${TYPED_RISK_WARDRYX_URL:-}")')" \
+	"empty with nothing set"
+
+run_case "broker-blocks-raw-secrets: the broker fails open" fail \
+	'./scripts/broker-blocks-raw-secrets.sh' \
+	"$(py 's = open("compose.yaml").read()
+i = s.index("  tokenfuse-mcp-broker:\n")
+a = "      TOKENFUSE_WARDRYX_FAILMODE: closed\n"
+j = s.index(a, i)
+assert j < s.index("  typryx-wardryx-proxy:\n"), "no fail mode in the broker block"
+open("compose.yaml", "w").write(s[:j] + "      TOKENFUSE_WARDRYX_FAILMODE: open\n" + s[j + len(a):])')" \
+	"TOKENFUSE_WARDRYX_FAILMODE: open, not closed"
+
+# The image compose resolves for the broker is what C runs, so an image that cannot
+# serve it at all is a red gate, not a pass on the static half alone.
+run_case "broker-blocks-raw-secrets: the broker image is one that never answers" fail_env \
+	'TOKENFUSE_IMAGE=busybox:1.36 ./scripts/broker-blocks-raw-secrets.sh' \
+	"$(py 'pass')" \
+	"never answered as the broker"
+
+run_case "broker-blocks-raw-secrets: no broker is left to judge" fail \
+	'./scripts/broker-blocks-raw-secrets.sh' \
+	"$(py 'edit("compose.yaml", "    command: [\"mcp-broker\"]\n", "    command: [\"mcp-broker\", \"--stdio\"]\n")')" \
+	"measured NOTHING"
+
+run_case "broker-blocks-raw-secrets: a comment in the broker's block is reworded" pass \
+	'./scripts/broker-blocks-raw-secrets.sh' \
+	"$(py 'edit("compose.yaml", "(finding F-009 of the 2026-10-17 review, measured", "(finding F-009 of the 2026-10-17 review; measured")')"
 
 echo
 if [ -n "$(git status --porcelain)" ]; then

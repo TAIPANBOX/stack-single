@@ -29,6 +29,12 @@ job, on a laptop, its calls are metered, budgeted and policy-checked:
 ANTHROPIC_BASE_URL=http://<your box>:4100
 ```
 
+Every call carries a client key. The gateway does not answer a caller without
+one, and the installer mints a key for your agents when you bring none: it is in
+`/opt/agent-stack/agent-key`, and each call sends it as `x-fuse-key`, with an
+agent id under `agent://local/agents/` as `x-fuse-agent-id` (see "Client keys and
+the identity map" below).
+
 On a box that is already installed, edit `GATEWAY_BIND` in
 `/opt/agent-stack/.env` and `docker compose up -d`. Re-running the installer
 will NOT widen it: `.env` is left alone once it exists, which is the same
@@ -277,7 +283,7 @@ names resolve the same way in both:
 
 | Service | Port | Published to a host port |
 |---|---|---|
-| `tokenfuse-gateway` | 4100 | **yes**, `GATEWAY_BIND` decides where: loopback by default |
+| `tokenfuse-gateway` | 4100 | **yes**, `GATEWAY_BIND` decides where: loopback by default. Every call needs a client key (see "Client keys and the identity map") |
 | `tokenfuse-cloud` | 8080 | no |
 | `wardryx` | 8090 | no |
 | `idryx` | 8081 | no |
@@ -426,11 +432,47 @@ Add it to `/opt/agent-stack/policy.yaml` beside the rule above and run
 `docker compose restart wardryx`. A decision under a list is never cached, so each
 model call reaches wardryx.
 
-### Client keys and the identity map (opt-in, off by default)
+### Client keys and the identity map (on by default)
 
-By default the gateway answers any caller that can reach it, and the agent id on
-a call is whatever the caller wrote. Two files change that, prepared by you or by
-an onboarding agent (the console's Onboard tab prints both pieces):
+The gateway answers no caller without a client key, and a key may speak only as
+the agent ids the identity map binds it to. Without them the gateway admitted
+anyone who could reach it and took the agent id a caller wrote, so one agent
+could speak as another and take its policy and its budget. Compose refuses to
+start the gateway without keys, and the map runs strict (`TOKENFUSE_IDENTITY_STRICT:
+enforce`).
+
+**Given no files, the installer mints two keys** and a map binding each:
+
+| Key id | Unit | May speak as | Its secret |
+|---|---|---|---|
+| `felyx` | `console` | `agent://<trust domain>/genaryx/felyx`, exactly | `GENARYX_COPILOT_FUSE_KEY` in `.env`; the console sends it for Felyx |
+| `agents` | `agents` | `agent://<trust domain>/agents/*` | `GATEWAY_AGENT_KEY` in `.env`, and the file `/opt/agent-stack/agent-key` (0600) |
+
+The trust domain is `RECORD_TRUST_DOMAIN` from `.env`, `local` when it is unset.
+The end of the run names the file and the ids and never prints a key. Your agents
+then send, on every call:
+
+| Header | Value |
+|---|---|
+| `x-fuse-key` | the secret in `/opt/agent-stack/agent-key` |
+| `x-fuse-agent-id` | an id under `agent://local/agents/`, such as `agent://local/agents/support-bot` |
+| `x-fuse-run-id` | its run, as before |
+
+A call with no key, or one the gateway does not hold, is refused 401; the key
+speaking as an id outside `agents/` (Felyx's included) is refused 403
+`identity_mismatch`. The units carry no budget: the map binds and attributes, and
+a monthly cap is yours to set in a map of your own. A re-run keeps every minted
+key byte for byte and rebuilds the same map; to rotate one, empty its line in
+`.env` and run the installer again, which mints a new one. An installed box from
+before this release gets its keys on its next run of the installer, and its agents
+are refused 401 until they send one; `docker compose up` on its old `.env` stops
+at the missing `GATEWAY_CLIENT_KEYS` rather than starting a gateway that answers
+anyone.
+
+**One key for all your agents is the floor.** To give each agent its own key and
+unit, bring two files, prepared by you or by an onboarding agent (the console's
+Onboard tab prints both pieces). On a box whose keys were minted, give both files
+together: the minted map binds the minted keys only.
 
 - a **keys file**: one `secret:key_id` per line. The secret is what one agent
   presents; the key id is the name the gateway records its spend under. Blank
@@ -492,19 +534,20 @@ The keys are kept in `.env` (0600) as `GATEWAY_CLIENT_KEYS` and are never
 printed. The map is kept at `/opt/agent-stack/identity/identity.json` and
 mounted read only into the gateway. A re-run that names neither file keeps both
 and checks them again; naming one replaces it, and a new map restarts the
-gateway, which reads the map only at start. To turn either off, remove its line
-from `.env` (`GATEWAY_CLIENT_KEYS`, `GATEWAY_IDENTITY_MAP`) and run
-`docker compose up -d tokenfuse-gateway`.
+gateway, which reads the map only at start. The map can be turned off by removing
+`GATEWAY_IDENTITY_MAP` from `.env` and running `docker compose up -d
+tokenfuse-gateway`; the keys cannot, the gateway requires them.
 
 The keys file can hold only the keys, with no map: callers are then
-authenticated and their spend attributed by key id, with no agent binding. A
-map with only units and `prefixes[]` and no keys attributes spend by agent id
-and authenticates nobody.
+authenticated and their spend attributed by key id, with no agent binding. A map
+with no keys file is refused: the gateway requires keys, and a map's bindings
+would name keys the box does not have.
 
-Felyx, the console's copilot, calls this gateway like any agent, so while client
-keys are on it needs a key of its own. It has none by default: with
+Felyx, the console's copilot, calls this gateway like any agent, so it needs a
+key of its own. On a box given no files it has the minted `felyx` key. With your
+own files, give it a line in the keys file and a binding, as below; with
 `GENARYX_COPILOT_FUSE_KEY` empty, Felyx sends no `x-fuse-key` and its calls are
-refused 401. The installer says which of the two your box has at the end of the
+refused 401. The installer says which of these your box has at the end of the
 run, when `GENARYX_COPILOT_KEY` is set.
 
 A console that carries genaryx invariant 24 can present a key of its own:
@@ -790,14 +833,28 @@ port uses, so it is closed by default the same way and widens with the same
 one variable.
 
 An agent reaches typryx at `http://<this box>:4200/mcp`, with the header
-`X-Fuse-Mcp-Upstream: typryx` naming which plane the broker forwards to, and
-its own client key (`TOKENFUSE_MCP_KEYS` in `.env`) as `x-fuse-key`. A
-`tools/call` carries the typed-plane credential the broker injects, not a key
-the caller ever sees:
+`X-Fuse-Mcp-Upstream: typryx` naming which plane the broker forwards to, its
+own client key (`TOKENFUSE_MCP_KEYS` in `.env`) as `x-fuse-key`, and its agent id
+as `x-fuse-agent-id`. A `tools/call` carries the typed-plane credential the
+broker injects, not a key the caller ever sees:
 
 ```json
 {"_meta": {"typryx/key": "{{secret:typryx_key}}"}}
 ```
+
+The broker does not run tokenfuse's defaults here. A raw secret in tool
+arguments is refused (`-32002`) rather than forwarded, and a tool listing the
+broker's scanner flags is refused rather than passed with a log line. It asks
+wardryx about every `tools/call`, so `policy.yaml` judges tool calls as it judges
+model calls: a call with no `x-fuse-agent-id` is refused (it cannot be judged),
+a tool your policy denies is refused (`-32004`), and with wardryx unreachable the
+call is refused (fail closed, like the gateway). A `{{secret:NAME}}` handle is not
+a raw secret and resolves as before. Pinning tool definitions
+(`TOKENFUSE_MCP_LOCK`) needs a lock file you approved and is not set. Measured
+2026-10-17 on a scratch project from this compose file (tokenfuse v1.14.0, typryx
+v0.4.1, wardryx v1.5.0): typryx's tools listed under the blocking scan, an `ask`
+with an agent id answered, without one refused 400, a raw AWS example key id
+refused, a denied tool refused, and every call refused while wardryx was stopped.
 
 `install.sh` prints the URL and the header names at the end of a run with
 `WITH_TYPED=1`; it never prints a key's value.
@@ -867,11 +924,10 @@ under single-use one approval lets exactly one through.
 
 What turning it on changes, so nobody is surprised:
 
-- **The broker becomes a policy enforcement point.** It was not one: on this
-  launcher it never asked wardryx anything. Now every tool call is decided
-  under your whole `policy.yaml`, a call with no `x-fuse-agent-id` header is
-  refused (it cannot be judged), and with wardryx or the proxy unreachable the
-  call is refused (fail closed, like the gateway).
+- **The broker asks through the proxy.** It is a policy enforcement point on
+  every box (above), asking wardryx directly; with the signal on it asks through
+  the proxy instead, so with the proxy unreachable the call is refused (fail
+  closed, like the gateway).
 - **A paid backend is asked once per tool call**, whatever your policy reads.
   typryx caps its own calls per hour (1000 by default); a spent cap just stops
   signals being added. With `jev` that is metered at TypeSafe.
@@ -1109,7 +1165,8 @@ reached from outside the LAN; `down -v`; a full disk; a lost `.env`.
 
 It verifies itself and tells you what it found. Three of its checks have to
 FAIL to pass: the money plane, the policy plane and the store must not be
-reachable from the host. Three more test the CREDENTIAL rather than the port,
+reachable from the host. Two more ask the gateway itself to refuse a call with no
+client key and one with a key it does not hold. Three more test the CREDENTIAL rather than the port,
 because a plane with a malformed key spec starts cleanly, stays reachable and
 authenticates nobody: the admin key must get 200, an unknown key 401, and the
 gateway's own key 403 when it tries to read policy. And one reads back the

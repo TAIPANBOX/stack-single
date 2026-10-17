@@ -74,16 +74,24 @@ elif ! printf '%s' "$BLOCK" | grep -q '^felyx_gateway_note()'; then
 elif [ "$(grep -c '\$(felyx_gateway_note)' install.sh)" -ne 1 ]; then
   fail "install.sh does not call felyx_gateway_note exactly once in the closing report: the note about Felyx is dead text or repeated"
 else
-  note_for() { # IDENTITY_KEYS_COUNT COPILOT_KEY FUSE_KEY: what the note prints
-    env -i PATH="$PATH" BLOCK="$BLOCK" KEYS="$1" CK="$2" FK="$3" bash -c '
+  note_for() { # IDENTITY_KEYS_COUNT COPILOT_KEY FUSE_KEY [MINTED]: what the note prints
+    env -i PATH="$PATH" BLOCK="$BLOCK" KEYS="$1" CK="$2" FK="$3" MINTED="${4:-0}" bash -c '
       set -euo pipefail
       eval "$BLOCK"
       STACK_DIR=/opt/agent-stack
       IDENTITY_KEYS_COUNT="$KEYS"
+      IDENTITY_MINTED="$MINTED"
       GENARYX_COPILOT_KEY="$CK"
       GENARYX_COPILOT_FUSE_KEY="$FK"
       felyx_gateway_note' 2>&1
   }
+  # keys the installer minted (invariant 35): Felyx's is one of them and is bound,
+  # so the note asks nothing of the operator and never prints the key
+  out="$(note_for 2 sk-provider "$SENTINEL" 1)"
+  case "$out" in *minted*) ;; *) fail "the note for a box whose keys the installer minted does not say Felyx's key was minted" ;; esac
+  case "$out" in *"its own agent id"*) ;; *) fail "the note for a box whose keys the installer minted does not say Felyx's key is bound to its own agent id" ;; esac
+  case "$out" in *"keys file"*|*"refused 401"*) fail "the note for a box whose keys the installer minted asks the operator to do what the installer did: $out" ;; esac
+  case "$out" in *"$SENTINEL"*) fail "the note for a box whose keys the installer minted printed the value of GENARYX_COPILOT_FUSE_KEY" ;; esac
   # client keys on, a key for Felyx's provider, and a key of its own for the gateway
   out="$(note_for 3 sk-provider "$SENTINEL")"
   [ -n "$out" ] || fail "Felyx has a gateway key and client keys are on, and the note says nothing"
@@ -111,6 +119,7 @@ fi
 if [ "$problems" -gt 0 ]; then
   exit 1
 fi
-echo "OK: the closing report tells an operator whose Felyx has a gateway key that it presents it and must be"
+echo "OK: the closing report tells an operator whose keys were minted that Felyx's is bound, one whose Felyx has"
+echo "    a gateway key that it presents it and must be"
 echo "    bound, one whose Felyx has none that its calls are refused 401, and nothing when there is nothing"
 echo "    to refuse; it never prints the key."

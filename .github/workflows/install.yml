@@ -122,6 +122,15 @@ jobs:
           sudo env STACK_DIR=/opt/agent-stack $extra ./install.sh 2>&1 | tee install-1.log
           grep -q "every check passed" install-1.log || { echo "::error::the first install did not pass every check"; exit 1; }
 
+      # What the first install minted (CLAUDE.md invariant 35), as digests only, so the
+      # re-run can be held to keeping it byte for byte. The identity leg gave files.
+      - name: the keys the first install minted
+        if: matrix.profile != 'identity'
+        run: |
+          cd /opt/agent-stack
+          sudo grep -E '^(GENARYX_COPILOT_FUSE_KEY|GATEWAY_AGENT_KEY|GATEWAY_CLIENT_KEYS)=' .env | sort | sha256sum >"$RUNNER_TEMP/minted-1.sha"
+          sudo sha256sum agent-key >>"$RUNNER_TEMP/minted-1.sha"
+
       - name: re-run over the same box
         run: |
           # The re-run says nothing about the risk signal: it must stay on from
@@ -168,7 +177,14 @@ jobs:
         run: |
           cd /opt/agent-stack
           [ "$(sudo grep -c '^OPENAI_DOOR_CLIENT_KEYS=' .env)" = 1 ] || { echo "::error::.env does not carry exactly one OPENAI_DOOR_CLIENT_KEYS after the re-run"; exit 1; }
-          if sudo grep -q '^GATEWAY_CLIENT_KEYS=' .env; then echo "::error::the door's keys reached the gateway's line"; exit 1; fi
+          # The gateway always has a client-keys line now (minted when no file is
+          # given), so the check is that none of the door's secrets is in it.
+          gw="$(sudo sed -n 's/^GATEWAY_CLIENT_KEYS=//p' .env)"
+          [ -n "$gw" ] || { echo "::error::the gateway has no client keys line, and it is required"; exit 1; }
+          while IFS= read -r line; do
+            s="${line%%:*}"; [ -n "$s" ] || continue
+            if grep -qF -- "$s" <<<"$gw"; then echo "::error::the door's keys reached the gateway's line"; exit 1; fi
+          done <"$DOOR_IN/keys.txt"
           sudo cmp -s identity-openai/identity.json "$DOOR_IN/identity.json" || { echo "::error::the door's installed map is not the map given"; exit 1; }
           fkey="$(sed -n 's/:flint$//p' "$DOOR_IN/keys.txt")"
           if grep -qF "$fkey" "$GITHUB_WORKSPACE/install-1.log" "$GITHUB_WORKSPACE/install-2.log"; then
@@ -235,6 +251,53 @@ jobs:
           [ "$c" = "403 identity_mismatch" ] || { echo "::error::a key speaking as another unit's agent was not refused 403 identity_mismatch"; exit 1; }
           [ "${d%% *}" = 402 ] || { echo "::error::a key speaking as its own agent did not get past identity to the budget (402)"; exit 1; }
 
+      # CLAUDE.md invariant 35, on every leg that gave no files: the gateway minted keys
+      # for Felyx and for the operator's agents, kept them through the re-run, and holds
+      # each to its own agent ids. A budget of one micro-dollar stops an admitted call
+      # before it reaches a provider, so 402 is "past identity". No key is printed.
+      - name: the gateway holds callers to the keys the installer minted
+        if: matrix.profile != 'identity'
+        run: |
+          cd /opt/agent-stack
+          sudo grep -qx "GATEWAY_IDENTITY_MINTED='1'" .env || { echo "::error::.env does not mark the keys as minted"; exit 1; }
+          [ "$(sudo grep -c '^GATEWAY_CLIENT_KEYS=' .env)" = 1 ] || { echo "::error::.env does not carry exactly one GATEWAY_CLIENT_KEYS"; exit 1; }
+          { sudo grep -E '^(GENARYX_COPILOT_FUSE_KEY|GATEWAY_AGENT_KEY|GATEWAY_CLIENT_KEYS)=' .env | sort | sha256sum; sudo sha256sum agent-key; } >"$RUNNER_TEMP/minted-2.sha"
+          diff "$RUNNER_TEMP/minted-1.sha" "$RUNNER_TEMP/minted-2.sha" >/dev/null || { echo "::error::the re-run changed a minted key, the spec or the agents' key file"; exit 1; }
+          [ "$(sudo stat -c '%a %U' agent-key)" = "600 root" ] || { echo "::error::agent-key is $(sudo stat -c '%a %U' agent-key), not 600 root"; exit 1; }
+          akey="$(sudo cat agent-key)"
+          fkey="$(sudo sed -n "s/^GENARYX_COPILOT_FUSE_KEY='\(.*\)'\$/\1/p" .env)"
+          [ -n "$akey" ] && [ -n "$fkey" ] && [ "$akey" != "$fkey" ] || { echo "::error::the agents' key or Felyx's key is missing, or they are the same"; exit 1; }
+          [ "$(sudo sed -n "s/^GATEWAY_AGENT_KEY='\(.*\)'\$/\1/p" .env)" = "$akey" ] || { echo "::error::agent-key does not hold the GATEWAY_AGENT_KEY .env holds"; exit 1; }
+          if grep -qF -e "$akey" -e "$fkey" "$GITHUB_WORKSPACE/install-1.log" "$GITHUB_WORKSPACE/install-2.log"; then
+            echo "::error::a minted key appears in the installer's output"; exit 1
+          fi
+          grep -qF '/opt/agent-stack/agent-key' "$GITHUB_WORKSPACE/install-1.log" || { echo "::error::the first install did not name the agents' key file"; exit 1; }
+          [ "$(sudo docker compose exec -T console printenv GENARYX_COPILOT_FUSE_KEY)" = "$fkey" ] || { echo "::error::the console does not hold Felyx's minted key"; exit 1; }
+          call() {
+            curl -s -o "$RUNNER_TEMP/body.json" -w '%{http_code}' -X POST http://127.0.0.1:4100/v1/messages \
+              -H 'content-type: application/json' -H "x-fuse-run-id: ci-$RANDOM" -H 'x-fuse-budget-usd: 0.000001' \
+              "$@" -d '{"model":"claude-haiku-4-5","max_tokens":1,"messages":[{"role":"user","content":"ci"}]}'
+            printf ' %s\n' "$(sed -n 's/.*"type":"\([a-z_]*\)".*/\1/p' "$RUNNER_TEMP/body.json")"
+          }
+          a="$(call -H 'x-fuse-agent-id: agent://local/agents/ci')"
+          b="$(call -H "x-fuse-key: $akey" -H 'x-fuse-agent-id: agent://local/agents/ci')"
+          c="$(call -H "x-fuse-key: $akey" -H 'x-fuse-agent-id: agent://local/genaryx/felyx')"
+          d="$(call -H "x-fuse-key: $fkey" -H 'x-fuse-agent-id: agent://local/genaryx/felyx')"
+          e="$(call -H "x-fuse-key: $fkey" -H 'x-fuse-agent-id: agent://local/agents/ci')"
+          echo "no key: $a | agents' key as an agent: $b | agents' key as Felyx: $c | Felyx's key as Felyx: $d | Felyx's key as an agent: $e"
+          [ "$a" = "401 unauthorized" ] || { echo "::error::a call with no key was not refused 401"; exit 1; }
+          [ "${b%% *}" = 402 ] || { echo "::error::the agents' key speaking as an agent did not get past identity to the budget (402)"; exit 1; }
+          [ "$c" = "403 identity_mismatch" ] || { echo "::error::the agents' key speaking as Felyx was not refused 403 identity_mismatch"; exit 1; }
+          [ "${d%% *}" = 402 ] || { echo "::error::Felyx's key speaking as Felyx did not get past identity to the budget (402)"; exit 1; }
+          [ "$e" = "403 identity_mismatch" ] || { echo "::error::Felyx's key speaking as an agent was not refused 403 identity_mismatch"; exit 1; }
+
+      - name: a box given its own files carries no minted keys
+        if: matrix.profile == 'identity'
+        run: |
+          cd /opt/agent-stack
+          if sudo grep -qE '^(GATEWAY_IDENTITY_MINTED|GATEWAY_AGENT_KEY)=' .env; then echo "::error::a box given its own files minted keys"; exit 1; fi
+          if sudo test -e agent-key; then echo "::error::a box given its own files has an agents' key file"; exit 1; fi
+
       - name: the chain verifier is up on every profile
         run: |
           cd /opt/agent-stack
@@ -248,6 +311,34 @@ jobs:
           cd /opt/agent-stack
           if sudo docker compose ps --services | grep -qx typryx-wardryx-proxy; then echo "::error::the proxy is still running after TYPED_RISK_SIGNAL=0"; exit 1; fi
           if sudo grep -q '^TYPED_RISK_' .env; then echo "::error::TYPED_RISK_ lines are still in .env after TYPED_RISK_SIGNAL=0"; exit 1; fi
+
+      # CLAUDE.md invariant 36, on the broker as a box without the risk signal runs it:
+      # it asks wardryx directly, refuses an unattributed call, refuses a raw secret in
+      # tool arguments, and refuses a tool the starter policy denies. AWS's documented
+      # example key id is a secret's shape and nobody's secret.
+      - name: the MCP broker blocks raw secrets and asks wardryx about every tool call
+        if: matrix.profile == 'typed-risk'
+        run: |
+          cd /opt/agent-stack
+          [ "$(sudo docker compose exec -T tokenfuse-mcp-broker printenv TOKENFUSE_WARDRYX_URL)" = http://wardryx:8090 ] \
+            || { echo "::error::without the risk signal the broker does not ask wardryx directly"; exit 1; }
+          mkey="$(sudo sed -n 's/^TOKENFUSE_MCP_KEYS=\([^:]*\):.*/\1/p' .env | head -1)"
+          mcp() {
+            curl -s -w ' %{http_code}' -X POST http://127.0.0.1:4200/mcp -H 'content-type: application/json' \
+              -H 'X-Fuse-Mcp-Upstream: typryx' -H "x-fuse-key: $mkey" "$@"
+          }
+          ask='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ask","arguments":{"template":"eval.outcome_met","state":{"task":"2+2","final_answer":"4"}},"_meta":{"typryx/key":"{{secret:typryx_key}}"}}}'
+          raw='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ask","arguments":{"template":"eval.outcome_met","state":{"task":"note AKIAIOSFODNN7EXAMPLE","final_answer":"4"}},"_meta":{"typryx/key":"{{secret:typryx_key}}"}}}'
+          deny='{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"shell_exec","arguments":{"cmd":"id"}}}'
+          a="$(mcp -H 'x-fuse-agent-id: agent://local.invalid/ci' -d "$ask")"
+          b="$(mcp -d "$ask")"
+          c="$(mcp -H 'x-fuse-agent-id: agent://local.invalid/ci' -d "$raw")"
+          d="$(mcp -H 'x-fuse-agent-id: agent://mockryx.local/ci' -d "$deny")"
+          echo "ask: ${a: -3} | no agent id: ${b: -3} | raw secret: $(cut -c1-90 <<<"$c") | denied tool: $(cut -c1-90 <<<"$d")"
+          grep -q '"isError":false' <<<"$a" || { echo "::error::an attributed ask through the broker was not answered: $a"; exit 1; }
+          [ "${b: -3}" = 400 ] || { echo "::error::a tools/call with no x-fuse-agent-id was not refused 400"; exit 1; }
+          grep -q '"code":-32002' <<<"$c" || { echo "::error::a raw secret in tool arguments was not refused -32002: $c"; exit 1; }
+          grep -q '"code":-32004' <<<"$d" || { echo "::error::a tool the starter policy denies was not refused -32004: $d"; exit 1; }
 
       - name: turning the OpenAI door off removes it and keeps its lines
         if: matrix.profile == 'openai-door'

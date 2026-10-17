@@ -7,6 +7,11 @@
 # this box runs is the judge of the files, in a throwaway container, so the check is the
 # real parser rather than a copy. Scenarios are bound to cases in scripts/gates-have-teeth.sh
 # by name, and scripts/features-are-bound.sh holds the binding both ways.
+# @decided 2026-10-17 (paraphrased): close the agent-security findings of the 2026-10-17
+# review, defaults first, so the gateway requires client keys on every box and a box given
+# no files gets keys the installer mints (features/the-metered-doors-need-a-key.feature).
+# The files below are how an operator brings their own; the scenario that said a box with
+# no file runs keyless is replaced by the one that says the gateway requires its keys.
 Feature: the installer takes client keys and the identity map as files, and keeps them
 
   A client key decides who may call the gateway. The identity map decides which agent
@@ -23,11 +28,11 @@ Feature: the installer takes client keys and the identity map as files, and keep
     # -> gates-have-teeth.sh "identity-files: the gateway loses its identity map setting"
     # -> gates-have-teeth.sh "identity-files: another service is handed the client keys"
 
-  Scenario: a box that gives no file runs exactly as before
-    Given an operator who never names CLIENT_KEYS_FILE or IDENTITY_MAP_FILE
-    When compose.yaml makes the keys required instead of empty by default
-    Then identity-files-are-checked.sh fails, because every such box would stop starting
-    # -> gates-have-teeth.sh "identity-files: the client keys become required"
+  Scenario: the gateway every box runs requires its keys
+    Given the installer writes the gateway's keys on every box, the operator's or its own
+    When compose.yaml gives the keys an empty default instead of requiring them
+    Then identity-files-are-checked.sh fails, because a box whose .env lost them would answer anyone
+    # -> gates-have-teeth.sh "identity-files: the gateway's client keys get an empty default"
 
   Scenario: the map is mounted read only, at the path .env names
     Given the gateway reads the map and must not be able to change it
@@ -114,7 +119,7 @@ Feature: the installer takes client keys and the identity map as files, and keep
 
   Scenario: a comment or a reworded refusal is not a fault
     Given reviewers write comments beside the settings and edit the wording of refusals
-    When a comment names a required form of the setting, or a refusal is reworded
+    When a comment names another form of the setting, or a refusal is reworded
     Then identity-files-are-checked.sh still passes
-    # -> gates-have-teeth.sh "identity-files: a comment that names a required setting is not the setting"
+    # -> gates-have-teeth.sh "identity-files: a comment that names another form of the setting is not the setting"
     # -> gates-have-teeth.sh "identity-files: a reworded refusal still refuses"
