@@ -1959,7 +1959,7 @@ run_case "felyx-through-the-gateway: Felyx's client key becomes required" fail \
 # the box held, including on a box that had given Felyx a key.
 run_case "felyx-through-the-gateway: the closing report says Felyx sends no key though it has one" fail \
 	'./scripts/felyx-through-the-gateway.sh' \
-	"$(py 'edit("install.sh", "  if [ -n \"${GENARYX_COPILOT_FUSE_KEY:-}\" ]; then\n    printf \x27\\n  Felyx", "  if false; then\n    printf \x27\\n  Felyx")')" \
+	"$(py 'edit("install.sh", "  elif [ -n \"${GENARYX_COPILOT_FUSE_KEY:-}\" ]; then\n    printf \x27\\n  Felyx", "  elif false; then\n    printf \x27\\n  Felyx")')" \
 	"although GENARYX_COPILOT_FUSE_KEY is set"
 
 run_case "felyx-through-the-gateway: the closing report stops saying a keyless Felyx is refused" fail \
