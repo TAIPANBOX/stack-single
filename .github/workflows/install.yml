@@ -177,7 +177,14 @@ jobs:
         run: |
           cd /opt/agent-stack
           [ "$(sudo grep -c '^OPENAI_DOOR_CLIENT_KEYS=' .env)" = 1 ] || { echo "::error::.env does not carry exactly one OPENAI_DOOR_CLIENT_KEYS after the re-run"; exit 1; }
-          if sudo grep -q '^GATEWAY_CLIENT_KEYS=' .env; then echo "::error::the door's keys reached the gateway's line"; exit 1; fi
+          # The gateway always has a client-keys line now (minted when no file is
+          # given), so the check is that none of the door's secrets is in it.
+          gw="$(sudo sed -n 's/^GATEWAY_CLIENT_KEYS=//p' .env)"
+          [ -n "$gw" ] || { echo "::error::the gateway has no client keys line, and it is required"; exit 1; }
+          while IFS= read -r line; do
+            s="${line%%:*}"; [ -n "$s" ] || continue
+            if grep -qF -- "$s" <<<"$gw"; then echo "::error::the door's keys reached the gateway's line"; exit 1; fi
+          done <"$DOOR_IN/keys.txt"
           sudo cmp -s identity-openai/identity.json "$DOOR_IN/identity.json" || { echo "::error::the door's installed map is not the map given"; exit 1; }
           fkey="$(sed -n 's/:flint$//p' "$DOOR_IN/keys.txt")"
           if grep -qF "$fkey" "$GITHUB_WORKSPACE/install-1.log" "$GITHUB_WORKSPACE/install-2.log"; then
