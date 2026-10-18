@@ -599,7 +599,7 @@ run_case "delegation-off-by-default: DELEGATION_ON is set to 1 with no switch ab
 
 run_case "delegation-off-by-default: install.sh starts the profile unconditionally" fail \
 	'./scripts/delegation-off-by-default.sh' \
-	"$(py 'edit("install.sh", "[ \"${DELEGATION_ON:-0}\" = 1 ] || UP_PROFILES+=(--profile delegation)", "UP_PROFILES+=(--profile delegation)")')" \
+	"$(py 'edit("install.sh", "if [ \"${DELEGATION_ON:-0}\" = 1 ]; then UP_PROFILES+=(--profile delegation); fi", "UP_PROFILES+=(--profile delegation)")')" \
 	"no WITH_DELEGATION guard"
 
 # invariant 26: closing a retained reservation is off by default, and on, the
