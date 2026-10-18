@@ -1931,8 +1931,9 @@ agent_tokens_resolve() {
   DELEGATION_ON=1
   td="$(identity_env_get RECORD_TRUST_DOMAIN)"
   [ -n "$td" ] || td="${RECORD_TRUST_DOMAIN:-local}"
-  [[ "$td" =~ ^[A-Za-z0-9.-]{1,253}$ ]] && [ "$td" != mockryx.local ] \
-    || die "RECORD_TRUST_DOMAIN must be a name of A-Z a-z 0-9 . and - other than mockryx.local, because the agent's id is in it. Nothing was installed."
+  if ! { [[ "$td" =~ ^[A-Za-z0-9.-]{1,253}$ ]] && [ "$td" != mockryx.local ]; }; then
+    die "RECORD_TRUST_DOMAIN must be a name of A-Z a-z 0-9 . and - other than mockryx.local, because the agent's id is in it. Nothing was installed."
+  fi
   AGENT_TOKEN_AGENT="agent://$td/agents/operator"
   [ "$MINT_ON" = 1 ] \
     || die "WITH_AGENT_TOKENS=1 on a box given its own client keys: the MCP broker needs a key of its own, so give it a line 'broker:<secret>' in your keys file, bound in your identity map to agent://$td/agents/*. Or remove CLIENT_KEYS_FILE and IDENTITY_MAP_FILE and let the installer mint the keys. Nothing was installed."
