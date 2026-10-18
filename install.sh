@@ -1709,7 +1709,7 @@ mint_env_secret() {
 # Section 3, once .env exists: the secrets, the spec and the map, handed to section
 # 3e as if they were the operator's files.
 mint_prepare() {
-  local felyx agents drills why seen s
+  local felyx agents drills broker why seen s
   [ "$MINT_ON" = 1 ] || return 0
   mint_env_secret GENARYX_COPILOT_FUSE_KEY
   mint_env_secret GATEWAY_AGENT_KEY
@@ -1723,17 +1723,25 @@ mint_prepare() {
   [ -z "$why" ] || die "GATEWAY_AGENT_KEY in .env, the agents' client key, $why. Empty that line and the installer mints one. Nothing was started."
   why="$(identity_entry_why "$drills:drills")"
   [ -z "$why" ] || die "GATEWAY_DRILLS_KEY in .env, the fire drills' key, $why. Empty that line and the installer mints one. Nothing was started."
+  # The broker's own key exists only with agent tokens on (agent_tokens_apply mints it).
+  broker=""
+  if [ "$AGENT_TOKENS_ON" = 1 ]; then broker="$(identity_env_get GATEWAY_BROKER_KEY)"; fi
   seen=""
-  for s in "$felyx" "$agents" "$drills"; do
+  for s in "$felyx" "$agents" "$drills" ${broker:+"$broker"}; do
     case " $seen " in
       *" $s "*) die "two of GENARYX_COPILOT_FUSE_KEY, GATEWAY_AGENT_KEY and GATEWAY_DRILLS_KEY in .env hold the same secret, so one agent could speak as another. Empty one of those lines and the installer mints a new one. Nothing was started." ;;
     esac
     seen="$seen $s"
   done
   MINT_MAP="$(mktemp)" || die "could not make a temporary file for the minted identity map"
-  printf '{\n  "units": [\n    {"id": "console", "name": "Felyx, the console copilot"},\n    {"id": "agents", "name": "The operator agents"},\n    {"id": "drills", "name": "The fire drills"}\n  ],\n  "keys": [\n    {"key_id": "felyx", "unit": "console", "agents": ["agent://%s/genaryx/felyx"]},\n    {"key_id": "agents", "unit": "agents", "agents": ["agent://%s/agents/*"]},\n    {"key_id": "drills", "unit": "drills", "agents": ["agent://mockryx.local/*"]}\n  ]\n}\n' \
-    "$MINT_DOMAIN" "$MINT_DOMAIN" >"$MINT_MAP" || die "could not write the minted identity map"
-  IDENTITY_KEYS_NEW="$felyx:felyx,$agents:agents,$drills:drills"
+  {
+    printf '{\n  "units": [\n    {"id": "console", "name": "Felyx, the console copilot"},\n    {"id": "agents", "name": "The operator agents"},\n    {"id": "drills", "name": "The fire drills"}'
+    [ -z "$broker" ] || printf ',\n    {"id": "broker", "name": "The MCP broker, relaying tool-call checks"}'
+    printf '\n  ],\n  "keys": [\n    {"key_id": "felyx", "unit": "console", "agents": ["agent://%s/genaryx/felyx"]},\n    {"key_id": "agents", "unit": "agents", "agents": ["agent://%s/agents/*"]},\n    {"key_id": "drills", "unit": "drills", "agents": ["agent://mockryx.local/*"]}' "$MINT_DOMAIN" "$MINT_DOMAIN"
+    [ -z "$broker" ] || printf ',\n    {"key_id": "broker", "unit": "broker", "agents": ["agent://%s/agents/*"]}' "$MINT_DOMAIN"
+    printf '\n  ]\n}\n'
+  } >"$MINT_MAP" || die "could not write the minted identity map"
+  IDENTITY_KEYS_NEW="$felyx:felyx,$agents:agents,$drills:drills${broker:+,$broker:broker}"
   IDENTITY_KEYS_GIVEN=1
   IDENTITY_MAP_SRC="$MINT_MAP"
 }
@@ -1882,6 +1890,112 @@ upstream_reach_note() {
   fi
 }
 # upstream-key: end
+
+# ---- 3b-agent. agent tokens: vouchryx enrols one agent, the doors verify its token ----
+# agent-tokens: begin
+# @decided 2026-10-18 (paraphrased, wave 1 design section 1, decisions D1 a, D2 a and
+# D8 a): an agent presents a short-lived, sender-constrained token of its own instead of a
+# static client key, when the operator asks for it with WITH_AGENT_TOKENS=1. Off by
+# default, so a box that did not ask runs what it ran before (CLAUDE.md invariant 40).
+# On, vouchryx starts with the delegation plane (invariant 15's profile, but no trusted
+# issuer is invented: the agent's own registry line is the trust), enrols ONE agent, and
+# the gateway and the MCP broker verify its token offline for their own audience, against
+# a revocation list that fails closed. A stopped agent is one vouchryx revocation.
+#
+# What this wave does NOT do, named here and in the report: vouchryx reads its registry
+# from one environment variable, so this installer enrols one agent per box (the
+# operator's, `agent://<td>/agents/operator`). More agents need the registry read from a
+# file, which vouchryx does not do yet. The enrolment secret never reaches .env or a log:
+# it lives in $STACK_DIR/agent-token.key (0600), and .env holds only its SHA-256 digest.
+#
+# The broker's own gateway client key (taint relay, tokenfuse invariant 123) is minted
+# only on a box the installer gives keys to (MINT_ON): a box with its own keys file must
+# add a `broker` line itself, so the installer never edits a file it did not write.
+AGENT_TOKENS_ON=0      # 1 when this run turns agent tokens on
+DELEGATION_ON=0        # 1 when vouchryx runs this run: WITH_DELEGATION or agent tokens
+AGENT_TOKEN_AGENT=""   # the one agent enrolled: agent://<td>/agents/operator
+
+# Section 0, before anything is installed: refuses a value it does not read, and a pair
+# it cannot honour. Writes nothing. Runs after mint_resolve, which decides MINT_ON.
+agent_tokens_resolve() {
+  local td
+  case "${WITH_AGENT_TOKENS:-}" in
+    "") return 0 ;;
+    1) ;;
+    0) return 0 ;;
+    *) die "WITH_AGENT_TOKENS must be 1 (agent tokens on) or 0 (off), not what it was given. Nothing was installed." ;;
+  esac
+  AGENT_TOKENS_ON=1
+  DELEGATION_ON=1
+  td="$(identity_env_get RECORD_TRUST_DOMAIN)"
+  [ -n "$td" ] || td="${RECORD_TRUST_DOMAIN:-local}"
+  [[ "$td" =~ ^[A-Za-z0-9.-]{1,253}$ ]] && [ "$td" != mockryx.local ] \
+    || die "RECORD_TRUST_DOMAIN must be a name of A-Z a-z 0-9 . and - other than mockryx.local, because the agent's id is in it. Nothing was installed."
+  AGENT_TOKEN_AGENT="agent://$td/agents/operator"
+  [ "$MINT_ON" = 1 ] \
+    || die "WITH_AGENT_TOKENS=1 on a box given its own client keys: the MCP broker needs a key of its own, so give it a line 'broker:<secret>' in your keys file, bound in your identity map to agent://$td/agents/*. Or remove CLIENT_KEYS_FILE and IDENTITY_MAP_FILE and let the installer mint the keys. Nothing was installed."
+}
+
+# Section 3, after .env exists and before section 3e reads the keys: the enrolment
+# secret into its file, the registry line and the settings the doors read, and the
+# broker's own key into its file. Off, a run that said WITH_AGENT_TOKENS=0 forgets the
+# lines that turn the plane on and keeps every secret it minted.
+agent_tokens_apply() {
+  local f="$STACK_DIR/agent-token.key" secret digest broker why v
+  # The broker's key directory exists on every box, so compose never creates it as root.
+  mkdir -p "$STACK_DIR/broker" || die "could not make $STACK_DIR/broker for the broker's key"
+  chmod 0755 "$STACK_DIR/broker" || die "could not set the mode of $STACK_DIR/broker"
+  if [ "$AGENT_TOKENS_ON" != 1 ]; then
+    if [ "${WITH_AGENT_TOKENS:-}" = 0 ] && [ -n "$(identity_env_get VOUCHRYX_AGENTS)" ]; then
+      identity_env_set TOKENFUSE_AGENT_TOKENS off
+      for v in VOUCHRYX_AGENTS VOUCHRYX_ALLOWED_AUDIENCES BROKER_TAINT_GATEWAY BROKER_GATEWAY_KEY_FILE \
+          MCP_BROKER_DELEGATION_AUDIENCE MCP_BROKER_DELEGATION_URL; do
+        mint_env_forget "$v"
+      done
+      note "agent tokens: off. The enrolment secret and the broker key stay in their files; nothing accepts them"
+    fi
+    return 0
+  fi
+  if [ ! -s "$f" ]; then
+    ( umask 077; printf '%s' "$(gen 40)" >"$f.tmp" ) || die "could not write the enrolment secret to $f"
+    mv -f "$f.tmp" "$f" || die "could not put the enrolment secret in place at $f"
+    note "minted the agent's enrolment secret into $f (0600, never printed)"
+  fi
+  chmod 0600 "$f" || die "could not set the mode of $f"
+  secret="$(cat "$f")"
+  digest="$(printf '%s' "$secret" | openssl dgst -sha256 -hex | awk '{print $NF}')"
+  [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || die "could not compute the enrolment digest. Nothing was started."
+  identity_env_set VOUCHRYX_AGENTS "$AGENT_TOKEN_AGENT|agents|local|sha256:$digest"
+  identity_env_set VOUCHRYX_ALLOWED_AUDIENCES "tokenfuse-gateway,tokenfuse-mcp-broker"
+  identity_env_set TOKENFUSE_AGENT_TOKENS accept
+  identity_env_set TOKENFUSE_DELEGATION_ISSUER http://vouchryx:4310
+  identity_env_set TOKENFUSE_DELEGATION_AUDIENCE tokenfuse-gateway
+  identity_env_set TOKENFUSE_DELEGATION_URL "http://$GATEWAY_PROBE:4100"
+  identity_env_set TOKENFUSE_DELEGATION_REVOCATIONS http://vouchryx:4310/v1/revocations
+  identity_env_set TOKENFUSE_DELEGATION_REVOCATIONS_INTERVAL_MS 12000
+  identity_env_set MCP_BROKER_DELEGATION_AUDIENCE tokenfuse-mcp-broker
+  identity_env_set MCP_BROKER_DELEGATION_URL "http://$GATEWAY_PROBE:4200"
+  identity_env_set BROKER_TAINT_GATEWAY http://tokenfuse-gateway:4100
+  identity_env_set BROKER_GATEWAY_KEY_FILE /run/broker/key
+  mint_env_secret GATEWAY_BROKER_KEY
+  broker="$(identity_env_get GATEWAY_BROKER_KEY)"
+  why="$(identity_entry_why "$broker:broker")"
+  [ -z "$why" ] || die "GATEWAY_BROKER_KEY in .env, the broker's client key, $why. Empty that line and the installer mints one. Nothing was started."
+  upstream_put "$broker" "$STACK_DIR/broker"
+  note "the broker's key: in $STACK_DIR/broker/key (0400, uid 10001, never printed)"
+}
+
+agent_tokens_reach_note() {
+  [ "$AGENT_TOKENS_ON" = 1 ] || return 0
+  printf '\n  Agent tokens are ON. The agent %s enrols at vouchryx, not published to the\n' "$AGENT_TOKEN_AGENT"
+  printf '  host, with the secret in %s/agent-token.key (0600, never printed). It\n' "$STACK_DIR"
+  printf '  exchanges that for a five-minute token bound to its DPoP key and sends\n'
+  printf '  Authorization: DPoP <token> with a proof. A static key still works beside it\n'
+  printf '  until you turn it off (CLAUDE.md invariant 40). Stop the agent with one call:\n'
+  printf '  POST http://vouchryx:4310/v1/revoke with ban, using VOUCHRYX_REVOKE_KEYS from .env.'
+}
+# agent-tokens: end
+
 
 # ---- 0g. a second door, on the OpenAI wire (opt-in) ----------------------------
 # The gateway speaks the Anthropic wire, POST /v1/messages. An agent whose SDK
@@ -2072,6 +2186,7 @@ if [ "$DOOR_ON" = 1 ]; then
 fi
 mint_resolve
 upstream_resolve
+agent_tokens_resolve
 
 say "installing docker and git"
 export DEBIAN_FRONTEND=noninteractive
@@ -2693,6 +2808,7 @@ door_apply
 # The gateway's client keys when this box was given none (section 0f, invariant 35):
 # Felyx's and the agents' secrets minted into .env if absent, and the spec and map
 # built from them for section 3e to check and install.
+agent_tokens_apply
 mint_prepare
 # The provider keys the gateway and the OpenAI door hold (section 0h, invariant 39): the
 # directories compose mounts, the files written from what the operator gave, and the
@@ -2800,13 +2916,13 @@ gateway_probe_resolve
 # every other plane running while the one thing the operator actually asked
 # for, a verified chain, silently never happened. So this is checked here,
 # before section 3c pulls a single image.
-if [ -n "${WITH_DELEGATION:-}" ]; then
+if [ "$DELEGATION_ON" = 1 ]; then
   say "delegation"
   # The value on this box now, whichever run put it there: an operator's own
   # VOUCHRYX_TRUSTED_ISSUERS in the environment this run, or .env already
   # carrying one from an earlier run (just sourced above).
   VOUCHRYX_TRUSTED_ISSUERS="${VOUCHRYX_TRUSTED_ISSUERS:-}"
-  if [ -z "$VOUCHRYX_TRUSTED_ISSUERS" ] && [ -z "${WITH_DELEGATION_DEMO_ISSUER:-}" ]; then
+  if [ -n "${WITH_DELEGATION:-}" ] && [ -z "$VOUCHRYX_TRUSTED_ISSUERS" ] && [ -z "${WITH_DELEGATION_DEMO_ISSUER:-}" ]; then
     die "WITH_DELEGATION=1 needs a trusted upstream issuer to verify the subject and actor \
 tokens it exchanges against, and none is configured. Set VOUCHRYX_TRUSTED_ISSUERS='iss|aud|jwks-path' \
 (the jwks-path readable inside $STACK_DIR/delegation once this run finishes), naming the identity \
@@ -2843,7 +2959,7 @@ posture and README says so."
   if [ ! -f delegation/signing.pem ]; then
     note "vouchryx: minting a signing key"
     docker run --rm --user 0:0 -v "$STACK_DIR/delegation:/out" \
-        --entrypoint vouchryx-demo "${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.3.0}" \
+        --entrypoint vouchryx-demo "${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.4.0}" \
         keygen -out /out/signing >/dev/null \
       || die "could not mint vouchryx's signing key"
     chown 65532:65532 delegation/signing.pem delegation/signing.jwks.json
@@ -2856,11 +2972,11 @@ posture and README says so."
   # IdP a real deployment would point at instead, minted the same way the
   # signing key above is. Never a production posture, and never chosen unless
   # the operator names it explicitly (CLAUDE.md invariant 15).
-  if [ -z "$VOUCHRYX_TRUSTED_ISSUERS" ]; then
+  if [ -z "$VOUCHRYX_TRUSTED_ISSUERS" ] && [ -n "${WITH_DELEGATION_DEMO_ISSUER:-}" ]; then
     if [ ! -f delegation/idp.pem ]; then
       note "vouchryx: minting a demo issuer (WITH_DELEGATION_DEMO_ISSUER=1, never for production)"
       docker run --rm --user 0:0 -v "$STACK_DIR/delegation:/out" \
-          --entrypoint vouchryx-demo "${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.3.0}" \
+          --entrypoint vouchryx-demo "${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.4.0}" \
           keygen -out /out/idp -kid stack-single-demo-idp >/dev/null \
         || die "could not mint the demo issuer key"
       chown 65532:65532 delegation/idp.pem delegation/idp.jwks.json
@@ -2914,7 +3030,7 @@ if [ -z "$BUILD_FROM_SOURCE" ]; then
   # typed profile, so this adds nothing to pull; it is named so that
   # `config --images` resolves the same set docker will run.
   if [ "$TYPED_PLANE" != off ] && [ "$TYPED_RISK_ON" = 1 ]; then profiles+=(--profile typed-risk-signal); fi
-  [ -z "${WITH_DELEGATION:-}" ] || profiles+=(--profile delegation)
+  [ "$DELEGATION_ON" = 1 ] || profiles+=(--profile delegation)
   # The OpenAI door runs the gateway's own image, so this adds nothing to pull;
   # named so that `config --images` resolves the same set docker will run.
   [ "$DOOR_ON" != 1 ] || profiles+=(--profile openai-door)
@@ -3163,7 +3279,7 @@ UP_PROFILES=()
 # it serves, and only with typed answers on: a flag with no typryx was refused
 # in section 0b, and a saved flag is inert while typed answers are off.
 if [ "$TYPED_PLANE" != off ] && [ "$TYPED_RISK_ON" = 1 ]; then UP_PROFILES+=(--profile typed-risk-signal); fi
-[ -z "${WITH_DELEGATION:-}" ] || UP_PROFILES+=(--profile delegation)
+[ "$DELEGATION_ON" = 1 ] || UP_PROFILES+=(--profile delegation)
 # The OpenAI door (OPENAI_DOOR=1, section 0g) is started like the typed plane, so
 # section 8 can ask it the questions it asks the gateway.
 [ "$DOOR_ON" != 1 ] || UP_PROFILES+=(--profile openai-door)
@@ -3176,7 +3292,7 @@ if [ "$TYPED_PLANE" != off ] && [ "$TYPED_RISK_ON" = 1 ]; then UP_PROFILES+=(--p
 # gateway's own compose block). So vouchryx comes up alone first, this run
 # fetches its JWKS onto disk, and only then does the gateway start for the
 # first time with that file already in place.
-if [ -n "${WITH_DELEGATION:-}" ]; then
+if [ "$DELEGATION_ON" = 1 ]; then
   say "vouchryx"
   "${COMPOSE[@]}" --profile delegation up -d vouchryx
   # Not published to the host (compose.yaml's own comment on the vouchryx
@@ -3491,7 +3607,7 @@ elif [ "$IDENTITY_KEYS_COUNT" -gt 0 ]; then
 fi
 # The gateway always holds client keys now (compose requires them), so the branch
 # for a map with no keys, which used to follow, is gone with it.
-IDENTITY_REACH="$IDENTITY_REACH$(felyx_gateway_note)$(upstream_reach_note)"
+IDENTITY_REACH="$IDENTITY_REACH$(felyx_gateway_note)$(upstream_reach_note)$(agent_tokens_reach_note)"
 
 # The OpenAI door, when this box runs it: where an agent points, what it sends,
 # who pays, and what this box does not see of it. Its keys are named by where they

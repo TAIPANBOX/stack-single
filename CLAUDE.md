@@ -76,6 +76,7 @@ change here is a change to something with root on somebody else's box.
 ./scripts/wardryx-gateway-key-is-pep.sh
 ./scripts/network-membership.sh
 ./scripts/no-provider-key-outside-the-gateway.sh
+./scripts/agent-tokens-are-wired.sh
 ./scripts/gates-have-teeth.sh   # invariant 8; needs a clean tree
 ```
 
@@ -1378,6 +1379,33 @@ an absent invariant.
     but the console does not present it until a console image carries mockryx's
     key flag (release lane); CostCrew, which is not given a gateway here, because
     invariant 24 keeps the add-on out of the core until the owner decides otherwise.)*
+
+40. **An agent can present its own short-lived token, and the doors that accept it
+    verify it where it is judged, for their own audience, against a revocation list that
+    fails closed. Off unless the operator asks.** `@decided 2026-10-18` (paraphrased, wave 1
+    design sections 1.2 to 1.7, decisions D1 a, D2 a and D8 a): a static client key is one
+    secret per namespace that cannot be stopped for one agent at runtime (findings F-001 and
+    F-005, launcher half). `@claude 2026-10-18`: `WITH_AGENT_TOKENS=1` writes
+    `TOKENFUSE_AGENT_TOKENS=accept` into `.env`, starts vouchryx with the delegation profile
+    (this is the opt-in that starts it; invariant 15's default is unchanged, and no trusted
+    issuer is invented), enrols ONE agent (`agent://<td>/agents/operator`), and gives the
+    gateway and the MCP broker their own audiences, `tokenfuse-gateway` and
+    `tokenfuse-mcp-broker`, with the revocation list at vouchryx failing closed. The
+    enrolment secret lives in `agent-token.key` (0600) and only its SHA-256 digest is in
+    `.env`. The broker's taint relay uses its own `broker` client key from a file, and the
+    installer mints that key only on a box it gives keys to; a box with its own keys file
+    must add the line itself. The OpenAI door keeps static keys only.
+    *(gate: `scripts/agent-tokens-are-wired.sh`: with the switch off, the gateway and the broker
+    read it as off and vouchryx enrols nobody; with it on, the gateway and the broker verify
+    against vouchryx's issuer and key set for a non-empty audience of their own, poll the
+    revocation list and fail closed, the broker reads its key from a read-only mount, vouchryx
+    publishes no port and signs for the two audiences; the installer block writes the secret
+    0600 and never into .env; refuses to report OK on no gateway, broker or vouchryx service,
+    or no installer block; scenarios in `features/an-agent-presents-its-own-token.feature`;
+    10 teeth cases in `scripts/gates-have-teeth.sh`. Not covered: more than one agent per box
+    (vouchryx reads its registry from one variable; a registry file is a vouchryx change), the
+    OpenAI door, a live stop measured on a real agent framework, the SDK helper (T5, outside
+    this repo), and the broker's relayed check, which the local measurement did not exercise.)*
 
 ## Decisions that have no gate yet
 

@@ -2990,6 +2990,60 @@ run_case "no-provider-key-outside-the-gateway: no gateway left to judge" fail \
 	"measured NOTHING"
 
 
+
+# ---- agent-tokens-are-wired (CLAUDE.md invariant 40, wave 1 S4) ----------------
+# The agent's own token is accepted only where it is verified: off by default, and on, the
+# two doors check it against vouchryx for their own audience, against a revocation list
+# that fails closed, and vouchryx publishes nothing and keeps the enrolment secret out of .env.
+run_case "agent-tokens-are-wired: the switch is accept by default" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit_all("compose.yaml", "TOKENFUSE_AGENT_TOKENS: ${TOKENFUSE_AGENT_TOKENS:-off}", "TOKENFUSE_AGENT_TOKENS: ${TOKENFUSE_AGENT_TOKENS:-accept}")')" \
+	"must be off"
+
+run_case "agent-tokens-are-wired: the gateway's audience is empty" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_DELEGATION_AUDIENCE: ${TOKENFUSE_DELEGATION_AUDIENCE:-}\n", "      TOKENFUSE_DELEGATION_AUDIENCE: \"\"\n")')" \
+	"is empty"
+
+run_case "agent-tokens-are-wired: the revocation list fails open" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit_all("compose.yaml", "TOKENFUSE_DELEGATION_REVOCATIONS_FAILMODE: closed", "TOKENFUSE_DELEGATION_REVOCATIONS_FAILMODE: open")')" \
+	"does not fail closed"
+
+run_case "agent-tokens-are-wired: the gateway polls no revocation list" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit_all("compose.yaml", "      TOKENFUSE_DELEGATION_REVOCATIONS: ${TOKENFUSE_DELEGATION_REVOCATIONS:-}\n", "      TOKENFUSE_DELEGATION_REVOCATIONS: \"\"\n")')" \
+	"polls no revocation list"
+
+run_case "agent-tokens-are-wired: the broker's taint-gateway key file is gone" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_MCP_TAINT_GATEWAY_KEY_FILE: ${BROKER_GATEWAY_KEY_FILE:-}\n", "      TOKENFUSE_MCP_TAINT_GATEWAY_KEY_FILE: \"\"\n")')" \
+	"reads its taint-gateway key from"
+
+run_case "agent-tokens-are-wired: the broker does not mount its key directory" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("compose.yaml", "      - ./broker:/run/broker:ro\n", "")')" \
+	"does not mount ./broker at /run/broker read only"
+
+run_case "agent-tokens-are-wired: vouchryx publishes a port" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("compose.yaml", "    user: \"65532:10001\"\n    environment:\n      VOUCHRYX_ADDR", "    user: \"65532:10001\"\n    ports:\n      - \"127.0.0.1:4310:4310\"\n    environment:\n      VOUCHRYX_ADDR")')" \
+	"publishes ports"
+
+run_case "agent-tokens-are-wired: the installer writes the enrolment secret to .env" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("install.sh", "  identity_env_set VOUCHRYX_AGENTS \"$AGENT_TOKEN_AGENT|agents|local|sha256:$digest\"\n", "  identity_env_set VOUCHRYX_AGENTS \"$AGENT_TOKEN_AGENT|agents|local|sha256:$digest\"\n  identity_env_set ENROL_SECRET \"$secret\"\n")')" \
+	"writes an enrolment secret into .env"
+
+run_case "agent-tokens-are-wired: a reworded comment is not a fault" pass \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("install.sh", "# What this wave does NOT do, named here", "# What this wave does not do, named here")')"
+
+run_case "agent-tokens-are-wired: no vouchryx service left to judge" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("compose.yaml", "  vouchryx:\n    <<: *restart\n", "  vouchryx-moved:\n    <<: *restart\n")')" \
+	"measured NOTHING"
+
 echo
 if [ -n "$(git status --porcelain)" ]; then
 	printf 'FAIL: this script left the tree dirty, so it cannot be trusted about anything above\n'

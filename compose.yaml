@@ -739,10 +739,30 @@ services:
       # first and its own deadline (TYPED_RISK_ASK_TIMEOUT_MS, at most 5000)
       # must fit inside this one or the call is refused for being slow.
       TOKENFUSE_MCP_WARDRYX_TIMEOUT_MS: "7000"
+      # Agent tokens, the same switch and the same delegation door as the gateway,
+      # for this door's own audience and origin (CLAUDE.md invariant 40). Off
+      # unless the operator asks for WITH_AGENT_TOKENS=1.
+      TOKENFUSE_AGENT_TOKENS: ${TOKENFUSE_AGENT_TOKENS:-off}
+      TOKENFUSE_DELEGATION_ISSUER: ${TOKENFUSE_DELEGATION_ISSUER:-}
+      TOKENFUSE_DELEGATION_JWKS: ${TOKENFUSE_DELEGATION_JWKS:-}
+      TOKENFUSE_DELEGATION_AUDIENCE: ${MCP_BROKER_DELEGATION_AUDIENCE:-}
+      TOKENFUSE_DELEGATION_URL: ${MCP_BROKER_DELEGATION_URL:-}
+      TOKENFUSE_DELEGATION_REVOCATIONS: ${TOKENFUSE_DELEGATION_REVOCATIONS:-}
+      TOKENFUSE_DELEGATION_REVOCATIONS_INTERVAL_MS: ${TOKENFUSE_DELEGATION_REVOCATIONS_INTERVAL_MS:-}
+      TOKENFUSE_DELEGATION_REVOCATIONS_FAILMODE: closed
+      # The relayed tool-call check goes to the gateway, with the broker's own
+      # client key read from a file (its `broker` key, invariant 40). Both empty,
+      # the default, and the broker asks no gateway, as it did before.
+      TOKENFUSE_MCP_TAINT_GATEWAY: ${BROKER_TAINT_GATEWAY:-}
+      TOKENFUSE_MCP_TAINT_GATEWAY_KEY_FILE: ${BROKER_GATEWAY_KEY_FILE:-}
     ports:
       - "${GATEWAY_BIND:-127.0.0.1}:4200:4200"
     volumes:
       - events:/var/lib/stack/events
+      # The delegation JWKS the agent-token door verifies against, read only, and
+      # the broker's own taint-gateway key (its directory, read only, this door alone).
+      - ./delegation-public:/etc/tokenfuse/delegation:ro
+      - ./broker:/run/broker:ro
     # Agents reach the broker here; core reaches typryx and the planes; the
     # risk-signal network reaches the proxy and wardryx; front publishes port
     # 4200 (a published port needs a network with a route to the host; see the
@@ -902,6 +922,13 @@ services:
       # the same way `pgdata` and `wgstate` already do, so an operator
       # clearing the bus never quietly un-revokes a delegation.
       VOUCHRYX_REVOCATIONS_PATH: /var/lib/vouchryx/revocations.ndjson
+      # Agent tokens (CLAUDE.md invariant 40): one enrolled agent per registry line,
+      # its secret held only as a SHA-256 digest; install.sh writes the line when
+      # WITH_AGENT_TOKENS=1. Empty, vouchryx enrols nobody and closes the grant.
+      VOUCHRYX_AGENTS: ${VOUCHRYX_AGENTS:-}
+      # The audiences a token may be issued for: exactly the two doors that verify
+      # agent tokens, written by install.sh with the switch. Empty, the issuer alone.
+      VOUCHRYX_ALLOWED_AUDIENCES: ${VOUCHRYX_ALLOWED_AUDIENCES:-}
     volumes:
       # The signing key and, when WITH_DELEGATION_DEMO_ISSUER minted one, the
       # demo issuer's own public JWKS: both written once by install.sh into
@@ -1089,6 +1116,14 @@ services:
       # gateway does not need it to be.
       TOKENFUSE_DELEGATION_REVOCATIONS: ${TOKENFUSE_DELEGATION_REVOCATIONS:-}
       TOKENFUSE_DELEGATION_REVOCATIONS_INTERVAL_MS: ${TOKENFUSE_DELEGATION_REVOCATIONS_INTERVAL_MS:-}
+      # Agent tokens (CLAUDE.md invariant 40): off unless the operator asks for
+      # WITH_AGENT_TOKENS=1, which writes accept into .env. On accept tokenfuse
+      # refuses to start without the audience and a revocation list that fails
+      # closed (tokenfuse agenttoken.rs). The fail mode is written out here, not
+      # left to tokenfuse's default: a list that failed open would honour a
+      # stopped agent. `agent-tokens-are-wired.sh` holds both.
+      TOKENFUSE_AGENT_TOKENS: ${TOKENFUSE_AGENT_TOKENS:-off}
+      TOKENFUSE_DELEGATION_REVOCATIONS_FAILMODE: closed
       # Client keys and the identity map (tokenfuse docs/20): who may call this
       # gateway (`x-fuse-key`), which agent ids each key may speak as, and which
       # unit pays. The keys are REQUIRED: with none, tokenfuse admits every
