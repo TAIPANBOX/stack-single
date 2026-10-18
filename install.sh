@@ -1725,7 +1725,7 @@ mint_prepare() {
   [ -z "$why" ] || die "GATEWAY_DRILLS_KEY in .env, the fire drills' key, $why. Empty that line and the installer mints one. Nothing was started."
   # The broker's own key exists only with agent tokens on (agent_tokens_apply mints it).
   broker=""
-  if [ "$AGENT_TOKENS_ON" = 1 ]; then broker="$(identity_env_get GATEWAY_BROKER_KEY)"; fi
+  if [ "${AGENT_TOKENS_ON:-0}" = 1 ]; then broker="$(identity_env_get GATEWAY_BROKER_KEY)"; fi
   seen=""
   for s in "$felyx" "$agents" "$drills" ${broker:+"$broker"}; do
     case " $seen " in
