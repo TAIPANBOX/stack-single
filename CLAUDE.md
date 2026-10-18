@@ -75,6 +75,7 @@ change here is a change to something with root on somebody else's box.
 ./scripts/broker-blocks-raw-secrets.sh
 ./scripts/wardryx-gateway-key-is-pep.sh
 ./scripts/network-membership.sh
+./scripts/no-provider-key-outside-the-gateway.sh
 ./scripts/gates-have-teeth.sh   # invariant 8; needs a clean tree
 ```
 
@@ -1345,6 +1346,38 @@ an absent invariant.
     behaviour was measured on Docker Desktop only; the browser's own route over
     `edge` is open by design; and no fetch through the `egress-browser` profile has
     been decided by wardryx in CI, only the network path to wardryx is checked.)*
+
+39. **The provider key is held by the gateway, read from a file, and no agent-facing
+    service carries it.** `@decided 2026-10-18` (paraphrased, wave 1 of the
+    2026-10-17 agent-security review, its design section 2 and decision D9): an
+    agent that holds the provider key can call the model with no gateway in the
+    way, and the gateway used to forward whatever key a caller sent (finding F-002).
+    So each door reads its provider key from a file, `TOKENFUSE_UPSTREAM_KEY_FILE`,
+    that the installer writes mode 0400 and owned by uid 10001, the uid the gateway
+    runs as, mounted read only into that door alone: `./upstream/anthropic` for the
+    Anthropic door, `./upstream/openai` for the OpenAI door. `@claude 2026-10-18`:
+    the agent presents its gateway credential and the door supplies the provider
+    credential. Once the key is held, a caller's own provider key is refused 401
+    `provider_credential_refused` (tokenfuse invariant 122, tokenfuse v1.16.0). The
+    installer takes the key as a file, `ANTHROPIC_KEY_FILE` or `OPENAI_KEY_FILE`,
+    and never prints it. Felyx, the console's copilot, presents its own gateway key,
+    `GENARYX_COPILOT_FUSE_KEY` (invariant 35), and no longer has the provider key as
+    `GENARYX_COPILOT_KEY`; a re-run copies that value into the key file once, and the
+    `.env` line stays, unused. With no key file the gateway forwards the caller's
+    own key as before and says so at startup and in the closing report.
+    *(gate: `scripts/no-provider-key-outside-the-gateway.sh`: the resolved
+    configuration of every gateway; no service carries a provider key as an
+    environment value or by reference; each door reads its own file from its own
+    read-only directory and no other service mounts one; the installer's
+    `# upstream-key:` block writes the file 0400 for uid 10001; refuses to report
+    OK on no gateway subject, no compose file or no installer block; 10 teeth cases
+    in `scripts/gates-have-teeth.sh`; `features/the-provider-key-stays-with-the-gateway.feature`.
+    Not covered: a live refused call from a caller that holds a provider key, which
+    needs a running stack; the MCP broker, which holds no provider key and is not
+    judged here; the fire drills' key, `GATEWAY_DRILLS_KEY`, is minted into the map
+    but the console does not present it until a console image carries mockryx's
+    key flag (release lane); CostCrew, which is not given a gateway here, because
+    invariant 24 keeps the add-on out of the core until the owner decides otherwise.)*
 
 ## Decisions that have no gate yet
 

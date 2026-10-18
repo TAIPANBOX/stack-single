@@ -576,7 +576,7 @@ run_case "manifest-is-true: a routine arrives and the manifest does not claim it
 # is one character in one tag, which is exactly how it would arrive.
 run_case "manifest-is-true: a pulled tag moves in compose and not in the manifest" fail \
 	'./scripts/manifest-is-true.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.0.0", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.1.0", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
 	"an image it pulls"
 
 # invariant 15: the delegation plane's default is byte-for-byte what it was
@@ -1089,7 +1089,7 @@ run_case "identity-files: the map is mounted writable" fail \
 
 run_case "identity-files: another service is handed the client keys" fail \
 	'./scripts/identity-files-are-checked.sh' \
-	"$(py 'edit("compose.yaml", "      GENARYX_COPILOT_KEY: ${GENARYX_COPILOT_KEY:-}\n", "      GENARYX_COPILOT_KEY: ${GENARYX_COPILOT_KEY:-}\n      TOKENFUSE_CLIENT_KEYS: ${GATEWAY_CLIENT_KEYS:-}\n")')" \
+	"$(py 'edit("compose.yaml", "      GENARYX_COPILOT_FUSE_KEY: ${GENARYX_COPILOT_FUSE_KEY:-}\n", "      GENARYX_COPILOT_FUSE_KEY: ${GENARYX_COPILOT_FUSE_KEY:-}\n      TOKENFUSE_CLIENT_KEYS: ${GATEWAY_CLIENT_KEYS:-}\n")')" \
 	"console names GATEWAY_CLIENT_KEYS"
 
 run_case "identity-files: no gateway service left to judge" fail \
@@ -1514,17 +1514,17 @@ run_case "typed-risk-signal: typryx is pinned before the proxy existed" fail \
 
 run_case "typed-risk-signal: wardryx is pinned before it read signals" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.0.0}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.1.0}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
 	"hold_if_signal and signals on /v1/decide do not exist before it"
 
 run_case "typed-risk-signal: wardryx is pinned before when_absent" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.0.0}", "ghcr.io/taipanbox/wardryx:v1.3.2}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.1.0}", "ghcr.io/taipanbox/wardryx:v1.3.2}")')" \
 	"needs v1.4.0 or later"
 
 run_case "typed-risk-signal: tokenfuse is pinned before it sent the tool call" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/tokenfuse:v1.15.0}", "ghcr.io/taipanbox/tokenfuse:v1.4.1}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/tokenfuse:v1.16.0}", "ghcr.io/taipanbox/tokenfuse:v1.4.1}")')" \
 	"the broker sends no tool_call to the policy plane before it"
 
 run_case "typed-risk-signal: install.sh starts the proxy profile unconditionally" fail \
@@ -1937,7 +1937,7 @@ run_case "felyx-through-the-gateway: the base URL points past the gateway" fail 
 
 run_case "felyx-through-the-gateway: the remote opt-in comes back" fail \
 	'./scripts/felyx-through-the-gateway.sh' \
-	"$(py 'edit("compose.yaml", "      GENARYX_COPILOT_API_KEY_REF: env:GENARYX_COPILOT_KEY\n", "      GENARYX_COPILOT_API_KEY_REF: env:GENARYX_COPILOT_KEY\n      GENARYX_COPILOT_ALLOW_REMOTE: \"1\"\n")')" \
+	"$(py 'edit("compose.yaml", "      GENARYX_COPILOT_API_KEY_REF: env:GENARYX_COPILOT_FUSE_KEY\n", "      GENARYX_COPILOT_API_KEY_REF: env:GENARYX_COPILOT_FUSE_KEY\n      GENARYX_COPILOT_ALLOW_REMOTE: \"1\"\n")')" \
 	"would skip the residency check"
 
 run_case "felyx-through-the-gateway: Felyx's client key reference is dropped" fail \
@@ -1972,14 +1972,14 @@ run_case "felyx-through-the-gateway: the closing report prints Felyx's key" fail
 	"$(py 'edit("install.sh", "    printf \x27  (README, \"Client keys and the identity map\").\x27\n  else", "    printf \x27  (README, \"Client keys and the identity map\"). key=%s\x27 \"$GENARYX_COPILOT_FUSE_KEY\"\n  else")')" \
 	"printed the value of GENARYX_COPILOT_FUSE_KEY"
 
-run_case "felyx-through-the-gateway: the closing report speaks of Felyx though it has no provider key" fail \
+run_case "felyx-through-the-gateway: the closing report speaks of Felyx with client keys off" fail \
 	'./scripts/felyx-through-the-gateway.sh' \
-	"$(py 'edit("install.sh", "[ \"$IDENTITY_KEYS_COUNT\" -gt 0 ] && [ -n \"${GENARYX_COPILOT_KEY:-}\" ] || return 0", "[ \"$IDENTITY_KEYS_COUNT\" -gt 0 ] || return 0")')" \
-	"when it has no provider key"
+	"$(py 'edit("install.sh", "felyx_gateway_note() {\n  [ \"$IDENTITY_KEYS_COUNT\" -gt 0 ] || return 0\n", "felyx_gateway_note() {\n")')" \
+	"with client keys off"
 
 run_case "felyx-through-the-gateway: the closing report never calls the note" fail \
 	'./scripts/felyx-through-the-gateway.sh' \
-	"$(py 'edit("install.sh", "IDENTITY_REACH=\"$IDENTITY_REACH$(felyx_gateway_note)\"", "IDENTITY_REACH=\"$IDENTITY_REACH\"")')" \
+	"$(py 'edit("install.sh", "IDENTITY_REACH=\"$IDENTITY_REACH$(felyx_gateway_note)$(upstream_reach_note)\"", "IDENTITY_REACH=\"$IDENTITY_REACH$(upstream_reach_note)\"")')" \
 	"does not call felyx_gateway_note exactly once"
 
 run_case "felyx-through-the-gateway: a comment about Felyx changes" pass \
@@ -2935,6 +2935,59 @@ run_case "network-membership: browser-policy is not internal" fail \
 	'./scripts/network-membership.sh' \
 	"$(py 'edit("compose.yaml", "  browser-policy:\n    internal: true\n", "  browser-policy:\n")')" \
 	"network browser-policy must be internal"
+
+# ---- no-provider-key-outside-the-gateway (CLAUDE.md invariant 39, wave 1 S1) ----
+# The provider key is held by the gateway: read from a file mounted read only into the
+# door that uses it, never a value in another service's environment, and written by the
+# installer 0400 and owned by the gateway's uid.
+run_case "no-provider-key-outside-the-gateway: the console gets the provider key back" fail \
+	'./scripts/no-provider-key-outside-the-gateway.sh' \
+	"$(py 'edit("compose.yaml", "      GENARYX_COPILOT_FUSE_KEY: ${GENARYX_COPILOT_FUSE_KEY:-}\n", "      GENARYX_COPILOT_FUSE_KEY: ${GENARYX_COPILOT_FUSE_KEY:-}\n      ANTHROPIC_API_KEY: ${GENARYX_COPILOT_FUSE_KEY:-}\n")')" \
+	"carries ANTHROPIC_API_KEY as an environment value"
+
+run_case "no-provider-key-outside-the-gateway: Felyx reads the provider key by reference" fail \
+	'./scripts/no-provider-key-outside-the-gateway.sh' \
+	"$(py 'edit("compose.yaml", "      GENARYX_COPILOT_API_KEY_REF: env:GENARYX_COPILOT_FUSE_KEY\n", "      GENARYX_COPILOT_API_KEY_REF: env:GENARYX_COPILOT_KEY\n")')" \
+	"takes its key from env:GENARYX_COPILOT_KEY"
+
+run_case "no-provider-key-outside-the-gateway: the gateway loses its key file" fail \
+	'./scripts/no-provider-key-outside-the-gateway.sh' \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_UPSTREAM_KEY_FILE: ${GATEWAY_UPSTREAM_KEY_FILE:-}\n", "")')" \
+	"sets no TOKENFUSE_UPSTREAM_KEY_FILE"
+
+run_case "no-provider-key-outside-the-gateway: the OpenAI door reads the Anthropic key file" fail \
+	'./scripts/no-provider-key-outside-the-gateway.sh' \
+	"$(py 'door("TOKENFUSE_UPSTREAM_KEY_FILE: ${OPENAI_DOOR_UPSTREAM_KEY_FILE:-}", "TOKENFUSE_UPSTREAM_KEY_FILE: ${GATEWAY_UPSTREAM_KEY_FILE:-}")')" \
+	"reads TOKENFUSE_UPSTREAM_KEY_FILE"
+
+run_case "no-provider-key-outside-the-gateway: the gateway mounts its key directory read-write" fail \
+	'./scripts/no-provider-key-outside-the-gateway.sh' \
+	"$(py 'edit("compose.yaml", "      - ./upstream/anthropic:/run/upstream:ro\n", "      - ./upstream/anthropic:/run/upstream:rw\n")')" \
+	"does not mount ./upstream/anthropic at /run/upstream read only"
+
+run_case "no-provider-key-outside-the-gateway: the console mounts the Anthropic key directory" fail \
+	'./scripts/no-provider-key-outside-the-gateway.sh' \
+	"$(py 'edit("compose.yaml", "      - ./closure:/run/closure:ro\n", "      - ./closure:/run/closure:ro\n      - ./upstream/anthropic:/run/upstream:ro\n")')" \
+	"mounts /run/upstream, the provider key's directory"
+
+run_case "no-provider-key-outside-the-gateway: the installer stops writing the key file" fail \
+	'./scripts/no-provider-key-outside-the-gateway.sh' \
+	"$(py 'edit("install.sh", "# upstream-key: begin\n", "# upstream-key: gone\n")')" \
+	"has no '# upstream-key: begin'"
+
+run_case "no-provider-key-outside-the-gateway: the key file is readable by everyone" fail \
+	'./scripts/no-provider-key-outside-the-gateway.sh' \
+	"$(py 'edit("install.sh", "chmod 0400 \"$tmp\"", "chmod 0444 \"$tmp\"")')" \
+	"does not set mode 0400 on the key file"
+
+run_case "no-provider-key-outside-the-gateway: a harmless variable is not a fault" pass \
+	'./scripts/no-provider-key-outside-the-gateway.sh' \
+	"$(py 'edit("compose.yaml", "      GENARYX_COPILOT_FUSE_KEY: ${GENARYX_COPILOT_FUSE_KEY:-}\n", "      GENARYX_COPILOT_FUSE_KEY: ${GENARYX_COPILOT_FUSE_KEY:-}\n      GATE_HARMLESS_NOTE: \"one\"\n")')"
+
+run_case "no-provider-key-outside-the-gateway: no gateway left to judge" fail \
+	'./scripts/no-provider-key-outside-the-gateway.sh' \
+	"$(py 'edit_all("compose.yaml", "command: [\"/usr/local/bin/tokenfuse\"]", "command: [\"/usr/local/bin/tokenfuse-moved\"]")')" \
+	"measured NOTHING"
 
 
 echo

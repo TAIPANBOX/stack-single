@@ -272,7 +272,9 @@ if [ "$mint_ok" = 1 ]; then
     [[ "$fk" =~ ^[A-Za-z0-9]{40}$ ]] || fail "the installer did not mint Felyx's key into .env as GENARYX_COPILOT_FUSE_KEY, 40 characters"
     [[ "$ak" =~ ^[A-Za-z0-9]{40}$ ]] || fail "the installer did not mint the agents' key into .env as GATEWAY_AGENT_KEY, 40 characters"
     [ "$fk" != "$ak" ] || fail "Felyx and the agents were given the same secret, so one could speak as the other"
-    [ "$(val_of "$out" spec)" = "$fk:felyx,$ak:agents" ] || fail "the minted spec is not <felyx>:felyx,<agents>:agents"
+    dk="$(envv "$d" GATEWAY_DRILLS_KEY)"
+    [[ "$dk" =~ ^[A-Za-z0-9]{40}$ ]] || fail "the installer did not mint the fire drills' key into .env as GATEWAY_DRILLS_KEY, 40 characters"
+    [ "$(val_of "$out" spec)" = "$fk:felyx,$ak:agents,$dk:drills" ] || fail "the minted spec is not <felyx>:felyx,<agents>:agents,<drills>:drills"
     if [ -f "$d/agent-key" ]; then
       [ "$(mode_of "$d/agent-key")" = 600 ] || fail "the agents' key file $d/agent-key is mode $(mode_of "$d/agent-key"), not 600: another account on the box could read it"
       [ "$(cat "$d/agent-key")" = "$ak" ] || fail "the agents' key file does not hold exactly the agents' key"
@@ -292,8 +294,8 @@ bad = 0
 def no(msg):
     global bad
     print("FAIL: " + msg); bad += 1
-if set(keys) != {"felyx", "agents"}:
-    no(f"the minted map binds key ids {sorted(keys)}, not felyx and agents")
+if set(keys) != {"felyx", "agents", "drills"}:
+    no(f"the minted map binds key ids {sorted(keys)}, not felyx, agents and drills")
 else:
     if keys["felyx"].get("agents") != [felyx_id]:
         no(f"the minted map binds felyx to {keys['felyx'].get('agents')}, not exactly [{felyx_id}]")
@@ -303,6 +305,11 @@ else:
     for p in pats:
         if p == "*" or (p.endswith("*") and felyx_id.startswith(p[:-1])) or p == felyx_id:
             no(f"the agents' key may speak as Felyx: its pattern {p} matches {felyx_id}")
+    if keys["drills"].get("agents") != ["agent://mockryx.local/*"]:
+        no(f"the minted map binds the drills' key to {keys['drills'].get('agents')}, not [agent://mockryx.local/*]")
+    for p in keys["drills"].get("agents") or []:
+        if p == "*" or (p.endswith("*") and felyx_id.startswith(p[:-1])) or p == felyx_id:
+            no(f"the drills' key may speak as Felyx: its pattern {p} matches {felyx_id}")
     for k in keys.values():
         if k.get("unit") not in units:
             no(f"the minted map binds {k.get('key_id')} to unit {k.get('unit')!r}, which it does not declare")
@@ -334,7 +341,7 @@ PY
     cmp -s "$d/.env" "$d/.env.before" || fail "a re-run of a minted box changed .env"
     cmp -s "$d/agent-key" "$d/key.before" || fail "a re-run of a minted box changed the agents' key file"
     cmp -s "$d/map.seen" "$d/map.before" || fail "a re-run of a minted box built a different map, which restarts the gateway for nothing"
-    [ "$(val_of "$out2" spec)" = "$fk:felyx,$ak:agents" ] || fail "a re-run built a different spec from the same .env"
+    [ "$(val_of "$out2" spec)" = "$fk:felyx,$ak:agents,$(envv "$d" GATEWAY_DRILLS_KEY):drills" ] || fail "a re-run built a different spec from the same .env"
 
     # The operator takes over with both files: their keys, and the marker goes.
     out3="$(run "$d" apply CLIENT_KEYS_FILE=keys.txt IDENTITY_MAP_FILE=map.json)"
@@ -347,7 +354,7 @@ PY
   printf "GENARYX_COPILOT_FUSE_KEY='%s'\n" "$FELYX_SET" >>"$d/.env"
   out="$(run "$d" prepare)"
   [ "$(envv "$d" GENARYX_COPILOT_FUSE_KEY)" = "$FELYX_SET" ] || fail "a GENARYX_COPILOT_FUSE_KEY already in .env was rewritten"
-  [ "$(val_of "$out" spec)" = "$FELYX_SET:felyx,$(envv "$d" GATEWAY_AGENT_KEY):agents" ] || fail "a Felyx key already in .env was not the one bound as felyx"
+  [ "$(val_of "$out" spec)" = "$FELYX_SET:felyx,$(envv "$d" GATEWAY_AGENT_KEY):agents,$(envv "$d" GATEWAY_DRILLS_KEY):drills" ] || fail "a Felyx key already in .env was not the one bound as felyx"
   d="$(mk)"
   printf "GENARYX_COPILOT_FUSE_KEY=\n" >>"$d/.env"
   out="$(run "$d" prepare)"
@@ -411,7 +418,7 @@ if [ "$mint_ok" = 1 ]; then
     if [ "$(rc_of "$out")" != 0 ]; then
       fail "the pinned gateway image refused the pair the installer minted: $(grep '^die' <<<"$out" | cut -c1-300)"
     else
-      grep -qx 'count=2 map_on=1' <<<"$out" || fail "the pinned gateway image did not hold two keys and the map for the minted pair: $(grep '^count' <<<"$out")"
+      grep -qx 'count=3 map_on=1' <<<"$out" || fail "the pinned gateway image did not hold three keys and the map for the minted set: $(grep '^count' <<<"$out")"
       [ "$(envv "$d" GATEWAY_CLIENT_KEYS)" = "$(val_of "$out" spec)" ] || fail "the identity block did not write the minted spec to GATEWAY_CLIENT_KEYS"
       cmp -s "$d/map.seen" "$d/identity/identity.json" || fail "the identity block did not install the minted map"
     fi

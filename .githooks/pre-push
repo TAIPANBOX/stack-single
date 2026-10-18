@@ -67,6 +67,7 @@ step "the gateway every box runs requires client keys, minted when none are give
 step "the MCP broker blocks raw secrets and asks the policy plane, failing closed" "./scripts/broker-blocks-raw-secrets.sh"
 step "the gateway's policy-plane key is a pep, on a new box and on a re-run" "./scripts/wardryx-gateway-key-is-pep.sh"
 step "the agents network is internal, and only the doors and scopyx reach it" "./scripts/network-membership.sh"
+step "the provider key is held by the gateway, read from a file, and no agent-facing service has it" "./scripts/no-provider-key-outside-the-gateway.sh"
 # Reaches the network (a tarball from the sibling repo), which is why it is
 # last: everything that can be judged offline has already spoken by here.
 step "every image has the files it copies" "./scripts/build-context-complete.sh"

@@ -1597,7 +1597,7 @@ identity_apply() {
 # the note says so and asks nothing of the operator. Prints no key value.
 # (gate: scripts/felyx-through-the-gateway.sh lifts this and runs it.)
 felyx_gateway_note() {
-  [ "$IDENTITY_KEYS_COUNT" -gt 0 ] && [ -n "${GENARYX_COPILOT_KEY:-}" ] || return 0
+  [ "$IDENTITY_KEYS_COUNT" -gt 0 ] || return 0
   if [ "${IDENTITY_MINTED:-0}" = 1 ]; then
     printf '\n  Felyx, the console'"'"'s copilot, calls this gateway too, with the key this\n'
     printf '  installer minted for it (GENARYX_COPILOT_FUSE_KEY in .env, sent as x-fuse-key and\n'
@@ -1693,6 +1693,8 @@ mint_resolve() {
   [ -n "$td" ] || td="${RECORD_TRUST_DOMAIN:-local}"
   [[ "$td" =~ ^[A-Za-z0-9.-]{1,253}$ ]] \
     || die "RECORD_TRUST_DOMAIN must be a name of A-Z a-z 0-9 . and -: the keys this installer mints are bound to agent ids in it. Nothing was installed."
+  [ "$td" != mockryx.local ] \
+    || die "RECORD_TRUST_DOMAIN is mockryx.local, the domain the fire drills' key is bound to, so an agent of this box could speak as a drill. Give another name. Nothing was installed."
   MINT_DOMAIN="$td"
 }
 
@@ -1707,22 +1709,31 @@ mint_env_secret() {
 # Section 3, once .env exists: the secrets, the spec and the map, handed to section
 # 3e as if they were the operator's files.
 mint_prepare() {
-  local felyx agents why
+  local felyx agents drills why seen s
   [ "$MINT_ON" = 1 ] || return 0
   mint_env_secret GENARYX_COPILOT_FUSE_KEY
   mint_env_secret GATEWAY_AGENT_KEY
+  mint_env_secret GATEWAY_DRILLS_KEY
   felyx="$(identity_env_get GENARYX_COPILOT_FUSE_KEY)"
   agents="$(identity_env_get GATEWAY_AGENT_KEY)"
+  drills="$(identity_env_get GATEWAY_DRILLS_KEY)"
   why="$(identity_entry_why "$felyx:felyx")"
   [ -z "$why" ] || die "GENARYX_COPILOT_FUSE_KEY in .env, Felyx's client key, $why. Empty that line and the installer mints one. Nothing was started."
   why="$(identity_entry_why "$agents:agents")"
   [ -z "$why" ] || die "GATEWAY_AGENT_KEY in .env, the agents' client key, $why. Empty that line and the installer mints one. Nothing was started."
-  [ "$felyx" != "$agents" ] \
-    || die "GENARYX_COPILOT_FUSE_KEY and GATEWAY_AGENT_KEY in .env hold the same secret, so an agent could speak as Felyx. Empty one of the two lines and the installer mints a new one. Nothing was started."
+  why="$(identity_entry_why "$drills:drills")"
+  [ -z "$why" ] || die "GATEWAY_DRILLS_KEY in .env, the fire drills' key, $why. Empty that line and the installer mints one. Nothing was started."
+  seen=""
+  for s in "$felyx" "$agents" "$drills"; do
+    case " $seen " in
+      *" $s "*) die "two of GENARYX_COPILOT_FUSE_KEY, GATEWAY_AGENT_KEY and GATEWAY_DRILLS_KEY in .env hold the same secret, so one agent could speak as another. Empty one of those lines and the installer mints a new one. Nothing was started." ;;
+    esac
+    seen="$seen $s"
+  done
   MINT_MAP="$(mktemp)" || die "could not make a temporary file for the minted identity map"
-  printf '{\n  "units": [\n    {"id": "console", "name": "Felyx, the console copilot"},\n    {"id": "agents", "name": "The operator agents"}\n  ],\n  "keys": [\n    {"key_id": "felyx", "unit": "console", "agents": ["agent://%s/genaryx/felyx"]},\n    {"key_id": "agents", "unit": "agents", "agents": ["agent://%s/agents/*"]}\n  ]\n}\n' \
+  printf '{\n  "units": [\n    {"id": "console", "name": "Felyx, the console copilot"},\n    {"id": "agents", "name": "The operator agents"},\n    {"id": "drills", "name": "The fire drills"}\n  ],\n  "keys": [\n    {"key_id": "felyx", "unit": "console", "agents": ["agent://%s/genaryx/felyx"]},\n    {"key_id": "agents", "unit": "agents", "agents": ["agent://%s/agents/*"]},\n    {"key_id": "drills", "unit": "drills", "agents": ["agent://mockryx.local/*"]}\n  ]\n}\n' \
     "$MINT_DOMAIN" "$MINT_DOMAIN" >"$MINT_MAP" || die "could not write the minted identity map"
-  IDENTITY_KEYS_NEW="$felyx:felyx,$agents:agents"
+  IDENTITY_KEYS_NEW="$felyx:felyx,$agents:agents,$drills:drills"
   IDENTITY_KEYS_GIVEN=1
   IDENTITY_MAP_SRC="$MINT_MAP"
 }
@@ -1769,6 +1780,108 @@ mint_reach_note() {
   printf '  (README, "Client keys and the identity map").'
 }
 # identity-mint: end
+
+# ---- 0h. the provider key each door holds (CLAUDE.md invariant 39) ------------------
+# @decided 2026-10-17 (paraphrased): the gateway holds the provider key, not the agent.
+# A door reads its provider key from a file this installer writes, mode 0400 and owned
+# by uid 10001 (the uid the gateway runs as), mounted read only into that door alone:
+# ./upstream/anthropic for tokenfuse-gateway and ./upstream/openai for the OpenAI door
+# (compose.yaml). The operator gives the key as a FILE, ANTHROPIC_KEY_FILE or
+# OPENAI_KEY_FILE, the way the typed plane's key is given (section 0b): the path, never
+# the bytes. A refusal never prints what it was given. A box that has
+# GENARYX_COPILOT_KEY in .env, the provider key Felyx held before this release, has that
+# value written to the file once; the .env line stays, unused, because removing a
+# credential is the operator's decision. With no file the gateway forwards the caller's
+# own key as before and says so at startup, and the closing report says it is not
+# brokered. gate: scripts/no-provider-key-outside-the-gateway.sh.
+# upstream-key: begin
+UP_ANTHROPIC_SRC=""   # the file ANTHROPIC_KEY_FILE names, checked by upstream_resolve
+UP_OPENAI_SRC=""      # the file OPENAI_KEY_FILE names, checked by upstream_resolve
+
+upstream_why() { # FILE: why FILE cannot hold a provider key, nothing when it can. Never prints it.
+  local LC_ALL=C f="$1" k
+  [ -e "$f" ] || { printf 'does not exist'; return 0; }
+  [ -f "$f" ] || { printf 'is not a regular file'; return 0; }
+  [ -r "$f" ] || { printf 'is not readable'; return 0; }
+  k="$(head -c 4097 "$f" 2>/dev/null)" || { printf 'could not be read'; return 0; }
+  [ "${#k}" -le 4096 ] || { printf 'is over 4096 bytes'; return 0; }
+  [ -n "$k" ] || { printf 'is empty'; return 0; }
+  [[ "$k" != *[![:graph:]]* ]] || { printf 'holds a space or a control character, which a provider key does not'; return 0; }
+}
+
+# Section 0h, before anything is installed: refuses a file that cannot hold a key.
+upstream_resolve() {
+  local why
+  if [ -n "${ANTHROPIC_KEY_FILE:-}" ]; then
+    why="$(upstream_why "$ANTHROPIC_KEY_FILE")"
+    [ -z "$why" ] || die "ANTHROPIC_KEY_FILE $why, so it cannot be the provider key the gateway holds. It names a file that holds the key, not the key itself. Nothing was installed."
+    UP_ANTHROPIC_SRC="$ANTHROPIC_KEY_FILE"
+  fi
+  if [ -n "${OPENAI_KEY_FILE:-}" ]; then
+    why="$(upstream_why "$OPENAI_KEY_FILE")"
+    [ -z "$why" ] || die "OPENAI_KEY_FILE $why, so it cannot be the OpenAI door's provider key. It names a file that holds the key, not the key itself. Nothing was installed."
+    UP_OPENAI_SRC="$OPENAI_KEY_FILE"
+  fi
+}
+
+upstream_put() { # KEY DIR: DIR/key holds KEY, 0400, owned by uid 10001. Never prints KEY.
+  local k="$1" dir="$2" tmp
+  tmp="$dir/.key.tmp"
+  ( umask 077; printf '%s' "$k" >"$tmp" ) || die "could not write the provider key into $dir"
+  if ! { chown 10001:10001 "$tmp" && chmod 0400 "$tmp" && mv -f "$tmp" "$dir/key"; }; then
+    die "could not put the provider key in place in $dir (mode 0400, uid 10001)"
+  fi
+}
+
+# Section 3, once .env exists: the two directories every compose run mounts, the key
+# files, and the .env lines that tell each door where its file is. The directories
+# exist on every box so compose never creates one as root.
+upstream_apply() {
+  local k
+  mkdir -p "$STACK_DIR/upstream/anthropic" "$STACK_DIR/upstream/openai" \
+    || die "could not make the provider key directories under $STACK_DIR/upstream"
+  chmod 0755 "$STACK_DIR/upstream" "$STACK_DIR/upstream/anthropic" "$STACK_DIR/upstream/openai" \
+    || die "could not set the mode of the provider key directories"
+  if [ -n "$UP_ANTHROPIC_SRC" ]; then
+    k="$(head -c 4096 "$UP_ANTHROPIC_SRC")" || die "could not read ANTHROPIC_KEY_FILE"
+    upstream_put "$k" "$STACK_DIR/upstream/anthropic"
+    note "the Anthropic key: in $STACK_DIR/upstream/anthropic/key (0400, uid 10001, never printed)"
+  elif [ ! -f "$STACK_DIR/upstream/anthropic/key" ] && [ -n "$(identity_env_get GENARYX_COPILOT_KEY)" ]; then
+    k="$(identity_env_get GENARYX_COPILOT_KEY)"
+    upstream_put "$k" "$STACK_DIR/upstream/anthropic"
+    note "the Anthropic key Felyx held in .env (GENARYX_COPILOT_KEY) is now in $STACK_DIR/upstream/anthropic/key (0400, uid 10001, never printed); the .env line stays, unused, until you remove it"
+  fi
+  if [ -f "$STACK_DIR/upstream/anthropic/key" ]; then
+    identity_env_set GATEWAY_UPSTREAM_KEY_FILE /run/upstream/key
+  else
+    mint_env_forget GATEWAY_UPSTREAM_KEY_FILE
+  fi
+  if [ -n "$UP_OPENAI_SRC" ]; then
+    k="$(head -c 4096 "$UP_OPENAI_SRC")" || die "could not read OPENAI_KEY_FILE"
+    upstream_put "$k" "$STACK_DIR/upstream/openai"
+    note "the OpenAI door's key: in $STACK_DIR/upstream/openai/key (0400, uid 10001, never printed)"
+  fi
+  if [ -f "$STACK_DIR/upstream/openai/key" ]; then
+    identity_env_set OPENAI_DOOR_UPSTREAM_KEY_FILE /run/upstream/key
+  else
+    mint_env_forget OPENAI_DOOR_UPSTREAM_KEY_FILE
+  fi
+}
+
+# What the closing report says about the provider key. Says whether the gateway holds
+# it and where the file is, never the key.
+upstream_reach_note() {
+  if [ -f "$STACK_DIR/upstream/anthropic/key" ]; then
+    printf '\n  The gateway holds the Anthropic key itself, in %s/upstream/anthropic/key (0400,\n' "$STACK_DIR"
+    printf '  uid 10001). An agent presents its gateway key and no provider key. A provider key\n'
+    printf '  sent by a caller is refused 401 provider_credential_refused (CLAUDE.md invariant 39).'
+  else
+    printf '\n  The gateway holds no provider key: it forwards the caller'"'"'s own key, as before, and\n'
+    printf '  says so at startup. Give ANTHROPIC_KEY_FILE to hold the key on the gateway (CLAUDE.md\n'
+    printf '  invariant 39).'
+  fi
+}
+# upstream-key: end
 
 # ---- 0g. a second door, on the OpenAI wire (opt-in) ----------------------------
 # The gateway speaks the Anthropic wire, POST /v1/messages. An agent whose SDK
@@ -1958,6 +2071,7 @@ if [ "$DOOR_ON" = 1 ]; then
   identity_door main
 fi
 mint_resolve
+upstream_resolve
 
 say "installing docker and git"
 export DEBIAN_FRONTEND=noninteractive
@@ -2580,6 +2694,10 @@ door_apply
 # Felyx's and the agents' secrets minted into .env if absent, and the spec and map
 # built from them for section 3e to check and install.
 mint_prepare
+# The provider keys the gateway and the OpenAI door hold (section 0h, invariant 39): the
+# directories compose mounts, the files written from what the operator gave, and the
+# .env lines naming them.
+upstream_apply
 
 # The delegation plane's own door (profile delegation), handled like every
 # other opt-in plane's key above: generated whether or not WITH_DELEGATION is
@@ -3373,7 +3491,7 @@ elif [ "$IDENTITY_KEYS_COUNT" -gt 0 ]; then
 fi
 # The gateway always holds client keys now (compose requires them), so the branch
 # for a map with no keys, which used to follow, is gone with it.
-IDENTITY_REACH="$IDENTITY_REACH$(felyx_gateway_note)"
+IDENTITY_REACH="$IDENTITY_REACH$(felyx_gateway_note)$(upstream_reach_note)"
 
 # The OpenAI door, when this box runs it: where an agent points, what it sends,
 # who pays, and what this box does not see of it. Its keys are named by where they

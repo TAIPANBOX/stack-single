@@ -194,7 +194,7 @@ services:
   # ---- policy --------------------------------------------------------------
   wardryx:
     <<: *restart
-    image: ${WARDRYX_IMAGE:-ghcr.io/taipanbox/wardryx:v2.0.0}
+    image: ${WARDRYX_IMAGE:-ghcr.io/taipanbox/wardryx:v2.1.0}
     # The image's own 65532:65532, with the GID moved to the one that owns the
     # shared event directory. The binary is a static Go binary and reads no
     # /etc/passwd, so a numeric pair it was not built with is fine.
@@ -668,7 +668,7 @@ services:
   tokenfuse-mcp-broker:
     <<: *restart
     profiles: ["typed"]
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.15.0}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.16.0}
     # Just the subcommand, not the full binary path: the image's own
     # ENTRYPOINT is already the tokenfuse binary (@measured `docker inspect
     # ghcr.io/taipanbox/tokenfuse:v1.1.1`, 2026-09-26), so this `command:`
@@ -868,7 +868,7 @@ services:
   vouchryx:
     <<: *restart
     profiles: ["delegation"]
-    image: ${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.3.0}
+    image: ${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.4.0}
     networks:
       - core
     # Group 10001, the same pair typryx and the money plane's writers use: its
@@ -917,7 +917,7 @@ services:
   # ---- money: the control API ----------------------------------------------
   tokenfuse-cloud:
     <<: *restart
-    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v1.15.0}
+    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v1.16.0}
     networks:
       - core
     command: ["/usr/local/bin/tokenfuse-cloud"]
@@ -960,7 +960,7 @@ services:
   # gets a hard refusal rather than a log line.
   tokenfuse-gateway:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.15.0}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.16.0}
     networks:
       - edge
       - agents
@@ -1045,6 +1045,13 @@ services:
       # reads the gateway's own "export enabled" line.
       TOKENFUSE_EVENTS_PATH: /var/lib/stack/events/tokenfuse.ndjson
       TOKENFUSE_UPSTREAM: https://api.anthropic.com/v1/messages
+      # The provider key this gateway holds (CLAUDE.md invariant 39). The file is
+      # written by install.sh from the key the operator gives it, 0400 and owned by
+      # uid 10001, and mounted read only from ./upstream/anthropic. Empty, the
+      # default, the gateway forwards the caller's own key as before and says so at
+      # startup. `no-provider-key-outside-the-gateway.sh` holds that this is the only
+      # place a provider key is read from, and that no agent-facing service has one.
+      TOKENFUSE_UPSTREAM_KEY_FILE: ${GATEWAY_UPSTREAM_KEY_FILE:-}
       TOKENFUSE_CLOUD_URL: http://tokenfuse-cloud:8080
       TOKENFUSE_CLOUD_KEY: ${CLOUD_ADMIN:?set by install.sh}
       TOKENFUSE_WARDRYX_MODE: enforce
@@ -1123,6 +1130,8 @@ services:
       # the file, so a new map moves in by rename and the next start reads it. An
       # empty directory on a box that has no map, which nothing here reads.
       - ./identity:/etc/tokenfuse/identity:ro
+      # The provider key's directory, read only, this gateway alone (invariant 39).
+      - ./upstream/anthropic:/run/upstream:ro
     depends_on:
       init-volumes:
         condition: service_completed_successfully
@@ -1164,7 +1173,7 @@ services:
   #     reading of the variables being absent.
   tokenfuse-gateway-openai:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.15.0}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.16.0}
     networks:
       - edge
       - agents
@@ -1199,6 +1208,9 @@ services:
       # compose up` on every box that never asked for this door (measured on
       # Compose 5.6.0, 2026-10-14).
       TOKENFUSE_UPSTREAM: ${OPENAI_DOOR_CLIENT_KEYS:+${OPENAI_DOOR_IDENTITY_MAP:+${OPENAI_DOOR_UPSTREAM:-}}}
+      # The door's own provider key file (invariant 39), from ./upstream/openai and
+      # never the gateway's: `no-provider-key-outside-the-gateway.sh` reads both.
+      TOKENFUSE_UPSTREAM_KEY_FILE: ${OPENAI_DOOR_UPSTREAM_KEY_FILE:-}
       TOKENFUSE_CLOUD_URL: http://tokenfuse-cloud:8080
       TOKENFUSE_CLOUD_KEY: ${CLOUD_ADMIN:?set by install.sh}
       TOKENFUSE_WARDRYX_MODE: enforce
@@ -1222,6 +1234,8 @@ services:
       # Its own map, at the same path inside as the gateway's, so the one
       # GATEWAY_IDENTITY_MAP-style value install.sh writes names the file here too.
       - ./identity-openai:/etc/tokenfuse/identity:ro
+      # The OpenAI door's provider key directory, read only, this door alone (invariant 39).
+      - ./upstream/openai:/run/upstream:ro
     depends_on:
       init-volumes:
         condition: service_completed_successfully
@@ -1335,8 +1349,11 @@ services:
       GENARYX_COPILOT_LOCAL_HOSTNAMES: tokenfuse-gateway
       GENARYX_COPILOT_MODEL: ${GENARYX_COPILOT_MODEL:-claude-haiku-4-5}
       GENARYX_COPILOT_AGENT_ID: agent://${RECORD_TRUST_DOMAIN:-local}/genaryx/felyx
-      GENARYX_COPILOT_API_KEY_REF: env:GENARYX_COPILOT_KEY
-      GENARYX_COPILOT_KEY: ${GENARYX_COPILOT_KEY:-}
+      # Felyx authenticates to the gateway with its own gateway client key, the one
+      # install.sh mints (GENARYX_COPILOT_FUSE_KEY, invariant 35), in x-api-key and
+      # x-fuse-key alike. The provider key never reaches this container (invariant
+      # 39): the gateway holds it, from the file install.sh wrote.
+      GENARYX_COPILOT_API_KEY_REF: env:GENARYX_COPILOT_FUSE_KEY
       # Felyx's own gateway client key (genaryx invariant 24): the gateway
       # answers 401 to any call without a key it holds, Felyx's included. A
       # console carrying that invariant reads the key through this reference
@@ -1557,7 +1574,7 @@ services:
   # The sixth, trailryx-seal, is the `record` profile above.
   focus-export:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.15.0}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.16.0}
     networks:
       - core
     user: "10001:10001"
