@@ -2916,7 +2916,7 @@ gateway_probe_resolve
 keyryx_root_key() { # FILE UID: create FILE with 32 random bytes when absent
   local f="$1" uid="$2" tmp
   if [ -e "$f" ]; then
-    [ -f "$f" ] && [ -s "$f" ] || die "$f exists but is not a non-empty file; refusing to replace a keyryx root key"
+    if ! { [ -f "$f" ] && [ -s "$f" ]; }; then die "$f exists but is not a non-empty file; refusing to replace a keyryx root key"; fi
     if ! { chown "$uid:$uid" "$f" && chmod 0400 "$f"; }; then die "could not set the owner or mode of $f"; fi
     return 0
   fi
