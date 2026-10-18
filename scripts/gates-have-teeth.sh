@@ -2901,7 +2901,7 @@ run_case "network-membership: the egress block is not there" fail \
 
 run_case "network-membership: a reworded comment is not a fault" pass \
 	'./scripts/network-membership.sh' \
-	"$(py 'edit("compose.yaml", "    # Agent-facing, so an agent reaches it under the name `scopyx`, and edge,", "    # Agent-facing: an agent reaches it under the name `scopyx`, and edge,")')"
+	"$(py 'edit("compose.yaml", "    # Agent-facing, so an agent reaches it under the name `scopyx`; edge,", "    # Agent-facing: an agent reaches it under the name `scopyx`; edge,")')"
 
 run_case "network-membership: no services resolve, so nothing was measured" fail \
 	'./scripts/network-membership.sh' \
