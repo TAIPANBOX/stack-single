@@ -638,6 +638,32 @@ Upgrading: Felyx now authenticates with its own gateway key, not the provider
 key. A box given its own keys file needs `GENARYX_COPILOT_FUSE_KEY` in `.env`,
 with the same secret on a line of the keys file, or Felyx is refused 401.
 
+### Agent tokens: an agent's own credential (opt-in, off by default)
+
+By default an agent presents a static client key, the way it always has. With
+`WITH_AGENT_TOKENS=1 ./install.sh`, the box instead gives one agent its own
+credential and checks its tokens where they are used:
+
+```bash
+WITH_AGENT_TOKENS=1 ./install.sh
+```
+
+The installer starts vouchryx (the delegation plane), enrols the agent
+`agent://<RECORD_TRUST_DOMAIN>/agents/operator`, and writes its enrolment secret to
+`$STACK_DIR/agent-token.key` (mode 0600). The secret is never printed and never
+written to `.env`; only its SHA-256 digest is. The agent exchanges the secret at
+vouchryx for a five-minute token bound to a DPoP key of its own, and sends
+`Authorization: DPoP <token>` with a proof. The gateway and the MCP broker verify the
+token offline, for their own audiences, against a revocation list that fails closed.
+
+Stopping the agent is one call to vouchryx with `ban`, using `VOUCHRYX_REVOKE_KEYS`
+from `.env`. Every door polls the list, so the stop reaches each of them within one
+poll.
+
+Limits, as shipped: one enrolled agent per box, the OpenAI door keeps static keys
+only, and a box that gave its own keys file must add a `broker:<secret>` line itself
+before it turns this on. `WITH_AGENT_TOKENS=0` turns it off again and keeps the files.
+
 ### A second door on the OpenAI wire (opt-in, off by default)
 
 The gateway on 4100 speaks Anthropic's wire, `POST /v1/messages`. An agent whose

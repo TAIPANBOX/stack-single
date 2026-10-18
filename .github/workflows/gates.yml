@@ -102,6 +102,8 @@ jobs:
         run: ./scripts/network-membership.sh
       - name: the provider key is held by the gateway, read from a file, and no agent-facing service has it
         run: ./scripts/no-provider-key-outside-the-gateway.sh
+      - name: agent tokens are off by default, and when on, the doors verify them against vouchryx and fail closed
+        run: ./scripts/agent-tokens-are-wired.sh
 
       # Last, because it mutates tracked files and restores them. It needs a
       # clean tree and says so plainly, so it also reports any earlier step
