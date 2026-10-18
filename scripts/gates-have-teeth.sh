@@ -1913,9 +1913,9 @@ run_case "delegation-dirs-are-split: ./delegation left to root" fail \
 	'./scripts/delegation-dirs-are-split.sh' \
 	"$(py 'import re
 s = open("install.sh").read()
-s = re.sub(r"(?m)^\s*chown 65532:65532 delegation\s*\n", "", s)
+s = re.sub(r"(?m)^\s*chown 20002:20002 delegation\s*\n", "", s)
 open("install.sh", "w").write(s)')" \
-	"never gives ./delegation to uid 65532"
+	"never gives ./delegation to uid 20002"
 
 run_case "delegation-dirs-are-split: a comment in the gateway block changes" pass \
 	'./scripts/delegation-dirs-are-split.sh' \
