@@ -287,8 +287,10 @@ DC="${COMPOSE[*]}"
 # that needs a tool the image deliberately omits fails on a perfectly healthy
 # stack and is indistinguishable from a real failure. So the probe is a
 # throwaway busybox attached to the same network, which is what a neighbouring
-# container sees and therefore what the check should be asking about.
-NET="agent-stack_default"
+# container sees and therefore what the check should be asking about. The
+# planes and both gateways are on `core` (or reach it), and the agents' network,
+# the browser's and the proxy's are not: so this is the planes' own view.
+NET="agent-stack_core"
 docker network inspect "$NET" >/dev/null 2>&1 || die "network $NET is missing: the stack did not start."
 # Where the gateway is probed: the address the operator chose, not loopback.
 # With GATEWAY_BIND set to ONE address (a tailnet address is the shape an
@@ -610,16 +612,16 @@ if compose_has tokenfuse-mcp-broker; then
   # came up. Three things are asked, none of which the broker's own checks
   # above can see. The proxy answers on the network it is meant to be on
   # (through it, wardryx's /healthz: a 200 here is the proxy AND its upstream).
-  # It does NOT answer from the default network and is not on the host: both
-  # must fail to pass, because the proxy runs without a credential and who can
-  # reach it is its only protection. And only the broker's policy client was
+  # It does NOT answer from the planes' network (core) and is not on the host:
+  # both must fail to pass, because the proxy runs without a credential and who
+  # can reach it is its only protection. And only the broker's policy client was
   # pointed at it: the LLM gateway keeps asking wardryx directly.
   if compose_has typryx-wardryx-proxy; then
     # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
     risk_probe() { docker run --rm --network agent-stack_risk-signal busybox:1.36 wget -q -T5 -O /dev/null "$1"; }
     check "typed risk signal: the proxy answers on its own network" \
           "risk_probe http://typryx-wardryx-proxy:4330/healthz"
-    check "typed risk signal: the proxy is NOT reachable from the default network" \
+    check "typed risk signal: the proxy is NOT reachable from the planes' network" \
           "! probe http://typryx-wardryx-proxy:4330/healthz"
     check "typed risk signal: the proxy is NOT on the host" \
           "! curl -fsS -m3 -o /dev/null http://127.0.0.1:4330/healthz"
@@ -2989,6 +2991,47 @@ case "$GATEWAY_BIND" in
     ;;
 esac
 
+# ---- egress: the routes out that a box's own choices need ------------------
+# egress-override: begin
+# compose.yaml puts every service on a network that matches its job, and only
+# the services that need a provider sit on edge, the one network with a route
+# out. The typryx service and its typed risk signal proxy need edge only when
+# TYPED_MODE names a provider (jev, own-model). Compose cannot make a membership
+# conditional, so that choice is written here as compose.override.yaml, which
+# compose v2 reads beside compose.yaml on every command, and removed when the
+# choice is not made (CLAUDE.md invariant 38). The first line says the file is
+# ours, so only this installer ever removes it. A file somebody else wrote is
+# refused, before `up`, when this box needs one; it is left alone otherwise.
+egress_override() { # $1: the stack directory. Reads TYPED_MODE.
+  local dir="$1" f="$1/compose.override.yaml" marker='# written by install.sh'
+  local typed=0
+  case "${TYPED_MODE:-}" in jev | own-model) typed=1 ;; esac
+  if [ "$typed" = 0 ]; then
+    if [ -f "$f" ]; then
+      case "$(head -n1 "$f")" in "$marker"*) rm -f "$f" ;; esac
+    fi
+    return 0
+  fi
+  if [ -f "$f" ]; then
+    case "$(head -n1 "$f")" in "$marker"*) ;; *)
+      die "$dir/compose.override.yaml is not ours (no '$marker' first line), and this box needs a route out for typryx. Move it aside or set TYPED_MODE=stub. Nothing was started."
+      ;;
+    esac
+  fi
+  {
+    echo "$marker from .env on every run (CLAUDE.md invariant 38). Rewritten or removed each run; do not edit."
+    echo "# It adds the network edge, the one route out, to the services named below and to no other."
+    echo "services:"
+    if [ "$typed" = 1 ]; then
+      echo "  typryx:"
+      echo "    networks: [edge]"
+      echo "  typryx-wardryx-proxy:"
+      echo "    networks: [edge]"
+    fi
+  } >"$f.tmp" && mv "$f.tmp" "$f"
+}
+# egress-override: end
+
 # ---- 5. up ------------------------------------------------------------------
 say "starting the stack"
 UP_PROFILES=()
@@ -3021,13 +3064,13 @@ if [ -n "${WITH_DELEGATION:-}" ]; then
   # Not published to the host (compose.yaml's own comment on the vouchryx
   # service says why), so this is fetched from inside the compose network,
   # the same throwaway-busybox shape section 8 uses for every other
-  # container-side probe here. `agent-stack_default`: the fixed network name
+  # container-side probe here. `agent-stack_core`: the fixed network name
   # `name: agent-stack` in compose.yaml produces, the same literal section 8
   # uses as `$NET`.
   fetched=0
   left=15
   while [ "$left" -gt 0 ]; do
-    if docker run --rm --network agent-stack_default busybox:1.36 wget -q -T5 -O - \
+    if docker run --rm --network agent-stack_core busybox:1.36 wget -q -T5 -O - \
          http://vouchryx:4310/.well-known/jwks.json >delegation-public/vouchryx.jwks.json.tmp 2>/dev/null \
        && [ -s delegation-public/vouchryx.jwks.json.tmp ]; then
       fetched=1
@@ -3055,6 +3098,9 @@ verified chain and nothing came up to verify it against. Check: ${COMPOSE[*]} lo
   gateway_probe_resolve
 fi
 
+# The routes out this box's own choices need (invariant 38), written before `up`
+# reads the files. A refusal here is before any container starts.
+egress_override .
 "${COMPOSE[@]}" "${UP_PROFILES[@]}" up -d --remove-orphans
 # `up --remove-orphans` does not remove a container whose profile this run does
 # not name (measured 2026-10-04 on Docker Desktop's compose v2: a proxy started

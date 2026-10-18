@@ -303,6 +303,34 @@ jobs:
           cd /opt/agent-stack
           sudo docker compose ps --status running --services | grep -qx agent-conform
 
+      # CLAUDE.md invariant 38, on every leg: a container on the agents network, the
+      # one an operator's agent container joins, reaches the gateway and nothing else
+      # outside the box. It has no name for an address on the internet, no route to
+      # one, and no plane by name. The first probe is a positive control on the edge
+      # network, so a runner with no internet cannot make the negative checks pass.
+      - name: "agents network: no direct internet, the gateway reachable"
+        run: |
+          probe() { sudo docker run --rm --network "$1" busybox:1.36 sh -c "$2" >/dev/null 2>&1; }
+          if probe agent-stack_edge 'wget -q -T10 -O /dev/null http://example.com/'; then
+            echo "positive control: a container on the edge network reaches example.com"
+          else
+            echo "::error::the positive control failed: edge cannot reach example.com, so the checks below would prove nothing"; exit 1
+          fi
+          if probe agent-stack_agents 'wget -q -T5 -O /dev/null http://example.com/'; then
+            echo "::error::a container on the agents network reached example.com by name"; exit 1
+          fi
+          if probe agent-stack_agents 'wget -q -T5 -O /dev/null http://1.1.1.1/'; then
+            echo "::error::a container on the agents network reached 1.1.1.1 directly"; exit 1
+          fi
+          if probe agent-stack_agents 'wget -q -T5 -O /dev/null http://wardryx:8090/healthz'; then
+            echo "::error::a container on the agents network reached wardryx, a plane, by name"; exit 1
+          fi
+          if probe agent-stack_agents 'wget -q -T5 -O /dev/null http://tokenfuse-gateway:4100/healthz'; then
+            echo "the gateway answers from the agents network"
+          else
+            echo "::error::a container on the agents network cannot reach the gateway"; exit 1
+          fi
+
       - name: turning the typed risk signal off removes its proxy
         if: matrix.profile == 'typed-risk'
         run: |

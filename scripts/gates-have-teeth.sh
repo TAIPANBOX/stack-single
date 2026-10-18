@@ -2805,6 +2805,110 @@ run_case "wardryx-key-is-pep: a reworded note is not a fault" pass \
 	"$(py 'edit("install.sh", "(its secret is unchanged)", "(its secret stays the same)")')"
 
 
+# ---- network-membership.sh (CLAUDE.md invariant 38, wave 1 S2) -------------
+# Each case plants one fault in the networks, the override, the probes or the
+# install workflow, and the gate must go red with the wording it names.
+run_case "network-membership: idryx joins the agents network" fail \
+	'./scripts/network-membership.sh' \
+	"$(py 'import re
+s = open("compose.yaml").read()
+i = re.search(r"\n  idryx:\n", s).end()
+j = i + re.search(r"\n  [a-z]", s[i:]).start()
+b = s[i:j]
+assert "      - core\n" in b, "idryx has no core line"
+open("compose.yaml", "w").write(s[:i] + b.replace("      - core\n", "      - core\n      - agents\n", 1) + s[j:])')" \
+	"the agents network holds idryx"
+
+run_case "network-membership: the browser joins core" fail \
+	'./scripts/network-membership.sh' \
+	"$(py 'import re
+s = open("compose.yaml").read()
+i = re.search(r"\n  scopyx-browser:\n", s).end()
+j = i + re.search(r"\n  [a-z]", s[i:]).start()
+b = s[i:j]
+assert "      edge:\n" in b, "scopyx-browser has no edge line"
+open("compose.yaml", "w").write(s[:i] + b.replace("      edge:\n", "      edge:\n      core:\n", 1) + s[j:])')" \
+	"scopyx-browser is on core"
+
+run_case "network-membership: the console joins edge" fail \
+	'./scripts/network-membership.sh' \
+	"$(py 'import re
+s = open("compose.yaml").read()
+i = re.search(r"\n  console:\n", s).end()
+j = i + re.search(r"\n  [a-z]", s[i:]).start()
+b = s[i:j]
+assert "      - front\n" in b, "console has no front line"
+open("compose.yaml", "w").write(s[:i] + b.replace("      - front\n", "      - front\n      - edge\n", 1) + s[j:])')" \
+	"console is on network edge"
+
+run_case "network-membership: agents is not internal" fail \
+	'./scripts/network-membership.sh' \
+	"$(py 'edit("compose.yaml", "  agents:\n    internal: true\n", "  agents:\n")')" \
+	"network agents must be internal"
+
+run_case "network-membership: risk-signal is not internal" fail \
+	'./scripts/network-membership.sh' \
+	"$(py 'edit("compose.yaml", "  risk-signal:\n    internal: true\n", "  risk-signal:\n")')" \
+	"network risk-signal must be internal"
+
+run_case "network-membership: front masquerades" fail \
+	'./scripts/network-membership.sh' \
+	"$(py 'edit("compose.yaml", "com.docker.network.bridge.enable_ip_masquerade: \"false\"", "com.docker.network.bridge.enable_ip_masquerade: \"true\"")')" \
+	"network front must not masquerade"
+
+run_case "network-membership: wg is on the default network" fail \
+	'./scripts/network-membership.sh' \
+	"$(py 'import re
+s = open("compose.yaml").read()
+i = re.search(r"\n  wg:\n", s).end()
+j = i + re.search(r"\n  [a-z]", s[i:]).start()
+b = s[i:j]
+assert "      - edge\n" in b, "wg has no edge line"
+s = s[:i] + b.replace("      - edge\n", "      - default\n", 1) + s[j:]
+s = s.replace("\n  edge:\n", "\n  default:\n  edge:\n", 1)
+open("compose.yaml", "w").write(s)')" \
+	"wg is on the default network"
+
+run_case "network-membership: a service the table does not name" fail \
+	'./scripts/network-membership.sh' \
+	"$(py 'edit("compose.yaml", "\nvolumes:\n", "\n  probe:\n    image: busybox:1.36\n    networks:\n      - core\n\nvolumes:\n")')" \
+	"probe is not in the table"
+
+run_case "network-membership: typryx gets edge under the stub" fail \
+	'./scripts/network-membership.sh' \
+	"$(py 'edit("install.sh", "  case \"${TYPED_MODE:-}\" in jev | own-model) typed=1 ;; esac", "  typed=1")')" \
+	"typryx is on"
+
+run_case "network-membership: scopyx-browser loses its agents alias" fail \
+	'./scripts/network-membership.sh' \
+	"$(py 'edit("compose.yaml", "        aliases: [\"scopyx\"]\n", "        aliases: [\"browser\"]\n")')" \
+	"lost the alias scopyx"
+
+run_case "network-membership: install.yml loses the agents probe" fail \
+	'./scripts/network-membership.sh' \
+	"$(py 'edit_all(".github/workflows/install.yml", "agent-stack_agents", "agent-stack_core")')" \
+	"does not probe the agents network"
+
+run_case "network-membership: install.sh probes the default network" fail \
+	'./scripts/network-membership.sh' \
+	"$(py 'edit("install.sh", "NET=\"agent-stack_core\"", "NET=\"agent-stack_default\"")')" \
+	"install.sh names the agent-stack_default network"
+
+run_case "network-membership: the egress block is not there" fail \
+	'./scripts/network-membership.sh' \
+	"$(py 'edit("install.sh", "# egress-override: begin\n", "")')" \
+	"measured nothing"
+
+run_case "network-membership: a reworded comment is not a fault" pass \
+	'./scripts/network-membership.sh' \
+	"$(py 'edit("compose.yaml", "    # Agent-facing, so an agent reaches it under the name `scopyx`, and edge,", "    # Agent-facing: an agent reaches it under the name `scopyx`, and edge,")')"
+
+run_case "network-membership: no services resolve, so nothing was measured" fail \
+	'./scripts/network-membership.sh' \
+	"$(py 'edit("compose.yaml", "\nservices:\n", "\nservices: {}\nx-unused:\n")')" \
+	"measured nothing"
+
+
 echo
 if [ -n "$(git status --porcelain)" ]; then
 	printf 'FAIL: this script left the tree dirty, so it cannot be trusted about anything above\n'
