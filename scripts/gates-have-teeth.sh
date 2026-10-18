@@ -587,6 +587,11 @@ run_case "delegation-off-by-default: a delegation variable gets a literal defaul
 	"$(py 'edit("compose.yaml", "TOKENFUSE_DELEGATION_AUDIENCE: ${TOKENFUSE_DELEGATION_AUDIENCE:-}", "TOKENFUSE_DELEGATION_AUDIENCE: stack-single")')" \
 	"not the empty-default form"
 
+run_case "delegation-off-by-default: the profile starts when DELEGATION_ON is not 1" fail \
+	'./scripts/delegation-off-by-default.sh' \
+	"$(py 'edit("install.sh", "if [ \"${DELEGATION_ON:-0}\" = 1 ]; then UP_PROFILES+=(--profile delegation); fi", "[ \"${DELEGATION_ON:-0}\" = 1 ] || UP_PROFILES+=(--profile delegation)")')" \
+	"an inverted test that starts vouchryx on a default box"
+
 run_case "delegation-off-by-default: DELEGATION_ON is set to 1 with no switch above it" fail \
 	'./scripts/delegation-off-by-default.sh' \
 	"$(py 'edit("install.sh", "DELEGATION_ON=0        # 1 when vouchryx runs this run: WITH_DELEGATION or agent tokens\n", "DELEGATION_ON=0        # 1 when vouchryx runs this run: WITH_DELEGATION or agent tokens\nDELEGATION_ON=1\n")')" \

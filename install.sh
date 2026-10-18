@@ -3035,7 +3035,7 @@ if [ -z "$BUILD_FROM_SOURCE" ]; then
   # typed profile, so this adds nothing to pull; it is named so that
   # `config --images` resolves the same set docker will run.
   if [ "$TYPED_PLANE" != off ] && [ "$TYPED_RISK_ON" = 1 ]; then profiles+=(--profile typed-risk-signal); fi
-  [ "${DELEGATION_ON:-0}" = 1 ] || profiles+=(--profile delegation)
+  if [ "${DELEGATION_ON:-0}" = 1 ]; then profiles+=(--profile delegation); fi
   # The OpenAI door runs the gateway's own image, so this adds nothing to pull;
   # named so that `config --images` resolves the same set docker will run.
   [ "$DOOR_ON" != 1 ] || profiles+=(--profile openai-door)
@@ -3284,7 +3284,7 @@ UP_PROFILES=()
 # it serves, and only with typed answers on: a flag with no typryx was refused
 # in section 0b, and a saved flag is inert while typed answers are off.
 if [ "$TYPED_PLANE" != off ] && [ "$TYPED_RISK_ON" = 1 ]; then UP_PROFILES+=(--profile typed-risk-signal); fi
-[ "${DELEGATION_ON:-0}" = 1 ] || UP_PROFILES+=(--profile delegation)
+if [ "${DELEGATION_ON:-0}" = 1 ]; then UP_PROFILES+=(--profile delegation); fi
 # The OpenAI door (OPENAI_DOOR=1, section 0g) is started like the typed plane, so
 # section 8 can ask it the questions it asks the gateway.
 [ "$DOOR_ON" != 1 ] || UP_PROFILES+=(--profile openai-door)

@@ -127,6 +127,11 @@ for i, ln in enumerate(install_lines):
         window = [w.split("#")[0] for w in install_lines[max(0, i - 12):i] if not w.lstrip().startswith("#")] + [ln.split("#")[0]]
         if not any(("WITH_DELEGATION" in w or "WITH_AGENT_TOKENS" in w) for w in window):
             note(f"install.sh:{i + 1} sets DELEGATION_ON=1 with no WITH_DELEGATION or WITH_AGENT_TOKENS switch in the lines above it: {ln.strip()!r}")
+# The test must be "start the profile when DELEGATION_ON is 1". The inverted form
+# (`[ ... = 1 ] || --profile delegation`) starts vouchryx on every default box.
+for i, ln in enumerate(install_lines):
+    if "--profile delegation" in ln and "DELEGATION_ON" in ln and re.search(r"=\s*1\s*\]\s*\|\|", ln):
+        note(f"install.sh:{i + 1} adds --profile delegation when DELEGATION_ON is NOT 1, an inverted test that starts vouchryx on a default box: {ln.strip()!r}")
 hits = [i for i, ln in enumerate(install_lines) if "--profile delegation" in ln]
 if not hits:
     note("install.sh never passes --profile delegation at all, so this gate measured "
