@@ -73,6 +73,7 @@ change here is a change to something with root on somebody else's box.
 ./scripts/health-checks-are-declared.sh
 ./scripts/metered-doors-require-keys.sh
 ./scripts/broker-blocks-raw-secrets.sh
+./scripts/wardryx-gateway-key-is-pep.sh
 ./scripts/gates-have-teeth.sh   # invariant 8; needs a clean tree
 ```
 
@@ -1283,6 +1284,32 @@ an absent invariant.
     image (no upstream serves it a poisoned listing here; held by the static and
     resolved halves and the measurement above), tool pinning, a real typed backend
     behind the broker, and stack-k8s's broker manifest.)*
+
+37. **The gateway's policy-plane key is a `pep`, on a new box and on a box re-run.**
+    `@decided 2026-10-18` (paraphrased, from the wardryx 2.0.0 release that
+    closes the policy-plane findings of the 2026-10-17 review): an enforcement
+    point asks for decisions and does not rewrite policy, so the release refuses
+    a viewer key on `POST /v1/decide` and `POST /v1/filter-tools`. `@claude
+    2026-10-18`: the gateway, the MCP broker and scopyx present this one key on
+    every governed call, and with failmode closed a refused decision refuses the
+    call, so a viewer key would refuse every governed call the moment wardryx took
+    the new image. install.sh mints the entry as `:default:pep`, and a `.env`
+    minted before this release keeps `viewer` on every re-run, which leaves
+    `.env` as is. So `wardryx_gateway_role` (between the `# wardryx-role:`
+    markers) rewrites that one entry, role only, before the first `up`: the
+    secret, the org, an agent list, every other entry and every other line stay
+    byte for byte, and the admin key is never rewritten.
+    *(gate: `scripts/wardryx-gateway-key-is-pep.sh`: the fresh `.env` line gives
+    the gateway's key `pep` and no line in install.sh gives it `viewer`; the
+    lifted block, run in scratch `.env` files, moves the gateway's own entry and
+    nothing else, leaves a `pep` entry, a key that only begins with the gateway's
+    secret and a `.env` with no gateway line alone, and creates no `.env`; the
+    call comes before the first `up`. Scenarios in
+    `features/the-gateway-key-is-a-pep.feature`; nine teeth cases in
+    `scripts/gates-have-teeth.sh`. Not covered: that wardryx 2.0.0 answers `pep`
+    on `/v1/decide` (the install's own checks, which CI's install.yml runs on a
+    fresh runner, not run here), and an `.env` edited by hand to hold a second
+    gateway entry.)*
 
 ## Decisions that have no gate yet
 

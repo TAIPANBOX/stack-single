@@ -190,7 +190,7 @@ services:
   # ---- policy --------------------------------------------------------------
   wardryx:
     <<: *restart
-    image: ${WARDRYX_IMAGE:-ghcr.io/taipanbox/wardryx:v1.5.0}
+    image: ${WARDRYX_IMAGE:-ghcr.io/taipanbox/wardryx:v2.0.0}
     # The image's own 65532:65532, with the GID moved to the one that owns the
     # shared event directory. The binary is a static Go binary and reads no
     # /etc/passwd, so a numeric pair it was not built with is fine.
@@ -642,7 +642,7 @@ services:
   tokenfuse-mcp-broker:
     <<: *restart
     profiles: ["typed"]
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.14.0}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.15.0}
     # Just the subcommand, not the full binary path: the image's own
     # ENTRYPOINT is already the tokenfuse binary (@measured `docker inspect
     # ghcr.io/taipanbox/tokenfuse:v1.1.1`, 2026-09-26), so this `command:`
@@ -699,9 +699,9 @@ services:
       # broker is pointed there: the LLM gateway keeps asking wardryx
       # directly, because a model call has no pending tool call to classify
       # and the proxy's ask would add latency to a path with a 250 ms deadline
-      # (J2-DESIGN). The key is the gateway's own viewer key, which may call
-      # /v1/decide and nothing else, and the proxy forwards it to wardryx
-      # unchanged.
+      # (J2-DESIGN). The key is the gateway's own policy-plane key, a pep, which
+      # may ask /v1/decide and /v1/filter-tools and read what a viewer reads, and
+      # the proxy forwards it to wardryx unchanged.
       TOKENFUSE_WARDRYX_MODE: ${TYPED_RISK_WARDRYX_MODE:-enforce}
       TOKENFUSE_WARDRYX_URL: ${TYPED_RISK_WARDRYX_URL:-http://wardryx:8090}
       TOKENFUSE_WARDRYX_KEY: ${WARDRYX_GATEWAY:?set by install.sh}
@@ -837,7 +837,7 @@ services:
   vouchryx:
     <<: *restart
     profiles: ["delegation"]
-    image: ${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.2.0}
+    image: ${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.3.0}
     # Group 10001, the same pair typryx and the money plane's writers use: its
     # journal (VOUCHRYX_EVENTS_PATH) lands on the shared `events` volume,
     # root:10001 2775, and this is how it can append there.
@@ -884,7 +884,7 @@ services:
   # ---- money: the control API ----------------------------------------------
   tokenfuse-cloud:
     <<: *restart
-    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v1.14.0}
+    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v1.15.0}
     command: ["/usr/local/bin/tokenfuse-cloud"]
     healthcheck:
       # bash, not curl: these images ship bash and no HTTP client. The probe is the same
@@ -925,7 +925,7 @@ services:
   # gets a hard refusal rather than a log line.
   tokenfuse-gateway:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.14.0}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.15.0}
     command: ["/usr/local/bin/tokenfuse"]
     healthcheck:
       # bash, not curl: these images ship bash and no HTTP client. The probe is the same
@@ -1125,7 +1125,7 @@ services:
   #     reading of the variables being absent.
   tokenfuse-gateway-openai:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.14.0}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.15.0}
     command: ["/usr/local/bin/tokenfuse"]
     profiles: ["openai-door"]
     healthcheck:
@@ -1503,7 +1503,7 @@ services:
   # The sixth, trailryx-seal, is the `record` profile above.
   focus-export:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.14.0}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.15.0}
     user: "10001:10001"
     profiles: ["routines"]
     environment:
@@ -1724,7 +1724,7 @@ services:
   costcrew:
     <<: *restart
     profiles: ["finops"]
-    image: ${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.6.0}
+    image: ${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.7.0}
     user: "10003:10003"
     # The image's ENTRYPOINT is the console, so this is its argv.
     command:

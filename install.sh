@@ -2353,10 +2353,12 @@ CLOUD_KEYS=$CLOUD_SECRET:default:admin
 CLOUD_ADMIN=$CLOUD_SECRET
 
 # The policy plane, with two client keys on purpose. The console administers
-# policy and needs admin. The gateway only calls /v1/decide, which any
-# authenticated principal may do, so it gets a VIEWER key: an enforcement point
-# that can rewrite the policy it enforces is not an enforcement point.
-WARDRYX_KEYS=$WARDRYX_ADMIN_SECRET:default:admin,$WARDRYX_GATEWAY_SECRET:default:viewer
+# policy and needs admin. The gateway only asks for decisions (/v1/decide and
+# /v1/filter-tools), so it gets a PEP key, the enforcement point's role: an
+# enforcement point that can rewrite the policy it enforces is not one. wardryx
+# 2.0.0 refuses a viewer key on those two routes, so a viewer here would refuse
+# every governed call.
+WARDRYX_KEYS=$WARDRYX_ADMIN_SECRET:default:admin,$WARDRYX_GATEWAY_SECRET:default:pep
 WARDRYX_ADMIN=$WARDRYX_ADMIN_SECRET
 WARDRYX_GATEWAY=$WARDRYX_GATEWAY_SECRET
 
@@ -2374,6 +2376,50 @@ EOF
   chmod 600 .env
   note "generated .env (0600)"
 fi
+
+# wardryx-role: begin
+# wardryx 2.0.0 refuses a viewer key on POST /v1/decide and POST /v1/filter-tools,
+# the two calls the gateway, the MCP broker and scopyx make on every governed call
+# with this one key. A .env minted before that release still says viewer, and a
+# re-run leaves .env as is, so this one entry is rewritten here, before the stack
+# comes up: its role and nothing else. The secret, the org, any agent list, every
+# other entry and every other line stay as they were, and the file keeps its mode.
+wardryx_gateway_role() {
+  [ -s .env ] || return 0
+  local gw keys new tmp
+  gw="$(sed -n 's/^WARDRYX_GATEWAY=//p' .env | head -n 1 | tr -d "'\"")"
+  keys="$(sed -n 's/^WARDRYX_KEYS=//p' .env | head -n 1 | tr -d "'\"")"
+  [ -n "$gw" ] && [ -n "$keys" ] || return 0
+  new="$(printf '%s' "$keys" | awk -v gw="$gw" -F, '
+    {
+      out = ""
+      for (i = 1; i <= NF; i++) {
+        e = $i
+        if (index(e, gw ":") == 1) {
+          rest = substr(e, length(gw) + 2)
+          c = index(rest, ":")
+          if (c > 0) {
+            org = substr(rest, 1, c - 1)
+            tail = substr(rest, c + 1)
+            role = tail
+            sub(/:.*/, "", role)
+            if (role == "viewer") e = gw ":" org ":pep" substr(tail, 7)
+          }
+        }
+        out = (i == 1 ? e : out "," e)
+      }
+      printf "%s", out
+    }')"
+  [ "$new" != "$keys" ] || return 0
+  tmp="$(mktemp)" || die "could not make a temporary file to update .env"
+  awk -v v="$new" '/^WARDRYX_KEYS=/ && !done { print "WARDRYX_KEYS=" v; done = 1; next } { print }' .env >"$tmp" \
+    || die "could not read .env to update WARDRYX_KEYS"
+  cat "$tmp" >.env || die "could not update .env"
+  rm -f "$tmp"
+  note "WARDRYX_KEYS: the gateway's entry moves from viewer to pep (its secret is unchanged)"
+}
+# wardryx-role: end
+wardryx_gateway_role
 
 # Leaving .env alone is right for values that already exist, and wrong for
 # values a NEWER release introduced: an installed box would otherwise fail on
@@ -2460,7 +2506,7 @@ add_env_default ALERT_CONSOLE_URL "$(sq_ "")"
 # real one an operator later uses, and cannot be mistaken for one in a trail.
 # Change it to your own domain when you have one.
 add_env_default SCOPYX_KEYS "$(gen 40)=agent://local.invalid/default-agent"
-# Its own viewer key for the policy plane, for the reason the gateway has one:
+# Its own pep key for the policy plane (the gateway's key, the same secret), for the reason the gateway has one:
 # an enforcement point that can rewrite the policy it enforces is not an
 # enforcement point.
 #
@@ -2677,7 +2723,7 @@ posture and README says so."
   if [ ! -f delegation/signing.pem ]; then
     note "vouchryx: minting a signing key"
     docker run --rm --user 0:0 -v "$STACK_DIR/delegation:/out" \
-        --entrypoint vouchryx-demo "${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.2.0}" \
+        --entrypoint vouchryx-demo "${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.3.0}" \
         keygen -out /out/signing >/dev/null \
       || die "could not mint vouchryx's signing key"
     chown 65532:65532 delegation/signing.pem delegation/signing.jwks.json
@@ -2694,7 +2740,7 @@ posture and README says so."
     if [ ! -f delegation/idp.pem ]; then
       note "vouchryx: minting a demo issuer (WITH_DELEGATION_DEMO_ISSUER=1, never for production)"
       docker run --rm --user 0:0 -v "$STACK_DIR/delegation:/out" \
-          --entrypoint vouchryx-demo "${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.2.0}" \
+          --entrypoint vouchryx-demo "${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.3.0}" \
           keygen -out /out/idp -kid stack-single-demo-idp >/dev/null \
         || die "could not mint the demo issuer key"
       chown 65532:65532 delegation/idp.pem delegation/idp.jwks.json
