@@ -74,6 +74,7 @@ change here is a change to something with root on somebody else's box.
 ./scripts/metered-doors-require-keys.sh
 ./scripts/broker-blocks-raw-secrets.sh
 ./scripts/wardryx-gateway-key-is-pep.sh
+./scripts/network-membership.sh
 ./scripts/gates-have-teeth.sh   # invariant 8; needs a clean tree
 ```
 
@@ -1310,6 +1311,40 @@ an absent invariant.
     on `/v1/decide` (the install's own checks, which CI's install.yml runs on a
     fresh runner, not run here), and an `.env` edited by hand to hold a second
     gateway entry.)*
+
+38. **An agent has no route out of the box except through the doors, and no
+    plane is on an agent's network.** `@decided 2026-10-18` (paraphrased, wave 1
+    of the 2026-10-17 agent-security review, design decision D6 a: containers
+    only, with no host firewall change): an agent that could reach a
+    model provider directly did not need the metered gateway, because every
+    container shared one network with a route to the internet (finding F-014).
+    `@claude 2026-10-18`: the networks are declared in compose.yaml. `edge` is
+    the one network with a route out, and its members are the services that need
+    the internet, listed in `scripts/network-membership.sh`. `agents` is internal
+    and holds only the doors (the two gateways and the MCP broker), scopyx, the
+    browser, the console and costcrew. `core` is internal and holds the planes.
+    `risk-signal` is internal, as it was in use, now declared so. `front` is not
+    internal and has masquerade off, so a published port reaches the host without
+    a route out. The browser is on `agents`, `edge` and `browser-policy`, not on
+    `core`; `browser-policy` is internal and holds exactly scopyx-browser and
+    wardryx, the browser's one path to a decision. typryx and
+    its risk-signal proxy also get `edge`, through `compose.override.yaml`, only
+    when `TYPED_MODE` is `jev` or `own-model`; install.sh writes that file and no
+    other. The host firewall is not touched (design decision D6 a).
+    `.github/workflows/install.yml` runs a container on `agents` on a fresh runner:
+    it must reach the gateway, and must not resolve or reach example.com or
+    1.1.1.1, or reach wardryx by name, after a positive control on `edge`. A second
+    container, on `browser-policy`, must reach wardryx and neither the gateway nor
+    example.com.
+    *(gate: `scripts/network-membership.sh`: the resolved configuration against
+    the table in the gate, for the stock box and each egress choice, the network
+    properties, the install probes present; teeth in `scripts/gates-have-teeth.sh`;
+    scenarios in `features/the-agent-networks-are-internal.feature`. Not covered:
+    a container failing to reach the internet on the fresh runner is proven only
+    by that workflow step, and it has not run yet; the `front` network's masquerade
+    behaviour was measured on Docker Desktop only; the browser's own route over
+    `edge` is open by design; and no fetch through the `egress-browser` profile has
+    been decided by wardryx in CI, only the network path to wardryx is checked.)*
 
 ## Decisions that have no gate yet
 

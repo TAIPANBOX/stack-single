@@ -277,9 +277,10 @@ breaks passkeys again. If you set it, leave it.
 
 ## What comes up
 
-Ten containers on one Docker network, plus a one-shot `init-volumes` that
-exits, wired exactly as the Kubernetes deployment wires them, because service
-names resolve the same way in both:
+Ten containers and a one-shot `init-volumes` that exits, wired exactly as the
+Kubernetes deployment wires them, because service names resolve the same way in
+both. They sit on five Docker networks, not one; see "Networks" below for who is
+on which, and why an agent's container has no route to the internet:
 
 | Service | Port | Published to a host port |
 |---|---|---|
@@ -300,6 +301,47 @@ names resolve the same way in both:
 | `typryx-wardryx-proxy` | none | **opt-in twice, off unless you ask for it** (typed answers on, and `TYPED_RISK_SIGNAL=1`). Reachable only from the broker and wardryx. See "A risk signal on tool calls" below |
 | `vouchryx` | none | **opt-in, off unless you ask for it.** Inside the compose network only. See "Delegation" below |
 | `costcrew` | 8321 | **opt-in, off unless you ask for it** (profile `finops`; `install.sh` never starts it). Loopback only. See "The FinOps console" below |
+
+### Networks
+
+Before this release every container shared one Docker network and every one of
+them had a route to the internet, so an agent that could reach a model provider
+directly never needed the gateway. Now there are five networks:
+
+| Network | Internal | Who is on it |
+|---|---|---|
+| `edge` | no | the one route out: heraldyx (mail), the gateways (provider calls), scopyx and the browser (the web), wg and caddy. typryx and its risk-signal proxy join it only when `TYPED_MODE` is `jev` or `own-model`, because only then do they call a provider |
+| `agents` | yes | where an agent's container joins (`agent-stack_agents`). Its only peers are the two gateways, the MCP broker, scopyx, the browser, the console and costcrew |
+| `core` | yes | the planes, which reach each other and the doors. No agent container is on it |
+| `risk-signal` | yes | the typed risk signal's proxy, the MCP broker and wardryx, and nothing else |
+| `browser-policy` | yes | the browser's one path to a decision: scopyx-browser and wardryx, which decides every fetch the browser makes, and nothing else |
+| `front` | no, with NAT off | the published ports: caddy, console, costcrew and the MCP broker. Nothing outbound is translated, so a container here cannot use the host as a route out |
+
+An agent's container on `agents` reaches the gateways, the broker and scopyx.
+It cannot resolve a name on the internet, cannot connect to an address on it,
+and cannot reach a plane by name. `install.yml` checks those three things on a
+fresh runner, on every install leg, after a positive control on `edge` so a
+runner with no internet cannot pass them by accident.
+
+What this means for you:
+
+- An agent container you run yourself joins `agent-stack_agents`:
+  `docker run --network agent-stack_agents ...`. Its model calls go through the
+  gateway, with its client key, like any other metered call. A container left on
+  the old default network has lost its route to the internet, which is the point.
+- The browser container (scopyx-browser) is on `edge`, because it fetches the
+  web. Its containment is the proxy scopyx owns, not the network: a compromised
+  browser can open a connection over `edge` itself. Closing that needs the
+  browser to reach the web only through scopyx on an internal network, which is a
+  design change and is not done here.
+- The browser asks wardryx before every fetch. It reaches wardryx through
+  `browser-policy`, a network of its own whose only other member is wardryx, so
+  the browser is not on `core`. The path is measured at the network level (a
+  container on it reaches wardryx and not the gateway or the internet). No fetch
+  through the `egress-browser` profile has run in CI yet, so whether the profile
+  decides each fetch end to end is not proven by this release.
+- The host firewall is untouched. An agent that runs as a process on the host,
+  rather than in a container, is outside all of this.
 
 Docker watches the services the installer checks on their health paths:
 `tokenfuse-gateway`, `tokenfuse-gateway-openai` (when the door is on),
@@ -939,10 +981,11 @@ What turning it on changes, so nobody is surprised:
 - **The proxy is open on purpose, and a network is what closes it.** The broker
   cannot send it a credential, so it runs without one, on a Docker network
   (`risk-signal`) that holds only the proxy, the broker and wardryx, with no
-  published port. It must never be put on the default network: every container
-  there could then spend your ask budget. `scripts/typed-risk-signal.sh` holds
-  that, and `install.sh` checks it from both sides (reachable from its own
-  network, not from the default one, not on the host).
+  published port. It must never be put on any other network except `edge` for a
+  provider (jev or own-model): every container on a shared network could then
+  spend your ask budget. `scripts/typed-risk-signal.sh` holds that, and
+  `install.sh` checks it from both sides (reachable from its own network, not from
+  the planes' network, not on the host).
 - **The stub backend's answer is a fixed pick, not a classification.** It proves
   the wiring end to end, and holds a call only if you write a rule for the value
   it picks.
@@ -1310,7 +1353,7 @@ The password is visible in your shell history and in the process list for as
 long as that command runs. The first start also fills the console with a
 generated estate so there is something to look at; it is not a bill of yours.
 It answers `/healthz` with 200 and no redirect; from the compose network that
-is `docker run --rm --network agent-stack_default busybox:1.36 wget -q -O - http://costcrew:8321/healthz`.
+is `docker run --rm --network agent-stack_core busybox:1.36 wget -q -O - http://costcrew:8321/healthz`.
 
 **What it does here.** Its events go to the shared bus as `costcrew.ndjson`, so
 the notifier can mail about them and the chain verifier checks them. It runs as
