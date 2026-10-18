@@ -104,6 +104,12 @@ jobs:
         run: ./scripts/no-provider-key-outside-the-gateway.sh
       - name: agent tokens are off by default, and when on, the doors verify them against vouchryx and fail closed
         run: ./scripts/agent-tokens-are-wired.sh
+      - name: no plane writes another plane's stream, and nobody but the setup script creates a file on the bus
+        run: ./scripts/no-plane-writes-another-planes-stream.sh
+      - name: the Keyryx root keys are files, never in .env or an environment
+        run: ./scripts/keyryx-root-is-not-in-env.sh
+      - name: the Keyryx witness is a process apart from custody
+        run: ./scripts/witness-is-separate.sh
 
       # Last, because it mutates tracked files and restores them. It needs a
       # clean tree and says so plainly, so it also reports any earlier step

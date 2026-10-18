@@ -68,8 +68,8 @@ gw = mounts("tokenfuse-gateway")
 if "tokenfuse-gateway" in services and not any("./delegation-public:" in m for m in gw):
     errors.append("the gateway does not mount ./delegation-public, so the JWKS it is told to read is not there")
 
-if not re.search(r"^\s*chown 65532:65532 delegation\s*$", install, re.M):
-    errors.append("install.sh never gives ./delegation to uid 65532: on Linux vouchryx cannot read its own signing key")
+if not re.search(r"^\s*chown 20002:20002 delegation\s*$", install, re.M):
+    errors.append("install.sh never gives ./delegation to uid 20002: on Linux vouchryx cannot read its own signing key")
 if not re.search(r"^\s*chmod 755 delegation-public\s*$", install, re.M):
     errors.append("install.sh never makes ./delegation-public readable: on Linux the gateway (uid 10001) cannot read the JWKS")
 
@@ -77,5 +77,5 @@ if errors:
     for e in errors:
         print(f"FAIL: {e}")
     sys.exit(1)
-print("OK: ./delegation is vouchryx's alone (uid 65532), and the gateway reads only ./delegation-public.")
+print("OK: ./delegation is vouchryx's alone (uid 20002), and the gateway reads only ./delegation-public.")
 PY

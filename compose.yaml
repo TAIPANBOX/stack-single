@@ -52,8 +52,12 @@ services:
       - sh
       - -euc
       - |
-        mkdir -p /vol/events /vol/traces /vol/cloud /vol/heraldyx /vol/records /vol/scopyx /vol/focus /vol/typryx /vol/vouchryx /vol/conform
-        chown 0:10001 /vol/events && chmod 2775 /vol/events
+        mkdir -p /vol/events /vol/traces /vol/cloud /vol/heraldyx /vol/records /vol/scopyx /vol/focus /vol/typryx /vol/vouchryx /vol/conform /vol/keyryx /vol/keyryxw /vol/checkpoints
+        # Invariant 41. The bus directory is root:10001 0750: nothing but this
+        # script creates a file in it, so no plane can create one, let alone
+        # write another plane's. Every stream below is created here, owned by
+        # its producer's uid, mode 0640, group 10001 to read.
+        chown 0:10001 /vol/events && chmod 0750 /vol/events
         chown 10001:10001 /vol/traces /vol/cloud && chmod 0775 /vol/traces /vol/cloud
         # The OpenAI door (tokenfuse-gateway-openai, profile openai-door, opt-in)
         # keeps its traces and its retained-reservation journal in a directory of
@@ -85,7 +89,7 @@ services:
         # ledger here, the same reasoning as scopyx above: a fresh named volume
         # is root:root 0755, so without this chown the plane crash-loops on
         # "permission denied" the moment it is started.
-        chown 65532:65532 /vol/typryx && chmod 0775 /vol/typryx
+        chown 20005:10001 /vol/typryx && chmod 0775 /vol/typryx
         # vouchryx (profile delegation) runs 65532:10001, the same pair every
         # other Go plane's bus writer uses, and keeps its own revocation store
         # here (VOUCHRYX_REVOCATIONS_PATH), deliberately not the shared events
@@ -94,7 +98,7 @@ services:
         # Same trap as every other named volume in this loop: root:root 0755
         # by default, and without this chown the plane refuses to start rather
         # than run with a revocation list nobody can prove survived a restart.
-        chown 65532:10001 /vol/vouchryx && chmod 0775 /vol/vouchryx
+        chown 20002:10001 /vol/vouchryx && chmod 0775 /vol/vouchryx
         # focus-export (profile routines) runs 10001:10001 and writes the FOCUS
         # CSVs here; found by the gate the day it was written, same trap.
         chown 10001:10001 /vol/focus && chmod 0775 /vol/focus
@@ -138,10 +142,45 @@ services:
         # idryx loads it at start on every box and exits on a file that is not
         # there; an empty file is an empty log. heraldyx v0.5.0 and idryx v1.2.0
         # read it as tokenfuse (CLAUDE.md invariants 23 and 32).
-        for f in tokenfuse.ndjson tokenfuse-cloud.ndjson tokenfuse-mcp.ndjson tokenfuse-openai.ndjson wardryx.ndjson typryx.ndjson vouchryx.ndjson; do
-          [ -e "/vol/events/$$f" ] || : > "/vol/events/$$f"
-          chown 10001:10001 "/vol/events/$$f" && chmod 0664 "/vol/events/$$f"
-        done
+        [ -e /vol/events/tokenfuse.ndjson ] || : > /vol/events/tokenfuse.ndjson
+        chown 20010:10001 /vol/events/tokenfuse.ndjson && chmod 0640 /vol/events/tokenfuse.ndjson
+        [ -e /vol/events/tokenfuse-cloud.ndjson ] || : > /vol/events/tokenfuse-cloud.ndjson
+        chown 20013:10001 /vol/events/tokenfuse-cloud.ndjson && chmod 0640 /vol/events/tokenfuse-cloud.ndjson
+        [ -e /vol/events/tokenfuse-mcp.ndjson ] || : > /vol/events/tokenfuse-mcp.ndjson
+        chown 20012:10001 /vol/events/tokenfuse-mcp.ndjson && chmod 0640 /vol/events/tokenfuse-mcp.ndjson
+        [ -e /vol/events/tokenfuse-openai.ndjson ] || : > /vol/events/tokenfuse-openai.ndjson
+        chown 20011:10001 /vol/events/tokenfuse-openai.ndjson && chmod 0640 /vol/events/tokenfuse-openai.ndjson
+        [ -e /vol/events/wardryx.ndjson ] || : > /vol/events/wardryx.ndjson
+        chown 20001:10001 /vol/events/wardryx.ndjson && chmod 0640 /vol/events/wardryx.ndjson
+        [ -e /vol/events/typryx.ndjson ] || : > /vol/events/typryx.ndjson
+        chown 20005:10001 /vol/events/typryx.ndjson && chmod 0640 /vol/events/typryx.ndjson
+        [ -e /vol/events/vouchryx.ndjson ] || : > /vol/events/vouchryx.ndjson
+        chown 20002:10001 /vol/events/vouchryx.ndjson && chmod 0640 /vol/events/vouchryx.ndjson
+        # wardryx's policy archive is a directory in the bus (WARDRYX_POLICY_ARCHIVE),
+        # made here so that wardryx, which cannot create in the bus, owns it.
+        mkdir -p /vol/events/wardryx-policy-archive && chown 20001:10001 /vol/events/wardryx-policy-archive && chmod 0750 /vol/events/wardryx-policy-archive
+        # Keyryx's two state directories, each owned by the one process that uses it.
+        chown 20101:20101 /vol/keyryx && chmod 0700 /vol/keyryx
+        chown 20100:20100 /vol/keyryxw && chmod 0700 /vol/keyryxw
+        # One checkpoint file per producer stream (agent-passport SPEC 6.5.1), each
+        # written by its producer alone. Empty until a producer signs one.
+        chown 0:10001 /vol/checkpoints && chmod 0750 /vol/checkpoints
+        [ -e /vol/checkpoints/tokenfuse.ndjson.ckpt.ndjson ] || : > /vol/checkpoints/tokenfuse.ndjson.ckpt.ndjson
+        chown 20010:10001 /vol/checkpoints/tokenfuse.ndjson.ckpt.ndjson && chmod 0640 /vol/checkpoints/tokenfuse.ndjson.ckpt.ndjson
+        [ -e /vol/checkpoints/tokenfuse-cloud.ndjson.ckpt.ndjson ] || : > /vol/checkpoints/tokenfuse-cloud.ndjson.ckpt.ndjson
+        chown 20013:10001 /vol/checkpoints/tokenfuse-cloud.ndjson.ckpt.ndjson && chmod 0640 /vol/checkpoints/tokenfuse-cloud.ndjson.ckpt.ndjson
+        [ -e /vol/checkpoints/tokenfuse-mcp.ndjson.ckpt.ndjson ] || : > /vol/checkpoints/tokenfuse-mcp.ndjson.ckpt.ndjson
+        chown 20012:10001 /vol/checkpoints/tokenfuse-mcp.ndjson.ckpt.ndjson && chmod 0640 /vol/checkpoints/tokenfuse-mcp.ndjson.ckpt.ndjson
+        [ -e /vol/checkpoints/tokenfuse-openai.ndjson.ckpt.ndjson ] || : > /vol/checkpoints/tokenfuse-openai.ndjson.ckpt.ndjson
+        chown 20011:10001 /vol/checkpoints/tokenfuse-openai.ndjson.ckpt.ndjson && chmod 0640 /vol/checkpoints/tokenfuse-openai.ndjson.ckpt.ndjson
+        [ -e /vol/checkpoints/wardryx.ndjson.ckpt.ndjson ] || : > /vol/checkpoints/wardryx.ndjson.ckpt.ndjson
+        chown 20001:10001 /vol/checkpoints/wardryx.ndjson.ckpt.ndjson && chmod 0640 /vol/checkpoints/wardryx.ndjson.ckpt.ndjson
+        [ -e /vol/checkpoints/typryx.ndjson.ckpt.ndjson ] || : > /vol/checkpoints/typryx.ndjson.ckpt.ndjson
+        chown 20005:10001 /vol/checkpoints/typryx.ndjson.ckpt.ndjson && chmod 0640 /vol/checkpoints/typryx.ndjson.ckpt.ndjson
+        [ -e /vol/checkpoints/vouchryx.ndjson.ckpt.ndjson ] || : > /vol/checkpoints/vouchryx.ndjson.ckpt.ndjson
+        chown 20002:10001 /vol/checkpoints/vouchryx.ndjson.ckpt.ndjson && chmod 0640 /vol/checkpoints/vouchryx.ndjson.ckpt.ndjson
+        [ -e /vol/checkpoints/agent-conform.ndjson.ckpt.ndjson ] || : > /vol/checkpoints/agent-conform.ndjson.ckpt.ndjson
+        chown 10002:10001 /vol/checkpoints/agent-conform.ndjson.ckpt.ndjson && chmod 0640 /vol/checkpoints/agent-conform.ndjson.ckpt.ndjson
         # The chain verifier (agent-conform) runs 10002:10002, NEITHER of the
         # bus's uid families and NOT in the bus group on purpose: this
         # directory is root:10001 2775, so a process outside group 10001 cannot
@@ -154,7 +193,7 @@ services:
         # re-send every alert. `chain-verifier-is-contained.sh` holds all of
         # this.
         [ -e /vol/events/agent-conform.ndjson ] || : > /vol/events/agent-conform.ndjson
-        chown 10002:10002 /vol/events/agent-conform.ndjson && chmod 0644 /vol/events/agent-conform.ndjson
+        chown 10002:10001 /vol/events/agent-conform.ndjson && chmod 0640 /vol/events/agent-conform.ndjson
         chown 10002:10002 /vol/conform && chmod 0775 /vol/conform
         echo "volumes ready"
     volumes:
@@ -168,6 +207,9 @@ services:
       - typryxdata:/vol/typryx
       - vouchryxdata:/vol/vouchryx
       - conformstate:/vol/conform
+      - keyryxstate:/vol/keyryx
+      - keyryxwitness:/vol/keyryxw
+      - checkpoints:/vol/checkpoints
     restart: "no"
 
   # ---- the policy plane's durable store ------------------------------------
@@ -192,13 +234,97 @@ services:
       retries: 20
 
   # ---- policy --------------------------------------------------------------
+  # ---- key custody and the witness (CLAUDE.md invariants 41 to 43) ---------
+  # keyryx holds the keys that sign approvals and seal roots, certifies the
+  # short-lived key vouchryx signs tokens with, and publishes the key sets that
+  # verifiers cache. No request path calls it per decision: the synchronous
+  # calls are an approval being granted, a seal, and a renewal.
+  #
+  # keyryx-witness is the other role of the same binary, as its own process:
+  # its own uid, its own data volume, its own root key file, and no network.
+  # It reads the bus and nothing else. Its findings go to its own volume.
+  # Custody's root key is never mounted into it and its key is never mounted
+  # into custody (invariant 43).
+  #
+  # The root keys are host files that install.sh writes once, 0400, owned by
+  # the uid of the process that reads them. They are never in .env.
+  keyryx:
+    <<: *restart
+    image: ${KEYRYX_IMAGE:-ghcr.io/taipanbox/keyryx:v0.1.0@sha256:02e5d434e86c8f982eb2cf523abb254a4dde17823005b02861498ac38eab7c3e}
+    # The image's own 65532 is replaced: custody runs under its own uid, and
+    # no other container runs as it (invariant 41).
+    user: "20101:20101"
+    command:
+      - custody
+    environment:
+      KEYRYX_DATA: /var/lib/keyryx
+      KEYRYX_ROOT_KEY_FILE: /run/keyryx/root.key
+      KEYRYX_POLICY: /etc/keyryx/policy.json
+      KEYRYX_ADDR: 0.0.0.0:4340
+      KEYRYX_SOCKET_DIR: /run/keyryx/sock
+    volumes:
+      - keyryxstate:/var/lib/keyryx
+      - ./keyryx/root.key:/run/keyryx/root.key:ro
+      - ./keyryx/policy.json:/etc/keyryx/policy.json:ro
+      # One directory per consumer, each entered only by that consumer's group
+      # (install.sh sets the owners). Custody reaches them all.
+      - ./keyryx/sock:/run/keyryx/sock
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - core
+    depends_on:
+      init-volumes:
+        condition: service_completed_successfully
+
+  keyryx-witness:
+    <<: *restart
+    image: ${KEYRYX_IMAGE:-ghcr.io/taipanbox/keyryx:v0.1.0@sha256:02e5d434e86c8f982eb2cf523abb254a4dde17823005b02861498ac38eab7c3e}
+    user: "20100:10001"
+    command:
+      - witness
+    environment:
+      KEYRYX_WITNESS_DATA: /var/lib/keyryx-witness
+      KEYRYX_WITNESS_ROOT_KEY_FILE: /run/keyryx/witness-root.key
+      KEYRYX_WITNESS_EVENTS: /var/lib/stack/events
+      KEYRYX_WITNESS_ALERTS: /var/lib/keyryx-witness/alerts.ndjson
+      # Checkpoints are not read yet: no producer writes one (AS2, TF5c). The
+      # directory is mounted so the witness sees them the day they exist, and
+      # KEYRYX_WITNESS_CHECKPOINTS, which needs a custody URL and a stream-key
+      # map, is set with the producers that write them.
+    volumes:
+      - keyryxwitness:/var/lib/keyryx-witness
+      - ./keyryx/witness-root.key:/run/keyryx/witness-root.key:ro
+      # Read only: the witness writes nothing to the bus. Its findings go to its
+      # own volume (alerts.ndjson) until heraldyx renders the keyryx source, since
+      # a stream heraldyx does not accept is reported as unknown on every pass.
+      - events:/var/lib/stack/events:ro
+      - checkpoints:/var/lib/stack/checkpoints:ro
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # No network at all: the witness has nothing to call and nothing to serve
+    # outside its host volumes (invariant 43).
+    network_mode: none
+    depends_on:
+      init-volumes:
+        condition: service_completed_successfully
+
   wardryx:
     <<: *restart
-    image: ${WARDRYX_IMAGE:-ghcr.io/taipanbox/wardryx:v2.1.0}
-    # The image's own 65532:65532, with the GID moved to the one that owns the
-    # shared event directory. The binary is a static Go binary and reads no
-    # /etc/passwd, so a numeric pair it was not built with is fine.
-    user: "65532:10001"
+    image: ${WARDRYX_IMAGE:-ghcr.io/taipanbox/wardryx:v2.2.0}
+    # Its own uid (CLAUDE.md invariant 41): wardryx.ndjson is its stream, and
+    # no other plane's uid can write it. The GID stays the bus group, so it
+    # reads the other streams. group_add 20001 is for the Keyryx socket
+    # directory, which only this uid's group may enter (below).
+    user: "20001:10001"
+    group_add:
+      - "20001"
     command:
       - serve
       - -addr
@@ -209,6 +335,14 @@ services:
       - /etc/wardryx/policy.yaml
     environment:
       WARDRYX_KEYS: ${WARDRYX_KEYS:?set by install.sh}
+      # Approval tokens are signed by Keyryx (invariant 42): the key
+      # wardryx-approval is held there, and every grant asks it over this
+      # consumer's own socket. A v2 (HMAC) token is accepted only until
+      # WARDRYX_APPROVAL_V2_UNTIL; unset, a v2 token is refused from the switch,
+      # which is right on a box with none in flight.
+      WARDRYX_APPROVAL_SIGNER: keyryx
+      WARDRYX_KEYRYX_URL: unix:///run/keyryx/sock/wardryx/keyryx.sock
+      WARDRYX_APPROVAL_V2_UNTIL: ${WARDRYX_APPROVAL_V2_UNTIL:-}
       # WARDRYX_DB, not WARDRYX_DSN. wardryx reads WARDRYX_DB
       # (internal/config/config.go) and has never read WARDRYX_DSN, so this
       # compose generated a correct DSN, waited for policy-db to be healthy,
@@ -235,6 +369,8 @@ services:
     volumes:
       - events:/var/lib/stack/events
       - ./policy.yaml:/etc/wardryx/policy.yaml:ro
+      # Its own Keyryx socket directory and no other (invariant 42).
+      - ./keyryx/sock/wardryx:/run/keyryx/sock/wardryx
     # Core for the planes it calls, and the risk-signal network the typed
     # risk signal's proxy is on (see `typryx-wardryx-proxy` below). Joining it
     # costs nothing while the proxy is not running: the network then holds
@@ -367,12 +503,12 @@ services:
   # WHAT IT MAY WRITE, AND HOW THAT IS ENFORCED. The bus is mounted read-write
   # because its own stream has to be on the bus for heraldyx to see it, and
   # compose cannot mount one file of a named volume. So the limit is the
-  # account it runs as, not the mount: 10002:10002 is outside the bus group
-  # (10001), the directory is root:10001 2775, and the other planes' files are
-  # 0664 owned by 10001, so this uid can READ every stream through the "other"
-  # bits and WRITE exactly one file, the one init-volumes pre-created and gave
-  # it. No `group_add`, ever: the bus group would let it write every plane's
-  # file. `-out` must be a file named agent-conform.ndjson (the tool refuses
+  # account it runs as, not the mount. Since invariant 41 the streams are 0640,
+  # owned by their producers, so this uid joins the bus group (10001) to READ
+  # them. Group 10001 has no write bit on the bus directory (root:10001 0750)
+  # or on any stream but its owner's, so the group lets it read every stream and
+  # write exactly one file, the one init-volumes pre-created and gave it. The
+  # only group it ever joins is 10001, read-only in effect. `-out` must be a file named agent-conform.ndjson (the tool refuses
   # any other name: that name is the source its events claim), and `-state` is
   # on its own volume, outside the directory it walks.
   #
@@ -385,6 +521,11 @@ services:
     networks:
       - core
     user: "10002:10002"
+    # Group 10001 reads the streams (each is 0640, owned by its producer), so the
+    # chain verifier can read every stream and write only its own (invariant 21,
+    # as amended by invariant 41). This is the one group the verifier joins.
+    group_add:
+      - "10001"
     command:
       - watch-dir
       - -every
@@ -574,7 +715,7 @@ services:
     # other Go plane's bus writer runs as. The ledger stays on typryxdata,
     # still owned 65532:65532 below, and uid 65532 keeps full owner access
     # there whatever the primary gid is.
-    user: "65532:10001"
+    user: "20005:10001"
     environment:
       TYPRYX_BACKEND: ${TYPRYX_BACKEND:-stub}
       # All empty unless TYPED_MODE put something in `.env`, and empty is what
@@ -669,6 +810,9 @@ services:
     <<: *restart
     profiles: ["typed"]
     image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.16.0}
+    # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
+    # owned by it and by no other plane. The GID stays the bus group.
+    user: "20012:10001"
     # Just the subcommand, not the full binary path: the image's own
     # ENTRYPOINT is already the tokenfuse binary (@measured `docker inspect
     # ghcr.io/taipanbox/tokenfuse:v1.1.1`, 2026-09-26), so this `command:`
@@ -745,6 +889,10 @@ services:
       TOKENFUSE_AGENT_TOKENS: ${TOKENFUSE_AGENT_TOKENS:-off}
       TOKENFUSE_DELEGATION_ISSUER: ${TOKENFUSE_DELEGATION_ISSUER:-}
       TOKENFUSE_DELEGATION_JWKS: ${TOKENFUSE_DELEGATION_JWKS:-}
+      # The Keyryx key set for delegated tokens (CLAUDE.md invariant 42, TF5a). Empty is
+      # off, which tokenfuse reads as off; the file variable above stays until the
+      # JWKS URL is the pin (tokenfuse v1.17.0 is the first release that reads it).
+      TOKENFUSE_DELEGATION_JWKS_URL: ${TOKENFUSE_DELEGATION_JWKS_URL:-}
       TOKENFUSE_DELEGATION_AUDIENCE: ${MCP_BROKER_DELEGATION_AUDIENCE:-}
       TOKENFUSE_DELEGATION_URL: ${MCP_BROKER_DELEGATION_URL:-}
       TOKENFUSE_DELEGATION_REVOCATIONS: ${TOKENFUSE_DELEGATION_REVOCATIONS:-}
@@ -894,8 +1042,17 @@ services:
     # Group 10001, the same pair typryx and the money plane's writers use: its
     # journal (VOUCHRYX_EVENTS_PATH) lands on the shared `events` volume,
     # root:10001 2775, and this is how it can append there.
-    user: "65532:10001"
+    user: "20002:10001"
+    # Keyryx certifies vouchryx's working signing key (invariant 42). Empty, the
+    # default, keeps the file key, which is what v0.4.0 (the pin here) does. The
+    # switch moves with the pin: v0.5.0 is the first release that reads it, and
+    # when the pin moves this becomes `keyryx`. group_add 20002 is for the socket
+    # directory below, which only this uid's group may enter.
+    group_add:
+      - "20002"
     environment:
+      VOUCHRYX_SIGNER: ${VOUCHRYX_SIGNER:-}
+      VOUCHRYX_KEYRYX_URL: unix:///run/keyryx/sock/vouchryx/keyryx.sock
       VOUCHRYX_ADDR: 0.0.0.0:4310
       # This exact literal, `http://vouchryx:4310`, is also `install.sh`'s own
       # `TOKENFUSE_DELEGATION_ISSUER` default once WITH_DELEGATION=1: the
@@ -935,6 +1092,8 @@ services:
       # ./delegation and reused on every later run, read only here because
       # this container never needs to write either.
       - ./delegation:/etc/vouchryx:ro
+      # Its own Keyryx socket directory (invariant 42), and no other.
+      - ./keyryx/sock/vouchryx:/run/keyryx/sock/vouchryx
       - vouchryxdata:/var/lib/vouchryx
       - events:/var/lib/stack/events
     depends_on:
@@ -945,6 +1104,9 @@ services:
   tokenfuse-cloud:
     <<: *restart
     image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v1.16.0}
+    # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
+    # owned by it and by no other plane. The GID stays the bus group.
+    user: "20013:10001"
     networks:
       - core
     command: ["/usr/local/bin/tokenfuse-cloud"]
@@ -988,6 +1150,9 @@ services:
   tokenfuse-gateway:
     <<: *restart
     image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.16.0}
+    # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
+    # owned by it and by no other plane. The GID stays the bus group.
+    user: "20010:10001"
     networks:
       - edge
       - agents
@@ -1106,6 +1271,10 @@ services:
       # not fetch FROM the running vouchryx would carry the wrong `kid` and
       # every token would be refused `BadToken`. Measured 2026-09-27.
       TOKENFUSE_DELEGATION_JWKS: ${TOKENFUSE_DELEGATION_JWKS:-}
+      # The Keyryx key set for delegated tokens (CLAUDE.md invariant 42, TF5a). Empty is
+      # off, which tokenfuse reads as off; the file variable above stays until the
+      # JWKS URL is the pin (tokenfuse v1.17.0 is the first release that reads it).
+      TOKENFUSE_DELEGATION_JWKS_URL: ${TOKENFUSE_DELEGATION_JWKS_URL:-}
       TOKENFUSE_DELEGATION_AUDIENCE: ${TOKENFUSE_DELEGATION_AUDIENCE:-}
       # The absolute origin agents actually reach this gateway at, for the
       # DPoP `htu` a hand-off proof is checked against; install.sh derives it
@@ -1209,6 +1378,9 @@ services:
   tokenfuse-gateway-openai:
     <<: *restart
     image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.16.0}
+    # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
+    # owned by it and by no other plane. The GID stays the bus group.
+    user: "20011:10001"
     networks:
       - edge
       - agents
@@ -1825,7 +1997,7 @@ services:
         mkdir -p /vol/costcrew
         chown 10003:10003 /vol/costcrew && chmod 0750 /vol/costcrew
         [ -e /vol/events/costcrew.ndjson ] || : > /vol/events/costcrew.ndjson
-        chown 10003:10003 /vol/events/costcrew.ndjson && chmod 0644 /vol/events/costcrew.ndjson
+        chown 10003:10001 /vol/events/costcrew.ndjson && chmod 0640 /vol/events/costcrew.ndjson
         echo "costcrew volumes ready"
     volumes:
       - events:/vol/events
@@ -1893,6 +2065,12 @@ volumes:
   # simply a volume: the cluster needed a ReadWriteMany class and a storage
   # provider to get the same thing.
   events:
+  # Keyryx custody state, 0700 and its uid only (invariant 41).
+  keyryxstate:
+  # Keyryx witness state, its own volume and uid (invariant 43).
+  keyryxwitness:
+  # One checkpoint file per producer stream, each written by that producer alone.
+  checkpoints:
   traces:
   cloudstate:
   consolestate:

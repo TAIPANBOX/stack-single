@@ -300,6 +300,8 @@ on which, and why an agent's container has no route to the internet:
 | `tokenfuse-gateway-openai` | 4110 | **opt-in, off unless you ask for it** (`OPENAI_DOOR=1`). A second gateway for agents that speak the OpenAI wire; `GATEWAY_BIND` decides where, same as the gateway. See "A second door on the OpenAI wire" below |
 | `typryx-wardryx-proxy` | none | **opt-in twice, off unless you ask for it** (typed answers on, and `TYPED_RISK_SIGNAL=1`). Reachable only from the broker and wardryx. See "A risk signal on tool calls" below |
 | `vouchryx` | none | **opt-in, off unless you ask for it.** Inside the compose network only. See "Delegation" below |
+| `keyryx` | 4340 (compose network only) | none. Key custody: it holds the keys that sign approvals and seal roots. See "Key custody and the witness" below |
+| `keyryx-witness` | none | none. It has no network at all. It reads the event record and checks it. See "Key custody and the witness" below |
 | `costcrew` | 8321 | **opt-in, off unless you ask for it** (profile `finops`; `install.sh` never starts it). Loopback only. See "The FinOps console" below |
 
 ### Networks
@@ -841,6 +843,58 @@ ssh -L 17420:127.0.0.1:7420 root@<your box>
 open http://localhost:17420
 ```
 
+
+## Key custody and the witness (Keyryx)
+
+Two containers run one binary, `keyryx`, as two processes that do not share a uid,
+a volume or a root key:
+
+- **`keyryx`** (custody) holds the private keys that sign things the box must be able
+  to prove later. Today that is the key that signs wardryx's approval tokens, which
+  is what a human approval is checked against. It is never on a request path: it is
+  called when an approval is granted, not for every call an agent makes.
+- **`keyryx-witness`** reads the event record and countersigns what it saw. Its
+  findings go to its own volume, `keyryxwitness`, as `alerts.ndjson`. It has no
+  network, so nothing can call it and it can call nothing.
+
+The two root keys are files that `install.sh` writes once, 32 random bytes each, mode
+0400, owned by the one process that reads them: `keyryx/root.key` for custody and
+`keyryx/witness-root.key` for the witness. The installer never rewrites one and never
+deletes one, because a replaced root key orphans every private key wrapped under it.
+Neither key is in `.env`. Back up the `keyryx` directory with the rest of the box.
+
+Each producer of the record now runs under its own uid, so one plane cannot rewrite
+another plane's stream. Every stream in the shared event volume is owned by the one
+plane that writes it and is mode 0640: the gateway, the control plane, the MCP broker,
+the OpenAI door, wardryx, typryx, vouchryx, and the chain verifier (which reads the
+streams through the bus group and writes only its own). The bus directory belongs to
+root and nothing but the setup script creates a file in it. A checkpoint file per
+producer is created alongside, empty until a producer signs one.
+
+What is wired now, and what is not:
+
+- **wardryx** (image pin `v2.2.0`) signs approval tokens through keyryx, over its
+  own socket. A v2 token, signed with the shared secret, is accepted only until
+  `WARDRYX_APPROVAL_V2_UNTIL`. That variable is unset here, so a v2 token is refused from
+  the switch. On a box with no token in flight that is correct.
+- **vouchryx** has the wiring, and its working key is still the file key. The switch
+  is `VOUCHRYX_SIGNER`, empty by default. It becomes `keyryx` when the pin moves to a
+  release that reads it (v0.5.0).
+- **the tokenfuse gateway and the MCP broker** have `TOKENFUSE_DELEGATION_JWKS_URL`
+  set to empty, which is off. It takes effect with tokenfuse v1.17.0.
+- **trailryx's seal** is not wired. Its signer needs the next trailryx release.
+- **checkpoints** are not written yet: no producer signs one. The witness checks each
+  stream against the bytes it saw before, and it reads the checkpoints once a producer
+  has written some.
+- **the witness's findings are not mailed.** Heraldyx does not render the keyryx
+  source yet, so a finding on the bus would be reported as unknown on every pass. They
+  wait in the witness's own volume until heraldyx does.
+
+Migration, for a box that already runs: the streams change owner and mode the first
+time `install.sh` runs, and the planes change uid when their containers are
+recreated. Run `./install.sh` (not only `docker compose up`), or `docker compose up`
+stops at the missing root key file and names it. The `WARDRYX_APPROVAL_SECRET` and the
+old `signing.pem` are left in place and unused. Nothing is deleted.
 
 ## The record: what this box did, sealed
 

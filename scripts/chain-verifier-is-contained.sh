@@ -199,8 +199,12 @@ for name in sorted(subjects):
             note(f"{name}: uid {uid} is one of the bus's writer uids ({', '.join(sorted(BUS_UIDS))}); it would own or share another plane's files")
         if gid == BUS_GID:
             note(f"{name}: gid {gid} is the bus group: the bus directory is group-writable and every plane's file is 0664 in that group")
-    if field(b, "group_add") is not None or listing(b, "group_add"):
-        note(f"{name}: has group_add, which can put it in the bus group and let it write every plane's stream")
+    # Invariant 41 amended this: the streams are 0640 and owned by their
+    # producers, so the verifier joins the bus group to READ them. The only
+    # group it may join is the bus group, and it has no write bit there.
+    groups = listing(b, "group_add")
+    if groups != [BUS_GID]:
+        note(f"{name}: group_add is {groups or 'absent'}; the only group it may join is the bus group {BUS_GID}, to read the 0640 streams")
 
     # ---- 5. hardening and pin
     if field(b, "read_only") != "true":
@@ -226,8 +230,8 @@ for name in sorted(subjects):
             note(f"init-volumes does not pre-create {os.path.basename(out)}: the verifier cannot create a file in a directory it has no write access to")
         if not chown:
             note(f"init-volumes does not chown {os.path.basename(out)}: the verifier could not append to it")
-        elif uid is not None and (chown.group(1), chown.group(2)) != (uid, gid):
-            note(f"init-volumes gives {os.path.basename(out)} to {chown.group(1)}:{chown.group(2)} but the verifier runs as {user}")
+        elif uid is not None and (chown.group(1), chown.group(2)) != (uid, BUS_GID):
+            note(f"init-volumes gives {os.path.basename(out)} to {chown.group(1)}:{chown.group(2)}; the verifier must own it (uid {uid}) in the bus group ({BUS_GID}), mode 0640")
         if not chmod:
             note(f"init-volumes sets no mode on {os.path.basename(out)}")
         elif int(chmod.group(1)[-2:], 8) & 0o22:

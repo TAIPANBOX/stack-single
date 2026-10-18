@@ -576,7 +576,7 @@ run_case "manifest-is-true: a routine arrives and the manifest does not claim it
 # is one character in one tag, which is exactly how it would arrive.
 run_case "manifest-is-true: a pulled tag moves in compose and not in the manifest" fail \
 	'./scripts/manifest-is-true.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.1.0", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.2.0", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
 	"an image it pulls"
 
 # invariant 15: the delegation plane's default is byte-for-byte what it was
@@ -1524,12 +1524,12 @@ run_case "typed-risk-signal: typryx is pinned before the proxy existed" fail \
 
 run_case "typed-risk-signal: wardryx is pinned before it read signals" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.1.0}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.2.0}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
 	"hold_if_signal and signals on /v1/decide do not exist before it"
 
 run_case "typed-risk-signal: wardryx is pinned before when_absent" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.1.0}", "ghcr.io/taipanbox/wardryx:v1.3.2}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.2.0}", "ghcr.io/taipanbox/wardryx:v1.3.2}")')" \
 	"needs v1.4.0 or later"
 
 run_case "typed-risk-signal: tokenfuse is pinned before it sent the tool call" fail \
@@ -3053,6 +3053,68 @@ run_case "agent-tokens-are-wired: no vouchryx service left to judge" fail \
 	'./scripts/agent-tokens-are-wired.sh' \
 	"$(py 'edit("compose.yaml", "  vouchryx:\n    <<: *restart\n", "  vouchryx-moved:\n    <<: *restart\n")')" \
 	"measured NOTHING"
+
+# invariant 41: no plane writes another plane's stream. Each case plants one
+# fault in the compose file or the installer, and the gate must go red on it.
+run_case "no-plane-writes: two producers run as one uid" fail \
+	'./scripts/no-plane-writes-another-planes-stream.sh' \
+	"$(py 'edit("compose.yaml", "    user: \"20010:10001\"\n", "    user: \"20013:10001\"\n")')" \
+	"tokenfuse-cloud"
+
+run_case "no-plane-writes: a stream is world-readable (0644)" fail \
+	'./scripts/no-plane-writes-another-planes-stream.sh' \
+	"$(py 'edit("compose.yaml", "chown 20001:10001 /vol/events/wardryx.ndjson && chmod 0640 /vol/events/wardryx.ndjson", "chown 20001:10001 /vol/events/wardryx.ndjson && chmod 0644 /vol/events/wardryx.ndjson")')" \
+	"want 0640"
+
+run_case "no-plane-writes: the bus directory is group-writable" fail \
+	'./scripts/no-plane-writes-another-planes-stream.sh' \
+	"$(py 'edit("compose.yaml", "chown 0:10001 /vol/events && chmod 0750 /vol/events", "chown 0:10001 /vol/events && chmod 2775 /vol/events")')" \
+	"bus directory"
+
+run_case "no-plane-writes: a reworded comment in init-volumes is not a fault" pass \
+	'./scripts/no-plane-writes-another-planes-stream.sh' \
+	"$(py 'edit("compose.yaml", "# Invariant 41. The bus directory is", "# Invariant 41: the bus directory is")')"
+
+# invariant 43: the root keys are files, never environment values or .env lines.
+run_case "keyryx-root: a root key is written into .env" fail \
+	'./scripts/keyryx-root-is-not-in-env.sh' \
+	"$(py 'edit("install.sh", "keyryx_root_key() { # FILE UID: create FILE with 32 random bytes when absent\n", "keyryx_root_key() { # FILE UID: create FILE with 32 random bytes when absent\n  add_env_default KEYRYX_ROOT_KEY \"x\"\n")')" \
+	"KEYRYX_ROOT_KEY"
+
+run_case "keyryx-root: custody interpolates its root key from .env" fail \
+	'./scripts/keyryx-root-is-not-in-env.sh' \
+	"$(py 'edit("compose.yaml", "      KEYRYX_DATA: /var/lib/keyryx\n", "      KEYRYX_DATA: /var/lib/keyryx\n      KEYRYX_ROOT_KEY: ${KEYRYX_ROOT_KEY:?set by install.sh}\n")')" \
+	"KEYRYX_ROOT_KEY"
+
+run_case "keyryx-root: a reworded comment in install.sh is not a fault" pass \
+	'./scripts/keyryx-root-is-not-in-env.sh' \
+	"$(py 'edit("install.sh", "# Two root keys, one per role, each 32 random bytes, written ONCE", "# Two root keys, one for each role, each 32 random bytes, written ONCE")')"
+
+# invariant 43: the witness is a process apart from custody.
+run_case "witness-is-separate: the witness runs under custody's uid" fail \
+	'./scripts/witness-is-separate.sh' \
+	"$(py 'edit("compose.yaml", "    user: \"20100:10001\"\n", "    user: \"20101:10001\"\n")')" \
+	"same uid"
+
+run_case "witness-is-separate: the witness mounts custody's state" fail \
+	'./scripts/witness-is-separate.sh' \
+	"$(py 'edit("compose.yaml", "      - keyryxwitness:/var/lib/keyryx-witness\n", "      - keyryxwitness:/var/lib/keyryx-witness\n      - keyryxstate:/var/lib/keyryx-custody-peek\n")')" \
+	"share state"
+
+run_case "witness-is-separate: the witness has a network" fail \
+	'./scripts/witness-is-separate.sh' \
+	"$(py 'edit("compose.yaml", "    network_mode: none\n", "    networks:\n      - core\n")')" \
+	"has a network"
+
+run_case "witness-is-separate: a reworded comment in the witness block is not a fault" pass \
+	'./scripts/witness-is-separate.sh' \
+	"$(py 'edit("compose.yaml", "# No network at all: the witness has nothing", "# No network at all, the witness has nothing")')"
+
+run_case "witness-is-separate: no keyryx service left to judge" fail \
+	'./scripts/witness-is-separate.sh' \
+	"$(py 'edit("compose.yaml", "  keyryx-witness:\n", "  keyryx-witness-moved:\n")')" \
+	"measured nothing"
+
 
 echo
 if [ -n "$(git status --porcelain)" ]; then

@@ -360,8 +360,8 @@ for n in sorted(subjects):
             chown = re.search(r"chown\s+([0-9]+):([0-9]+)\s+" + d + "/" + base, itext)
             if not chown:
                 note(f"{init_name[0]} does not chown {os.path.basename(ev)}, so the console could not append to it")
-            elif uid is not None and (chown.group(1), chown.group(2)) != (uid, gid):
-                note(f"{init_name[0]} gives {os.path.basename(ev)} to {chown.group(1)}:{chown.group(2)} but the console runs as {user}")
+            elif uid is not None and (chown.group(1), chown.group(2)) not in ((uid, gid), (uid, "10001")):
+                note(f"{init_name[0]} gives {os.path.basename(ev)} to {chown.group(1)}:{chown.group(2)} but the console runs as {user}; its stream is its own uid in the bus group (CLAUDE.md invariant 41)")
             chmod = re.search(r"chmod\s+([0-7]{3,4})\s+" + d + "/" + base, itext)
             if not chmod:
                 note(f"{init_name[0]} sets no mode on {os.path.basename(ev)}")
@@ -369,7 +369,7 @@ for n in sorted(subjects):
                 mode = int(chmod.group(1)[-3:], 8)
                 if mode & 0o022:
                     note(f"{init_name[0]} makes {os.path.basename(ev)} {chmod.group(1)}: writable by group or other, so another plane could append in the console's name")
-                if not mode & 0o004:
+                if not mode & 0o004 and not mode & 0o040:
                     note(f"{init_name[0]} makes {os.path.basename(ev)} {chmod.group(1)}: not readable by other, so the chain verifier (outside the bus group) "
                          "could not read it and would exit and restart on every box that enabled this")
     if data_vol:
