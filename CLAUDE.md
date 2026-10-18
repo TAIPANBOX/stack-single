@@ -1370,7 +1370,7 @@ an absent invariant.
     environment value or by reference; each door reads its own file from its own
     read-only directory and no other service mounts one; the installer's
     `# upstream-key:` block writes the file 0400 for uid 10001; refuses to report
-    OK on no gateway subject, no compose file or no installer block; 9 teeth cases
+    OK on no gateway subject, no compose file or no installer block; 10 teeth cases
     in `scripts/gates-have-teeth.sh`; `features/the-provider-key-stays-with-the-gateway.feature`.
     Not covered: a live refused call from a caller that holds a provider key, which
     needs a running stack; the MCP broker, which holds no provider key and is not
