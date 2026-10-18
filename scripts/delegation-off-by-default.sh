@@ -123,7 +123,8 @@ def guarded(idx):
 # every place it is set to 1 must sit under WITH_DELEGATION or the agent-token switch.
 for i, ln in enumerate(install_lines):
     if re.match(r"^\s*DELEGATION_ON=1\b", ln):
-        window = [w for w in install_lines[max(0, i - 12):i] if not w.lstrip().startswith("#")] + [ln]
+        # Code only: a trailing comment that names a switch is not a switch.
+        window = [w.split("#")[0] for w in install_lines[max(0, i - 12):i] if not w.lstrip().startswith("#")] + [ln.split("#")[0]]
         if not any(("WITH_DELEGATION" in w or "WITH_AGENT_TOKENS" in w) for w in window):
             note(f"install.sh:{i + 1} sets DELEGATION_ON=1 with no WITH_DELEGATION or WITH_AGENT_TOKENS switch in the lines above it: {ln.strip()!r}")
 hits = [i for i, ln in enumerate(install_lines) if "--profile delegation" in ln]
