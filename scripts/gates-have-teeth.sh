@@ -576,7 +576,7 @@ run_case "manifest-is-true: a routine arrives and the manifest does not claim it
 # is one character in one tag, which is exactly how it would arrive.
 run_case "manifest-is-true: a pulled tag moves in compose and not in the manifest" fail \
 	'./scripts/manifest-is-true.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.0.0", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.1.0", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
 	"an image it pulls"
 
 # invariant 15: the delegation plane's default is byte-for-byte what it was
@@ -1089,7 +1089,7 @@ run_case "identity-files: the map is mounted writable" fail \
 
 run_case "identity-files: another service is handed the client keys" fail \
 	'./scripts/identity-files-are-checked.sh' \
-	"$(py 'edit("compose.yaml", "      GENARYX_COPILOT_KEY: ${GENARYX_COPILOT_KEY:-}\n", "      GENARYX_COPILOT_KEY: ${GENARYX_COPILOT_KEY:-}\n      TOKENFUSE_CLIENT_KEYS: ${GATEWAY_CLIENT_KEYS:-}\n")')" \
+	"$(py 'edit("compose.yaml", "      GENARYX_COPILOT_FUSE_KEY: ${GENARYX_COPILOT_FUSE_KEY:-}\n", "      GENARYX_COPILOT_FUSE_KEY: ${GENARYX_COPILOT_FUSE_KEY:-}\n      TOKENFUSE_CLIENT_KEYS: ${GATEWAY_CLIENT_KEYS:-}\n")')" \
 	"console names GATEWAY_CLIENT_KEYS"
 
 run_case "identity-files: no gateway service left to judge" fail \
@@ -1514,17 +1514,17 @@ run_case "typed-risk-signal: typryx is pinned before the proxy existed" fail \
 
 run_case "typed-risk-signal: wardryx is pinned before it read signals" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.0.0}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.1.0}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
 	"hold_if_signal and signals on /v1/decide do not exist before it"
 
 run_case "typed-risk-signal: wardryx is pinned before when_absent" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.0.0}", "ghcr.io/taipanbox/wardryx:v1.3.2}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.1.0}", "ghcr.io/taipanbox/wardryx:v1.3.2}")')" \
 	"needs v1.4.0 or later"
 
 run_case "typed-risk-signal: tokenfuse is pinned before it sent the tool call" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/tokenfuse:v1.15.0}", "ghcr.io/taipanbox/tokenfuse:v1.4.1}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/tokenfuse:v1.16.0}", "ghcr.io/taipanbox/tokenfuse:v1.4.1}")')" \
 	"the broker sends no tool_call to the policy plane before it"
 
 run_case "typed-risk-signal: install.sh starts the proxy profile unconditionally" fail \
@@ -1937,7 +1937,7 @@ run_case "felyx-through-the-gateway: the base URL points past the gateway" fail 
 
 run_case "felyx-through-the-gateway: the remote opt-in comes back" fail \
 	'./scripts/felyx-through-the-gateway.sh' \
-	"$(py 'edit("compose.yaml", "      GENARYX_COPILOT_API_KEY_REF: env:GENARYX_COPILOT_KEY\n", "      GENARYX_COPILOT_API_KEY_REF: env:GENARYX_COPILOT_KEY\n      GENARYX_COPILOT_ALLOW_REMOTE: \"1\"\n")')" \
+	"$(py 'edit("compose.yaml", "      GENARYX_COPILOT_API_KEY_REF: env:GENARYX_COPILOT_FUSE_KEY\n", "      GENARYX_COPILOT_API_KEY_REF: env:GENARYX_COPILOT_FUSE_KEY\n      GENARYX_COPILOT_ALLOW_REMOTE: \"1\"\n")')" \
 	"would skip the residency check"
 
 run_case "felyx-through-the-gateway: Felyx's client key reference is dropped" fail \
@@ -1972,10 +1972,10 @@ run_case "felyx-through-the-gateway: the closing report prints Felyx's key" fail
 	"$(py 'edit("install.sh", "    printf \x27  (README, \"Client keys and the identity map\").\x27\n  else", "    printf \x27  (README, \"Client keys and the identity map\"). key=%s\x27 \"$GENARYX_COPILOT_FUSE_KEY\"\n  else")')" \
 	"printed the value of GENARYX_COPILOT_FUSE_KEY"
 
-run_case "felyx-through-the-gateway: the closing report speaks of Felyx though it has no provider key" fail \
+run_case "felyx-through-the-gateway: the closing report speaks of Felyx with client keys off" fail \
 	'./scripts/felyx-through-the-gateway.sh' \
-	"$(py 'edit("install.sh", "[ \"$IDENTITY_KEYS_COUNT\" -gt 0 ] && [ -n \"${GENARYX_COPILOT_KEY:-}\" ] || return 0", "[ \"$IDENTITY_KEYS_COUNT\" -gt 0 ] || return 0")')" \
-	"when it has no provider key"
+	"$(py 'edit("install.sh", "felyx_gateway_note() {\n  [ \"$IDENTITY_KEYS_COUNT\" -gt 0 ] || return 0\n", "felyx_gateway_note() {\n")')" \
+	"with client keys off"
 
 run_case "felyx-through-the-gateway: the closing report never calls the note" fail \
 	'./scripts/felyx-through-the-gateway.sh' \
