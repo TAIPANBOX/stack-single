@@ -480,11 +480,11 @@ check "gateway published on $GATEWAY_BIND only" \
 check_log "chain verifier is running and has read the bus" \
       "$DC ps --status running --services | grep -qx agent-conform && $DC logs agent-conform 2>&1 | grep -qE '(PASS|NOTE) [a-z-]+\\.ndjson'"
 install_only check "chain verifier can write its own stream" \
-      "docker run --rm --user 10002:10002 -v agent-stack_events:/e busybox:1.36 sh -c ': >> /e/agent-conform.ndjson'"
+      "docker run --rm --user 10002:10002 --group-add 10001 -v agent-stack_events:/e busybox:1.36 sh -c ': >> /e/agent-conform.ndjson'"
 install_only check "chain verifier cannot write another plane's stream" \
-      "! docker run --rm --user 10002:10002 -v agent-stack_events:/e busybox:1.36 sh -c ': >> /e/wardryx.ndjson'"
+      "! docker run --rm --user 10002:10002 --group-add 10001 -v agent-stack_events:/e busybox:1.36 sh -c ': >> /e/wardryx.ndjson'"
 install_only check "chain verifier cannot create a file on the bus" \
-      "! docker run --rm --user 10002:10002 -v agent-stack_events:/e busybox:1.36 sh -c ': > /e/not-its-own.ndjson'"
+      "! docker run --rm --user 10002:10002 --group-add 10001 -v agent-stack_events:/e busybox:1.36 sh -c ': > /e/not-its-own.ndjson'"
 
 # The operator's tunnel. Checked from the CONSOLE's side rather than the wg
 # container's: what matters is not that a socket exists somewhere, it is that
