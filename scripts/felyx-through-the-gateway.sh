@@ -23,8 +23,10 @@
 # `# identity-files:` block is lifted and run for each situation: with
 # GENARYX_COPILOT_FUSE_KEY set it says Felyx presents the key and must be bound,
 # and does not say it sends none; with it empty it says Felyx sends none and its
-# calls are refused 401; with client keys off, or no provider key for Felyx, it says
-# nothing; and it never prints the key.
+# calls are refused 401; with client keys off it says nothing; and it never prints the
+# key. Felyx authenticates with its gateway key, GENARYX_COPILOT_FUSE_KEY, and never with
+# the provider key, which the gateway holds from a file (CLAUDE.md invariant 39), so the
+# note does not depend on the provider key at all.
 #
 # AND IT REFUSES TO REPORT OK ON NOTHING: no console service, or no copilot
 # variable in it, no installer block, no felyx_gateway_note, or a closing report
@@ -107,12 +109,14 @@ else
   case "$out" in *"sends no x-fuse-key"*) ;; *) fail "the note for a Felyx with no gateway key does not say it sends no x-fuse-key" ;; esac
   case "$out" in *"refused 401"*) ;; *) fail "the note for a Felyx with no gateway key no longer says its calls are refused 401" ;; esac
   case "$out" in *GENARYX_COPILOT_FUSE_KEY*) ;; *) fail "the note for a Felyx with no gateway key does not name GENARYX_COPILOT_FUSE_KEY, the way to give it one" ;; esac
-  # nothing to refuse: client keys off, or Felyx has no provider key and so makes no call
+  # nothing to refuse: client keys off. Felyx's gateway key is the one that matters; a
+  # missing provider key changes nothing the note says (invariant 39)
   for fk in "" "$SENTINEL"; do
     out="$(note_for 0 sk-provider "$fk")"
     [ -z "$out" ] || fail "the note says something about Felyx with client keys off, when there is nothing to refuse: $out"
     out="$(note_for 3 "" "$fk")"
-    [ -z "$out" ] || fail "the note says something about Felyx when it has no provider key and so makes no call: $out"
+    [ -n "$out" ] || fail "client keys are on and the note says nothing about Felyx, whose calls depend on its gateway key, not the provider key"
+    [ "$out" = "$(note_for 3 sk-provider "$fk")" ] || fail "the note depends on the provider key, which the gateway holds from a file and Felyx never sends"
   done
 fi
 

@@ -590,7 +590,7 @@ key of its own. On a box given no files it has the minted `felyx` key. With your
 own files, give it a line in the keys file and a binding, as below; with
 `GENARYX_COPILOT_FUSE_KEY` empty, Felyx sends no `x-fuse-key` and its calls are
 refused 401. The installer says which of these your box has at the end of the
-run, when `GENARYX_COPILOT_KEY` is set.
+run. Felyx authenticates with this key and never with your provider key.
 
 A console that carries genaryx invariant 24 can present a key of its own:
 `compose.yaml` already hands it `GENARYX_COPILOT_FUSE_KEY_REF`, which points at
@@ -613,6 +613,30 @@ with it empty, the gateway answered 401. To give Felyx a key:
 
 Left empty, the default, Felyx sends no key, as before, and with client keys on
 its calls are refused 401.
+
+### The provider key: the gateway holds it, never an agent
+
+The gateway holds your model provider's key, so an agent never needs it. Give the
+key to the installer as a file, not as a value:
+
+```bash
+ANTHROPIC_KEY_FILE=/path/to/anthropic.key ./install.sh
+```
+
+The installer copies it to `./upstream/anthropic/key` (mode 0400, owned by the
+gateway's user) and mounts that directory read only into the gateway alone. A
+re-run keeps the file. `OPENAI_KEY_FILE` does the same for the OpenAI door, into
+`./upstream/openai/key`. Agents present their gateway key. A call that carries a
+provider key of its own is refused 401 `provider_credential_refused`.
+
+With no key file the gateway forwards a caller's own key, as it did before, and
+the closing report says so. A box that had `GENARYX_COPILOT_KEY` in `.env` gets
+that value copied into the key file on its next run. The `.env` line stays,
+unused, so remove it once you are sure.
+
+Upgrading: Felyx now authenticates with its own gateway key, not the provider
+key. A box given its own keys file needs `GENARYX_COPILOT_FUSE_KEY` in `.env`,
+with the same secret on a line of the keys file, or Felyx is refused 401.
 
 ### A second door on the OpenAI wire (opt-in, off by default)
 
@@ -1420,7 +1444,7 @@ into `./closure/secret`, readable only by the console. Nothing prints it, and a
 re-run keeps it. To turn closing off again, remove `CLOSURE_SECRET` and
 `CLOSURE_SECRET_FILE` from `.env` and run `docker compose up -d`.
 
-It needs tokenfuse v1.9.0 or later and console v1.1.34 or later. The images pinned here are tokenfuse v1.15.0 and
+It needs tokenfuse v1.9.0 or later and console v1.1.34 or later. The images pinned here are tokenfuse v1.16.0 and
 console v1.1.46; an older image ignores the setting.
 
 ## The console
@@ -1436,10 +1460,12 @@ own rather than reach GitHub at all.
 
 Felyx, the console's copilot, asks its model through this box's own gateway,
 under `agent://<RECORD_TRUST_DOMAIN>/genaryx/felyx`, so its questions are
-metered and policy-checked like any agent's calls. It ships without a key: put
-your provider key in `.env` as `GENARYX_COPILOT_KEY` and run
-`docker compose up -d console`. Until then Felyx says it is not configured and
-the rest of the console works as before.
+metered and policy-checked like any agent's calls. It authenticates with its own
+gateway key, `GENARYX_COPILOT_FUSE_KEY`, which the installer mints when you give no
+keys file (see "Client keys and the identity map"). Your provider key goes to the
+gateway, as a file, and never to the console (see "The provider key: the gateway
+holds it, never an agent"). With no keys file given and no gateway key for Felyx,
+Felyx says it is not configured and the rest of the console works as before.
 
 ## Traps, already fixed here
 

@@ -2936,6 +2936,59 @@ run_case "network-membership: browser-policy is not internal" fail \
 	"$(py 'edit("compose.yaml", "  browser-policy:\n    internal: true\n", "  browser-policy:\n")')" \
 	"network browser-policy must be internal"
 
+# ---- no-provider-key-outside-the-gateway (CLAUDE.md invariant 39, wave 1 S1) ----
+# The provider key is held by the gateway: read from a file mounted read only into the
+# door that uses it, never a value in another service's environment, and written by the
+# installer 0400 and owned by the gateway's uid.
+run_case "no-provider-key-outside-the-gateway: the console gets the provider key back" fail \
+	'./scripts/no-provider-key-outside-the-gateway.sh' \
+	"$(py 'edit("compose.yaml", "      GENARYX_COPILOT_FUSE_KEY: ${GENARYX_COPILOT_FUSE_KEY:-}\n", "      GENARYX_COPILOT_FUSE_KEY: ${GENARYX_COPILOT_FUSE_KEY:-}\n      ANTHROPIC_API_KEY: ${GENARYX_COPILOT_FUSE_KEY:-}\n")')" \
+	"carries ANTHROPIC_API_KEY as an environment value"
+
+run_case "no-provider-key-outside-the-gateway: Felyx reads the provider key by reference" fail \
+	'./scripts/no-provider-key-outside-the-gateway.sh' \
+	"$(py 'edit("compose.yaml", "      GENARYX_COPILOT_API_KEY_REF: env:GENARYX_COPILOT_FUSE_KEY\n", "      GENARYX_COPILOT_API_KEY_REF: env:GENARYX_COPILOT_KEY\n")')" \
+	"takes its key from env:GENARYX_COPILOT_KEY"
+
+run_case "no-provider-key-outside-the-gateway: the gateway loses its key file" fail \
+	'./scripts/no-provider-key-outside-the-gateway.sh' \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_UPSTREAM_KEY_FILE: ${GATEWAY_UPSTREAM_KEY_FILE:-}\n", "")')" \
+	"sets no TOKENFUSE_UPSTREAM_KEY_FILE"
+
+run_case "no-provider-key-outside-the-gateway: the OpenAI door reads the Anthropic key file" fail \
+	'./scripts/no-provider-key-outside-the-gateway.sh' \
+	"$(py 'door("TOKENFUSE_UPSTREAM_KEY_FILE: ${OPENAI_DOOR_UPSTREAM_KEY_FILE:-}", "TOKENFUSE_UPSTREAM_KEY_FILE: ${GATEWAY_UPSTREAM_KEY_FILE:-}")')" \
+	"reads TOKENFUSE_UPSTREAM_KEY_FILE"
+
+run_case "no-provider-key-outside-the-gateway: the gateway mounts its key directory read-write" fail \
+	'./scripts/no-provider-key-outside-the-gateway.sh' \
+	"$(py 'edit("compose.yaml", "      - ./upstream/anthropic:/run/upstream:ro\n", "      - ./upstream/anthropic:/run/upstream:rw\n")')" \
+	"does not mount ./upstream/anthropic at /run/upstream read only"
+
+run_case "no-provider-key-outside-the-gateway: the console mounts the Anthropic key directory" fail \
+	'./scripts/no-provider-key-outside-the-gateway.sh' \
+	"$(py 'edit("compose.yaml", "      - ./closure:/run/closure:ro\n", "      - ./closure:/run/closure:ro\n      - ./upstream/anthropic:/run/upstream:ro\n")')" \
+	"mounts /run/upstream, the provider key's directory"
+
+run_case "no-provider-key-outside-the-gateway: the installer stops writing the key file" fail \
+	'./scripts/no-provider-key-outside-the-gateway.sh' \
+	"$(py 'edit("install.sh", "# upstream-key: begin\n", "# upstream-key: gone\n")')" \
+	"has no '# upstream-key: begin'"
+
+run_case "no-provider-key-outside-the-gateway: the key file is readable by everyone" fail \
+	'./scripts/no-provider-key-outside-the-gateway.sh' \
+	"$(py 'edit("install.sh", "chmod 0400 \"$tmp\"", "chmod 0444 \"$tmp\"")')" \
+	"does not set mode 0400 on the key file"
+
+run_case "no-provider-key-outside-the-gateway: a harmless variable is not a fault" pass \
+	'./scripts/no-provider-key-outside-the-gateway.sh' \
+	"$(py 'edit("compose.yaml", "      GENARYX_COPILOT_FUSE_KEY: ${GENARYX_COPILOT_FUSE_KEY:-}\n", "      GENARYX_COPILOT_FUSE_KEY: ${GENARYX_COPILOT_FUSE_KEY:-}\n      GATE_HARMLESS_NOTE: \"one\"\n")')"
+
+run_case "no-provider-key-outside-the-gateway: no gateway left to judge" fail \
+	'./scripts/no-provider-key-outside-the-gateway.sh' \
+	"$(py 'edit_all("compose.yaml", "command: [\"/usr/local/bin/tokenfuse\"]", "command: [\"/usr/local/bin/tokenfuse-moved\"]")')" \
+	"measured NOTHING"
+
 
 echo
 if [ -n "$(git status --porcelain)" ]; then

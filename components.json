@@ -116,12 +116,12 @@
           "ghcr.io/taipanbox/scopyx:v1.0.1-chromium",
           "ghcr.io/taipanbox/stack-caddy:v1.1.43",
           "ghcr.io/taipanbox/stack-wg:v1.1.43",
-          "ghcr.io/taipanbox/tokenfuse-control-plane:v1.15.0",
-          "ghcr.io/taipanbox/tokenfuse:v1.15.0",
+          "ghcr.io/taipanbox/tokenfuse-control-plane:v1.16.0",
+          "ghcr.io/taipanbox/tokenfuse:v1.16.0",
           "ghcr.io/taipanbox/trailryx-node:v1.2.1",
           "ghcr.io/taipanbox/typryx:v0.4.1",
-          "ghcr.io/taipanbox/vouchryx:v0.3.0",
-          "ghcr.io/taipanbox/wardryx:v2.0.0"
+          "ghcr.io/taipanbox/vouchryx:v0.4.0",
+          "ghcr.io/taipanbox/wardryx:v2.1.0"
         ]
       },
       "declared": {
