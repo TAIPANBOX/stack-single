@@ -1325,13 +1325,17 @@ an absent invariant.
     browser, the console and costcrew. `core` is internal and holds the planes.
     `risk-signal` is internal, as it was in use, now declared so. `front` is not
     internal and has masquerade off, so a published port reaches the host without
-    a route out. The browser is on `agents` and `edge`, not on `core`. typryx and
+    a route out. The browser is on `agents`, `edge` and `browser-policy`, not on
+    `core`; `browser-policy` is internal and holds exactly scopyx-browser and
+    wardryx, the browser's one path to a decision. typryx and
     its risk-signal proxy also get `edge`, through `compose.override.yaml`, only
     when `TYPED_MODE` is `jev` or `own-model`; install.sh writes that file and no
     other. The host firewall is not touched (design decision D6 a).
     `.github/workflows/install.yml` runs a container on `agents` on a fresh runner:
     it must reach the gateway, and must not resolve or reach example.com or
-    1.1.1.1, or reach wardryx by name, after a positive control on `edge`.
+    1.1.1.1, or reach wardryx by name, after a positive control on `edge`. A second
+    container, on `browser-policy`, must reach wardryx and neither the gateway nor
+    example.com.
     *(gate: `scripts/network-membership.sh`: the resolved configuration against
     the table in the gate, for the stock box and each egress choice, the network
     properties, the install probes present; teeth in `scripts/gates-have-teeth.sh`;
@@ -1339,8 +1343,8 @@ an absent invariant.
     a container failing to reach the internet on the fresh runner is proven only
     by that workflow step, and it has not run yet; the `front` network's masquerade
     behaviour was measured on Docker Desktop only; the browser's own route over
-    `edge` is open by design; and the browser's policy calls to wardryx have no
-    path from `core`, which is decided separately.)*
+    `edge` is open by design; and no fetch through the `egress-browser` profile has
+    been decided by wardryx in CI, only the network path to wardryx is checked.)*
 
 ## Decisions that have no gate yet
 

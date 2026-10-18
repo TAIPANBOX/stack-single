@@ -239,9 +239,11 @@ services:
     # risk signal's proxy is on (see `typryx-wardryx-proxy` below). Joining it
     # costs nothing while the proxy is not running: the network then holds
     # wardryx and the broker alone.
+    # browser-policy is the one network scopyx-browser shares with it.
     networks:
       - core
       - risk-signal
+      - browser-policy
     depends_on:
       policy-db:
         condition: service_healthy
@@ -488,14 +490,15 @@ services:
     user: "65532:65532"
     # The name the rest of the box reaches it by. Same as the profile above, so
     # nothing else in this file changes when an operator switches profiles.
-    # Agent-facing, so an agent reaches it under the name `scopyx`, and edge,
-    # because the browser fetches the web. Not core: the browser has no route
-    # to a plane. Its Wardryx decisions need one; see the README note and
-    # scripts/network-membership.sh.
+    # Agent-facing, so an agent reaches it under the name `scopyx`; edge,
+    # because the browser fetches the web; and browser-policy, the one network
+    # it shares with wardryx, which decides every fetch it makes. Not core: no
+    # plane is reachable from here. Scripts/network-membership.sh holds the list.
     networks:
       agents:
         aliases: ["scopyx"]
       edge:
+      browser-policy:
     environment:
       SCOPYX_ADDR: 0.0.0.0:4300
       SCOPYX_WARDRYX: http://wardryx:8090
@@ -1907,6 +1910,10 @@ networks:
   # Agent-facing. An agent container on this network reaches only the doors
   # (gateways, the MCP broker) and scopyx, and no plane. Internal.
   agents:
+    internal: true
+  # The browser's one path to a decision: wardryx, which decides every fetch
+  # scopyx-browser makes. Nothing else is on it, and it has no route out.
+  browser-policy:
     internal: true
   # The typed risk signal's one door, and the reason the proxy can run open.
   # `typryx wardryx-proxy` asks the typed backend about every tool call it

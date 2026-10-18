@@ -2909,6 +2909,34 @@ run_case "network-membership: no services resolve, so nothing was measured" fail
 	"measured nothing"
 
 
+run_case "network-membership: a third member joins the browser's network" fail \
+	'./scripts/network-membership.sh' \
+	"$(py 'import re
+s = open("compose.yaml").read()
+i = re.search(r"\n  idryx:\n", s).end()
+j = i + re.search(r"\n  [a-z]", s[i:]).start()
+b = s[i:j]
+assert "      - core\n" in b, "idryx has no core line"
+open("compose.yaml", "w").write(s[:i] + b.replace("      - core\n", "      - core\n      - browser-policy\n", 1) + s[j:])')" \
+	"browser-policy members are"
+
+run_case "network-membership: the browser's network loses wardryx" fail \
+	'./scripts/network-membership.sh' \
+	"$(py 'import re
+s = open("compose.yaml").read()
+i = re.search(r"\n  wardryx:\n", s).end()
+j = i + re.search(r"\n  [a-z]", s[i:]).start()
+b = s[i:j]
+assert "      - browser-policy\n" in b, "wardryx has no browser-policy line"
+open("compose.yaml", "w").write(s[:i] + b.replace("      - browser-policy\n", "", 1) + s[j:])')" \
+	"browser-policy members are"
+
+run_case "network-membership: browser-policy is not internal" fail \
+	'./scripts/network-membership.sh' \
+	"$(py 'edit("compose.yaml", "  browser-policy:\n    internal: true\n", "  browser-policy:\n")')" \
+	"network browser-policy must be internal"
+
+
 echo
 if [ -n "$(git status --porcelain)" ]; then
 	printf 'FAIL: this script left the tree dirty, so it cannot be trusted about anything above\n'

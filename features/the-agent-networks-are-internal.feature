@@ -98,3 +98,21 @@ Feature: an agent has no route out of the box except through the doors
     When the compose file names no services
     Then network-membership.sh fails and says it measured nothing
     # -> gates-have-teeth.sh "network-membership: no services resolve, so nothing was measured"
+
+  Scenario: a third service joins the browser's policy network
+    Given the browser's policy network holds scopyx-browser and wardryx, and nothing else
+    When idryx is added to the browser's policy network
+    Then network-membership.sh fails, because the browser would reach a plane there
+    # -> gates-have-teeth.sh "network-membership: a third member joins the browser's network"
+
+  Scenario: the browser's policy network loses wardryx
+    Given the browser must reach wardryx to decide each fetch it makes
+    When wardryx is taken off the browser's policy network
+    Then network-membership.sh fails, because the browser could no longer be decided
+    # -> gates-have-teeth.sh "network-membership: the browser's network loses wardryx"
+
+  Scenario: the browser's policy network has no route out
+    Given the browser's policy network carries decisions only
+    When browser-policy is declared without internal
+    Then network-membership.sh fails, because a route out would reach the internet from there
+    # -> gates-have-teeth.sh "network-membership: browser-policy is not internal"

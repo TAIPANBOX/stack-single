@@ -78,12 +78,12 @@ def bad(msg):
 TABLE = {
     "init-volumes": {"core"},
     "policy-db": {"core"},
-    "wardryx": {"core", "risk-signal"},
+    "wardryx": {"core", "risk-signal", "browser-policy"},
     "idryx": {"core"},
     "heraldyx": {"edge", "core"},
     "agent-conform": {"core"},
     "scopyx": {"agents", "core", "edge"},
-    "scopyx-browser": {"agents", "edge"},
+    "scopyx-browser": {"agents", "edge", "browser-policy"},
     "typryx": {"core"},
     "typryx-wardryx-proxy": {"risk-signal"},
     "tokenfuse-mcp-broker": {"agents", "core", "risk-signal", "front"},
@@ -108,7 +108,9 @@ AGENT_FACING = {"tokenfuse-gateway", "tokenfuse-gateway-openai", "tokenfuse-mcp-
                 "scopyx", "scopyx-browser", "console", "costcrew"}
 FRONT = {"caddy", "console", "costcrew", "tokenfuse-mcp-broker"}
 RISK = {"wardryx", "typryx-wardryx-proxy", "tokenfuse-mcp-broker"}
-INTERNAL = {"core", "agents", "risk-signal"}
+# the browser's one path to a decision: scopyx-browser and wardryx, nothing else
+BROWSER_POLICY = {"scopyx-browser", "wardryx"}
+INTERNAL = {"core", "agents", "risk-signal", "browser-policy"}
 NETWORKS = INTERNAL | {"edge", "front"}
 
 # ---- the install.sh block that writes the override --------------------------
@@ -229,6 +231,9 @@ if cfg is not None:
             bad("edge members are %s, the table lists %s" % (sorted(members("edge")), sorted(n for n, t in TABLE.items() if "edge" in t)))
         if "scopyx-browser" in members("core"):
             bad("scopyx-browser is on core: the browser must not reach a plane")
+        if members("browser-policy") != BROWSER_POLICY:
+            bad("browser-policy members are %s, the table lists %s: the browser's only path is wardryx, and nothing else may join it"
+                % (sorted(members("browser-policy")), sorted(BROWSER_POLICY)))
         plane_on_agents = members("agents") - AGENT_FACING
         for n in sorted(plane_on_agents):
             bad("the agents network holds %s, which is not an agent-facing service" % n)
@@ -253,6 +258,7 @@ if not re.search(r'^NET="agent-stack_core"', install, re.M):
 wf_path = os.path.join(root, ".github", "workflows", "install.yml")
 wf = open(wf_path).read() if os.path.exists(wf_path) else ""
 for needle, why in (
+    ("agent-stack_browser-policy", "the browser's policy network, from a container that is only on it"),
     ("agent-stack_agents", "the agents network"),
     ("agent-stack_edge", "a positive control on the edge network, so a broken runner cannot pass"),
     ("tokenfuse-gateway:4100", "the gateway, which an agent must reach"),

@@ -314,6 +314,7 @@ directly never needed the gateway. Now there are five networks:
 | `agents` | yes | where an agent's container joins (`agent-stack_agents`). Its only peers are the two gateways, the MCP broker, scopyx, the browser, the console and costcrew |
 | `core` | yes | the planes, which reach each other and the doors. No agent container is on it |
 | `risk-signal` | yes | the typed risk signal's proxy, the MCP broker and wardryx, and nothing else |
+| `browser-policy` | yes | the browser's one path to a decision: scopyx-browser and wardryx, which decides every fetch the browser makes, and nothing else |
 | `front` | no, with NAT off | the published ports: caddy, console, costcrew and the MCP broker. Nothing outbound is translated, so a container here cannot use the host as a route out |
 
 An agent's container on `agents` reaches the gateways, the broker and scopyx.
@@ -333,9 +334,12 @@ What this means for you:
   browser can open a connection over `edge` itself. Closing that needs the
   browser to reach the web only through scopyx on an internal network, which is a
   design change and is not done here.
-- The browser asks wardryx before every fetch, and wardryx is on `core`, which the
-  browser is not on. As this release wires it, the `egress-browser` profile
-  refuses every fetch until a path from the browser to wardryx is decided.
+- The browser asks wardryx before every fetch. It reaches wardryx through
+  `browser-policy`, a network of its own whose only other member is wardryx, so
+  the browser is not on `core`. The path is measured at the network level (a
+  container on it reaches wardryx and not the gateway or the internet). No fetch
+  through the `egress-browser` profile has run in CI yet, so whether the profile
+  decides each fetch end to end is not proven by this release.
 - The host firewall is untouched. An agent that runs as a process on the host,
   rather than in a container, is outside all of this.
 

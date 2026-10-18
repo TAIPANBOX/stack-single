@@ -331,6 +331,30 @@ jobs:
             echo "::error::a container on the agents network cannot reach the gateway"; exit 1
           fi
 
+      # CLAUDE.md invariant 38, the browser's path. The browser's network is shared with
+      # wardryx alone: a container on it reaches wardryx's healthz (the policy plane
+      # that decides every fetch) and nothing else, with no name for the gateway and no
+      # route to the internet. The positive control is the edge network, as above.
+      - name: "browser policy network: wardryx reachable, nothing else"
+        run: |
+          probe() { sudo docker run --rm --network "$1" busybox:1.36 sh -c "$2" >/dev/null 2>&1; }
+          if probe agent-stack_edge 'wget -q -T10 -O /dev/null http://example.com/'; then
+            echo "positive control: a container on the edge network reaches example.com"
+          else
+            echo "::error::the positive control failed: edge cannot reach example.com, so the checks below would prove nothing"; exit 1
+          fi
+          if probe agent-stack_browser-policy 'wget -q -T5 -O /dev/null http://wardryx:8090/healthz'; then
+            echo "the browser's policy network reaches wardryx"
+          else
+            echo "::error::a container on the browser's policy network cannot reach wardryx, so the browser could not be decided"; exit 1
+          fi
+          if probe agent-stack_browser-policy 'wget -q -T5 -O /dev/null http://tokenfuse-gateway:4100/healthz'; then
+            echo "::error::a container on the browser's policy network reached the gateway by name"; exit 1
+          fi
+          if probe agent-stack_browser-policy 'wget -q -T5 -O /dev/null http://example.com/'; then
+            echo "::error::a container on the browser's policy network reached example.com directly"; exit 1
+          fi
+
       - name: turning the typed risk signal off removes its proxy
         if: matrix.profile == 'typed-risk'
         run: |
