@@ -587,9 +587,14 @@ run_case "delegation-off-by-default: a delegation variable gets a literal defaul
 	"$(py 'edit("compose.yaml", "TOKENFUSE_DELEGATION_AUDIENCE: ${TOKENFUSE_DELEGATION_AUDIENCE:-}", "TOKENFUSE_DELEGATION_AUDIENCE: stack-single")')" \
 	"not the empty-default form"
 
+run_case "delegation-off-by-default: DELEGATION_ON is set to 1 with no switch above it" fail \
+	'./scripts/delegation-off-by-default.sh' \
+	"$(py 'edit("install.sh", "DELEGATION_ON=0        # 1 when vouchryx runs this run: WITH_DELEGATION or agent tokens\n", "DELEGATION_ON=0        # 1 when vouchryx runs this run: WITH_DELEGATION or agent tokens\nDELEGATION_ON=1\n")')" \
+	"sets DELEGATION_ON=1 with no WITH_DELEGATION or WITH_AGENT_TOKENS switch"
+
 run_case "delegation-off-by-default: install.sh starts the profile unconditionally" fail \
 	'./scripts/delegation-off-by-default.sh' \
-	"$(py 'edit("install.sh", "[ -z \"${WITH_DELEGATION:-}\" ] || UP_PROFILES+=(--profile delegation)", "UP_PROFILES+=(--profile delegation)")')" \
+	"$(py 'edit("install.sh", "[ \"${DELEGATION_ON:-0}\" = 1 ] || UP_PROFILES+=(--profile delegation)", "UP_PROFILES+=(--profile delegation)")')" \
 	"no WITH_DELEGATION guard"
 
 # invariant 26: closing a retained reservation is off by default, and on, the
@@ -1979,7 +1984,7 @@ run_case "felyx-through-the-gateway: the closing report speaks of Felyx with cli
 
 run_case "felyx-through-the-gateway: the closing report never calls the note" fail \
 	'./scripts/felyx-through-the-gateway.sh' \
-	"$(py 'edit("install.sh", "IDENTITY_REACH=\"$IDENTITY_REACH$(felyx_gateway_note)$(upstream_reach_note)\"", "IDENTITY_REACH=\"$IDENTITY_REACH$(upstream_reach_note)\"")')" \
+	"$(py 'edit("install.sh", "IDENTITY_REACH=\"$IDENTITY_REACH$(felyx_gateway_note)$(upstream_reach_note)$(agent_tokens_reach_note)\"", "IDENTITY_REACH=\"$IDENTITY_REACH$(upstream_reach_note)$(agent_tokens_reach_note)\"")')" \
 	"does not call felyx_gateway_note exactly once"
 
 run_case "felyx-through-the-gateway: a comment about Felyx changes" pass \

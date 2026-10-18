@@ -1919,6 +1919,8 @@ AGENT_TOKEN_AGENT=""   # the one agent enrolled: agent://<td>/agents/operator
 # it cannot honour. Writes nothing. Runs after mint_resolve, which decides MINT_ON.
 agent_tokens_resolve() {
   local td
+  # The delegation plane runs for its own switch as well as for agent tokens.
+  [ -z "${WITH_DELEGATION:-}" ] || DELEGATION_ON=1
   case "${WITH_AGENT_TOKENS:-}" in
     "") return 0 ;;
     1) ;;
@@ -2918,7 +2920,7 @@ gateway_probe_resolve
 # every other plane running while the one thing the operator actually asked
 # for, a verified chain, silently never happened. So this is checked here,
 # before section 3c pulls a single image.
-if [ "$DELEGATION_ON" = 1 ]; then
+if [ "${DELEGATION_ON:-0}" = 1 ]; then
   say "delegation"
   # The value on this box now, whichever run put it there: an operator's own
   # VOUCHRYX_TRUSTED_ISSUERS in the environment this run, or .env already
@@ -3032,7 +3034,7 @@ if [ -z "$BUILD_FROM_SOURCE" ]; then
   # typed profile, so this adds nothing to pull; it is named so that
   # `config --images` resolves the same set docker will run.
   if [ "$TYPED_PLANE" != off ] && [ "$TYPED_RISK_ON" = 1 ]; then profiles+=(--profile typed-risk-signal); fi
-  [ "$DELEGATION_ON" = 1 ] || profiles+=(--profile delegation)
+  [ "${DELEGATION_ON:-0}" = 1 ] || profiles+=(--profile delegation)
   # The OpenAI door runs the gateway's own image, so this adds nothing to pull;
   # named so that `config --images` resolves the same set docker will run.
   [ "$DOOR_ON" != 1 ] || profiles+=(--profile openai-door)
@@ -3281,7 +3283,7 @@ UP_PROFILES=()
 # it serves, and only with typed answers on: a flag with no typryx was refused
 # in section 0b, and a saved flag is inert while typed answers are off.
 if [ "$TYPED_PLANE" != off ] && [ "$TYPED_RISK_ON" = 1 ]; then UP_PROFILES+=(--profile typed-risk-signal); fi
-[ "$DELEGATION_ON" = 1 ] || UP_PROFILES+=(--profile delegation)
+[ "${DELEGATION_ON:-0}" = 1 ] || UP_PROFILES+=(--profile delegation)
 # The OpenAI door (OPENAI_DOOR=1, section 0g) is started like the typed plane, so
 # section 8 can ask it the questions it asks the gateway.
 [ "$DOOR_ON" != 1 ] || UP_PROFILES+=(--profile openai-door)
@@ -3294,7 +3296,7 @@ if [ "$TYPED_PLANE" != off ] && [ "$TYPED_RISK_ON" = 1 ]; then UP_PROFILES+=(--p
 # gateway's own compose block). So vouchryx comes up alone first, this run
 # fetches its JWKS onto disk, and only then does the gateway start for the
 # first time with that file already in place.
-if [ "$DELEGATION_ON" = 1 ]; then
+if [ "${DELEGATION_ON:-0}" = 1 ]; then
   say "vouchryx"
   "${COMPOSE[@]}" --profile delegation up -d vouchryx
   # Not published to the host (compose.yaml's own comment on the vouchryx
