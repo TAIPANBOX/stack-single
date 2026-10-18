@@ -88,6 +88,8 @@ TABLE = {
     "typryx-wardryx-proxy": {"risk-signal"},
     "tokenfuse-mcp-broker": {"agents", "core", "risk-signal", "front"},
     "vouchryx": {"core"},
+    "keyryx": {"core"},
+    "keyryx-witness": set(),
     "tokenfuse-cloud": {"core"},
     "tokenfuse-gateway": {"edge", "agents", "core"},
     "tokenfuse-gateway-openai": {"edge", "agents", "core"},

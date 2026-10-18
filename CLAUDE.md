@@ -77,6 +77,9 @@ change here is a change to something with root on somebody else's box.
 ./scripts/network-membership.sh
 ./scripts/no-provider-key-outside-the-gateway.sh
 ./scripts/agent-tokens-are-wired.sh
+./scripts/no-plane-writes-another-planes-stream.sh
+./scripts/keyryx-root-is-not-in-env.sh
+./scripts/witness-is-separate.sh
 ./scripts/gates-have-teeth.sh   # invariant 8; needs a clean tree
 ```
 
@@ -576,11 +579,12 @@ an absent invariant.
     `agent-conform.ndjson` has to be on the bus for heraldyx to read, so the bus
     is mounted read-write, and compose cannot mount one file of a named volume:
     the account is the whole containment. It runs `10002:10002`, outside both uid
-    families (10001, 65532) and outside the bus group (10001), with no
-    `group_add` ever; the bus directory is `root:10001 2775` and the other
-    planes' files are 0664 owned by 10001, so it reads through the "other" bits
-    and can write nothing it does not own and create nothing. `init-volumes`
-    pre-creates its stream and gives it to that uid alone, 0644; its state file
+    families (10001, 65532). `@claude 2026-10-18`, amended by invariant 41: the
+    streams are 0640 and owned by their producers, so it joins the bus group
+    (`group_add: ["10001"]`, the only group it may join) to READ them. The bus
+    directory is `root:10001 0750`, so nothing in the group can create a file, and
+    each stream is writable only by its owner, so it can write nothing it does not
+    own. `init-volumes` pre-creates its stream and gives it to that uid, mode 0640; its state file
     is on its own volume, `conformstate`, never inside the directory it walks
     (it would be read as a stream and an operator clearing the bus would
     delete it and re-send every alert). It is read-only, drops every capability
@@ -1406,6 +1410,59 @@ an absent invariant.
     (vouchryx reads its registry from one variable; a registry file is a vouchryx change), the
     OpenAI door, a live stop measured on a real agent framework, the SDK helper (T5, outside
     this repo), and the broker's relayed check, which the local measurement did not exercise.)*
+
+41. **No plane can write another plane's stream, and nobody but the setup script
+    can create a file on the bus.** `@decided 2026-10-18` (paraphrased, the
+    per-producer layout of the wave-2 design, decision D8 a): every producer runs
+    under its own uid, so a compromised plane cannot rewrite what another plane
+    wrote, and the record says who wrote each line. `@claude 2026-10-18`: each
+    stream is created by `init-volumes`, owned by its one writer and mode 0640,
+    group 10001 to read; the bus directory is `root:10001 0750`, so no uid can
+    create a file in it. The writers are the gateway (20010), the OpenAI door
+    (20011), the MCP broker (20012), the control plane (20013), wardryx (20001),
+    typryx (20005) and vouchryx (20002); costcrew keeps its own uid (10003) and the
+    chain verifier its own (10002). The checkpoint files are per producer, owned
+    like their stream.
+    *(gate: `scripts/no-plane-writes-another-planes-stream.sh`, which resolves
+    compose.yaml and runs the one-shot scripts in a sandbox with `chown` and
+    `chmod` recorded, so it judges the owners and modes the scripts would set;
+    refuses OK on no stream and no root one-shot; teeth in
+    `scripts/gates-have-teeth.sh`, cases "no-plane-writes: ...". Not covered: a
+    writer that gets a stream it does not own through a file descriptor passed in
+    by another process; the checkpoint writes, which no producer makes yet; and the
+    keyryx witness's alerts, which are not on the bus.)*
+
+42. **Keyryx signs for a consumer only over that consumer's own socket, and a
+    socket directory is entered only by that consumer's group.** `@decided
+    2026-10-18` (paraphrased, design decision D1 b): a consumer is recognised by
+    the socket it reaches, so no bearer secret exists for it where the platform
+    gives an identity. `@claude 2026-10-18`: `install.sh` makes one directory per
+    consumer, owned by the custody uid and of the consumer's own group (wardryx
+    20001, vouchryx 20002, record-seal 30001), mode 0750; wardryx and vouchryx join
+    their group with `group_add`. The bus group is never given a consumer's group,
+    because a bus reader that could enter the directory could speak as that
+    consumer. Keyryx refuses a socket directory open to other users at start
+    (its `internal/config`).
+    *(not enforced: `install.sh` sets the modes and keyryx checks them at start;
+    no gate in this repository reads them yet. Not run: a bus reader being refused
+    at wardryx's socket on a live box.)*
+
+43. **The Keyryx root keys are files, never environment values or `.env` lines,
+    and the witness is a process apart from custody.** `@decided 2026-10-18`
+    (paraphrased, design sections 2.5 and 3.4): the key that wraps custody's
+    private keys is a file the installer writes once and never replaces, mounted
+    read only into custody alone; the witness has its own key, data and uid, no
+    network, and reads the record without signing. `@claude 2026-10-18`:
+    `keyryx_root_key` writes 32 random bytes, mode 0400, owned by the reading uid,
+    and nothing in `install.sh` or the compose file puts those bytes in `.env` or
+    an environment.
+    *(gate: `scripts/keyryx-root-is-not-in-env.sh` and
+    `scripts/witness-is-separate.sh`; scenarios in
+    `features/keyryx-root-keys-are-files.feature` and
+    `features/the-keyryx-witness-is-a-separate-process.feature`; teeth in
+    `scripts/gates-have-teeth.sh`. Not covered: a live custody refusing a bad root
+    file (keyryx's own tests), the witness's time-stamping authority (off), and
+    checkpoint checks, since no producer writes one yet.)*
 
 ## Decisions that have no gate yet
 

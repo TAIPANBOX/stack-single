@@ -480,11 +480,11 @@ check "gateway published on $GATEWAY_BIND only" \
 check_log "chain verifier is running and has read the bus" \
       "$DC ps --status running --services | grep -qx agent-conform && $DC logs agent-conform 2>&1 | grep -qE '(PASS|NOTE) [a-z-]+\\.ndjson'"
 install_only check "chain verifier can write its own stream" \
-      "docker run --rm --user 10002:10002 -v agent-stack_events:/e busybox:1.36 sh -c ': >> /e/agent-conform.ndjson'"
+      "docker run --rm --user 10002:10002 --group-add 10001 -v agent-stack_events:/e busybox:1.36 sh -c ': >> /e/agent-conform.ndjson'"
 install_only check "chain verifier cannot write another plane's stream" \
-      "! docker run --rm --user 10002:10002 -v agent-stack_events:/e busybox:1.36 sh -c ': >> /e/wardryx.ndjson'"
+      "! docker run --rm --user 10002:10002 --group-add 10001 -v agent-stack_events:/e busybox:1.36 sh -c ': >> /e/wardryx.ndjson'"
 install_only check "chain verifier cannot create a file on the bus" \
-      "! docker run --rm --user 10002:10002 -v agent-stack_events:/e busybox:1.36 sh -c ': > /e/not-its-own.ndjson'"
+      "! docker run --rm --user 10002:10002 --group-add 10001 -v agent-stack_events:/e busybox:1.36 sh -c ': > /e/not-its-own.ndjson'"
 
 # The operator's tunnel. Checked from the CONSOLE's side rather than the wg
 # container's: what matters is not that a socket exists somewhere, it is that
@@ -830,13 +830,13 @@ typed_forget_env() { # NAME...: drop these lines from .env
 # SRC DST: a copy of a key file the container can read and nothing else can
 # change. A copy rather than a mount of the operator's own file, because a bind
 # mount keeps host ownership and a key the operator keeps 0600 for themselves
-# is unreadable by uid 65532.
+# is unreadable by uid 20005 (typryx, CLAUDE.md invariant 41).
 typed_install_key() {
   local dir="$STACK_DIR/typed"
   mkdir -p "$dir" || die "could not create $dir"
   chmod 0755 "$dir" || die "could not set the mode of $dir"
   ( umask 077; cat "$1" >"$dir/$2.tmp" ) || die "could not copy the key file into $dir"
-  chown 65532:65532 "$dir/$2.tmp" || die "could not hand the key file to the uid typryx runs as"
+  chown 20005:20005 "$dir/$2.tmp" || die "could not hand the key file to the uid typryx runs as"
   chmod 0400 "$dir/$2.tmp" || die "could not set the mode of the key file"
   mv -f "$dir/$2.tmp" "$dir/$2" || die "could not put the key file in place"
   note "key file installed at $dir/$2 (read only; its contents are never shown)"
@@ -2906,6 +2906,79 @@ repair_env_quoting .env || die "could not check .env's quoting"
 # given (see gateway_probe_resolve at the top).
 gateway_probe_resolve
 
+# ---- 3f. key custody and the witness (CLAUDE.md invariants 41 to 43) -------
+# Two root keys, one per role, each 32 random bytes (64 hex characters), written ONCE: a root key
+# that is replaced orphans every key wrapped under it, so this never rewrites
+# or deletes one (the installer never deletes a key). Each is mode 0400 and
+# owned by the uid of the one process that reads it (custody 20101, witness
+# 20100). Neither reaches .env. The policy file and the consumers' socket
+# directories are rebuilt from fixed text on every run; they hold no secret.
+keyryx_root_key() { # FILE UID: create FILE with 32 random bytes when absent
+  local f="$1" uid="$2" tmp
+  if [ -e "$f" ]; then
+    if ! { [ -f "$f" ] && [ -s "$f" ]; }; then die "$f exists but is not a non-empty file; refusing to replace a keyryx root key"; fi
+    if ! { chown "$uid:$uid" "$f" && chmod 0400 "$f"; }; then die "could not set the owner or mode of $f"; fi
+    return 0
+  fi
+  tmp="$f.tmp.$$"
+  # Keyryx reads exactly 64 hex characters (its KEYRYX_ROOT_KEY_FILE check), so
+  # 32 random bytes are written as hex, with no newline.
+  ( umask 077; head -c 32 /dev/urandom | od -An -v -tx1 | tr -d ' \n' >"$tmp" ) || die "could not read 32 random bytes for $f"
+  [ "$(wc -c <"$tmp" | tr -d ' ')" = 64 ] || { rm -f "$tmp"; die "the root key for $f came out short"; }
+  if ! { chown "$uid:$uid" "$tmp" && chmod 0400 "$tmp" && mv -f "$tmp" "$f"; }; then die "could not put the root key in place at $f"; fi
+  note "keyryx root key written at $f (32 bytes, 0400, uid $uid; its contents are never shown)"
+}
+
+keyryx_prepare() {
+  local kdir="$STACK_DIR/keyryx"
+  mkdir -p "$kdir/sock" || die "could not create $kdir/sock"
+  chmod 0700 "$kdir" || die "could not set the mode of $kdir"
+  keyryx_root_key "$kdir/root.key" 20101
+  keyryx_root_key "$kdir/witness-root.key" 20100
+  # The policy: which keys exist, which consumer may use which, and how each
+  # consumer is recognised (its socket). Fixed text, rewritten each run, 0444:
+  # it holds no secret, and custody reads it as its own uid.
+  ( umask 022; cat >"$kdir/policy.json.tmp" <<'POLICY' ) || die "could not write $kdir/policy.json"
+{
+  "version": 1,
+  "keys": [
+    {"name": "wardryx-approval", "alg": "ES256"},
+    {"name": "trailryx-root", "alg": "ES384"},
+    {"name": "vouchryx", "alg": "ES256", "mode": "delegated",
+     "max_lifetime": "72h", "overlap": "10m"}
+  ],
+  "consumers": [
+    {"name": "wardryx", "auth": {"socket": "wardryx"},
+     "grants": {"wardryx-approval": ["sign"]}},
+    {"name": "vouchryx", "auth": {"socket": "vouchryx"},
+     "grants": {"vouchryx": ["delegate"]}},
+    {"name": "record-seal", "auth": {"socket": "record-seal"},
+     "grants": {"trailryx-root": ["sign"]}}
+  ]
+}
+POLICY
+  mv -f "$kdir/policy.json.tmp" "$kdir/policy.json" || die "could not put $kdir/policy.json in place"
+  chmod 0444 "$kdir/policy.json" || die "could not set the mode of $kdir/policy.json"
+  # One directory per consumer socket. Keyryx refuses a directory open to
+  # other users, so each is owned by custody and entered only through a group
+  # that is the consumer's own: the wardryx and vouchryx containers join theirs
+  # with group_add, and record-seal's joins when its signer is wired. The bus
+  # group (10001) is never given one of these, or any bus reader could speak as
+  # a consumer over its socket (CLAUDE.md invariant 42).
+  local name gid
+  for name in wardryx:20001 vouchryx:20002 record-seal:30001; do
+    gid="${name#*:}"; name="${name%:*}"
+    mkdir -p "$kdir/sock/$name" || die "could not create $kdir/sock/$name"
+    if ! { chown "20101:$gid" "$kdir/sock/$name" && chmod 0750 "$kdir/sock/$name"; }; then
+      die "could not set the owner or mode of $kdir/sock/$name"
+    fi
+  done
+  # The bus's own stream for the custody's alerts is pre-created by init-volumes;
+  # nothing here touches the bus.
+}
+
+keyryx_prepare
+
 # ---- 3b. delegation: vouchryx, opt-in -----------------------------------------
 # @decided 2026-09-27: the launchers offer vouchryx as an opt-in delegation
 # plane, off by default, so a gateway can verify a proved delegation chain
@@ -2938,13 +3011,13 @@ posture and README says so."
   fi
 
   # vouchryx's own directory: its signing key, and the demo issuer's JWKS
-  # when one is minted. Owned by the uid vouchryx runs as (65532, distroless
+  # when one is minted. Owned by the uid vouchryx runs as (20002 since invariant 41, distroless
   # nonroot) and closed to everyone else, the gateway included: a bind mount
   # keeps the host's ownership and mode, so a root-owned 0700 directory is one
   # the container cannot even enter (measured 2026-09-27 on Debian 13; Docker
   # Desktop on macOS ignores bind-mount ownership and hides this).
   mkdir -p delegation
-  chown 65532:65532 delegation
+  chown 20002:20002 delegation
   chmod 700 delegation
 
   # The signing key vouchryx issues delegation tokens with. Minted by
@@ -2967,7 +3040,7 @@ posture and README says so."
         --entrypoint vouchryx-demo "${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.4.0}" \
         keygen -out /out/signing >/dev/null \
       || die "could not mint vouchryx's signing key"
-    chown 65532:65532 delegation/signing.pem delegation/signing.jwks.json
+    chown 20002:20002 delegation/signing.pem delegation/signing.jwks.json
     chmod 600 delegation/signing.pem
   else
     note "vouchryx: signing key already present, reused"
@@ -2984,7 +3057,7 @@ posture and README says so."
           --entrypoint vouchryx-demo "${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.4.0}" \
           keygen -out /out/idp -kid stack-single-demo-idp >/dev/null \
         || die "could not mint the demo issuer key"
-      chown 65532:65532 delegation/idp.pem delegation/idp.jwks.json
+      chown 20002:20002 delegation/idp.pem delegation/idp.jwks.json
       chmod 600 delegation/idp.pem
     else
       note "vouchryx: demo issuer already present, reused"
@@ -3180,7 +3253,7 @@ fi
 # and a box that never asks for delegation gets an empty directory here, the
 # same as an install with no console gets an unused environments/.
 mkdir -p delegation delegation-public
-chown 65532:65532 delegation
+chown 20002:20002 delegation
 chmod 700 delegation
 # The gateway's side: only the JWKS vouchryx SERVES, public by definition,
 # readable by the gateway's own uid (10001) and never next to a private key.
