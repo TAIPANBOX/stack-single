@@ -1483,7 +1483,7 @@ run_case "typed-risk-signal: another service is pointed at the proxy" fail \
 
 run_case "typed-risk-signal: a fourth service joins the proxy's network" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "      - heraldyxstate:/var/lib/stack/heraldyx\n", "      - heraldyxstate:/var/lib/stack/heraldyx\n    networks:\n      - default\n      - risk-signal\n")')" \
+	"$(py 'edit("compose.yaml", "      - edge\n      - core\n", "      - edge\n      - core\n      - risk-signal\n")')" \
 	"the risk-signal network has members"
 
 # No brace in the inserted text: macOS bash 3.2 expands `{name: a, values: [b]}`
