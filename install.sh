@@ -1966,14 +1966,16 @@ agent_tokens_apply() {
   digest="$(printf '%s' "$secret" | openssl dgst -sha256 -hex | awk '{print $NF}')"
   [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || die "could not compute the enrolment digest. Nothing was started."
   identity_env_set VOUCHRYX_AGENTS "$AGENT_TOKEN_AGENT|agents|local|sha256:$digest"
-  identity_env_set VOUCHRYX_ALLOWED_AUDIENCES "tokenfuse-gateway,tokenfuse-mcp-broker"
+  # vouchryx reads each audience as an absolute URL (RFC 8707 resources), so the two
+  # doors name their own origins: a plain name is refused at startup.
+  identity_env_set VOUCHRYX_ALLOWED_AUDIENCES "http://$GATEWAY_PROBE:4100,http://$GATEWAY_PROBE:4200"
   identity_env_set TOKENFUSE_AGENT_TOKENS accept
   identity_env_set TOKENFUSE_DELEGATION_ISSUER http://vouchryx:4310
-  identity_env_set TOKENFUSE_DELEGATION_AUDIENCE tokenfuse-gateway
+  identity_env_set TOKENFUSE_DELEGATION_AUDIENCE "http://$GATEWAY_PROBE:4100"
   identity_env_set TOKENFUSE_DELEGATION_URL "http://$GATEWAY_PROBE:4100"
   identity_env_set TOKENFUSE_DELEGATION_REVOCATIONS http://vouchryx:4310/v1/revocations
   identity_env_set TOKENFUSE_DELEGATION_REVOCATIONS_INTERVAL_MS 12000
-  identity_env_set MCP_BROKER_DELEGATION_AUDIENCE tokenfuse-mcp-broker
+  identity_env_set MCP_BROKER_DELEGATION_AUDIENCE "http://$GATEWAY_PROBE:4200"
   identity_env_set MCP_BROKER_DELEGATION_URL "http://$GATEWAY_PROBE:4200"
   identity_env_set BROKER_TAINT_GATEWAY http://tokenfuse-gateway:4100
   identity_env_set BROKER_GATEWAY_KEY_FILE /run/broker/key
