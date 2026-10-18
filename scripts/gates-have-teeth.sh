@@ -287,7 +287,7 @@ run_case "bus-has-a-writer: the control plane stops exporting events" fail \
 # reads as wired while the file never exists.
 run_case "bus-has-a-writer: the control plane's file is not pre-created" fail \
 	'./scripts/bus-has-a-writer.sh' \
-	"$(py 'edit("compose.yaml", "for f in tokenfuse.ndjson tokenfuse-cloud.ndjson tokenfuse-mcp.ndjson tokenfuse-openai.ndjson wardryx.ndjson typryx.ndjson vouchryx.ndjson; do", "for f in tokenfuse.ndjson tokenfuse-mcp.ndjson tokenfuse-openai.ndjson wardryx.ndjson typryx.ndjson vouchryx.ndjson; do")')" \
+	"$(py 'edit("compose.yaml", "        [ -e /vol/events/tokenfuse-cloud.ndjson ] || : > /vol/events/tokenfuse-cloud.ndjson\n", "")')" \
 	"does not pre-create tokenfuse-cloud.ndjson"
 
 # typryx joined the bus 2026-09-26; its writer entry has its own env var name
@@ -1360,8 +1360,8 @@ run_case "delegation-key-reused-on-rerun: install.sh's gen has no markers to lif
 # ---- chain-verifier (invariant 21): the account is the whole containment.
 run_case "chain-verifier: the verifier gets a group_add" fail \
 	'./scripts/chain-verifier-is-contained.sh' \
-	"$(py 'edit("compose.yaml", "    user: \"10002:10002\"\n    command:\n      - watch-dir", "    user: \"10002:10002\"\n    group_add:\n      - \"10001\"\n    command:\n      - watch-dir")')" \
-	"has group_add"
+	"$(py 'edit("compose.yaml", "      - \"10001\"\n    command:\n      - watch-dir", "      - \"10001\"\n      - \"20010\"\n    command:\n      - watch-dir")')" \
+	"group_add is"
 
 run_case "chain-verifier: the verifier joins the bus group" fail \
 	'./scripts/chain-verifier-is-contained.sh' \
@@ -1390,12 +1390,12 @@ run_case "chain-verifier: init-volumes stops pre-creating its stream" fail \
 
 run_case "chain-verifier: its stream becomes group-writable" fail \
 	'./scripts/chain-verifier-is-contained.sh' \
-	"$(py 'edit("compose.yaml", "chmod 0644 /vol/events/agent-conform.ndjson", "chmod 0664 /vol/events/agent-conform.ndjson")')" \
+	"$(py 'edit("compose.yaml", "chmod 0640 /vol/events/agent-conform.ndjson", "chmod 0664 /vol/events/agent-conform.ndjson")')" \
 	"writable by group or other"
 
 run_case "chain-verifier: its stream is given to another uid" fail \
 	'./scripts/chain-verifier-is-contained.sh' \
-	"$(py 'edit("compose.yaml", "chown 10002:10002 /vol/events/agent-conform.ndjson", "chown 10001:10001 /vol/events/agent-conform.ndjson")')" \
+	"$(py 'edit("compose.yaml", "chown 10002:10001 /vol/events/agent-conform.ndjson", "chown 10001:10001 /vol/events/agent-conform.ndjson")')" \
 	"gives agent-conform.ndjson to 10001:10001"
 
 run_case "chain-verifier: its state volume has no owner" fail \
@@ -1432,7 +1432,7 @@ run_case "chain-verifier: no verifier service left to judge" fail \
 # owns, so a file given to nobody it runs as is a volume nobody can write.
 run_case "bus-has-a-writer: the verifier's stream is given to no one it runs as" fail \
 	'./scripts/bus-has-a-writer.sh' \
-	"$(py 'edit("compose.yaml", "chown 10002:10002 /vol/events/agent-conform.ndjson", "chown 10003:10003 /vol/events/agent-conform.ndjson")')" \
+	"$(py 'edit("compose.yaml", "chown 10002:10001 /vol/events/agent-conform.ndjson", "chown 10003:10003 /vol/events/agent-conform.ndjson")')" \
 	"no file under it is given to 10002"
 
 # ---- typed-risk-signal (invariant 22).
@@ -1589,7 +1589,7 @@ run_case "bus-names: idryx loads a file for a source it does not carry" fail \
 
 run_case "bus-names: init-volumes pre-creates a stream nobody accepts" fail \
 	'./scripts/bus-names-match-their-source.sh' \
-	"$(py 'edit("compose.yaml", "        for f in tokenfuse.ndjson", "        for f in events.ndjson tokenfuse.ndjson")')" \
+	"$(py 'edit("compose.yaml", "        [ -e /vol/events/tokenfuse.ndjson ] || : > /vol/events/tokenfuse.ndjson\n", "        [ -e /vol/events/events.ndjson ] || : > /vol/events/events.ndjson\n        [ -e /vol/events/tokenfuse.ndjson ] || : > /vol/events/tokenfuse.ndjson\n")')" \
 	"pre-creates events.ndjson on the bus"
 
 run_case "bus-names: a declaration widens the rule" fail \
@@ -1825,7 +1825,7 @@ run_case "bus-has-a-writer: the OpenAI door writes the gateway's file" fail \
 
 run_case "bus-has-a-writer: the OpenAI door's file is not pre-created" fail \
 	'./scripts/bus-has-a-writer.sh' \
-	"$(py 'edit("compose.yaml", "tokenfuse-mcp.ndjson tokenfuse-openai.ndjson wardryx.ndjson", "tokenfuse-mcp.ndjson wardryx.ndjson")')" \
+	"$(py 'edit("compose.yaml", "        [ -e /vol/events/tokenfuse-openai.ndjson ] || : > /vol/events/tokenfuse-openai.ndjson\n", "")')" \
 	"does not pre-create tokenfuse-openai.ndjson"
 
 run_case "bus-names: the idryx pin goes back before the OpenAI door's row" fail \
@@ -2205,7 +2205,7 @@ run_case "finops: a second profile starts the console too" fail \
 # install runs.
 run_case "finops: init-volumes learns the add-on" fail \
 	'./scripts/finops-is-opt-in.sh' \
-	"$(py 'edit("compose.yaml", "      - conformstate:/vol/conform\n    restart: \"no\"", "      - conformstate:/vol/conform\n      - costcrewdata:/vol/costcrew\n    restart: \"no\"")')" \
+	"$(py 'edit("compose.yaml", "      - checkpoints:/vol/checkpoints\n    restart: \"no\"", "      - checkpoints:/vol/checkpoints\n      - costcrewdata:/vol/costcrew\n    restart: \"no\"")')" \
 	"names the add-on"
 
 run_case "finops: a core service waits for the console" fail \
@@ -2316,17 +2316,17 @@ run_case "finops: its stream is no longer created" fail \
 
 run_case "finops: its stream is given to another uid" fail \
 	'./scripts/finops-is-opt-in.sh' \
-	"$(py 'edit("compose.yaml", "chown 10003:10003 /vol/events/costcrew.ndjson", "chown 10001:10001 /vol/events/costcrew.ndjson")')" \
+	"$(py 'edit("compose.yaml", "chown 10003:10001 /vol/events/costcrew.ndjson", "chown 10001:10001 /vol/events/costcrew.ndjson")')" \
 	"gives costcrew.ndjson to 10001:10001"
 
 run_case "finops: its stream becomes group-writable" fail \
 	'./scripts/finops-is-opt-in.sh' \
-	"$(py 'edit("compose.yaml", "chmod 0644 /vol/events/costcrew.ndjson", "chmod 0664 /vol/events/costcrew.ndjson")')" \
+	"$(py 'edit("compose.yaml", "chmod 0640 /vol/events/costcrew.ndjson", "chmod 0664 /vol/events/costcrew.ndjson")')" \
 	"writable by group or other"
 
 run_case "finops: its stream cannot be read by the chain verifier" fail \
 	'./scripts/finops-is-opt-in.sh' \
-	"$(py 'edit("compose.yaml", "chmod 0644 /vol/events/costcrew.ndjson", "chmod 0640 /vol/events/costcrew.ndjson")')" \
+	"$(py 'edit("compose.yaml", "chmod 0640 /vol/events/costcrew.ndjson", "chmod 0600 /vol/events/costcrew.ndjson")')" \
 	"not readable by other"
 
 run_case "finops: its data volume has no owner" fail \
@@ -2387,7 +2387,7 @@ run_case "bus-has-a-writer: the add-on's data volume is prepared by nobody" fail
 
 run_case "bus-has-a-writer: the add-on's stream is given to no one it runs as" fail \
 	'./scripts/bus-has-a-writer.sh' \
-	"$(py 'edit("compose.yaml", "chown 10003:10003 /vol/events/costcrew.ndjson", "chown 10001:10001 /vol/events/costcrew.ndjson")')" \
+	"$(py 'edit("compose.yaml", "chown 10003:10001 /vol/events/costcrew.ndjson", "chown 10001:10001 /vol/events/costcrew.ndjson")')" \
 	"neither the uid nor the gid matches"
 
 run_case "bus-names: the console writes a stream no reader knows" fail \
@@ -3037,7 +3037,7 @@ run_case "agent-tokens-are-wired: the broker does not mount its key directory" f
 
 run_case "agent-tokens-are-wired: vouchryx publishes a port" fail \
 	'./scripts/agent-tokens-are-wired.sh' \
-	"$(py 'edit("compose.yaml", "    user: \"65532:10001\"\n    environment:\n      VOUCHRYX_ADDR", "    user: \"65532:10001\"\n    ports:\n      - \"127.0.0.1:4310:4310\"\n    environment:\n      VOUCHRYX_ADDR")')" \
+	"$(py 'edit("compose.yaml", "    environment:\n      VOUCHRYX_SIGNER:", "    ports:\n      - \"127.0.0.1:4310:4310\"\n    environment:\n      VOUCHRYX_SIGNER:")')" \
 	"publishes ports"
 
 run_case "agent-tokens-are-wired: the installer writes the enrolment secret to .env" fail \
@@ -3088,7 +3088,7 @@ run_case "keyryx-root: custody interpolates its root key from .env" fail \
 
 run_case "keyryx-root: a reworded comment in install.sh is not a fault" pass \
 	'./scripts/keyryx-root-is-not-in-env.sh' \
-	"$(py 'edit("install.sh", "# Two root keys, one per role, each 32 random bytes, written ONCE", "# Two root keys, one for each role, each 32 random bytes, written ONCE")')"
+	"$(py 'edit("install.sh", "# Two root keys, one per role, each 32 random bytes (64 hex characters), written ONCE", "# Two root keys, one for each role, each 32 random bytes (64 hex characters), written ONCE")')"
 
 # invariant 43: the witness is a process apart from custody.
 run_case "witness-is-separate: the witness runs under custody's uid" fail \
