@@ -576,7 +576,7 @@ run_case "manifest-is-true: a routine arrives and the manifest does not claim it
 # is one character in one tag, which is exactly how it would arrive.
 run_case "manifest-is-true: a pulled tag moves in compose and not in the manifest" fail \
 	'./scripts/manifest-is-true.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v1.5.0", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.0.0", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
 	"an image it pulls"
 
 # invariant 15: the delegation plane's default is byte-for-byte what it was
@@ -916,7 +916,7 @@ run_case "firewall-is-enforce: the setting reads another variable" fail \
 # from the file, so a new gateway service that defaults to shadow is judged.
 run_case "firewall-is-enforce: a second gateway start defaults to shadow" fail \
 	'./scripts/firewall-is-enforce.sh' \
-	"$(py 'edit("compose.yaml", "  tokenfuse-gateway:\n    <<: *restart\n", "  tokenfuse-gateway-canary:\n    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.14.0}\n    command: [\"/usr/local/bin/tokenfuse\"]\n    environment:\n      TOKENFUSE_FIREWALL: ${TOKENFUSE_FIREWALL:-shadow}\n  tokenfuse-gateway:\n    <<: *restart\n")')" \
+	"$(py 'edit("compose.yaml", "  tokenfuse-gateway:\n    <<: *restart\n", "  tokenfuse-gateway-canary:\n    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.15.0}\n    command: [\"/usr/local/bin/tokenfuse\"]\n    environment:\n      TOKENFUSE_FIREWALL: ${TOKENFUSE_FIREWALL:-shadow}\n  tokenfuse-gateway:\n    <<: *restart\n")')" \
 	"defaults the agent firewall to shadow"
 
 run_case "firewall-is-enforce: no gateway service left to judge" fail \
@@ -1007,7 +1007,7 @@ run_case "pii-is-shadow: the broker reads its own switch, not the one the gatewa
 # come from the file, so a new gateway that defaults to off is judged.
 run_case "pii-is-shadow: a second gateway start defaults to off" fail \
 	'./scripts/pii-is-shadow.sh' \
-	"$(py 'edit("compose.yaml", "  tokenfuse-gateway:\n    <<: *restart\n", "  tokenfuse-gateway-canary:\n    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.14.0}\n    command: [\"/usr/local/bin/tokenfuse\"]\n    environment:\n      TOKENFUSE_DLP_PII: ${TOKENFUSE_DLP_PII:-off}\n  tokenfuse-gateway:\n    <<: *restart\n")')" \
+	"$(py 'edit("compose.yaml", "  tokenfuse-gateway:\n    <<: *restart\n", "  tokenfuse-gateway-canary:\n    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.15.0}\n    command: [\"/usr/local/bin/tokenfuse\"]\n    environment:\n      TOKENFUSE_DLP_PII: ${TOKENFUSE_DLP_PII:-off}\n  tokenfuse-gateway:\n    <<: *restart\n")')" \
 	"defaults PII detection to off"
 
 # Both subjects renamed away: nothing is judged, and the gate must say so.
@@ -1514,17 +1514,17 @@ run_case "typed-risk-signal: typryx is pinned before the proxy existed" fail \
 
 run_case "typed-risk-signal: wardryx is pinned before it read signals" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v1.5.0}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.0.0}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
 	"hold_if_signal and signals on /v1/decide do not exist before it"
 
 run_case "typed-risk-signal: wardryx is pinned before when_absent" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v1.5.0}", "ghcr.io/taipanbox/wardryx:v1.3.2}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.0.0}", "ghcr.io/taipanbox/wardryx:v1.3.2}")')" \
 	"needs v1.4.0 or later"
 
 run_case "typed-risk-signal: tokenfuse is pinned before it sent the tool call" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/tokenfuse:v1.14.0}", "ghcr.io/taipanbox/tokenfuse:v1.4.1}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/tokenfuse:v1.15.0}", "ghcr.io/taipanbox/tokenfuse:v1.4.1}")')" \
 	"the broker sends no tool_call to the policy plane before it"
 
 run_case "typed-risk-signal: install.sh starts the proxy profile unconditionally" fail \
@@ -2285,7 +2285,7 @@ run_case "finops: its root filesystem becomes writable" fail \
 
 run_case "finops: its image is unpinned" fail \
 	'./scripts/finops-is-opt-in.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.6.0}", "ghcr.io/taipanbox/costcrew:latest}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.7.0}", "ghcr.io/taipanbox/costcrew:latest}")')" \
 	"is not the pinned"
 
 run_case "finops: it is published on every address" fail \
@@ -2336,7 +2336,7 @@ run_case "finops: the console stops waiting for its one-shot" fail \
 
 run_case "finops: no console left to judge" fail \
 	'./scripts/finops-is-opt-in.sh' \
-	"$(py 'edit("compose.yaml", "${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.6.0}", "${COSTCREW_IMAGE:-registry.invalid/costcrew}")')" \
+	"$(py 'edit("compose.yaml", "${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.7.0}", "${COSTCREW_IMAGE:-registry.invalid/costcrew}")')" \
 	"measured NOTHING about the FinOps console"
 
 # The rendering half: text a parser accepts and compose does not.
@@ -2414,7 +2414,7 @@ run_case "finops: the owner default changes" pass \
 
 run_case "finops: the pinned tag moves" pass \
 	'./scripts/finops-is-opt-in.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.6.0}", "ghcr.io/taipanbox/costcrew:v0.6.1}")')"
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.7.0}", "ghcr.io/taipanbox/costcrew:v0.6.1}")')"
 
 run_case "finops: the loopback port moves" pass \
 	'./scripts/finops-is-opt-in.sh' \
@@ -2758,6 +2758,52 @@ run_case "broker-blocks-raw-secrets: no broker is left to judge" fail \
 run_case "broker-blocks-raw-secrets: a comment in the broker's block is reworded" pass \
 	'./scripts/broker-blocks-raw-secrets.sh' \
 	"$(py 'edit("compose.yaml", "(finding F-009 of the 2026-10-17 review, measured", "(finding F-009 of the 2026-10-17 review; measured")')"
+
+run_case "wardryx-key-is-pep: a fresh .env mints the gateway's key as viewer again" fail \
+	'./scripts/wardryx-gateway-key-is-pep.sh' \
+	"$(py 'edit("install.sh", "WARDRYX_GATEWAY_SECRET:default:pep", "WARDRYX_GATEWAY_SECRET:default:viewer")')" \
+	"policy-plane key the role pep"
+
+run_case "wardryx-key-is-pep: the re-run never calls the migration" fail \
+	'./scripts/wardryx-gateway-key-is-pep.sh' \
+	"$(py 'edit("install.sh", "# wardryx-role: end\nwardryx_gateway_role\n", "# wardryx-role: end\n")')" \
+	"never calls wardryx_gateway_role"
+
+run_case "wardryx-key-is-pep: the migration is called after the stack comes up" fail \
+	'./scripts/wardryx-gateway-key-is-pep.sh' \
+	"$(py 'edit("install.sh", "# wardryx-role: end\nwardryx_gateway_role\n", "# wardryx-role: end\n")
+edit("install.sh", "up -d --remove-orphans\n", "up -d --remove-orphans\nwardryx_gateway_role\n")')" \
+	"after the first 'up -d'"
+
+run_case "wardryx-key-is-pep: the migration is switched off" fail \
+	'./scripts/wardryx-gateway-key-is-pep.sh' \
+	"$(py 'edit("install.sh", "wardryx_gateway_role() {\n", "wardryx_gateway_role() {\n  return 0\n")')" \
+	"did not change exactly the gateway's role"
+
+run_case "wardryx-key-is-pep: the migration rewrites a key that is not the gateway's" fail \
+	'./scripts/wardryx-gateway-key-is-pep.sh' \
+	"$(py 'edit("install.sh", "if (index(e, gw \":\") == 1) {", "if (1) {")')" \
+	"did not keep the agent list"
+
+run_case "wardryx-key-is-pep: the migration changes the gateway's secret" fail \
+	'./scripts/wardryx-gateway-key-is-pep.sh' \
+	"$(py 'edit("install.sh", "e = gw \":\" org \":pep\" substr(tail, 7)", "e = gw \"x:\" org \":pep\" substr(tail, 7)")')" \
+	"did not change exactly the gateway's role"
+
+run_case "wardryx-key-is-pep: the migration drops an agent list the operator wrote" fail \
+	'./scripts/wardryx-gateway-key-is-pep.sh' \
+	"$(py 'edit("install.sh", "\":pep\" substr(tail, 7)", "\":pep\"")')" \
+	"did not keep the agent list"
+
+run_case "wardryx-key-is-pep: the migration block is not there" fail \
+	'./scripts/wardryx-gateway-key-is-pep.sh' \
+	"$(py 'edit("install.sh", "# wardryx-role: begin\n", "")')" \
+	"re-run migration measured nothing"
+
+run_case "wardryx-key-is-pep: a reworded note is not a fault" pass \
+	'./scripts/wardryx-gateway-key-is-pep.sh' \
+	"$(py 'edit("install.sh", "(its secret is unchanged)", "(its secret stays the same)")')"
+
 
 echo
 if [ -n "$(git status --porcelain)" ]; then

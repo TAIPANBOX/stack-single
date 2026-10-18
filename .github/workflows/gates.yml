@@ -96,6 +96,8 @@ jobs:
         run: ./scripts/metered-doors-require-keys.sh
       - name: the MCP broker blocks raw secrets and asks the policy plane, failing closed
         run: ./scripts/broker-blocks-raw-secrets.sh
+      - name: the gateway's policy-plane key is a pep, and a re-run moves an old viewer entry to pep
+        run: ./scripts/wardryx-gateway-key-is-pep.sh
 
       # Last, because it mutates tracked files and restores them. It needs a
       # clean tree and says so plainly, so it also reports any earlier step

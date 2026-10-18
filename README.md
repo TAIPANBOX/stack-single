@@ -1276,7 +1276,7 @@ cd /opt/agent-stack
 docker compose --profile finops up -d costcrew
 ```
 
-That pulls one image, `ghcr.io/taipanbox/costcrew:v0.6.0`, and starts it beside
+That pulls one image, `ghcr.io/taipanbox/costcrew:v0.7.0`, and starts it beside
 a small one-shot that prepares its volume. It is the FinOps console: cloud and
 AI spend, a crew of agents that triages it, and a person who reviews what the
 crew wrote.
@@ -1326,7 +1326,7 @@ decision about money and is yours to take, separately. The notifier does not
 read its passports, so an alert about one of its agents names the agent and not
 the person who answers for it.
 
-**Moving to a newer console.** The pin is `ghcr.io/taipanbox/costcrew:v0.6.0`.
+**Moving to a newer console.** The pin is `ghcr.io/taipanbox/costcrew:v0.7.0`.
 On a box that already ran an earlier pin, the same `up -d costcrew` picks it
 up. From v0.5.0, the release adds two nullable columns to `drivers` at start (rows
 written before it read NULL, and no data is rewritten) and a new decision class,
@@ -1377,7 +1377,7 @@ into `./closure/secret`, readable only by the console. Nothing prints it, and a
 re-run keeps it. To turn closing off again, remove `CLOSURE_SECRET` and
 `CLOSURE_SECRET_FILE` from `.env` and run `docker compose up -d`.
 
-It needs tokenfuse v1.9.0 or later and console v1.1.34 or later. The images pinned here are tokenfuse v1.14.0 and
+It needs tokenfuse v1.9.0 or later and console v1.1.34 or later. The images pinned here are tokenfuse v1.15.0 and
 console v1.1.46; an older image ignores the setting.
 
 ## The console
@@ -1415,9 +1415,11 @@ have walked straight into, closed here rather than left for you:
   cleanly, stays reachable, and authenticates nobody. Every health check passes
   while the money plane is deaf.
 - The client side of each plane takes the bare key, not the spec, and the
-  gateway's key on the policy plane is a `viewer` on purpose: `/v1/decide`
-  needs no more, and an enforcement point that can rewrite the policy it
-  enforces is not one.
+  gateway's key on the policy plane is a `pep` on purpose: `/v1/decide` and
+  `/v1/filter-tools` need no more, and an enforcement point that can rewrite the
+  policy it enforces is not one. wardryx 2.0.0 refuses a `viewer` on those routes.
+  A box installed before this release has the gateway's entry rewritten from
+  `viewer` to `pep` by the next run of `install.sh`, and nothing else in `.env`.
 - Kubernetes has `fsGroup` for volume ownership and Compose has nothing. A
   fresh named volume is `root:root`, so the policy plane cannot write its own
   event file and the gateway drops every trace behind a single WARN. A one-shot
