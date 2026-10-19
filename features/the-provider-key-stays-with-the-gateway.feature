@@ -63,3 +63,15 @@ Feature: the provider key stays with the gateway, and no agent holds it
     When the command no longer names the gateway binary
     Then no-provider-key-outside-the-gateway.sh fails and says it measured nothing
     # -> gates-have-teeth.sh "no-provider-key-outside-the-gateway: no gateway left to judge"
+
+  Scenario: each door's key file belongs to the user that door runs as
+    Given the gateway runs as one uid in compose.yaml
+    When the installer writes the gateway's provider key file
+    Then the file is owned by that same uid, mode 0400, so the gateway can read it and nothing else can
+    # -> gates-have-teeth.sh "no-provider-key-outside-the-gateway: the gateway's key file goes back to uid 10001"
+
+  Scenario: who pays changes only when the operator says so
+    Given a box whose only provider key is the one Felyx held in .env before 1.2.0
+    When the installer runs without a key file and without the operator's consent
+    Then it stops before changing anything and names the two ways to let the gateway hold the key
+    # -> gates-have-teeth.sh "no-provider-key-outside-the-gateway: Felyx's key is moved without the operator's word"

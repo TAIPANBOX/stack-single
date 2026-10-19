@@ -640,9 +640,12 @@ re-run keeps the file. `OPENAI_KEY_FILE` does the same for the OpenAI door, into
 provider key of its own is refused 401 `provider_credential_refused`.
 
 With no key file the gateway forwards a caller's own key, as it did before, and
-the closing report says so. A box that had `GENARYX_COPILOT_KEY` in `.env` gets
-that value copied into the key file on its next run. The `.env` line stays,
-unused, so remove it once you are sure.
+the closing report says so. A key the gateway holds pays for every agent's
+calls, so it is never taken from elsewhere without your word: a box that has only
+`GENARYX_COPILOT_KEY` in `.env` (the key Felyx held before 1.2.0) stops before
+anything is changed and names the two ways on, `ANTHROPIC_KEY_FILE=<file>` or
+`GATEWAY_HOLDS_COPILOT_KEY=1`, which moves that `.env` value into the gateway's key
+file. The `.env` line stays, unused, so remove it once you are sure.
 
 Upgrading: Felyx now authenticates with its own gateway key, not the provider
 key. A box given its own keys file needs `GENARYX_COPILOT_FUSE_KEY` in `.env`,

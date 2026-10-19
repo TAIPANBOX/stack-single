@@ -1867,19 +1867,28 @@ mint_reach_note() {
 # ---- 0h. the provider key each door holds (CLAUDE.md invariant 39) ------------------
 # @decided 2026-10-17 (paraphrased): the gateway holds the provider key, not the agent.
 # A door reads its provider key from a file this installer writes, mode 0400 and owned
-# by uid 10001 (the uid the gateway runs as), mounted read only into that door alone:
+# by that door's own uid (compose.yaml's `user:` for it: 20010 for tokenfuse-gateway,
+# 20011 for tokenfuse-gateway-openai), mounted read only into that door alone:
 # ./upstream/anthropic for tokenfuse-gateway and ./upstream/openai for the OpenAI door
 # (compose.yaml). The operator gives the key as a FILE, ANTHROPIC_KEY_FILE or
 # OPENAI_KEY_FILE, the way the typed plane's key is given (section 0b): the path, never
-# the bytes. A refusal never prints what it was given. A box that has
-# GENARYX_COPILOT_KEY in .env, the provider key Felyx held before this release, has that
-# value written to the file once; the .env line stays, unused, because removing a
-# credential is the operator's decision. With no file the gateway forwards the caller's
-# own key as before and says so at startup, and the closing report says it is not
-# brokered. gate: scripts/no-provider-key-outside-the-gateway.sh.
+# the bytes. A refusal never prints what it was given. Who pays is the operator's word,
+# never a side effect (@claude 2026-10-19, under the owner's delegation): a key the
+# gateway holds pays for EVERY agent's calls and refuses a caller's own key, so a box
+# that has only GENARYX_COPILOT_KEY in .env (the key Felyx held before 1.2.0) is stopped
+# before anything is changed, and told the two explicit ways on: ANTHROPIC_KEY_FILE, or
+# GATEWAY_HOLDS_COPILOT_KEY=1 to move that same .env value into the gateway's file. 1.2.0
+# and 1.3.0 moved it silently; a key file they wrote stays and is re-owned to its door.
+# With no file the gateway forwards the caller's own key as before and says so at
+# startup, and the closing report says it is not brokered.
+# gate: scripts/no-provider-key-outside-the-gateway.sh.
 # upstream-key: begin
 UP_ANTHROPIC_SRC=""   # the file ANTHROPIC_KEY_FILE names, checked by upstream_resolve
 UP_OPENAI_SRC=""      # the file OPENAI_KEY_FILE names, checked by upstream_resolve
+UP_ADOPT_COPILOT=0    # 1 when the operator said GATEWAY_HOLDS_COPILOT_KEY=1
+# Each door's uid, as compose.yaml runs it; the gate holds the two equal.
+UP_UID_ANTHROPIC=20010   # tokenfuse-gateway
+UP_UID_OPENAI=20011      # tokenfuse-gateway-openai
 
 upstream_why() { # FILE: why FILE cannot hold a provider key, nothing when it can. Never prints it.
   local LC_ALL=C f="$1" k
@@ -1905,15 +1914,33 @@ upstream_resolve() {
     [ -z "$why" ] || die "OPENAI_KEY_FILE $why, so it cannot be the OpenAI door's provider key. It names a file that holds the key, not the key itself. Nothing was installed."
     UP_OPENAI_SRC="$OPENAI_KEY_FILE"
   fi
+  case "${GATEWAY_HOLDS_COPILOT_KEY:-0}" in
+    1) UP_ADOPT_COPILOT=1 ;;
+    0|"") ;;
+    *) die "GATEWAY_HOLDS_COPILOT_KEY is 1 or unset, not '${GATEWAY_HOLDS_COPILOT_KEY}'. Nothing was installed." ;;
+  esac
+  # Who pays is never changed in silence: Felyx's old key alone, with no key file and no
+  # word from the operator, stops the run here, before anything is written.
+  if [ -z "$UP_ANTHROPIC_SRC" ] && [ "$UP_ADOPT_COPILOT" = 0 ] \
+     && [ ! -f "$STACK_DIR/upstream/anthropic/key" ] && [ -f "$STACK_DIR/.env" ] \
+     && [ -n "$(identity_env_get GENARYX_COPILOT_KEY)" ]; then
+    die "this box's .env holds GENARYX_COPILOT_KEY, the provider key Felyx used before 1.2.0. Since 1.2.0 the gateway holds the provider key itself and pays for every agent's calls with it, refusing a caller's own key, so that key is moved only when you say so. Nothing was installed. Either let the gateway hold it: GATEWAY_HOLDS_COPILOT_KEY=1 ./install.sh (the .env value is moved into the gateway's key file, never printed), or ANTHROPIC_KEY_FILE=<a file holding the key> ./install.sh. Or keep each caller paying with its own key: remove the GENARYX_COPILOT_KEY line from .env, and Felyx has no model until a key file is given."
+  fi
 }
 
-upstream_put() { # KEY DIR: DIR/key holds KEY, 0400, owned by uid 10001. Never prints KEY.
-  local k="$1" dir="$2" tmp
+upstream_put() { # KEY DIR UID: DIR/key holds KEY, 0400, owned by UID:10001. Never prints KEY.
+  local k="$1" dir="$2" uid="$3" tmp
+  [ -n "$uid" ] || die "upstream_put was not told whose key the file in $dir is"
   tmp="$dir/.key.tmp"
   ( umask 077; printf '%s' "$k" >"$tmp" ) || die "could not write the provider key into $dir"
-  if ! { chown 10001:10001 "$tmp" && chmod 0400 "$tmp" && mv -f "$tmp" "$dir/key"; }; then
-    die "could not put the provider key in place in $dir (mode 0400, uid 10001)"
+  if ! { chown "$uid:10001" "$tmp" && chmod 0400 "$tmp" && mv -f "$tmp" "$dir/key"; }; then
+    die "could not put the provider key in place in $dir (mode 0400, uid $uid)"
   fi
+}
+
+upstream_own() { # FILE UID: an existing key file goes to its door, 0400. 1.2.0 and 1.3.0 gave it uid 10001.
+  [ -f "$1" ] || return 0
+  { chown "$2:10001" "$1" && chmod 0400 "$1"; } || die "could not give $1 to uid $2 (mode 0400)"
 }
 
 # Section 3, once .env exists: the two directories every compose run mounts, the key
@@ -1927,13 +1954,14 @@ upstream_apply() {
     || die "could not set the mode of the provider key directories"
   if [ -n "$UP_ANTHROPIC_SRC" ]; then
     k="$(head -c 4096 "$UP_ANTHROPIC_SRC")" || die "could not read ANTHROPIC_KEY_FILE"
-    upstream_put "$k" "$STACK_DIR/upstream/anthropic"
-    note "the Anthropic key: in $STACK_DIR/upstream/anthropic/key (0400, uid 10001, never printed)"
-  elif [ ! -f "$STACK_DIR/upstream/anthropic/key" ] && [ -n "$(identity_env_get GENARYX_COPILOT_KEY)" ]; then
+    upstream_put "$k" "$STACK_DIR/upstream/anthropic" "$UP_UID_ANTHROPIC"
+    note "the Anthropic key: in $STACK_DIR/upstream/anthropic/key (0400, uid $UP_UID_ANTHROPIC, never printed)"
+  elif [ "$UP_ADOPT_COPILOT" = 1 ] && [ ! -f "$STACK_DIR/upstream/anthropic/key" ] && [ -n "$(identity_env_get GENARYX_COPILOT_KEY)" ]; then
     k="$(identity_env_get GENARYX_COPILOT_KEY)"
-    upstream_put "$k" "$STACK_DIR/upstream/anthropic"
-    note "the Anthropic key Felyx held in .env (GENARYX_COPILOT_KEY) is now in $STACK_DIR/upstream/anthropic/key (0400, uid 10001, never printed); the .env line stays, unused, until you remove it"
+    upstream_put "$k" "$STACK_DIR/upstream/anthropic" "$UP_UID_ANTHROPIC"
+    note "as GATEWAY_HOLDS_COPILOT_KEY=1 asked, the Anthropic key Felyx held in .env (GENARYX_COPILOT_KEY) is now in $STACK_DIR/upstream/anthropic/key (0400, uid $UP_UID_ANTHROPIC, never printed); the gateway pays for every agent's calls with it; the .env line stays, unused, until you remove it"
   fi
+  upstream_own "$STACK_DIR/upstream/anthropic/key" "$UP_UID_ANTHROPIC"
   if [ -f "$STACK_DIR/upstream/anthropic/key" ]; then
     identity_env_set GATEWAY_UPSTREAM_KEY_FILE /run/upstream/key
   else
@@ -1941,9 +1969,10 @@ upstream_apply() {
   fi
   if [ -n "$UP_OPENAI_SRC" ]; then
     k="$(head -c 4096 "$UP_OPENAI_SRC")" || die "could not read OPENAI_KEY_FILE"
-    upstream_put "$k" "$STACK_DIR/upstream/openai"
-    note "the OpenAI door's key: in $STACK_DIR/upstream/openai/key (0400, uid 10001, never printed)"
+    upstream_put "$k" "$STACK_DIR/upstream/openai" "$UP_UID_OPENAI"
+    note "the OpenAI door's key: in $STACK_DIR/upstream/openai/key (0400, uid $UP_UID_OPENAI, never printed)"
   fi
+  upstream_own "$STACK_DIR/upstream/openai/key" "$UP_UID_OPENAI"
   if [ -f "$STACK_DIR/upstream/openai/key" ]; then
     identity_env_set OPENAI_DOOR_UPSTREAM_KEY_FILE /run/upstream/key
   else
@@ -1956,7 +1985,7 @@ upstream_apply() {
 upstream_reach_note() {
   if [ -f "$STACK_DIR/upstream/anthropic/key" ]; then
     printf '\n  The gateway holds the Anthropic key itself, in %s/upstream/anthropic/key (0400,\n' "$STACK_DIR"
-    printf '  uid 10001). An agent presents its gateway key and no provider key. A provider key\n'
+    printf '  uid %s). An agent presents its gateway key and no provider key. A provider key\n' "$UP_UID_ANTHROPIC"
     printf '  sent by a caller is refused 401 provider_credential_refused (CLAUDE.md invariant 39).'
   else
     printf '\n  The gateway holds no provider key: it forwards the caller'"'"'s own key, as before, and\n'
@@ -2111,8 +2140,7 @@ agent_tokens_apply() {
   # The broker runs as uid 20012 (CLAUDE.md invariant 41), so the key it reads is its own: owned by that uid,
   # 0400. A key owned by 10001 is unreadable to the broker, which then refuses to start (tokenfuse
   # mcpbroker.rs: "TOKENFUSE_MCP_TAINT_GATEWAY_KEY_FILE is not set") and restarts in a loop.
-  upstream_put "$broker" "$STACK_DIR/broker"
-  chown 20012:10001 "$STACK_DIR/broker/key" || die "could not give the broker's key to uid 20012 in $STACK_DIR/broker"
+  upstream_put "$broker" "$STACK_DIR/broker" 20012
   note "the broker's key: in $STACK_DIR/broker/key (0400, uid 20012, never printed)"
 }
 
