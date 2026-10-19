@@ -56,3 +56,15 @@ Feature: no credential rides on a process's argument list
     When its markers are gone
     Then no-secret-on-argv.sh fails rather than reporting OK over nothing
     # -> gates-have-teeth.sh "no-secret-on-argv: the request helper is gone"
+
+  Scenario: the clone resets the helper list before handing git its token
+    Given git also has a credential helper of the system, such as a keychain or a store
+    When the installer clones the console with its token
+    Then the empty helper reset comes first, so the system helper is never handed the token
+    # -> gates-have-teeth.sh "no-secret-on-argv: the clone does not reset the credential helper list"
+
+  Scenario: a request body with non-ASCII characters is sent with its byte length
+    Given a metered call carries a body with a non-ASCII character
+    When the request helper computes Content-Length under a UTF-8 locale
+    Then Content-Length counts bytes, so the server does not stop reading early
+    # -> gates-have-teeth.sh "no-secret-on-argv: a non-ASCII body is measured in characters"

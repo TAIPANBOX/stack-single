@@ -260,6 +260,9 @@ probe() { docker run --rm --network "$NET" busybox:1.36 wget -q -T5 -O /dev/null
 # line. Prints the whole response. (gate: scripts/no-secret-on-argv.sh lifts this block.)
 # shellcheck disable=SC2329,SC2317  # invoked indirectly, from code() and the checks that call it
 http_request() { # method, url, headers (CRLF-terminated, may hold a key), body
+  # Content-Length counts BYTES. Under a UTF-8 locale ${#body} counts characters, which
+  # is shorter than the bytes sent for any non-ASCII body, so the server would stop reading early.
+  local LC_ALL=C
   local method="$1" url="$2" hdrs="$3" body="$4" rest hostport path
   rest="${url#*://}"
   hostport="${rest%%/*}"
@@ -2542,10 +2545,12 @@ if [ -n "$BUILD_FROM_SOURCE" ]; then
   elif [ -n "$CONSOLE_TOKEN" ]; then
     # The token is handed to git by a credential helper that reads it from this command's
     # environment when git asks for it. It is in no URL and on no argument list, so git
-    # writes it into neither the clone's .git/config nor its remote URL.
+    # writes it into neither the clone's .git/config nor its remote URL. The empty
+    # credential.helper= first resets the helper list, so a system or global helper (store,
+    # osxkeychain) is never handed the token to save after the clone.
     # (gate: scripts/no-secret-on-argv.sh)
     # shellcheck disable=SC2016  # the helper is a string git runs later: its $CONSOLE_TOKEN must not expand here
-    CONSOLE_TOKEN="$CONSOLE_TOKEN" git -c credential.helper='!f() { echo username=x-access-token; printf "password=%s\n" "$CONSOLE_TOKEN"; }; f' \
+    CONSOLE_TOKEN="$CONSOLE_TOKEN" git -c credential.helper= -c credential.helper='!f() { echo username=x-access-token; printf "password=%s\n" "$CONSOLE_TOKEN"; }; f' \
       clone --depth 1 -q "https://github.com/TAIPANBOX/genaryx.git" genaryx-a360 \
       || die "could not clone the console with the token given; is it valid for your fork?"
   else

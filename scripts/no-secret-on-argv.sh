@@ -52,6 +52,9 @@ import sys
 import tempfile
 
 FAKE = "NOSECRET-FAKE-7f3a9c"
+# A non-ASCII body: Content-Length must be its BYTE count (e-acute is two bytes). Written
+# as an escape so this file stays ASCII.
+MBODY = "caf\u00e9 {\"a\":1}"
 problems = []
 
 def fail(msg):
@@ -139,6 +142,17 @@ open(os.path.join(d, "docker.stdin"), "ab").write(data)
 sys.stdout.write("HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n")
 '''
 
+def utf8_locale():
+    """A UTF-8 locale that is installed here, or None. Under one, bash counts characters, not bytes."""
+    try:
+        names = subprocess.run(["locale", "-a"], capture_output=True, text=True, timeout=10).stdout.split()
+    except (OSError, subprocess.TimeoutExpired):
+        names = []
+    for cand in ("C.UTF-8", "C.utf8", "en_US.UTF-8", "en_US.utf8"):
+        if cand in names:
+            return cand
+    return None
+
 def run_with_stub(stub_name, stub_src, script, extra_env, scratch):
     stubdir = os.path.join(scratch, "bin")
     os.makedirs(stubdir, exist_ok=True)
@@ -160,6 +174,9 @@ def read(path):
     except OSError:
         return ""
 
+LOC = utf8_locale()
+if LOC is None:
+    fail("no UTF-8 locale (C.UTF-8 or en_US.UTF-8) is installed, so the byte count of a non-ASCII body was not measured")
 start = install.find(BEGIN_HTTP)
 end = install.find(END_HTTP)
 if start < 0 or end < 0 or end < start:
@@ -173,8 +190,12 @@ else:
             'code http://wardryx:8090/v1/policies "$FAKE"\n'
             'http_request POST http://tokenfuse-gateway:4100/v1/runs '
             '"Content-Type: application/json"$\'\\r\\n\'"x-fuse-key: $FAKE"$\'\\r\\n\' \'{"a":1}\'\n'
+            'http_request POST http://tokenfuse-gateway:4100/v1/runs "Content-Type: application/json"$\'\\r\\n\' "$MBODY"\n'
         )
-        r = run_with_stub("docker", STUB_DOCKER, script, {"FAKE": FAKE}, scratch)
+        env_req = {"FAKE": FAKE, "MBODY": MBODY}
+        if LOC is not None:
+            env_req.update(LC_ALL=LOC, LANG=LOC)
+        r = run_with_stub("docker", STUB_DOCKER, script, env_req, scratch)
         argv = read(os.path.join(scratch, "docker.argv"))
         stdin = read(os.path.join(scratch, "docker.stdin"))
         if r.returncode != 0:
@@ -187,6 +208,8 @@ else:
             fail("the request helper does not send the client key on stdin")
         if "Content-Length: 7" not in stdin:
             fail("the request helper sends no Content-Length for a body")
+        if f"Content-Length: {len(MBODY.encode('utf-8'))}\r\n" not in stdin:
+            fail("the request helper sends a Content-Length in characters, not bytes, so a non-ASCII body is cut short")
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 
@@ -231,6 +254,13 @@ for a in args:
             fail(f"the console clone line did not run under the stub (exit {r.returncode}): {r.stderr.strip()[:200]}")
         if FAKE in argv:
             fail("the console clone puts the token on git's argument list")
+        calls = [json.loads(x) for x in argv.splitlines() if x.strip()]
+        if calls:
+            a = calls[0]
+            helper_at = next((i for i, x in enumerate(a) if x.startswith("credential.helper=!")), None)
+            reset_at = a.index("credential.helper=") if "credential.helper=" in a else None
+            if helper_at is None or reset_at is None or reset_at > helper_at:
+                fail("the console clone does not reset the credential helper list first, so a helper the system already has would be handed the token")
         if "username=x-access-token" not in helper or f"password={FAKE}" not in helper:
             fail("the credential helper does not hand git the token from its environment")
         if read(os.path.join(scratch, "git.env")) != FAKE:

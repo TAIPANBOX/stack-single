@@ -1506,14 +1506,15 @@ an absent invariant.
     to the stdin of a throwaway busybox that sends it with `nc`, so no argument of
     `docker run` or of the container carries a key. The console clone hands git its
     token through a credential helper that reads `CONSOLE_TOKEN` from the environment of
-    that one command, and the clone URL carries no credential.
+    that one command, after an empty `credential.helper=` resets git's helper list, and the
+    clone URL carries no credential. Content-Length counts bytes, under `LC_ALL=C`.
     *(gate: `scripts/no-secret-on-argv.sh`: no credential in a command-line URL, no
     `--header` or `-H` flag, no secret expanded on a line that runs an argument-carrying
     program unless it sits in single quotes or prefixes one command, no secret in a
     compose command, entrypoint, healthcheck or flag. It lifts the `# argv-free-http:`
     block and runs it against a stub docker, and lifts the console clone and runs it
     against a stub git; it refuses to report OK with no request helper, no clone line or
-    no subject to read. 9 teeth cases in `scripts/gates-have-teeth.sh`; scenarios in
+    no subject to read. 11 teeth cases in `scripts/gates-have-teeth.sh`; scenarios in
     `features/no-secret-on-argv.feature`. `@measured` by hand 2026-10-19, not gated: the
     clone line run against a local git http-backend behind Basic authentication, with a
     fresh token, a wrong token and the old URL form: the new form's clone wrote no token

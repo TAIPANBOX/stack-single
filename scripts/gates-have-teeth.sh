@@ -3323,6 +3323,17 @@ run_case "no-secret-on-argv: a comment naming a header flag is not a fault" pass
 	""
 
 
+run_case "no-secret-on-argv: the clone does not reset the credential helper list" fail \
+	'./scripts/no-secret-on-argv.sh' \
+	"$(py 'edit("install.sh", "git -c credential.helper= -c credential.helper=\x27!f()", "git -c credential.helper=\x27!f()")')" \
+	"does not reset the credential helper list"
+
+run_case "no-secret-on-argv: a non-ASCII body is measured in characters" fail \
+	'./scripts/no-secret-on-argv.sh' \
+	"$(py 'edit("install.sh", "  local LC_ALL=C\n", "")')" \
+	"a Content-Length in characters, not bytes"
+
+
 echo
 if [ -n "$(git status --porcelain)" ]; then
 	printf 'FAIL: this script left the tree dirty, so it cannot be trusted about anything above\n'
