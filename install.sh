@@ -613,8 +613,11 @@ if compose_has tokenfuse-mcp-broker; then
           '{"jsonrpc":"2.0","id":1,"method":"tools/call"}')"
     status="$(status_of "$out")"
     case "$status" in 401|403) ;; *) return 1 ;; esac
+    # Under require a call with no credential at all is refused 401 before the agent door is
+    # asked (the broker's "unauthorized" body); a static key the list does not name gets
+    # agent_token_required. Either is the refusal this check exists for; 403 is not, there.
     if [ "$(identity_env_get TOKENFUSE_AGENT_TOKENS)" = require ]; then
-      grep -q agent_token_required <<<"$out"
+      [ "$status" = 401 ] && grep -q -E 'agent_token_required|unauthorized' <<<"$out"
     fi
   }
   MCP_BROKER_KEY="$(sed -n 's/^TOKENFUSE_MCP_KEYS=\([^:]*\):.*/\1/p' .env 2>/dev/null | head -1)"
