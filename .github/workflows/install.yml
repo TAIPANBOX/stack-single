@@ -329,6 +329,38 @@ jobs:
             echo "::error::the off path left a static-key list or a wardryx token setting in .env"; exit 1
           fi
 
+      # The agent's own token, end to end (CLAUDE.md invariant 47), on the leg that runs the gateway, the MCP
+      # broker and typryx. vouchryx publishes nothing to the host, so the runner exchanges the enrolment secret
+      # at vouchryx's container address on agent-stack_core (an internal bridge the runner's host routes to).
+      # The checks are docs/evidence/agent-token-audience/measure.sh (#140), run unchanged except for the
+      # budget and the tools/call added there. Expectations: a token is issued (200); no resource is refused (400);
+      # the gateway admits the token and refuses the budget, which is admission past identity (402, no provider
+      # is needed); the broker answers the token's tools/list (200) and its tools/call to typryx is answered (not
+      # refused by the agent-token door); a tampered token is refused (401). The wardryx log holds no agent-token
+      # refusal for the run. The static-key checks are the steps above.
+      - name: "agent tokens, end to end: issued, admitted at the gateway (402 past identity) and the broker, asked of typryx, and no resource refused"
+        if: matrix.profile == 'typed-risk'
+        run: |
+          set -euo pipefail
+          cd /opt/agent-stack
+          vx="$(sudo docker compose ps -q vouchryx)"
+          vxip="$(sudo docker inspect -f '{{with index .NetworkSettings.Networks "agent-stack_core"}}{{.IPAddress}}{{end}}' "$vx")"
+          [ -n "$vxip" ] || { echo "::error::vouchryx has no address on agent-stack_core"; exit 1; }
+          td="$(sudo sed -n "s/^RECORD_TRUST_DOMAIN='\(.*\)'\$/\1/p" .env)"; td="${td:-local}"
+          work="$RUNNER_TEMP/agent-tokens"; mkdir -p "$work"
+          ENROL_SECRET="$(sudo cat agent-token.key)" \
+          VX_URL="http://$vxip:4310" \
+          AUDIENCE="https://stack-single.$td" \
+          GATEWAY_URL=http://127.0.0.1:4100 \
+          BROKER_URL=http://127.0.0.1:4200 \
+          BUDGET_USD=0.000001 \
+          WORK="$work" \
+            "$GITHUB_WORKSPACE/docs/evidence/agent-token-audience/measure.sh" 2>&1 | tee agent-tokens.log
+          # The D3(b) log check: wardryx refused no agent token during this run.
+          n="$(sudo docker run --rm -v agent-stack_events:/e:ro busybox:1.36 sh -c 'grep -cE "agent_token_(proof_invalid|invalid|required)|agent_contradicts_token" /e/wardryx.ndjson || true')"
+          [ "$n" = 0 ] || { echo "::error::wardryx logged $n agent-token refusal(s) during the run"; exit 1; }
+          echo "wardryx refused no agent token during this run"
+
       - name: a box given its own files carries no minted keys
         if: matrix.profile == 'identity'
         run: |

@@ -57,9 +57,17 @@ open(w + "/token.tampered", "w").write(h + "." + p + "." + base64.urlsafe_b64enc
 PY
 
 echo "== 3. the gateway with the issued token (a run id is sent, so a call that passes the door reaches the budget step)"
-out="$(XHDR='x-fuse-run-id: measure-run-1' python3 admit.py "$GATEWAY_URL/v1/messages" POST "$WORK/token" "$WORK/dpop.pem" "$GBODY")"
+# BUDGET_USD, when set, is sent as the run's budget: a micro-dollar budget is refused 402 past identity, so the
+# admitted call needs no provider. Without it the call reaches the budget step with the cloud not running (503).
+XH="x-fuse-run-id: measure-run-1"
+if [ -n "${BUDGET_USD:-}" ]; then XH="$XH"$'\n'"x-fuse-budget-usd: $BUDGET_USD"; fi
+out="$(XHDR="$XH" python3 admit.py "$GATEWAY_URL/v1/messages" POST "$WORK/token" "$WORK/dpop.pem" "$GBODY")"
 echo "$out"
-expect "gateway, good token: admitted past the agent-token check (503 seed_pending: the budget step, cloud not running)" "$(has 503 seed_pending "$out")" "yes"
+if [ -n "${BUDGET_USD:-}" ]; then
+  expect "gateway, good token: admitted past the agent-token check (402: refused by the budget, past identity)" "$(has 402 "" "$out")" "yes"
+else
+  expect "gateway, good token: admitted past the agent-token check (503 seed_pending: the budget step, cloud not running)" "$(has 503 seed_pending "$out")" "yes"
+fi
 echo "== 4. the gateway with a tampered token"
 out="$(python3 admit.py "$GATEWAY_URL/v1/messages" POST "$WORK/token.tampered" "$WORK/dpop.pem" "$GBODY")"
 echo "$out"
@@ -73,6 +81,15 @@ echo "== 6. the broker with a tampered token"
 out="$(python3 admit.py "$BROKER_URL/mcp" POST "$WORK/token.tampered" "$WORK/dpop.pem" "$RPC")"
 echo "$out"
 expect "broker, tampered token: refused as an agent token (401)" "$(has 401 agent_token_refused "$out")" "yes"
+
+echo "== 7. the broker asks typryx with the agent's own token: a tools/call answered, not refused by the agent-token door"
+# The D3(b) path: the door asks wardryx with the token and its proof (wardryx 2.3.0). typryx's stub answers.
+ASK='{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"ask","arguments":{"template":"eval.outcome_met","state":{"task":"2+2","final_answer":"4"}},"_meta":{"typryx/key":"{{secret:typryx_key}}"}}}'
+XH="X-Fuse-Mcp-Upstream: typryx"$'\n'"x-fuse-agent-id: $agent"
+out="$(XHDR="$XH" python3 admit.py "$BROKER_URL/mcp" POST "$WORK/token" "$WORK/dpop.pem" "$ASK")"
+echo "$out"
+answered() { python3 -c 'import json,sys;d=json.load(sys.stdin);b=d["body"];print("yes" if d["status"]==200 and "jsonrpc" in b and not any(x in b for x in ("agent_token_proof_invalid","agent_token_invalid","agent_token_required")) else "no")' <<<"$1"; }
+expect "broker, tools/call ask with the agent's token: answered, not refused by the agent-token door" "$(answered "$out")" "yes"
 
 echo
 if [ "$bad" -eq 0 ]; then echo "OK: every expectation holds"; exit 0; fi
