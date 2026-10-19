@@ -672,6 +672,13 @@ names an https URL that no server answers, so an MCP client that discovers the b
 document cannot reach it. The agent in this stack gets its token from vouchryx directly, so
 nothing here depends on that discovery.
 
+To get its token, the agent asks for that audience in its token request, with
+`resource=https://stack-single.<RECORD_TRUST_DOMAIN>` (RFC 8707; `audience=` works too). A
+request that names none is refused `audience_not_allowed`: vouchryx would otherwise fall back to
+its own issuer, which this box's allow-list does not name. The DPoP proof the agent sends to the
+gateway or the broker carries `ath`, the hash of the token (RFC 9449). The measured run is in
+`docs/evidence/agent-token-audience/RUN.md`.
+
 Stopping the agent is one call to vouchryx with `ban`, using `VOUCHRYX_REVOKE_KEYS`
 from `.env`. Every door polls the list, so the stop reaches each of them within one
 poll.

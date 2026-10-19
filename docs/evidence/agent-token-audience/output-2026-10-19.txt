@@ -1,0 +1,35 @@
+== 1. token exchange, with resource=https://stack-single.local
+{
+  "status": 200,
+  "body": {
+    "access_token": "eyJhbGciOiJFUzI1NiIsImtp...(637 chars)",
+    "expires_in": 300,
+    "token_type": "DPoP"
+  }
+}
+ok    with resource: status
+ok    with resource: token_type
+ok    with resource: a token was written
+== 2. token exchange, with no resource
+{
+  "status": 400,
+  "body": {
+    "error": "invalid_target"
+  }
+}
+ok    no resource: status
+ok    no resource: error
+== 3. the gateway with the issued token (a run id is sent, so a call that passes the door reaches the budget step)
+{"status": 503, "body": "{\"error\":{\"reason\":\"this gateway has not yet read the run's spend, the unit month, the Cloud budgets and kills from its control plane (could not be reached or the answer was cut short: error sending request for url (http://tokenfuse-cloud:8080/v1/run-spend?since_millis=1789714776157)), so it admits nothing a budget governs; retry shortly\",\"retryable\":true,\"run_id\":\"measure-run-1\",\"type\":\"seed_pending\"}}"}
+ok    gateway, good token: admitted past the agent-token check (503 seed_pending: the budget step, cloud not running)
+== 4. the gateway with a tampered token
+{"status": 401, "body": "{\"error\":{\"reason\":\"the agent token presented with this request was refused\",\"retryable\":false,\"type\":\"agent_token_refused\"}}"}
+ok    gateway, tampered token: refused as an agent token (401)
+== 5. the broker with the issued token
+{"status": 200, "body": "{\"error\":{\"code\":-32000,\"message\":\"upstream error: error sending request for url (http://typryx:4320/mcp)\"},\"id\":1,\"jsonrpc\":\"2.0\"}"}
+ok    broker, good token: admitted (200, JSON-RPC answer)
+== 6. the broker with a tampered token
+{"status": 401, "body": "{\"error\":{\"reason\":\"the agent token presented with this request was refused\",\"retryable\":false,\"type\":\"agent_token_refused\"}}"}
+ok    broker, tampered token: refused as an agent token (401)
+
+OK: every expectation holds

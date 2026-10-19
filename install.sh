@@ -2019,8 +2019,10 @@ agent_tokens_reach_note() {
   [ "$AGENT_TOKENS_ON" = 1 ] || return 0
   printf '\n  Agent tokens are ON. The agent %s enrols at vouchryx, not published to the\n' "$AGENT_TOKEN_AGENT"
   printf '  host, with the secret in %s/agent-token.key (0600, never printed). It\n' "$STACK_DIR"
-  printf '  exchanges that for a five-minute token bound to its DPoP key and sends\n'
-  printf '  Authorization: DPoP <token> with a proof. A static key still works beside it\n'
+  printf '  exchanges that for a five-minute token bound to its DPoP key. It asks for the\n'
+  printf '  audience with resource=%s (RFC 8707; audience= works too). A request that\n' "$AGENT_AUDIENCE"
+  printf '  names none is refused audience_not_allowed. It then sends\n'
+  printf '  Authorization: DPoP <token> with a proof (carrying ath, RFC 9449). A static key still works beside it\n'
   printf '  until you turn it off (CLAUDE.md invariant 40). Stop the agent with one call:\n'
   printf '  POST http://vouchryx:4310/v1/revoke with ban, using VOUCHRYX_REVOKE_KEYS from .env.'
 }
