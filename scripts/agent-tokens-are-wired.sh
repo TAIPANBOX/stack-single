@@ -253,12 +253,74 @@ else
     && fail "the agent-tokens block still writes accept: a static key would be admitted without a named list"
   printf '%s\n' "$BLOCK" | grep -q 'WARDRYX_AGENT_TOKEN_ISSUER' \
     || fail "the agent-tokens block writes no WARDRYX_AGENT_TOKEN_ISSUER: wardryx would not verify the token (invariant 47)"
+  for want in \
+      'identity_env_set WARDRYX_AGENT_TOKEN_ISSUER http://vouchryx:4310' \
+      'identity_env_set WARDRYX_AGENT_TOKEN_AUDIENCES "$AGENT_AUDIENCE"' \
+      'identity_env_set WARDRYX_AGENT_TOKEN_JWKS_URL http://vouchryx:4310/.well-known/jwks.json' \
+      'identity_env_set WARDRYX_AGENT_TOKEN_REVOCATION_URL http://vouchryx:4310/v1/revocations'; do
+    printf '%s\n' "$BLOCK" | grep -qF "$want" \
+      || fail "the agent-tokens block does not write '$want': wardryx would verify a token against the wrong key set, audience or revocation list (invariant 47)"
+  done
+  printf '%s\n' "$BLOCK" | grep -qF 'http://tokenfuse-gateway:4100,http://tokenfuse-mcp-broker:4200' \
+    || fail "wardryx's door origins do not name the gateway and the broker: a proof addressed to either is refused (invariant 47)"
+  printf '%s\n' "$BLOCK" | grep -qF 'TOKENFUSE_AGENT_TOKENS_STATIC_KEYS TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS; do' \
+    || fail "the off path does not clear the static-key lists: tokenfuse 1.19.0 refuses a list under any mode but require (invariant 47)"
   # Any write of a name that carries a secret into .env, in either spelling: the
   # NAME=value form printf writes, and the identity_env_set / add_env_default call.
   if printf '%s\n' "$BLOCK" | grep -E '^[[:space:]]*(add_env_default|identity_env_set)[[:space:]]+[A-Z_]*(SECRET|_KEY)([[:space:]]|$)' >/dev/null \
      || printf '%s\n' "$BLOCK" | grep -E '^[[:space:]]*(printf|echo)[^#]*(SECRET|_KEY)=' >/dev/null; then
     fail "the agent-tokens block writes an enrolment secret into .env; only the digest belongs there"
   fi
+fi
+
+# H. THE ALLOW-LIST, RUN FOR REAL. The installer's own helpers are lifted out of install.sh and
+# run against scratch .env files. A static key is named only when the box holds it (tokenfuse
+# 1.19.0 refuses a listed id the gateway does not hold); felyx and broker are named when held;
+# an id this box had before stays named on a re-run; STATIC_KEY_IDS naming a key it does not
+# hold is refused, not silently dropped.
+lib="$scratch/allowlist.sh"
+for fn in client_key_ids identity_env_get identity_env_set agent_static_keys_apply; do
+  awk -v n="$fn" 'index($0, n "() {") == 1 { p = 1 } p { print } p && /^}$/ { exit }' install.sh
+done >"$lib"
+if ! grep -q '^agent_static_keys_apply() {' "$lib"; then
+  fail "H. agent_static_keys_apply is not in install.sh, so the allow-list was not measured"
+else
+  allow_case() { # NAME KEYS STATIC_KEY_IDS EXISTING_GATEWAY MCP_KEYS EXISTING_MCP WANT_GATEWAY WANT_MCP
+    local name="$1" d out rc
+    d="$(mktemp -d "$scratch/allow.XXXXXX")"
+    printf "GATEWAY_CLIENT_KEYS='%s'\nTOKENFUSE_MCP_KEYS='%s'\n" "$2" "$5" >"$d/.env"
+    out="$(bash -c '
+      set -euo pipefail
+      STACK_DIR="$1"; AGENT_TOKENS_ON=1
+      STATIC_KEY_IDS_LIST="$2"; EXISTING_GATEWAY_IDS="$3"; EXISTING_MCP_IDS="$4"
+      die() { echo "DIE: $*"; exit 3; }
+      note() { :; }
+      . "$5"
+      agent_static_keys_apply
+      printf "GW=%s\nMCP=%s\n" "$(identity_env_get TOKENFUSE_AGENT_TOKENS_STATIC_KEYS)" "$(identity_env_get TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS)"
+    ' _ "$d" "$3" "$4" "$6" "$lib" 2>&1)" && rc=0 || rc=$?
+    if [ "$8" = DIE ]; then
+      [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q 'DIE: STATIC_KEY_IDS names' \
+        || fail "H. $name: a STATIC_KEY_IDS entry the box does not hold was not refused ($out)"
+      return 0
+    fi
+    [ "$rc" -eq 0 ] || { fail "H. $name: agent_static_keys_apply failed: $out"; return 0; }
+    printf '%s\n' "$out" | grep -qx "GW=$7" \
+      || fail "H. $name: the gateway's allow-list is $(printf '%s' "$out" | grep '^GW=') and should be GW=$7; a listed id the box does not hold, or a held id it dropped, is wrong"
+    printf '%s\n' "$out" | grep -qx "MCP=$8" \
+      || fail "H. $name: the broker's allow-list is $(printf '%s' "$out" | grep '^MCP=') and should be MCP=$8"
+  }
+  # (name, held keys, STATIC_KEY_IDS, existing gateway ids, broker keys, existing broker ids, want gw, want mcp)
+  allow_case "a fresh box names felyx and broker, and no broker static key" \
+    'S1:felyx,S2:broker,S3:agents' '' '' 'S9:stack-single' '' 'felyx,broker' ''
+  allow_case "a re-run keeps every key id it already had" \
+    'S1:felyx,S2:broker,S3:agents,S4:drills' '' 'agents drills' 'S9:stack-single' 'stack-single' 'felyx,broker,agents,drills' 'stack-single'
+  allow_case "a key the box does not hold is never named, even if it was there before" \
+    'S1:felyx,S3:agents' '' 'agents ghost' 'S9:stack-single' '' 'felyx,agents' ''
+  allow_case "a box without a broker key does not name broker" \
+    'S1:felyx,S3:agents' '' '' 'S9:stack-single' '' 'felyx' ''
+  allow_case "STATIC_KEY_IDS naming a key the box does not hold is refused" \
+    'S1:felyx,S3:agents' 'ghost' '' 'S9:stack-single' '' '' DIE
 fi
 
 if [ "$problems" -ne 0 ]; then

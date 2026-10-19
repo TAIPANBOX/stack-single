@@ -562,10 +562,17 @@ c_no_entrypoint() {
     || echo "FAIL: $DOOR door: a gateway image with no ENTRYPOINT, the shape BUILD_FROM_SOURCE builds, could not check the files: $(grep -E '^(count|die)' <<<"$out")"
 }
 c_prefixes() {
+  # tokenfuse 1.19.0 (CLAUDE.md invariant 137): a gateway that binds beyond loopback with no client
+  # authentication refuses to start, whatever its map says, so a map of units and prefixes with no keys
+  # is refused by the image. The installer never reaches that point: it refuses a map with no keys before
+  # anything is installed (section 0f). This case therefore asserts the image's refusal, and that it says why.
   local d out
   d="$(mk)"
   out="$(run "$d" all "$MF=map-prefixes.json")"
-  grep -qx 'count=0 map_on=1 changed=1' <<<"$out" || echo "FAIL: $DOOR door: a map of units and prefixes alone, with no keys, was not installed: $(grep -E '^(count|die)' <<<"$out")"
+  grep -qx 'count=0 map_on=1 changed=1' <<<"$out" \
+    && echo "FAIL: $DOOR door: a map of units and prefixes alone, with no keys, on a non-loopback bind was accepted"
+  grep -qF 'nothing authenticates the callers' <<<"$out" \
+    || echo "FAIL: $DOOR door: a map of units and prefixes alone, with no keys, was refused without saying why: $(grep -E '^(count|die)' <<<"$out")"
 }
 
 if [ "$block_ok" = 1 ]; then
@@ -624,7 +631,7 @@ if [ "$block_ok" = 1 ]; then
       c_refused "a client key the map does not bind" keys-orphan.txt map.json "orphan have no keys[] binding" >"$scratch/c.$door.unbound" 2>&1 &
       c_refused "a map that configures nothing ({})" keys.txt map-empty-object.json "configures nothing" >"$scratch/c.$door.empty" 2>&1 &
       c_refused "a map naming a unit it does not declare" keys.txt map-unknown-unit.json "not declared in units[]" >"$scratch/c.$door.unknown" 2>&1 &
-      c_refused "a map with key bindings and no client keys at all" "" map.json "that no client key carries" >"$scratch/c.$door.nokeys" 2>&1 &
+      c_refused "a map with key bindings and no client keys at all" "" map.json "nothing authenticates the callers" >"$scratch/c.$door.nokeys" 2>&1 &
       c_prefixes >"$scratch/c.$door.prefixes" 2>&1 &
       if [ "$noent_ok" = 1 ]; then
         c_no_entrypoint >"$scratch/c.$door.noentry" 2>&1 &

@@ -2937,11 +2937,10 @@ add_env_default SCOPYX_MAX_FETCHES_PER_HOUR 200
 # @claude 2026-09-26: this identity is NOT derived from RECORD_TRUST_DOMAIN,
 # matching SCOPYX_KEYS right above it rather than the record plane's own
 # trust domain. It would not change what record-seal does with typryx's
-# events either way: that plane refuses all four (agent-event v1.0 is a
-# schema trailryx 1.0 does not read, and its mapper refuses the four types by
-# name on purpose, trailryx#81), so a matching trust domain would not make
-# them seal, only keep the identity honest if that ever changes. Staying consistent with
-# every other generated identity here is worth more than that, until then.
+# events either way. Trailryx 1.0 refused the four as unknown_schema; trailryx 1.4.0 reads
+# that schema, and whether the record plane seals them is not measured here (the record
+# plane is opt-in). So a matching trust domain would only keep the identity honest, and
+# staying consistent with every other generated identity here is worth more than that.
 add_env_default TYPRYX_KEYS "$(gen 40)=agent://local.invalid/default-agent"
 
 # tokenfuse's MCP broker, fronting typryx (profile typed, same as above).

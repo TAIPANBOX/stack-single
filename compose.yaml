@@ -128,12 +128,12 @@ services:
         # its own. Each names its own file, never another writer's, for the
         # one-appender-per-file reason above. heraldyx reads this whole
         # directory, so it can now alert on typryx's own events; record-seal
-        # reads it too and counts typryx's four event types refused rather than
-        # sealing them: they carry agent-event v1.0, which trailryx 1.0 does
-        # not read (unknown_schema, measured on stack-up 2026-09-26), and past
-        # the schema its mapper refuses all four by name on purpose
-        # (trailryx#81: an answer to a question is not a decision the agent
-        # took).
+        # reads it too. It refused typryx's four event types as unknown_schema
+        # under trailryx 1.0 (measured on stack-up 2026-09-26). trailryx 1.4.0
+        # (agent-event v1.0 accepted) reads that schema, so whether the record
+        # plane seals the four is NOT measured for this release; the record
+        # plane is opt-in (WITH_RECORD=1). trailryx#81 (an answer to a question
+        # is not a decision the agent took) is what its mapper intended.
         #
         # tokenfuse-openai.ndjson is the OpenAI door's own file (profile
         # openai-door, opt-in): the tokenfuse image again, so it cannot create
@@ -762,11 +762,10 @@ services:
       # that agent-passport SPEC 6.2 registers typryx's four event types
       # (typed_answer, typed_unanswered, typed_refused, calibration_drift).
       # heraldyx reads this whole directory, so it can now alert on them.
-      # record-seal reads the same directory and counts all four refused,
-      # never sealed: they carry agent-event v1.0, which trailryx 1.0 does not
-      # read (unknown_schema, measured on stack-up 2026-09-26), and past the
-      # schema its mapper refuses them by name on purpose (trailryx#81). So
-      # this does not seal typryx's events; it lets them reach the notifier.
+      # record-seal reads the same directory. Under trailryx 1.0 it refused the
+      # four as unknown_schema (measured on stack-up 2026-09-26). Under trailryx
+      # 1.4.0 whether it seals them is not measured here. So this line is about
+      # the notifier: it lets heraldyx see typryx's events.
       TYPRYX_EVENTS: /var/lib/stack/events/typryx.ndjson
       # The ledger is a different kind of store, typryx's own answer/outcome
       # record rather than an agent-event stream, so it stays off the bus.
@@ -826,7 +825,7 @@ services:
   tokenfuse-mcp-broker:
     <<: *restart
     profiles: ["typed"]
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.18.0@sha256:7cbaa794670560468b15a7a6a3c37396767435332e8eca3a30af627de29ad6d9}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.19.0@sha256:32139654fc63ebc3026720413f1a9c16f07fb2507509714d946f50ffcf2a2434}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20012:10001"
@@ -1133,7 +1132,7 @@ services:
   # ---- money: the control API ----------------------------------------------
   tokenfuse-cloud:
     <<: *restart
-    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v1.18.0@sha256:c6160a8eed3d83d9caf42b426e82444cfe48a14027cb90ad4338340587a9d372}
+    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v1.19.0@sha256:201f4dc7faf556f16038a5cc380f5945dc7b87b79a8ab7940402988844b17949}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20013:10001"
@@ -1179,7 +1178,7 @@ services:
   # gets a hard refusal rather than a log line.
   tokenfuse-gateway:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.18.0@sha256:7cbaa794670560468b15a7a6a3c37396767435332e8eca3a30af627de29ad6d9}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.19.0@sha256:32139654fc63ebc3026720413f1a9c16f07fb2507509714d946f50ffcf2a2434}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20010:10001"
@@ -1415,7 +1414,7 @@ services:
   #     reading of the variables being absent.
   tokenfuse-gateway-openai:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.18.0@sha256:7cbaa794670560468b15a7a6a3c37396767435332e8eca3a30af627de29ad6d9}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.19.0@sha256:32139654fc63ebc3026720413f1a9c16f07fb2507509714d946f50ffcf2a2434}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20011:10001"
@@ -1819,7 +1818,7 @@ services:
   # The sixth, trailryx-seal, is the `record` profile above.
   focus-export:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.18.0@sha256:7cbaa794670560468b15a7a6a3c37396767435332e8eca3a30af627de29ad6d9}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.19.0@sha256:32139654fc63ebc3026720413f1a9c16f07fb2507509714d946f50ffcf2a2434}
     networks:
       - core
     user: "10001:10001"
@@ -2061,6 +2060,11 @@ services:
       # which inside a container nothing else can reach, the published port
       # included. What reaches the host is decided by `ports:` below.
       - 0.0.0.0:8321
+      # costcrew 0.10.0 refuses a non-loopback -addr without -behind-tls or -insecure-http.
+      # No TLS proxy is in front of this console, so -insecure-http is the flag, and it is
+      # honest only because the port stays on 127.0.0.1 and is reached through an encrypted
+      # SSH tunnel (ssh -L 8321:127.0.0.1:8321). CLAUDE.md invariant 24.
+      - -insecure-http
       - -data
       - /var/lib/costcrew
       - -stack-events

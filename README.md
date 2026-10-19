@@ -648,15 +648,42 @@ Upgrading: Felyx now authenticates with its own gateway key, not the provider
 key. A box given its own keys file needs `GENARYX_COPILOT_FUSE_KEY` in `.env`,
 with the same secret on a line of the keys file, or Felyx is refused 401.
 
-### Agent tokens: an agent's own credential (opt-in, off by default)
+### Agent tokens: an agent's own credential (the default, with a named list of static keys)
 
-By default an agent presents a static client key, the way it always has. With
-`WITH_AGENT_TOKENS=1 ./install.sh`, the box instead gives one agent its own
-credential and checks its tokens where they are used:
+By default the gateway and the MCP broker require an agent token. A static client key is
+admitted only when its key id is named on an allow-list the installer writes, and wardryx checks
+an agent's token itself rather than taking the gateway's word for who the agent is. This is what
+the installer does with no setting at all:
 
 ```bash
-WITH_AGENT_TOKENS=1 ./install.sh
+./install.sh            # agent tokens on, the default
+WITH_AGENT_TOKENS=0 ./install.sh   # the weaker way out: static keys only, as before
 ```
+
+The installer prints the allow-list in its closing report, under "static keys still admitted;
+move these agents to tokens". On a fresh box that list is the console's own key (`felyx`) and the
+broker's taint-relay key (`broker`), because neither can sign a proof. On a re-run it also keeps
+every key id the box already had, so nothing that worked yesterday stops. To keep another client,
+name its key id in `STATIC_KEY_IDS` (comma-separated, for a client that cannot sign a proof), and
+the installer refuses a name that is not one of the box's keys. Moving an agent to a token is the
+way to take it off the list.
+
+#### Upgrading a box with static-key agents (1.3.0)
+
+- An agent that calls with a static key it does not hold on the list is refused `401`
+  `agent_token_required` after the first run of this release. The same key on a re-run keeps
+  working, because the re-run keeps every key id the box already had.
+- A box given its own `CLIENT_KEYS_FILE` must add a `broker:<secret>` line, bound in its identity
+  map, or run with `WITH_AGENT_TOKENS=0`. Without one of those, the installer refuses before it
+  installs anything.
+- To move an agent to a token, it must be the one agent this box enrols at present
+  (`agent://<RECORD_TRUST_DOMAIN>/agents/operator`, its secret in `$STACK_DIR/agent-token.key`). vouchryx
+  reads its registry from one variable, so more agents need a change to vouchryx. Until then, name a key
+  that must stay in `STATIC_KEY_IDS`, and the rest of the agents keep their key on the list.
+- Rolling back to the previous release: set `WITH_AGENT_TOKENS=0` and run the installer again. That
+  writes `off`, clears the lists, and leaves every file in place.
+- The record plane (`WITH_RECORD=1`) reads agent-event v1.0 from trailryx 1.4.0. Under 1.0 it refused
+  typryx's four event types, and whether 1.4.0 seals them is not measured for this release.
 
 The installer starts vouchryx (the delegation plane), enrols the agent
 `agent://<RECORD_TRUST_DOMAIN>/agents/operator`, and writes its enrolment secret to
@@ -684,8 +711,8 @@ from `.env`. Every door polls the list, so the stop reaches each of them within 
 poll.
 
 Limits, as shipped: one enrolled agent per box, the OpenAI door keeps static keys
-only, and a box that gave its own keys file must add a `broker:<secret>` line itself
-before it turns this on. `WITH_AGENT_TOKENS=0` turns it off again and keeps the files.
+only, and a box that gave its own keys file must add a `broker:<secret>` line itself,
+or run with `WITH_AGENT_TOKENS=0`. `WITH_AGENT_TOKENS=0` turns the doors off again and keeps the files.
 
 ### A second door on the OpenAI wire (opt-in, off by default)
 
@@ -989,11 +1016,11 @@ a decision about where your data goes, so it has its own section below:
 typryx's four event types (`typed_answer`, `typed_unanswered`,
 `typed_refused`, `calibration_drift`) are registered in agent-passport's
 SPEC 6.2. heraldyx reads the whole event directory, so it can alert on them;
-`record-seal` counts all four refused rather than sealing them: they carry
-agent-event v1.0, a schema trailryx 1.0 does not read (`unknown_schema`), and
-past the schema trailryx refuses these four types by name on purpose, since an
-answer to a question is not a decision the agent took (trailryx#81). The ledger (typryx's own answer/outcome store,
-not an agent-event stream) stays on its own volume.
+Under trailryx 1.0 `record-seal` refused these four as `unknown_schema`. Since
+trailryx 1.4.0 reads the agent-event v1.0 schema, whether the record plane
+(`WITH_RECORD=1`) seals them is not measured for this release. The ledger
+(typryx's own answer/outcome store, not an agent-event stream) stays on its own
+volume.
 
 ### Reaching it through tokenfuse's MCP broker
 
@@ -1359,7 +1386,7 @@ checks no signature, so it does not fetch cosign either.
 
 Every image the stack runs is pinned to the digest of the bytes it names. The
 tag stays beside it for reading. A tag can be moved by whoever controls the
-registry; a digest cannot, so a box running `wardryx:v2.2.1@sha256:6771...` runs
+registry; a digest cannot, so a box running `wardryx:v2.3.0@sha256:eaa8...` runs
 that build and nothing else.
 
 The images this project publishes (`ghcr.io/taipanbox/...`) are also signed,
@@ -1505,7 +1532,7 @@ cd /opt/agent-stack
 docker compose --profile finops up -d costcrew
 ```
 
-That pulls one image, `ghcr.io/taipanbox/costcrew:v0.9.0`, and starts it beside
+That pulls one image, `ghcr.io/taipanbox/costcrew:v0.10.0`, and starts it beside
 a small one-shot that prepares its volume. It is the FinOps console: cloud and
 AI spend, a crew of agents that triages it, and a person who reviews what the
 crew wrote.
@@ -1555,7 +1582,7 @@ decision about money and is yours to take, separately. The notifier does not
 read its passports, so an alert about one of its agents names the agent and not
 the person who answers for it.
 
-**Moving to a newer console.** The pin is `ghcr.io/taipanbox/costcrew:v0.9.0`.
+**Moving to a newer console.** The pin is `ghcr.io/taipanbox/costcrew:v0.10.0`.
 On a box that already ran an earlier pin, the same `up -d costcrew` picks it
 up. From v0.8.0 every analyst's id is `agent://<host>/costcrew/<name>`. This launcher
 binds no analyst id to a gateway key, an identity map or a policy, so nothing here
@@ -1609,7 +1636,7 @@ into `./closure/secret`, readable only by the console. Nothing prints it, and a
 re-run keeps it. To turn closing off again, remove `CLOSURE_SECRET` and
 `CLOSURE_SECRET_FILE` from `.env` and run `docker compose up -d`.
 
-It needs tokenfuse v1.9.0 or later and console v1.1.34 or later. The images pinned here are tokenfuse v1.18.0 and
+It needs tokenfuse v1.9.0 or later and console v1.1.34 or later. The images pinned here are tokenfuse v1.19.0 and
 console v1.1.48; an older image ignores the setting.
 
 ## The console

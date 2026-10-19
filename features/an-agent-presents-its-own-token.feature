@@ -1,7 +1,8 @@
 # @decided 2026-10-18 (paraphrased, wave 1 of the 2026-10-17 agent-security review): an
 # agent presents a short-lived token of its own, not a shared static key, when the operator
 # asks for it; the doors that accept that token verify it against vouchryx for their own
-# audience, against a revocation list that fails closed. Off by default. Each scenario is
+# audience, against a revocation list that fails closed. Required by default since
+# 2026-10-19 (CLAUDE.md invariant 47); off only when WITH_AGENT_TOKENS=0. Each scenario is
 # bound by name to a case in scripts/gates-have-teeth.sh, and scripts/features-are-bound.sh
 # holds the binding both ways.
 Feature: an agent presents its own token, and the doors check it where it is judged
@@ -11,11 +12,65 @@ Feature: an agent presents its own token, and the doors check it where it is jud
   exchanged for a token that every door verifies offline, and a stop is one revocation that
   every door polls. A box that did not ask for any of this runs what it ran before.
 
-  Scenario: agent tokens are off until the operator asks for them
+  Scenario: agent tokens are required by default, and off only when the operator asks
     Given a box installed with no WITH_AGENT_TOKENS
     When the gateway's switch is read as the default
-    Then agent-tokens-are-wired.sh fails, because a default box would start accepting tokens
-    # -> gates-have-teeth.sh "agent-tokens-are-wired: the switch is accept by default"
+    Then agent-tokens-are-wired.sh fails, because a default box would admit a static key without a token
+    # -> gates-have-teeth.sh "agent-tokens-are-wired: the switch is off by default"
+
+  Scenario: a static key is admitted only when its key id is named
+    Given the gateway runs require with an allow-list of key ids
+    When the allow-list is not written to the gateway
+    Then agent-tokens-are-wired.sh fails, because require would admit no static key by name
+    # -> gates-have-teeth.sh "agent-tokens-are-wired: the gateway names no static-key list"
+
+  Scenario: the broker's static-key list is written as well
+    Given the MCP broker runs require with its own allow-list
+    When the broker's allow-list is not written to it
+    Then agent-tokens-are-wired.sh fails, because the broker would admit no static key by name
+    # -> gates-have-teeth.sh "agent-tokens-are-wired: the broker names no static-key list"
+
+  Scenario: wardryx verifies the token itself, for the doors' audience
+    Given wardryx decides a call that carries an agent token
+    When the audience it verifies for is not the doors' audience
+    Then agent-tokens-are-wired.sh fails, because the decision would verify a token for another resource
+    # -> gates-have-teeth.sh "agent-tokens-are-wired: wardryx names another audience"
+
+  Scenario: a stopped agent is refused at the decision too
+    Given wardryx polls the revocation list at vouchryx
+    When that list is removed from what the installer writes
+    Then agent-tokens-are-wired.sh fails, because a revoked token would still pass the decision
+    # -> gates-have-teeth.sh "agent-tokens-are-wired: wardryx polls no revocation list"
+
+  Scenario: a proof addressed to a door is checked against that door's origin
+    Given the agent sends its proof to the gateway or the broker by its address
+    When wardryx's door origins leave the broker out
+    Then agent-tokens-are-wired.sh fails, because a proof sent to the broker would be refused
+    # -> gates-have-teeth.sh "agent-tokens-are-wired: wardryx does not name the broker's door"
+
+  Scenario: the off path clears the static-key lists
+    Given tokenfuse 1.19.0 refuses a static-key list under any mode but require
+    When WITH_AGENT_TOKENS=0 leaves a list behind in .env
+    Then agent-tokens-are-wired.sh fails, because the gateway would refuse to start
+    # -> gates-have-teeth.sh "agent-tokens-are-wired: the off path keeps its static-key list"
+
+  Scenario: the allow-list holds felyx, which cannot sign a proof
+    Given the console's copilot presents its own static key
+    When the installer's allow-list leaves felyx out
+    Then the installer's check fails, because the console would be refused 401 on a fresh box
+    # -> gates-have-teeth.sh "agent-tokens-are-wired: the allow-list drops felyx"
+
+  Scenario: a re-run keeps every key id it already had on the allow-list
+    Given a box that already had a static key before this run
+    When a re-run builds the allow-list without that key id
+    Then the installer's check fails, because a key that worked yesterday would stop working
+    # -> gates-have-teeth.sh "agent-tokens-are-wired: a re-run drops an existing key id"
+
+  Scenario: the allow-list names only keys the box holds
+    Given a key id a box does not hold
+    When the installer builds the allow-list
+    Then the installer's check fails, because tokenfuse refuses to start on a listed id it does not hold
+    # -> gates-have-teeth.sh "agent-tokens-are-wired: the allow-list lists a key the box does not hold"
 
   Scenario: the gateway checks a token only for its own audience
     Given the gateway verifies a token against vouchryx's key set

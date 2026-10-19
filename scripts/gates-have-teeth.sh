@@ -576,7 +576,7 @@ run_case "manifest-is-true: a routine arrives and the manifest does not claim it
 # is one character in one tag, which is exactly how it would arrive.
 run_case "manifest-is-true: a pulled tag moves in compose and not in the manifest" fail \
 	'./scripts/manifest-is-true.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.2.1", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.3.0", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
 	"an image it pulls"
 
 # invariant 15: the delegation plane's default is byte-for-byte what it was
@@ -594,7 +594,7 @@ run_case "delegation-off-by-default: the profile starts when DELEGATION_ON is no
 
 run_case "delegation-off-by-default: DELEGATION_ON is set to 1 with no switch above it" fail \
 	'./scripts/delegation-off-by-default.sh' \
-	"$(py 'edit("install.sh", "DELEGATION_ON=0        # 1 when vouchryx runs this run: WITH_DELEGATION or agent tokens\n", "DELEGATION_ON=0        # 1 when vouchryx runs this run: WITH_DELEGATION or agent tokens\nDELEGATION_ON=1\n")')" \
+	"$(py 'edit("install.sh", "DELEGATION_ON=0          # 1 when vouchryx runs this run: WITH_DELEGATION or agent tokens\n", "DELEGATION_ON=0          # 1 when vouchryx runs this run: WITH_DELEGATION or agent tokens\nDELEGATION_ON=1\n")')" \
 	"sets DELEGATION_ON=1 with no WITH_DELEGATION or WITH_AGENT_TOKENS switch"
 
 run_case "delegation-off-by-default: install.sh starts the profile unconditionally" fail \
@@ -1524,17 +1524,17 @@ run_case "typed-risk-signal: typryx is pinned before the proxy existed" fail \
 
 run_case "typed-risk-signal: wardryx is pinned before it read signals" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.2.1@sha256:67718da5ef5551767156ef0ea893765f448c484fcbb5dcce5923a0ca83b8c309}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.3.0@sha256:eaa8cff9fe3722f7040e9f9b3aac2f57c5e66afb7a012a0eda1a62e63b647543}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
 	"hold_if_signal and signals on /v1/decide do not exist before it"
 
 run_case "typed-risk-signal: wardryx is pinned before when_absent" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.2.1@sha256:67718da5ef5551767156ef0ea893765f448c484fcbb5dcce5923a0ca83b8c309}", "ghcr.io/taipanbox/wardryx:v1.3.2}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.3.0@sha256:eaa8cff9fe3722f7040e9f9b3aac2f57c5e66afb7a012a0eda1a62e63b647543}", "ghcr.io/taipanbox/wardryx:v1.3.2}")')" \
 	"needs v1.4.0 or later"
 
 run_case "typed-risk-signal: tokenfuse is pinned before it sent the tool call" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/tokenfuse:v1.18.0@sha256:7cbaa794670560468b15a7a6a3c37396767435332e8eca3a30af627de29ad6d9}", "ghcr.io/taipanbox/tokenfuse:v1.4.1}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/tokenfuse:v1.19.0@sha256:32139654fc63ebc3026720413f1a9c16f07fb2507509714d946f50ffcf2a2434}", "ghcr.io/taipanbox/tokenfuse:v1.4.1}")')" \
 	"the broker sends no tool_call to the policy plane before it"
 
 run_case "typed-risk-signal: install.sh starts the proxy profile unconditionally" fail \
@@ -1830,7 +1830,7 @@ run_case "bus-has-a-writer: the OpenAI door's file is not pre-created" fail \
 
 run_case "bus-names: the idryx pin goes back before the OpenAI door's row" fail \
 	'./scripts/bus-names-match-their-source.sh' \
-	"$(py 'edit_all("compose.yaml", "ghcr.io/taipanbox/idryx:v1.2.2", "ghcr.io/taipanbox/idryx:v1.1.0")')" \
+	"$(py 'edit_all("compose.yaml", "ghcr.io/taipanbox/idryx:v1.3.0", "ghcr.io/taipanbox/idryx:v1.1.0")')" \
 	"older than v1.2.0"
 
 run_case "bus-names: the heraldyx pin goes back before the OpenAI door's row" fail \
@@ -2295,7 +2295,7 @@ run_case "finops: its root filesystem becomes writable" fail \
 
 run_case "finops: its image is unpinned" fail \
 	'./scripts/finops-is-opt-in.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.9.0@sha256:4f7883951aac2a0b723e5b0d7b36cf4005c8b94e4a6335ed051c14370a37b9b7}", "ghcr.io/taipanbox/costcrew:latest}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.10.0@sha256:26316b1c99706529a4589a328b2ddd3fc5f4db4cf0b5a46466e8be1ddd8f0de9}", "ghcr.io/taipanbox/costcrew:latest}")')" \
 	"is not the pinned"
 
 run_case "finops: it is published on every address" fail \
@@ -2346,7 +2346,7 @@ run_case "finops: the console stops waiting for its one-shot" fail \
 
 run_case "finops: no console left to judge" fail \
 	'./scripts/finops-is-opt-in.sh' \
-	"$(py 'edit("compose.yaml", "${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.9.0@sha256:4f7883951aac2a0b723e5b0d7b36cf4005c8b94e4a6335ed051c14370a37b9b7}", "${COSTCREW_IMAGE:-registry.invalid/costcrew}")')" \
+	"$(py 'edit("compose.yaml", "${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.10.0@sha256:26316b1c99706529a4589a328b2ddd3fc5f4db4cf0b5a46466e8be1ddd8f0de9}", "${COSTCREW_IMAGE:-registry.invalid/costcrew}")')" \
 	"measured NOTHING about the FinOps console"
 
 # The rendering half: text a parser accepts and compose does not.
@@ -2424,7 +2424,7 @@ run_case "finops: the owner default changes" pass \
 
 run_case "finops: the pinned tag moves" pass \
 	'./scripts/finops-is-opt-in.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.9.0@sha256:4f7883951aac2a0b723e5b0d7b36cf4005c8b94e4a6335ed051c14370a37b9b7}", "ghcr.io/taipanbox/costcrew:v0.6.1}")')"
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.10.0@sha256:26316b1c99706529a4589a328b2ddd3fc5f4db4cf0b5a46466e8be1ddd8f0de9}", "ghcr.io/taipanbox/costcrew:v0.6.1}")')"
 
 run_case "finops: the loopback port moves" pass \
 	'./scripts/finops-is-opt-in.sh' \
@@ -3002,13 +3002,63 @@ run_case "no-provider-key-outside-the-gateway: no gateway left to judge" fail \
 
 
 # ---- agent-tokens-are-wired (CLAUDE.md invariant 40, wave 1 S4) ----------------
-# The agent's own token is accepted only where it is verified: off by default, and on, the
-# two doors check it against vouchryx for their own audience, against a revocation list
+# The agent's own token is accepted only where it is verified: required by default (CLAUDE.md
+# invariant 47), and the two doors check it against vouchryx for their own audience, against a revocation list
 # that fails closed, and vouchryx publishes nothing and keeps the enrolment secret out of .env.
-run_case "agent-tokens-are-wired: the switch is accept by default" fail \
+run_case "agent-tokens-are-wired: the switch is off by default" fail \
 	'./scripts/agent-tokens-are-wired.sh' \
-	"$(py 'edit_all("compose.yaml", "TOKENFUSE_AGENT_TOKENS: ${TOKENFUSE_AGENT_TOKENS:-off}", "TOKENFUSE_AGENT_TOKENS: ${TOKENFUSE_AGENT_TOKENS:-accept}")')" \
-	"must be off"
+	"$(py 'edit_all("compose.yaml", "TOKENFUSE_AGENT_TOKENS: ${TOKENFUSE_AGENT_TOKENS:-require}", "TOKENFUSE_AGENT_TOKENS: ${TOKENFUSE_AGENT_TOKENS:-off}")')" \
+	"the default must be require"
+
+run_case "agent-tokens-are-wired: the gateway names no static-key list" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_AGENT_TOKENS_STATIC_KEYS: ${TOKENFUSE_AGENT_TOKENS_STATIC_KEYS:-}\n", "")')" \
+	"has no TOKENFUSE_AGENT_TOKENS_STATIC_KEYS"
+
+run_case "agent-tokens-are-wired: the broker names no static-key list" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS: ${TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS:-}\n", "")')" \
+	"has no TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS"
+
+run_case "agent-tokens-are-wired: the installer writes accept again" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("install.sh", "  identity_env_set TOKENFUSE_AGENT_TOKENS require\n", "  identity_env_set TOKENFUSE_AGENT_TOKENS accept\n")')" \
+	"still writes accept"
+
+run_case "agent-tokens-are-wired: wardryx names another audience" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("install.sh", "  identity_env_set WARDRYX_AGENT_TOKEN_AUDIENCES \"$AGENT_AUDIENCE\"\n", "  identity_env_set WARDRYX_AGENT_TOKEN_AUDIENCES \"https://other.example\"\n")')" \
+	"does not write 'identity_env_set WARDRYX_AGENT_TOKEN_AUDIENCES"
+
+run_case "agent-tokens-are-wired: wardryx polls no revocation list" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("install.sh", "  identity_env_set WARDRYX_AGENT_TOKEN_REVOCATION_URL http://vouchryx:4310/v1/revocations\n", "")')" \
+	"WARDRYX_AGENT_TOKEN_REVOCATION_URL http://vouchryx:4310/v1/revocations"
+
+run_case "agent-tokens-are-wired: wardryx does not name the broker's door" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("install.sh", ",http://tokenfuse-mcp-broker:4200,http://$GATEWAY_PROBE:4100", ",http://$GATEWAY_PROBE:4100")')" \
+	"door origins do not name the gateway and the broker"
+
+run_case "agent-tokens-are-wired: the off path keeps its static-key list" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("install.sh", "TOKENFUSE_AGENT_TOKENS_STATIC_KEYS TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS; do", "TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS; do")')" \
+	"does not clear the static-key lists"
+
+run_case "agent-tokens-are-wired: the allow-list drops felyx" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("install.sh", "for id in felyx broker $STATIC_KEY_IDS_LIST $EXISTING_GATEWAY_IDS; do", "for id in broker $STATIC_KEY_IDS_LIST $EXISTING_GATEWAY_IDS; do")')" \
+	"H. a fresh box names felyx"
+
+run_case "agent-tokens-are-wired: the allow-list lists a key the box does not hold" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("install.sh", "    case \"$have\" in *\" $id \"*) case \" $gw \" in", "    case \"$have\" in *) case \" $gw \" in")')" \
+	"a key the box does not hold is never named"
+
+run_case "agent-tokens-are-wired: a re-run drops an existing key id" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("install.sh", "for id in felyx broker $STATIC_KEY_IDS_LIST $EXISTING_GATEWAY_IDS; do", "for id in felyx broker $STATIC_KEY_IDS_LIST; do")')" \
+	"H. a re-run keeps"
 
 run_case "agent-tokens-are-wired: the gateway's audience is empty" fail \
 	'./scripts/agent-tokens-are-wired.sh' \
@@ -3062,7 +3112,7 @@ run_case "agent-tokens-are-wired: the installer writes the audience as a plain o
 
 run_case "agent-tokens-are-wired: a reworded comment is not a fault" pass \
 	'./scripts/agent-tokens-are-wired.sh' \
-	"$(py 'edit("install.sh", "# What this wave does NOT do, named here", "# What this wave does not do, named here")')"
+	"$(py 'edit("install.sh", "# What this does NOT do, named here", "# What this does not do, named here")')"
 
 run_case "agent-tokens-are-wired: no vouchryx service left to judge" fail \
 	'./scripts/agent-tokens-are-wired.sh' \
@@ -3134,12 +3184,12 @@ run_case "witness-is-separate: no keyryx service left to judge" fail \
 # ---- images-are-digest-pinned and images-are-verified (CLAUDE.md invariant 44) --
 run_case "images-are-digest-pinned: a published image loses its digest" fail \
 	'./scripts/images-are-digest-pinned.sh' \
-	"$(py 'edit("compose.yaml", "trailryx-node:v1.3.1@sha256:ab305ac6a65444e08090b56d6f666498b56d560f7351c96a8a84137ece9e6d37}", "trailryx-node:v1.3.1}")')" \
-	"trailryx-node:v1.3.1 is not pinned"
+	"$(py 'edit("compose.yaml", "trailryx-node:v1.4.0@sha256:79da026eab19b2b8ade994cbb65850b39f644c4b632edf1de411f70bddd047d3}", "trailryx-node:v1.4.0}")')" \
+	"trailryx-node:v1.4.0 is not pinned"
 
 run_case "images-are-digest-pinned: a digest is cut short" fail \
 	'./scripts/images-are-digest-pinned.sh' \
-	"$(py 'edit("compose.yaml", "trailryx-node:v1.3.1@sha256:ab305ac6a65444e08090b56d6f666498b56d560f7351c96a8a84137ece9e6d37}", "trailryx-node:v1.3.1@sha256:ab305ac6a65444e08090b56d6f666498b56d560f7351c96a8a84137ece9e6d3}")')" \
+	"$(py 'edit("compose.yaml", "trailryx-node:v1.4.0@sha256:79da026eab19b2b8ade994cbb65850b39f644c4b632edf1de411f70bddd047d3}", "trailryx-node:v1.4.0@sha256:ab305ac6a65444e08090b56d6f666498b56d560f7351c96a8a84137ece9e6d3}")')" \
 	"is not pinned by a full sha256 digest"
 
 run_case "images-are-digest-pinned: the third-party postgres loses its digest" fail \
