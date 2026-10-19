@@ -65,6 +65,7 @@ change here is a change to something with root on somebody else's box.
 ./scripts/firewall-is-enforce.sh
 ./scripts/pii-is-shadow.sh
 ./scripts/identity-files-are-checked.sh
+./scripts/demo-issuer-and-smtp-tls.sh
 ./scripts/checks-survive-a-closed-pipe.sh
 ./scripts/gen-is-bounded.sh
 ./scripts/openai-door.sh
@@ -1395,17 +1396,23 @@ an absent invariant.
     `TOKENFUSE_AGENT_TOKENS=accept` into `.env`, starts vouchryx with the delegation profile
     (this is the opt-in that starts it; invariant 15's default is unchanged, and no trusted
     issuer is invented), enrols ONE agent (`agent://<td>/agents/operator`), and gives the
-    gateway and the MCP broker their own audiences, `tokenfuse-gateway` and
-    `tokenfuse-mcp-broker`, with the revocation list at vouchryx failing closed. The
+    gateway and the MCP broker one audience between them, an https identifier
+    `https://stack-single.<trust domain>`. `@claude 2026-10-19`: tokenfuse 1.17.0
+    refuses an agent audience that is not an absolute https URL, and one agent
+    token must verify at both doors (the door checks `aud` exactly). Nothing serves
+    that identifier, so the broker's protected-resource document names an https URL
+    no server answers: MCP discovery by a third-party client does not work on this
+    box. Agents in the stack get their tokens from vouchryx directly. The revocation
+    list at vouchryx fails closed. The
     enrolment secret lives in `agent-token.key` (0600) and only its SHA-256 digest is in
     `.env`. The broker's taint relay uses its own `broker` client key from a file, and the
     installer mints that key only on a box it gives keys to; a box with its own keys file
     must add the line itself. The OpenAI door keeps static keys only.
     *(gate: `scripts/agent-tokens-are-wired.sh`: with the switch off, the gateway and the broker
     read it as off and vouchryx enrols nobody; with it on, the gateway and the broker verify
-    against vouchryx's issuer and key set for a non-empty audience of their own, poll the
+    against vouchryx's issuer and key set for one https audience they share, poll the
     revocation list and fail closed, the broker reads its key from a read-only mount, vouchryx
-    publishes no port and signs for the two audiences; the installer block writes the secret
+    publishes no port and signs for that audience; the installer block writes the secret
     0600 and never into .env; refuses to report OK on no gateway, broker or vouchryx service,
     or no installer block; scenarios in `features/an-agent-presents-its-own-token.feature`;
     10 teeth cases in `scripts/gates-have-teeth.sh`. Not covered: more than one agent per box
@@ -1468,6 +1475,25 @@ an absent invariant.
 
 44. **Every image the launcher runs is pinned by digest, and every image this project publishes is signature-checked before it is pulled.** `@decided 2026-10-18` (paraphrased, wave 3 of the 2026-10-17 agent-security review, finding F-016): images are pinned by digest, and their signatures are verified before the stack starts. `@claude 2026-10-19`: a pin is written `${VAR:-ghcr.io/taipanbox/name:tag@sha256:...}` in `compose.yaml` (the form `keyryx` already used), mirrored in `components.json`, and in the one place `install.sh` names an image itself. The installer fetches cosign v3.1.3 and runs it only when its SHA-256 matches the value pinned in `install.sh`, which was copied from that release's own checksum file, whose signature was checked against the sigstore release identity. Each `ghcr.io/taipanbox` image is checked with `cosign verify` against the regexp (the release workflow of a TAIPANBOX repository, or one of the two stack-k8s image workflows, on a version tag) `^https://github\.com/TAIPANBOX/(?:[A-Za-z0-9._-]+/\.github/workflows/release\.yml|stack-k8s/\.github/workflows/(?:console-image|tunnel-images)\.yml)@refs/tags/v[0-9][A-Za-z0-9._+-]*$` and GitHub's OIDC issuer, inside the pull loop of section 3c, before its `docker pull`. A signature that does not check stops the install before the stack starts. Third-party images (`busybox`, `postgres`) are digest-pinned and not signature-checked. `BUILD_FROM_SOURCE` builds locally, and nothing it builds is signed or checked; that is the operator's explicit choice.
 *(gate: `scripts/images-are-digest-pinned.sh` for the pins; `scripts/images-are-verified.sh` for the pinned cosign SHA-256, the signer and the issuer, the order in section 3c, and a run of the installer's block against stubs: a binary with the wrong bytes is refused and never installed, and a refused signature stops the run before that image is pulled; teeth in `scripts/gates-have-teeth.sh`; scenarios in `features/the-images-are-pinned-and-verified.feature`. Not covered: that every live image verifies, which is a registry measurement, and an end-to-end install on Debian or Ubuntu with signed images; CI's install legs are where that runs.)*
+
+45. **The installer's own migrations are exact, and the mail TLS mode is refused
+    before anything installs.** `@claude 2026-10-19`, from the pin move to the
+    2026-10-17 agent-security wave (conflicts 3 and 5 of its compatibility check):
+    vouchryx 0.5.0 and later refuse a subject token with no `cnf.jkt` unless its
+    issuer line ends in `|unbound`, and the demo IdP sends unbound tokens, so the
+    demo line `install.sh` writes carries that suffix. A `.env` from an earlier
+    release holds the old demo line, which `add_env_default` never rewrites, so a
+    rerun migrates exactly that line, byte for byte, and no other. An operator's
+    own line can never match it. `SMTP_TLS` is written as `HERALDYX_SMTP_TLS`
+    (heraldyx 0.8.0): unset is heraldyx's own default (STARTTLS, implicit on port
+    465), a value heraldyx does not read is refused in preflight, and `plain` is
+    refused for a host that is not loopback. The refusal never echoes the value.
+    *(gate: `scripts/demo-issuer-and-smtp-tls.sh`, which lifts the `# demo-issuer:`
+    and `# smtp-tls:` blocks out of install.sh and runs them in a scratch
+    directory: the exact old line, operator lines, no `.env`, a second run, the TLS
+    values and both refusals; teeth in `scripts/gates-have-teeth.sh`. Not covered:
+    a live install over a box that ran an earlier release, which CI's install leg
+    does on a fresh box only.)*
 
 ## Decisions that have no gate yet
 

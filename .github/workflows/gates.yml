@@ -80,6 +80,8 @@ jobs:
         run: ./scripts/pii-is-shadow.sh
       - name: client keys and the identity map are files, read by the gateway image before anything restarts
         run: ./scripts/identity-files-are-checked.sh
+      - name: the demo issuer line is migrated exactly, and the mail TLS mode is refused before anything installs
+        run: ./scripts/demo-issuer-and-smtp-tls.sh
       - name: a check reports the box, not which of a producer and its reader finished first
         run: ./scripts/checks-survive-a-closed-pipe.sh
       - name: a secret is minted from a bounded read, whatever SIGPIPE is set to

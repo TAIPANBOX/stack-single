@@ -576,7 +576,7 @@ run_case "manifest-is-true: a routine arrives and the manifest does not claim it
 # is one character in one tag, which is exactly how it would arrive.
 run_case "manifest-is-true: a pulled tag moves in compose and not in the manifest" fail \
 	'./scripts/manifest-is-true.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.2.0", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.2.1", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
 	"an image it pulls"
 
 # invariant 15: the delegation plane's default is byte-for-byte what it was
@@ -811,17 +811,17 @@ run_case "typed-data-mode: no volume is mounted where the training log lives" fa
 
 run_case "typed-data-mode: compose still pins a typryx older than the pin" fail \
 	'./scripts/typed-data-mode.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/typryx:v0.4.1@sha256:c49bceb2003e6486a6d2c82b34a7c7cc3834933b9c6108e8074fefa35b926502}", "ghcr.io/taipanbox/typryx:v0.2.0}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/typryx:v0.5.0@sha256:c9278289b3722d3e89fd90f4834666c295ee0c83b4b014c0df160500f2b57a20}", "ghcr.io/taipanbox/typryx:v0.2.0}")')" \
 	"compose.yaml pins typryx v0.2.0"
 
 run_case "typed-data-mode: components.json keeps the old typryx pin" fail \
 	'./scripts/typed-data-mode.sh' \
-	"$(py 'edit("components.json", "ghcr.io/taipanbox/typryx:v0.4.1", "ghcr.io/taipanbox/typryx:v0.2.0")')" \
+	"$(py 'edit("components.json", "ghcr.io/taipanbox/typryx:v0.5.0", "ghcr.io/taipanbox/typryx:v0.2.0")')" \
 	"components.json names typryx:v0.2.0"
 
 run_case "typed-data-mode: the README names a typryx tag compose does not pin" fail \
 	'./scripts/typed-data-mode.sh' \
-	"$(py 'edit("README.md", "this launcher pins typryx v0.4.1, so it is there", "this launcher pins ghcr.io/taipanbox/typryx:v0.2.0, so it is there")')" \
+	"$(py 'edit("README.md", "this launcher pins typryx v0.5.0, so it is there", "this launcher pins ghcr.io/taipanbox/typryx:v0.2.0, so it is there")')" \
 	"README.md names typryx:v0.2.0"
 
 # ---- run-budget-ceiling (invariant 20): tokenfuse 1.5.0's ceiling is OFF unless
@@ -1415,7 +1415,7 @@ run_case "chain-verifier: its root filesystem becomes writable" fail \
 
 run_case "chain-verifier: its image is unpinned" fail \
 	'./scripts/chain-verifier-is-contained.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/agent-conform:v1.1.0@sha256:c0a6369c2ca2c7d7bec67c6c390ac5db8a52d042fcaf7a87f2dd6490e20abda8}", "ghcr.io/taipanbox/agent-conform:latest}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/agent-conform:v2.0.1@sha256:445608e976247b94f4c3877541fdd4ae3f2aa623b18365ee7215a99f75b85e4c}", "ghcr.io/taipanbox/agent-conform:latest}")')" \
 	"is not pinned to a released"
 
 run_case "chain-verifier: its loop is removed" fail \
@@ -1425,7 +1425,7 @@ run_case "chain-verifier: its loop is removed" fail \
 
 run_case "chain-verifier: no verifier service left to judge" fail \
 	'./scripts/chain-verifier-is-contained.sh' \
-	"$(py 'edit("compose.yaml", "${AGENT_CONFORM_IMAGE:-ghcr.io/taipanbox/agent-conform:v1.1.0@sha256:c0a6369c2ca2c7d7bec67c6c390ac5db8a52d042fcaf7a87f2dd6490e20abda8}", "${AGENT_CONFORM_IMAGE:-registry.invalid/agent-conform}")')" \
+	"$(py 'edit("compose.yaml", "${AGENT_CONFORM_IMAGE:-ghcr.io/taipanbox/agent-conform:v2.0.1@sha256:445608e976247b94f4c3877541fdd4ae3f2aa623b18365ee7215a99f75b85e4c}", "${AGENT_CONFORM_IMAGE:-registry.invalid/agent-conform}")')" \
 	"measured NOTHING about the chain verifier"
 
 # The bus gate's own half: a shared volume is written through ONE FILE a service
@@ -1519,17 +1519,17 @@ open("README.md", "w").write(s.replace("when_absent: hold", "when_absent_gone: h
 
 run_case "typed-risk-signal: typryx is pinned before the proxy existed" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/typryx:v0.4.1@sha256:c49bceb2003e6486a6d2c82b34a7c7cc3834933b9c6108e8074fefa35b926502}", "ghcr.io/taipanbox/typryx:v0.3.0}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/typryx:v0.5.0@sha256:c9278289b3722d3e89fd90f4834666c295ee0c83b4b014c0df160500f2b57a20}", "ghcr.io/taipanbox/typryx:v0.3.0}")')" \
 	"the proxy (wardryx-proxy) does not exist before it"
 
 run_case "typed-risk-signal: wardryx is pinned before it read signals" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.2.0@sha256:c91cd4f2bb2542a2be6972a612666672122e15514341fe9ac49f5370357ee903}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.2.1@sha256:67718da5ef5551767156ef0ea893765f448c484fcbb5dcce5923a0ca83b8c309}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
 	"hold_if_signal and signals on /v1/decide do not exist before it"
 
 run_case "typed-risk-signal: wardryx is pinned before when_absent" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.2.0@sha256:c91cd4f2bb2542a2be6972a612666672122e15514341fe9ac49f5370357ee903}", "ghcr.io/taipanbox/wardryx:v1.3.2}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.2.1@sha256:67718da5ef5551767156ef0ea893765f448c484fcbb5dcce5923a0ca83b8c309}", "ghcr.io/taipanbox/wardryx:v1.3.2}")')" \
 	"needs v1.4.0 or later"
 
 run_case "typed-risk-signal: tokenfuse is pinned before it sent the tool call" fail \
@@ -1830,12 +1830,12 @@ run_case "bus-has-a-writer: the OpenAI door's file is not pre-created" fail \
 
 run_case "bus-names: the idryx pin goes back before the OpenAI door's row" fail \
 	'./scripts/bus-names-match-their-source.sh' \
-	"$(py 'edit_all("compose.yaml", "ghcr.io/taipanbox/idryx:v1.2.1", "ghcr.io/taipanbox/idryx:v1.1.0")')" \
+	"$(py 'edit_all("compose.yaml", "ghcr.io/taipanbox/idryx:v1.2.2", "ghcr.io/taipanbox/idryx:v1.1.0")')" \
 	"older than v1.2.0"
 
 run_case "bus-names: the heraldyx pin goes back before the OpenAI door's row" fail \
 	'./scripts/bus-names-match-their-source.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/heraldyx:v0.7.0", "ghcr.io/taipanbox/heraldyx:v0.4.0")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/heraldyx:v0.8.0", "ghcr.io/taipanbox/heraldyx:v0.4.0")')" \
 	"older than v0.5.0"
 
 echo "=== and what they must NOT catch ==="
@@ -2175,7 +2175,7 @@ edit("compose.yaml", "      typryx:\n        condition: service_started", "     
 run_case "typed-data-mode: compose names no typryx image to read a pin from" fail \
 	'./scripts/typed-data-mode.sh' \
 	"$(py 's = open("compose.yaml").read()
-a = "image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.4.1@sha256:c49bceb2003e6486a6d2c82b34a7c7cc3834933b9c6108e8074fefa35b926502}"
+a = "image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.5.0@sha256:c9278289b3722d3e89fd90f4834666c295ee0c83b4b014c0df160500f2b57a20}"
 assert s.count(a) == 2, "expected the typryx service and the risk-signal proxy to name the image"
 open("compose.yaml", "w").write(s.replace(a, "image: ${TYPRYX_IMAGE:-registry.invalid/typryx}"))')" \
 	"names no ghcr.io/taipanbox/typryx"
@@ -2295,7 +2295,7 @@ run_case "finops: its root filesystem becomes writable" fail \
 
 run_case "finops: its image is unpinned" fail \
 	'./scripts/finops-is-opt-in.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.7.0@sha256:b0bba08736c8e99d0db465bbb8ea8013fba6cf02c69f75171913c7bacb087066}", "ghcr.io/taipanbox/costcrew:latest}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.9.0@sha256:4f7883951aac2a0b723e5b0d7b36cf4005c8b94e4a6335ed051c14370a37b9b7}", "ghcr.io/taipanbox/costcrew:latest}")')" \
 	"is not the pinned"
 
 run_case "finops: it is published on every address" fail \
@@ -2346,7 +2346,7 @@ run_case "finops: the console stops waiting for its one-shot" fail \
 
 run_case "finops: no console left to judge" fail \
 	'./scripts/finops-is-opt-in.sh' \
-	"$(py 'edit("compose.yaml", "${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.7.0@sha256:b0bba08736c8e99d0db465bbb8ea8013fba6cf02c69f75171913c7bacb087066}", "${COSTCREW_IMAGE:-registry.invalid/costcrew}")')" \
+	"$(py 'edit("compose.yaml", "${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.9.0@sha256:4f7883951aac2a0b723e5b0d7b36cf4005c8b94e4a6335ed051c14370a37b9b7}", "${COSTCREW_IMAGE:-registry.invalid/costcrew}")')" \
 	"measured NOTHING about the FinOps console"
 
 # The rendering half: text a parser accepts and compose does not.
@@ -2424,7 +2424,7 @@ run_case "finops: the owner default changes" pass \
 
 run_case "finops: the pinned tag moves" pass \
 	'./scripts/finops-is-opt-in.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.7.0@sha256:b0bba08736c8e99d0db465bbb8ea8013fba6cf02c69f75171913c7bacb087066}", "ghcr.io/taipanbox/costcrew:v0.6.1}")')"
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.9.0@sha256:4f7883951aac2a0b723e5b0d7b36cf4005c8b94e4a6335ed051c14370a37b9b7}", "ghcr.io/taipanbox/costcrew:v0.6.1}")')"
 
 run_case "finops: the loopback port moves" pass \
 	'./scripts/finops-is-opt-in.sh' \
@@ -3045,6 +3045,21 @@ run_case "agent-tokens-are-wired: the installer writes the enrolment secret to .
 	"$(py 'edit("install.sh", "  identity_env_set VOUCHRYX_AGENTS \"$AGENT_TOKEN_AGENT|agents|local|sha256:$digest\"\n", "  identity_env_set VOUCHRYX_AGENTS \"$AGENT_TOKEN_AGENT|agents|local|sha256:$digest\"\n  identity_env_set ENROL_SECRET \"$secret\"\n")')" \
 	"writes an enrolment secret into .env"
 
+run_case "agent-tokens-are-wired: the broker names a different audience from the gateway" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_DELEGATION_AUDIENCE: ${MCP_BROKER_DELEGATION_AUDIENCE:-}\n", "      TOKENFUSE_DELEGATION_AUDIENCE: ${MCP_BROKER_DELEGATION_AUDIENCE:-}/other\n")')" \
+	"must verify at both doors"
+
+run_case "agent-tokens-are-wired: the installer names an audience that is not https" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("install.sh", "AGENT_AUDIENCE=\"https://stack-single.$td\"", "AGENT_AUDIENCE=\"http://stack-single.$td\"")')" \
+	"names no https audience"
+
+run_case "agent-tokens-are-wired: the installer writes the audience as a plain origin again" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("install.sh", "  identity_env_set VOUCHRYX_ALLOWED_AUDIENCES \"$AGENT_AUDIENCE\"\n", "  identity_env_set VOUCHRYX_ALLOWED_AUDIENCES \"http://$GATEWAY_PROBE:4100\"\n")')" \
+	"does not write the allowed audience from AGENT_AUDIENCE"
+
 run_case "agent-tokens-are-wired: a reworded comment is not a fault" pass \
 	'./scripts/agent-tokens-are-wired.sh' \
 	"$(py 'edit("install.sh", "# What this wave does NOT do, named here", "# What this wave does not do, named here")')"
@@ -3119,12 +3134,12 @@ run_case "witness-is-separate: no keyryx service left to judge" fail \
 # ---- images-are-digest-pinned and images-are-verified (CLAUDE.md invariant 44) --
 run_case "images-are-digest-pinned: a published image loses its digest" fail \
 	'./scripts/images-are-digest-pinned.sh' \
-	"$(py 'edit("compose.yaml", "trailryx-node:v1.2.1@sha256:86fe5a3fd17c09c33a955040d2570879eff5a1886c104bd237e4428389c213a3}", "trailryx-node:v1.2.1}")')" \
-	"trailryx-node:v1.2.1 is not pinned"
+	"$(py 'edit("compose.yaml", "trailryx-node:v1.3.1@sha256:ab305ac6a65444e08090b56d6f666498b56d560f7351c96a8a84137ece9e6d37}", "trailryx-node:v1.3.1}")')" \
+	"trailryx-node:v1.3.1 is not pinned"
 
 run_case "images-are-digest-pinned: a digest is cut short" fail \
 	'./scripts/images-are-digest-pinned.sh' \
-	"$(py 'edit("compose.yaml", "trailryx-node:v1.2.1@sha256:86fe5a3fd17c09c33a955040d2570879eff5a1886c104bd237e4428389c213a3}", "trailryx-node:v1.2.1@sha256:86fe5a3fd17c09c33a955040d2570879eff5a1886c104bd237e4428389c213a}")')" \
+	"$(py 'edit("compose.yaml", "trailryx-node:v1.3.1@sha256:ab305ac6a65444e08090b56d6f666498b56d560f7351c96a8a84137ece9e6d37}", "trailryx-node:v1.3.1@sha256:ab305ac6a65444e08090b56d6f666498b56d560f7351c96a8a84137ece9e6d37}")')" \
 	"is not pinned by a full sha256 digest"
 
 run_case "images-are-digest-pinned: the third-party postgres loses its digest" fail \
@@ -3134,7 +3149,7 @@ run_case "images-are-digest-pinned: the third-party postgres loses its digest" f
 
 run_case "images-are-digest-pinned: the installer names a digest compose does not run" fail \
 	'./scripts/images-are-digest-pinned.sh' \
-	"$(py 'edit_all("install.sh", "b650f01aeac9baa89f60ca86f71f589fc7c7c7d25d3237793814a186eb8f5cea", "1111111111111111111111111111111111111111111111111111111111111111")')" \
+	"$(py 'edit_all("install.sh", "4a2b6b31be44b5391974785bdfca597a88bcc5ddd834d50830bd6b9537e9ab3d", "1111111111111111111111111111111111111111111111111111111111111111")')" \
 	"pinned to a digest compose.yaml does not run"
 
 run_case "images-are-digest-pinned: no image line left to judge" fail \
@@ -3214,6 +3229,52 @@ run_case "images-are-verified: no image-verify block left to judge" fail \
 run_case "images-are-verified: a reworded comment in the block is not a fault" pass \
 	'./scripts/images-are-verified.sh' \
 	"$(py 'edit("install.sh", "# A signature is accepted only from", "# A signature is accepted solely from")')"
+
+
+run_case "demo-issuer-and-smtp-tls: the migration rewrites any line naming the demo host" fail \
+	'./scripts/demo-issuer-and-smtp-tls.sh' \
+	"$(py 'edit("install.sh", "\x27$0 == old { print new; next } { print }\x27", "\x27$0 ~ /idp[.]stack-single[.]local/ { print new; next } { print }\x27")')" \
+	"a line that only contains the demo line was rewritten"
+
+run_case "demo-issuer-and-smtp-tls: the new demo line drops |unbound" fail \
+	'./scripts/demo-issuer-and-smtp-tls.sh' \
+	"$(py 'edit("install.sh", "DEMO_ISSUER_NEW=\"$DEMO_ISSUER_OLD|unbound\"", "DEMO_ISSUER_NEW=\"$DEMO_ISSUER_OLD\"")')" \
+	"DEMO_ISSUER_NEW is not the demo line with |unbound"
+
+run_case "demo-issuer-and-smtp-tls: the delegation block stops migrating .env" fail \
+	'./scripts/demo-issuer-and-smtp-tls.sh' \
+	"$(py 'edit("install.sh", "  demo_issuer_migrate .env\n", "")')" \
+	"does not call demo_issuer_migrate .env"
+
+run_case "demo-issuer-and-smtp-tls: the mail TLS check accepts any value" fail \
+	'./scripts/demo-issuer-and-smtp-tls.sh' \
+	"$(py 'edit("install.sh", "case \"$1\" in \"\"|starttls|implicit|plain) return 0 ;; *) return 1 ;; esac", "case \"$1\" in *) return 0 ;; esac")')" \
+	"was accepted"
+
+run_case "demo-issuer-and-smtp-tls: plain is accepted for a host that is not loopback" fail \
+	'./scripts/demo-issuer-and-smtp-tls.sh' \
+	"$(py 'edit("install.sh", "if [ \"${SMTP_TLS:-}\" = plain ] && [ -n \"${SMTP_HOST:-}\" ] && ! smtp_tls_loopback \"$SMTP_HOST\"; then", "if false; then")')" \
+	"was accepted for a host"
+
+run_case "demo-issuer-and-smtp-tls: the refusal echoes the value it was given" fail \
+	'./scripts/demo-issuer-and-smtp-tls.sh' \
+	"$(py 'edit("install.sh", "SMTP_TLS must be starttls", "SMTP_TLS=$SMTP_TLS must be starttls")')" \
+	"echoed the value"
+
+run_case "demo-issuer-and-smtp-tls: SMTP_TLS is no longer written into .env" fail \
+	'./scripts/demo-issuer-and-smtp-tls.sh' \
+	"$(py 'edit("install.sh", "add_env_default SMTP_TLS   \"$(sq_ \"$SMTP_TLS\")\"\n", "")')" \
+	"does not write SMTP_TLS into .env"
+
+run_case "demo-issuer-and-smtp-tls: the demo block is gone" fail \
+	'./scripts/demo-issuer-and-smtp-tls.sh' \
+	"$(py 'edit("install.sh", "# demo-issuer: begin", "# demo-issuer: begun")')" \
+	"measured NOTHING"
+
+run_case "demo-issuer-and-smtp-tls: a reworded comment is not a fault" pass \
+	'./scripts/demo-issuer-and-smtp-tls.sh' \
+	"$(py 'edit("install.sh", "# The demo IdP\x27s line in .env.", "# The demo IdP\x27s line in the env file.")')" \
+	""
 
 
 echo

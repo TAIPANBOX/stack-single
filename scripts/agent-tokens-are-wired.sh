@@ -76,15 +76,16 @@ ON_ENV="$(printf '%s\n' \
   "TOKENFUSE_AGENT_TOKENS=accept" \
   "TOKENFUSE_DELEGATION_ISSUER=http://vouchryx:4310" \
   "TOKENFUSE_DELEGATION_JWKS=/etc/tokenfuse/delegation/vouchryx.jwks.json" \
-  "TOKENFUSE_DELEGATION_AUDIENCE=http://127.0.0.1:4100" \
+  "TOKENFUSE_DELEGATION_AUDIENCE=https://stack-single.gate.example" \
   "TOKENFUSE_DELEGATION_URL=http://127.0.0.1:4100" \
   "TOKENFUSE_DELEGATION_REVOCATIONS=http://vouchryx:4310/v1/revocations" \
   "TOKENFUSE_DELEGATION_REVOCATIONS_INTERVAL_MS=12000" \
   "VOUCHRYX_AGENTS=agent://gate.example/agents/operator|agents|local|sha256:0000000000000000000000000000000000000000000000000000000000000000" \
-  "MCP_BROKER_DELEGATION_AUDIENCE=http://127.0.0.1:4200" \
+  "MCP_BROKER_DELEGATION_AUDIENCE=https://stack-single.gate.example" \
   "MCP_BROKER_DELEGATION_URL=http://127.0.0.1:4200" \
   "BROKER_GATEWAY_KEY_FILE=/run/broker/key" \
-  "VOUCHRYX_ALLOWED_AUDIENCES=http://127.0.0.1:4100,http://127.0.0.1:4200")"
+  "BROKER_TAINT_GATEWAY=http://tokenfuse-gateway:4100" \
+  "VOUCHRYX_ALLOWED_AUDIENCES=https://stack-single.gate.example")"
 resolve "$scratch/off.json" "" || exit 1
 resolve "$scratch/on.json" "$ON_ENV" || exit 1
 
@@ -172,8 +173,18 @@ allowed = set(str(env(v, "VOUCHRYX_ALLOWED_AUDIENCES") or "").split(","))
 for aud in (env(g, "TOKENFUSE_DELEGATION_AUDIENCE"), env(b, "TOKENFUSE_DELEGATION_AUDIENCE")):
     if aud not in allowed:
         problems.append("D. vouchryx may not issue for audience %r (VOUCHRYX_ALLOWED_AUDIENCES does not name it)" % aud)
-    if not str(aud or "").startswith(("http://", "https://")):
-        problems.append("D. audience %r is not an absolute URL; vouchryx refuses a plain name at startup" % aud)
+    if not str(aud or "").startswith("https://"):
+        problems.append("D. audience %r is not an https URL; tokenfuse 1.17.0 refuses an agent audience that is not one" % aud)
+
+# E. one audience for both doors. One agent token is presented at the gateway and at the broker, and it
+# verifies only for the audience it was minted for, so the two must be the same identifier (tokenfuse 1.17.0
+# migration: the door checks aud exactly).
+if env(g, "TOKENFUSE_DELEGATION_AUDIENCE") != env(b, "TOKENFUSE_DELEGATION_AUDIENCE"):
+    problems.append("E. the gateway's audience %r and the broker's %r differ: one agent token must verify at both doors" % (env(g, "TOKENFUSE_DELEGATION_AUDIENCE"), env(b, "TOKENFUSE_DELEGATION_AUDIENCE")))
+
+# C2. tokenfuse 1.18.0 (invariant 129) refuses a broker that names a taint gateway without the file that holds its key.
+if env(b, "TOKENFUSE_MCP_TAINT_GATEWAY") and not env(b, "TOKENFUSE_MCP_TAINT_GATEWAY_KEY_FILE"):
+    problems.append("C. the broker names a taint gateway but no TOKENFUSE_MCP_TAINT_GATEWAY_KEY_FILE: tokenfuse 1.18.0 refuses to start")
 
 for p in problems:
     print("FAIL: " + p)
@@ -189,8 +200,10 @@ if [ -z "$BLOCK" ]; then
 else
   printf '%s\n' "$BLOCK" | grep -q 'chmod 0600' || fail "the agent-tokens block does not set mode 0600 on the enrolment secret"
   printf '%s\n' "$BLOCK" | grep -q 'sha256' || fail "the agent-tokens block writes no SHA-256 digest of the enrolment secret"
-  printf '%s\n' "$BLOCK" | grep -q 'VOUCHRYX_ALLOWED_AUDIENCES "http' \
-    || fail "the agent-tokens block does not write the allowed audiences as absolute URLs; vouchryx refuses a plain name at startup"
+  printf '%s\n' "$BLOCK" | grep -q 'VOUCHRYX_ALLOWED_AUDIENCES "\$AGENT_AUDIENCE"' \
+    || fail "the agent-tokens block does not write the allowed audience from AGENT_AUDIENCE; vouchryx refuses a plain name at startup"
+  printf '%s\n' "$BLOCK" | grep -q 'AGENT_AUDIENCE="https://' \
+    || fail "the agent-tokens block names no https audience: tokenfuse 1.17.0 refuses an agent audience that is not an https URL"
   # Any write of a name that carries a secret into .env, in either spelling: the
   # NAME=value form printf writes, and the identity_env_set / add_env_default call.
   if printf '%s\n' "$BLOCK" | grep -E '^[[:space:]]*(add_env_default|identity_env_set)[[:space:]]+[A-Z_]*(SECRET|_KEY)([[:space:]]|$)' >/dev/null \
