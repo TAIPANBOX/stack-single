@@ -46,11 +46,24 @@ Feature: Images are pinned by digest, and ours are verified before anything star
     Then it stops before that image is pulled and before docker compose up
     # -> gates-have-teeth.sh "images-are-verified: a refused signature does not stop the install"
 
-  Scenario: The signer must be a TAIPANBOX GitHub workflow on a release tag
+  Scenario: The signer accepts only the release workflows of the TAIPANBOX repositories and the stack-k8s image workflows
     Given the keyless identity the installer accepts
     When the verify gate reads it
-    Then it names the TAIPANBOX workflows, the GitHub issuer and a release tag, and nothing wider
+    Then it names those workflow files, on a version tag, from GitHub's issuer, and nothing wider
     # -> gates-have-teeth.sh "images-are-verified: the signer accepts any identity"
+    # -> gates-have-teeth.sh "images-are-verified: the signer refuses the release workflow"
+
+  Scenario: A signer from another workflow file is refused
+    Given a keyless signature made by a ci.yml workflow of a TAIPANBOX repository on a version tag
+    When the installer checks the signer
+    Then the signature is refused
+    # -> gates-have-teeth.sh "images-are-verified: the signer accepts a signer from another workflow file"
+
+  Scenario: A signer on a branch is refused
+    Given a keyless signature made by a release workflow on a branch
+    When the installer checks the signer
+    Then the signature is refused
+    # -> gates-have-teeth.sh "images-are-verified: the signer accepts a branch ref"
 
   Scenario: The verify call cannot skip the transparency log or the certificate checks
     Given the cosign verify call the installer makes

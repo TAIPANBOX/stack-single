@@ -90,7 +90,7 @@ EXPECT = {
     "COSIGN_SHA256_amd64": '"4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71"',
     "COSIGN_SHA256_arm64": '"c5d324e091826b0d7a78eb16fef316450b4eb9aaec045611c08ba06f5e73220a"',
     "TAIPANBOX_ISSUER": "'https://token.actions.githubusercontent.com'",
-    "TAIPANBOX_SIGNER": r"'^https://github\.com/TAIPANBOX/[^/]+/\.github/workflows/[^@]+@refs/tags/v[0-9].*$'",
+    "TAIPANBOX_SIGNER": r"'^https://github\.com/TAIPANBOX/(?:[A-Za-z0-9._-]+/\.github/workflows/release\.yml|stack-k8s/\.github/workflows/(?:console-image|tunnel-images)\.yml)@refs/tags/v[0-9][A-Za-z0-9._+-]*$'",
 }
 for var, want in EXPECT.items():
     m = re.search(r"^" + var + r"=(.*)$", block, re.M)
@@ -98,6 +98,30 @@ for var, want in EXPECT.items():
         problems.append(f"the image-verify block does not set {var}")
     elif m.group(1).strip() != want:
         problems.append(f"{var} is {m.group(1).strip()}, not the pinned value {want}")
+
+# Behaviour, not only text: the signer the block sets, read back and run against
+# identities it must accept and identities it must refuse. A widened pattern
+# that still reads as "a different string" is caught here as well.
+sm = re.search(r"^TAIPANBOX_SIGNER='(.*)'$", block, re.M)
+if sm:
+    signer = re.compile(sm.group(1))
+    must_accept = [
+        "https://github.com/TAIPANBOX/tokenfuse/.github/workflows/release.yml@refs/tags/v1.16.0",
+        "https://github.com/TAIPANBOX/stack-k8s/.github/workflows/console-image.yml@refs/tags/v1.1.47",
+        "https://github.com/TAIPANBOX/stack-k8s/.github/workflows/tunnel-images.yml@refs/tags/v1.1.47",
+    ]
+    must_refuse = [
+        ("https://github.com/TAIPANBOX/tokenfuse/.github/workflows/ci.yml@refs/tags/v1", "accepts a signer from another workflow file"),
+        ("https://github.com/TAIPANBOX/stack-k8s/.github/workflows/ci.yml@refs/tags/v1.1.47", "accepts a signer from another workflow file"),
+        ("https://github.com/TAIPANBOX/tokenfuse/.github/workflows/release.yml@refs/heads/main", "accepts a branch ref"),
+        ("https://github.com/OTHERORG/tokenfuse/.github/workflows/release.yml@refs/tags/v1.16.0", "accepts a signer from another organisation"),
+    ]
+    for ident in must_accept:
+        if not signer.search(ident):
+            problems.append(f"the signer refuses the release identity {ident}")
+    for ident, what in must_refuse:
+        if signer.search(ident):
+            problems.append(f"the signer {what}: {ident}")
 
 for forbidden in ("--insecure-ignore-tlog", "--insecure-ignore-sct", "--allow-insecure",
                   "--certificate-identity-regexp '.*'", "--certificate-identity-regexp \".*\"",

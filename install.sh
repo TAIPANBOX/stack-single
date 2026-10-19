@@ -3099,10 +3099,12 @@ COSIGN_VERSION="v3.1.3"
 COSIGN_SHA256_amd64="4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71"
 # shellcheck disable=SC2034 # read by name, as ${!want}, in cosign_install below
 COSIGN_SHA256_arm64="c5d324e091826b0d7a78eb16fef316450b4eb9aaec045611c08ba06f5e73220a"
-# A signature is accepted only from a GitHub Actions release workflow of the
-# TAIPANBOX organisation, run on a version tag, signed through GitHub's own OIDC
-# issuer. Nothing wider: not a branch, not another organisation.
-TAIPANBOX_SIGNER='^https://github\.com/TAIPANBOX/[^/]+/\.github/workflows/[^@]+@refs/tags/v[0-9].*$'
+# A signature is accepted only from the release workflow of a TAIPANBOX repository
+# (release.yml), or from the two image workflows of stack-k8s (console-image.yml and
+# tunnel-images.yml), run on a version tag and signed through GitHub's own OIDC
+# issuer. That is the identity stack-k8s's own admission policy names. Nothing
+# wider: not another workflow file, not a branch, not another organisation.
+TAIPANBOX_SIGNER='^https://github\.com/TAIPANBOX/(?:[A-Za-z0-9._-]+/\.github/workflows/release\.yml|stack-k8s/\.github/workflows/(?:console-image|tunnel-images)\.yml)@refs/tags/v[0-9][A-Za-z0-9._+-]*$'
 TAIPANBOX_ISSUER='https://token.actions.githubusercontent.com'
 
 cosign_install() {

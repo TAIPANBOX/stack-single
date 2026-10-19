@@ -3158,8 +3158,23 @@ run_case "images-are-verified: a refused signature does not stop the install" fa
 
 run_case "images-are-verified: the signer accepts any identity" fail \
 	'./scripts/images-are-verified.sh' \
-	"$(py 'edit("install.sh", "TAIPANBOX/[^/]+/", "[^/]+/[^/]+/")')" \
+	"$(py 'edit("install.sh", "TAIPANBOX/(?:", "(?:")')" \
 	"not the pinned value"
+
+run_case "images-are-verified: the signer accepts a signer from another workflow file" fail \
+	'./scripts/images-are-verified.sh' \
+	"$(py 'edit("install.sh", "/\\.github/workflows/release\\.yml|", "/\\.github/workflows/[^@]+|")')" \
+	"accepts a signer from another workflow file"
+
+run_case "images-are-verified: the signer refuses the release workflow" fail \
+	'./scripts/images-are-verified.sh' \
+	"$(py 'edit("install.sh", "/\\.github/workflows/release\\.yml|", "/\\.github/workflows/release-x\\.yml|")')" \
+	"refuses the release identity"
+
+run_case "images-are-verified: the signer accepts a branch ref" fail \
+	'./scripts/images-are-verified.sh' \
+	"$(py 'edit("install.sh", "@refs/tags/v[0-9][A-Za-z0-9._+-]*$", "@refs/[^@]*$")')" \
+	"accepts a branch ref"
 
 run_case "images-are-verified: the verify call skips the transparency log" fail \
 	'./scripts/images-are-verified.sh' \

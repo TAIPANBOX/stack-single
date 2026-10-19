@@ -1318,7 +1318,7 @@ that build and nothing else.
 The images this project publishes (`ghcr.io/taipanbox/...`) are also signed,
 keyless, by the release workflow that built them, and carry a provenance
 attestation. Before the installer pulls one of them it checks that signature
-against a TAIPANBOX release tag. The installer fetches a pinned cosign release,
+against the release workflows of the TAIPANBOX repositories, and the two stack-k8s image workflows, on a version tag. The installer fetches a pinned cosign release,
 checks its SHA-256 before anything can run it, and refuses to start the stack
 if one of our images does not verify. The refusal names the image and stops
 before anything is pulled further or started.
