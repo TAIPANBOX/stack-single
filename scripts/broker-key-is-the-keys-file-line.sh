@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
-# Enforces invariant 48 of CLAUDE.md (1.3.2, D6): a box given its own CLIENT_KEYS_FILE, with
+# Enforces invariant 48 of CLAUDE.md (1.4.0, D6): a box given its own CLIENT_KEYS_FILE, with
 # agent tokens on (the default), carries the MCP broker's key in that file as a line
 # `<secret>:broker`, the format install.sh reads (one secret:key_id per line, split on the LAST
 # colon). With the line, the installer accepts the box and the broker's key file is that secret.
 # Without it, the installer refuses, and the refusal names ADD_BROKER_KEY=1, which mints the
 # secret, appends the line and keeps the file's mode. The README must say the same format.
 #
-# Before 1.3.2 the README said `broker:<secret>`, the installer read `<secret>:broker`, and
+# Before 1.4.0 the README said `broker:<secret>`, the installer read `<secret>:broker`, and
 # the refusal named the README's form, so an operator who followed it was refused again.
 #
 # WHAT THIS CHECKS, by running the installer's own `# agent-tokens:` block (lifted out of

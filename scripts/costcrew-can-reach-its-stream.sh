@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Enforces invariant 52 of CLAUDE.md (1.3.2, D11): the FinOps console (costcrew, uid 10003, profile
+# Enforces invariant 52 of CLAUDE.md (1.4.0, D11): the FinOps console (costcrew, uid 10003, profile
 # finops) can reach the one file it writes on the bus. The bus directory is `root:10001`, and a
 # directory is entered by the `x` bit, so the directory needs the other-execute bit for a uid that is
 # not in the bus group. Mode 0750 gave costcrew "permission denied" on open, measured on gcp2

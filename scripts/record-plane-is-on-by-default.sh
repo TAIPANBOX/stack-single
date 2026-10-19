@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# Enforces invariant 51 of CLAUDE.md (1.3.2, D10): the record plane is a core control, so it is ON
+# Enforces invariant 51 of CLAUDE.md (1.4.0, D10): the record plane is a core control, so it is ON
 # by default from the pinned trailryx-node image (no build), and WITH_RECORD=0 is the explicit way off.
 #
-# Before 1.3.2 WITH_RECORD unset meant off, and WITH_RECORD=1 built trailryx from source; the `up`
+# Before 1.4.0 WITH_RECORD unset meant off, and WITH_RECORD=1 built trailryx from source; the `up`
 # profile list never named `record`, so a default box had no record plane at all.
 #
 # WHAT THIS CHECKS.

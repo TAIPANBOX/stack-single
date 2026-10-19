@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
-# Enforces invariant 50 of CLAUDE.md (1.3.2, D4 generalised): every compose profile this run does
+# Enforces invariant 50 of CLAUDE.md (1.4.0, D4 generalised): every compose profile this run does
 # not name is stopped and its containers removed, and no profile this run names loses a container.
 #
 # WHY. `up --remove-orphans` does not remove a container whose profile this run does not name
-# (measured 2026-10-04). Before 1.3.2 the installer removed two profiles by hand (typed-risk-signal
+# (measured 2026-10-04). Before 1.4.0 the installer removed two profiles by hand (typed-risk-signal
 # and openai-door) and left every other profile to chance: after the 1.1.35 to 1.3.1 upgrade on a
 # forge box the costcrew container of profile `finops` still ran image v0.6.0 from 2026-10-14, and
 # the typed plane's broker and typryx kept running stale beside a box whose typed plane was off.

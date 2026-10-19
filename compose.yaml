@@ -57,12 +57,12 @@ services:
         # script creates a file in it, so no plane can create one, let alone
         # write another plane's. Every stream below is created here, owned by
         # its producer's uid, mode 0640, group 10001 to read.
-        # 1.3.2 (CLAUDE.md invariant 52, D11): the bus directory is also traversable by others (x only, no
+        # 1.4.0 (CLAUDE.md invariant 52, D11): the bus directory is also traversable by others (x only, no
         # read, no write). A uid outside the bus group, costcrew (10003), must reach its own stream through
-        # it; before 1.3.2 the mode was 0750 and costcrew got "permission denied" on open. Nobody but this
+        # it; before 1.4.0 the mode was 0750 and costcrew got "permission denied" on open. Nobody but this
         # script creates a file here, because nothing has the write bit.
         chown 0:10001 /vol/events && chmod 0751 /vol/events
-        # 1.3.2 (CLAUDE.md invariant 49, D7 and D8): a re-own is RECURSIVE and runs on every up. The gateway
+        # 1.4.0 (CLAUDE.md invariant 49, D7 and D8): a re-own is RECURSIVE and runs on every up. The gateway
         # (20010) keeps its retained-reservation journal here, and an earlier release left that file to uid
         # 10001, so a top-level chown did not reach it and the gateway stopped. The same holds for every
         # volume below; volumes/gateways a service writes are re-owned by the gate volumes-are-reowned.sh.

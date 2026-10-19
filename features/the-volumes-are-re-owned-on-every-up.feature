@@ -1,4 +1,4 @@
-# @decided 2026-10-19 (paraphrased, the 1.3.2 wave, CLAUDE.md invariant 49): every volume a non-root service
+# @decided 2026-10-19 (paraphrased, the 1.4.0 wave, CLAUDE.md invariant 49): every volume a non-root service
 # mounts read-write is given to its uid, recursively, on every up. Each scenario is bound by name to a case
 # in scripts/gates-have-teeth.sh.
 Feature: an upgraded box's files are given back to the uid that writes them

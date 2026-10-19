@@ -1,9 +1,9 @@
-# @decided 2026-10-19 (paraphrased, the 1.3.2 wave, CLAUDE.md invariant 51): the record plane is a core
+# @decided 2026-10-19 (paraphrased, the 1.4.0 wave, CLAUDE.md invariant 51): the record plane is a core
 # control, on by default from the pinned image, and WITH_RECORD=0 is the explicit way off. Each scenario is
 # bound by name to a case in scripts/gates-have-teeth.sh.
 Feature: the record plane runs unless the operator turns it off
 
-  Before 1.3.2 an install without WITH_RECORD had no record plane, and WITH_RECORD=1 built trailryx from
+  Before 1.4.0 an install without WITH_RECORD had no record plane, and WITH_RECORD=1 built trailryx from
   source. A core control should not depend on the operator knowing to ask for it.
 
   Scenario: an install that says nothing runs the record plane

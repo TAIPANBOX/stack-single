@@ -1,4 +1,4 @@
-# @decided 2026-10-19 (paraphrased, the 1.3.2 wave, CLAUDE.md invariant 52): the FinOps console can enter the
+# @decided 2026-10-19 (paraphrased, the 1.4.0 wave, CLAUDE.md invariant 52): the FinOps console can enter the
 # bus directory and reach the one file it writes, and joins no group. Each scenario is bound by name to a case
 # in scripts/gates-have-teeth.sh.
 Feature: the FinOps console can reach its own stream on the bus

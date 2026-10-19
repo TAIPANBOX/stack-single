@@ -1,4 +1,4 @@
-# @decided 2026-10-19 (paraphrased, the 1.3.2 wave): a re-run keeps exactly the static allow-list the
+# @decided 2026-10-19 (paraphrased, the 1.4.0 wave): a re-run keeps exactly the static allow-list the
 # last run wrote, and never adds a key the installer minted for the agents or the fire drills (CLAUDE.md
 # invariant 53). Each scenario is bound by name to a case in scripts/gates-have-teeth.sh.
 Feature: a re-run keeps the static allow-list it had and widens nothing

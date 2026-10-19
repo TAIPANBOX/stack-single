@@ -1,4 +1,4 @@
-# @decided 2026-10-19 (paraphrased, the 1.3.2 wave, CLAUDE.md invariant 50): a compose profile this run
+# @decided 2026-10-19 (paraphrased, the 1.4.0 wave, CLAUDE.md invariant 50): a compose profile this run
 # does not name is stopped and its containers removed, and a profile it names keeps its containers. Each
 # scenario is bound by name to a case in scripts/gates-have-teeth.sh.
 Feature: a profile that is off has no container left from an earlier install

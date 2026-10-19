@@ -1,4 +1,4 @@
-# @decided 2026-10-19 (paraphrased, the 1.3.2 wave on the forge upgrade): a box given its own client keys
+# @decided 2026-10-19 (paraphrased, the 1.4.0 wave on the forge upgrade): a box given its own client keys
 # file must carry the MCP broker's key in that file, in the one format the installer reads. Each scenario
 # is bound by name to a case in scripts/gates-have-teeth.sh; scripts/features-are-bound.sh holds the binding.
 Feature: a box with its own keys file takes the broker's line, or adds it on request

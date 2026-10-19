@@ -246,7 +246,7 @@ for name, block in blocks.items():
             note(f"{name} (user {user}) writes volume {vol} at {target}, and init-volumes never mounts it: a fresh named volume is root:root 0755, so the service cannot write")
             continue
         path = init_mounts[vol]
-        # 1.3.2: a re-own is recursive (`chown -R`), and a user-only re-own names no group (keyryx).
+        # 1.4.0: a re-own is recursive (`chown -R`), and a user-only re-own names no group (keyryx).
         owned = re.search(r"chown\s+(?:-R\s+)?([0-9]+)(?::([0-9]+))?\s+([^\n&]*" + re.escape(path) + r"(?=[\s&]|$))", init_text)
         if not owned:
             note(f"{name} (user {user}) writes volume {vol}, mounted by init-volumes at {path}, but no chown line there names {path}")

@@ -1638,7 +1638,9 @@ an absent invariant.
     fire drills' keys without a token, because the list was built from every key the box held. Now the list comes from
     the `TOKENFUSE_AGENT_TOKENS_STATIC_KEYS` the last run wrote (and the MCP list from its own). Only a box whose `.env`
     predates the list takes its ids from its keys, and then not the two keys the installer minted. felyx and the broker are
-    named on a first run, by design. *(gate: `scripts/agent-tokens-are-wired.sh`, section H (the list per case) and section I
+    named on a first run, by design. An upgrade removes
+    agents and drills from both lists, a list a 1.3.1 re-run had widened, unless STATIC_KEY_IDS names them, and the
+    closing report says which it removed (1.4.0). *(gate: `scripts/agent-tokens-are-wired.sh`, section H (the list per case) and section I
     (two runs on one `.env`, the second must write what the first wrote); 2 teeth cases plus the existing ones in
     `scripts/gates-have-teeth.sh`; `features/a-re-run-keeps-its-allow-list.feature`. Not covered: a live second install on a
     box, and a box whose static key was listed by hand.)*

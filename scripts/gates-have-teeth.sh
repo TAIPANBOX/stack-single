@@ -125,7 +125,7 @@ cases=0
 # including one this harness caused itself.
 run_case() {
 	local name="$1" expect="$2" gate="$3" edit="$4" needle="${5:-}"
-	# TEETH_ONLY=REGEX runs only the cases whose name matches REGEX (1.3.2): a change runs the cases it
+	# TEETH_ONLY=REGEX runs only the cases whose name matches REGEX (1.4.0): a change runs the cases it
 	# touches, and CI runs the whole list. Unset, every case runs, as before.
 	if [ -n "${TEETH_ONLY:-}" ] && ! printf '%s' "$name" | grep -q -E -- "$TEETH_ONLY"; then
 		return 0
@@ -3082,12 +3082,12 @@ run_case "agent-tokens-are-wired: the allow-list drops felyx" fail \
 
 run_case "agent-tokens-are-wired: the allow-list lists a key the box does not hold" fail \
 	'./scripts/agent-tokens-are-wired.sh' \
-	"$(py 'edit("install.sh", "    case \"$have\" in *\" $id \"*) case \" $gw \" in", "    case \"$have\" in *) case \" $gw \" in")')" \
+	"$(py 'edit("install.sh", "    case \"$have\" in *\" $id \"*) ;; *) continue ;; esac\n", "")')" \
 	"a key the box does not hold is never named"
 
 run_case "agent-tokens-are-wired: a re-run drops an existing key id" fail \
 	'./scripts/agent-tokens-are-wired.sh' \
-	"$(py 'edit("install.sh", "for id in $named $STATIC_KEY_IDS_LIST $EXISTING_GATEWAY_IDS; do", "for id in $named $STATIC_KEY_IDS_LIST; do")')" \
+	"$(py 'edit("install.sh", "for id in $named $EXISTING_GATEWAY_IDS $STATIC_KEY_IDS_LIST; do", "for id in $named $STATIC_KEY_IDS_LIST; do")')" \
 	"H. a re-run keeps"
 
 run_case "agent-tokens-are-wired: the gateway's audience is empty" fail \
@@ -3440,7 +3440,7 @@ run_case "no-secret-on-argv: an evidence script passes its enrolment secret on a
 	"$(py 'edit("docs/evidence/agent-token-audience/measure.sh", "\"$agent\" \"$htu_token\" \"$AUDIENCE\"", "\"$agent\" \"$ENROL_SECRET\" \"$htu_token\" \"$AUDIENCE\"")')" \
 	"a secret is expanded on a line that runs an argument-carrying program"
 
-# ---- 1.3.2: the broker line (invariant 48), the re-run allow-list (53), every profile (50), re-owned volumes (49),
+# ---- 1.4.0: the broker line (invariant 48), the re-run allow-list (53), every profile (50), re-owned volumes (49),
 # the record plane on by default (51), and the costcrew stream's directory (52). Each fault is planted and the
 # named gate must go red; each pass case is a comment, which must leave the gate green.
 
@@ -3472,12 +3472,27 @@ edit("install.sh", "grep -v -x -E '\''felyx|broker|agents|drills'\'' | tr", "tr"
 
 run_case "agent-tokens-are-wired: the agents key joins the list on the first run" fail \
 	'./scripts/agent-tokens-are-wired.sh' \
-	"$(py 'edit("install.sh", "|| named=\"felyx broker\"", "|| named=\"felyx broker agents\"")')" \
+	"$(py 'edit("install.sh", "|| named=\"felyx broker\"", "|| named=\"felyx broker\"\n  STATIC_KEY_IDS_LIST=\"$STATIC_KEY_IDS_LIST agents\"")')" \
 	"a fresh box names felyx and broker"
+
+run_case "agent-tokens-are-wired: a re-run keeps the agents key the upgrade dropped" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("install.sh", "    agents|drills) case \" $STATIC_KEY_IDS_LIST \" in *\" $1 \"*) return 0 ;; *) return 1 ;; esac ;;", "    agents|drills) return 0 ;;")')" \
+	"loses agents and drills, on both doors"
+
+run_case "agent-tokens-are-wired: the closing report stops saying which keys the run removed" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("install.sh", "Removed from the static allow-lists on this run:", "Changed on this run:")')" \
+	"the closing report does not say which keys this run removed"
+
+run_case "agent-tokens-are-wired: a comment about the own agents key is not a fault" pass \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("install.sh", "static_keep_ok() {\n", "static_keep_ok() {\n  # a comment about the own agents key is not a fault\n")')" \
+	""
 
 run_case "agent-tokens-are-wired: a comment in the allow-list block is not a fault" pass \
 	'./scripts/agent-tokens-are-wired.sh' \
-	"$(py 'edit("install.sh", "  local named=\"\"\n", "  # a comment in the allow-list block is not a fault\n  local named=\"\"\n")')" \
+	"$(py 'edit("install.sh", "  [ \"${PRIOR_GW_PRESENT:-0}\" = 1 ] || named=\"felyx broker\"\n", "  # a comment in the allow-list block is not a fault\n  [ \"${PRIOR_GW_PRESENT:-0}\" = 1 ] || named=\"felyx broker\"\n")')" \
 	""
 
 run_case "profiles-off-are-removed: the cleanup names the off profiles by hand and misses finops" fail \

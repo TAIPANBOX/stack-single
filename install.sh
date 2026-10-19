@@ -1305,8 +1305,8 @@ pii_apply() {
 pii_resolve
 
 # record-plane: begin
-# 1.3.2 (CLAUDE.md invariant 51, D10): the record plane is a core control, so it is ON by default, from
-# the pinned trailryx-node image (no build). WITH_RECORD=0 is the explicit way off. Before 1.3.2 an unset
+# 1.4.0 (CLAUDE.md invariant 51, D10): the record plane is a core control, so it is ON by default, from
+# the pinned trailryx-node image (no build). WITH_RECORD=0 is the explicit way off. Before 1.4.0 an unset
 # WITH_RECORD meant off, and WITH_RECORD=1 built trailryx from source. BUILD_FROM_SOURCE=1 still builds it.
 RECORD_ON=1
 record_resolve() {
@@ -2040,6 +2040,7 @@ EXISTING_MCP_IDS=""      # the broker's client key ids this box had before this 
 STATIC_KEY_IDS_LIST=""   # STATIC_KEY_IDS as validated words, set by agent_tokens_resolve
 STATIC_GATEWAY_LIST=""   # what this run wrote to TOKENFUSE_AGENT_TOKENS_STATIC_KEYS
 STATIC_MCP_LIST=""       # what this run wrote to TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS
+REMOVED_STATIC_IDS=""    # the installer's own agents and drills ids a re-run did not keep (1.4.0)
 
 # The key id of each secret:key_id entry in SPEC, one per line. A key id is the text after
 # the LAST colon, as tokenfuse splits it. Nothing here echoes a secret.
@@ -2096,7 +2097,7 @@ agent_tokens_resolve() {
   AGENT_AUDIENCE="https://stack-single.$td"
   # The key ids this box already has, read before this run writes anything. On a re-run every one of
   # them stays on the static allow-list, so nothing that worked yesterday stops working (invariant 47).
-  # 1.3.2 (CLAUDE.md invariant 53): a re-run keeps EXACTLY the list the last run wrote, read back from
+  # 1.4.0 (CLAUDE.md invariant 53): a re-run keeps EXACTLY the list the last run wrote, read back from
   # .env. Only a box whose .env predates the list takes its ids from its keys, and then never the two
   # keys the installer minted for the agents and the fire drills, which must go through a token.
   if identity_env_has TOKENFUSE_AGENT_TOKENS_STATIC_KEYS; then
@@ -2123,7 +2124,7 @@ agent_tokens_resolve() {
     unset IFS
   fi
   # A box given its own keys file needs the broker's own key in it, as a line `<secret>:broker` (the
-  # format the keys file reads: split on the LAST colon). 1.3.2 (CLAUDE.md invariant 48): with that line
+  # format the keys file reads: split on the LAST colon). 1.4.0 (CLAUDE.md invariant 48): with that line
   # the box is accepted and the broker's key is its secret; without it, ADD_BROKER_KEY=1 has the installer
   # mint the secret and append the line, and without either the refusal names both.
   BROKER_SOURCE="mint"
@@ -2190,7 +2191,7 @@ agent_tokens_apply() {
   identity_env_set TOKENFUSE_AGENT_TOKENS require
   identity_env_set TOKENFUSE_DELEGATION_ISSUER http://vouchryx:4310
   identity_env_set TOKENFUSE_DELEGATION_AUDIENCE "$AGENT_AUDIENCE"
-  # TODO(1.3.2, D13, not waiting on it): the gateway accepts a DPoP proof for ONE door origin, so a proof
+  # TODO(1.4.0, D13, not waiting on it): the gateway accepts a DPoP proof for ONE door origin, so a proof
   # addressed to http://tokenfuse-gateway:4100 and one addressed to http://127.0.0.1:4100 cannot both
   # verify. When the tokenfuse release that lists DPoP door origins lands, set its list to both gateway
   # origins, and the broker's to its pair (http://tokenfuse-mcp-broker:4200 and http://$GATEWAY_PROBE:4200).
@@ -2216,7 +2217,7 @@ agent_tokens_apply() {
     why="$(identity_entry_why "$broker:broker")"
     [ -z "$why" ] || die "GATEWAY_BROKER_KEY in .env, the broker's client key, $why. Empty that line and the installer mints one. Nothing was started."
   else
-    # A box with its own keys file: the broker's key is the secret of that file's broker line (1.3.2,
+    # A box with its own keys file: the broker's key is the secret of that file's broker line (1.4.0,
     # CLAUDE.md invariant 48), or, on ADD_BROKER_KEY=1, a secret minted now and appended to that file.
     # The file keeps its mode (>> does not change it), and the secret is never printed.
     case "$BROKER_SOURCE" in
@@ -2250,30 +2251,48 @@ agent_tokens_apply() {
 # and broker, which cannot sign a proof and are in use on every box that has them; the operator's
 # STATIC_KEY_IDS; and, on a re-run, every key id this box already had. A listed id must be a key the
 # door holds, or the door refuses to start, so STATIC_KEY_IDS naming a key this box does not have is refused.
+# ID: a key id a re-run may keep on a static list. The installer's own agents and fire-drills keys are
+# never kept by a re-run: a 1.3.1 re-run had put them on both lists, and they stay only when STATIC_KEY_IDS
+# names them (1.4.0, CLAUDE.md invariant 53).
+static_keep_ok() {
+  case "$1" in
+    agents|drills) case " $STATIC_KEY_IDS_LIST " in *" $1 "*) return 0 ;; *) return 1 ;; esac ;;
+    *) return 0 ;;
+  esac
+}
+
 agent_static_keys_apply() {
-  local have id gw="" mcp="" have_mcp
+  local have id gw="" mcp="" have_mcp named
   [ "$AGENT_TOKENS_ON" = 1 ] || return 0
   have=" $(client_key_ids "$(identity_env_get GATEWAY_CLIENT_KEYS)" | tr '\n' ' ')"
   for id in $STATIC_KEY_IDS_LIST; do
     case "$have" in *" $id "*) ;; *) die "STATIC_KEY_IDS names $id, which is not a client key this box holds. Nothing was started." ;; esac
   done
-  # felyx and the broker are named on a box's first run, by design. A re-run names exactly what the last
-  # run named (EXISTING_GATEWAY_IDS, read from .env): it adds nothing, least of all the keys the installer
-  # minted for the agents and the fire drills (1.3.2, CLAUDE.md invariant 53).
-  local named=""
+  # felyx and the broker are named on a box's first run, by design. A re-run names what the last run named
+  # (EXISTING_GATEWAY_IDS, read from .env), and the operator's STATIC_KEY_IDS, and nothing else.
+  named=""
   [ "${PRIOR_GW_PRESENT:-0}" = 1 ] || named="felyx broker"
-  for id in $named $STATIC_KEY_IDS_LIST $EXISTING_GATEWAY_IDS; do
-    case "$have" in *" $id "*) case " $gw " in *" $id "*) ;; *) gw="$gw $id" ;; esac ;; esac
+  for id in $named $EXISTING_GATEWAY_IDS $STATIC_KEY_IDS_LIST; do
+    case "$have" in *" $id "*) ;; *) continue ;; esac
+    if ! static_keep_ok "$id"; then
+      REMOVED_STATIC_IDS="$REMOVED_STATIC_IDS $id"
+      continue
+    fi
+    case " $gw " in *" $id "*) ;; *) gw="$gw $id" ;; esac
   done
   gw="${gw# }"
   STATIC_GATEWAY_LIST="$(printf '%s' "$gw" | tr ' ' ',')"
   identity_env_set TOKENFUSE_AGENT_TOKENS_STATIC_KEYS "$STATIC_GATEWAY_LIST"
-  # The broker's own list: only the key ids this box had before, since a fresh box has none to keep.
+  # The broker's own list, the same rule: its own held keys only, the operator's STATIC_KEY_IDS on either door,
+  # and the installer's own check key (stack-single) by design.
   have_mcp=" $(client_key_ids "$(identity_env_get TOKENFUSE_MCP_KEYS)" | tr '\n' ' ')"
-  # stack-single is the installer's own key for the broker: its checks (tools/list, an ask, a refused call)
-  # present it. It is named here, on purpose, with that reason in the closing report.
-  for id in stack-single $EXISTING_MCP_IDS; do
-    case "$have_mcp" in *" $id "*) case " $mcp " in *" $id "*) ;; *) mcp="$mcp $id" ;; esac ;; esac
+  for id in stack-single $EXISTING_MCP_IDS $STATIC_KEY_IDS_LIST; do
+    case "$have_mcp" in *" $id "*) ;; *) continue ;; esac
+    if ! static_keep_ok "$id"; then
+      REMOVED_STATIC_IDS="$REMOVED_STATIC_IDS $id"
+      continue
+    fi
+    case " $mcp " in *" $id "*) ;; *) mcp="$mcp $id" ;; esac
   done
   mcp="${mcp# }"
   STATIC_MCP_LIST="$(printf '%s' "$mcp" | tr ' ' ',')"
@@ -2295,6 +2314,15 @@ agent_tokens_reach_note() {
   printf '  names none is refused audience_not_allowed. It then sends\n'
   printf '  Authorization: DPoP <token> with a proof (carrying ath, RFC 9449). Stop the agent with one call:\n'
   printf '  POST http://vouchryx:4310/v1/revoke with ban, using VOUCHRYX_REVOKE_KEYS from .env.\n'
+  if [ -n "${REMOVED_STATIC_IDS// /}" ]; then
+    local removed_id removed_list=""
+    for removed_id in $REMOVED_STATIC_IDS; do
+      case " $removed_list " in *" $removed_id "*) ;; *) removed_list="$removed_list $removed_id" ;; esac
+    done
+    printf '  Removed from the static allow-lists on this run:%s, the installer'"'"'s own keys for the agents and the\n' "$removed_list"
+    printf '  fire drills (a re-run does not keep them). To keep one, name it in STATIC_KEY_IDS, for example\n'
+    printf '  STATIC_KEY_IDS=agents ./install.sh.\n'
+  fi
   printf '  Static keys still admitted at the gateway: %s\n' "${STATIC_GATEWAY_LIST:-none}"
   printf '  Static keys still admitted at the MCP broker: %s (stack-single is the installer'"'"'s own check key there; felyx and broker at the gateway are the console and the broker'"'"'s taint relay)\n' "${STATIC_MCP_LIST:-none}"
   printf '  static keys still admitted; move these agents to tokens, or name each one in STATIC_KEY_IDS on purpose.'
@@ -3847,7 +3875,7 @@ egress_override .
 # not name (measured 2026-10-04 on Docker Desktop's compose v2: a proxy started
 # under typed-risk-signal kept running through an `up` without it). So every profile
 # this compose file defines that this run does not name is stopped and its containers
-# removed, by name, under that profile (CLAUDE.md invariant 50, 1.3.2). Before 1.3.2
+# removed, by name, under that profile (CLAUDE.md invariant 50, 1.4.0). Before 1.4.0
 # two profiles were removed by hand and the rest were left to chance: after the
 # 1.1.35 to 1.3.1 upgrade on forge the costcrew container of profile finops still ran
 # image v0.6.0. A profile this run names is left to `up`, which recreates a container

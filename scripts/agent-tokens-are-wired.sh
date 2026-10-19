@@ -282,7 +282,7 @@ fi
 # an id this box had before stays named on a re-run; STATIC_KEY_IDS naming a key it does not
 # hold is refused, not silently dropped.
 lib="$scratch/allowlist.sh"
-for fn in client_key_ids identity_env_get identity_env_set agent_static_keys_apply; do
+for fn in client_key_ids identity_env_get identity_env_set static_keep_ok agent_static_keys_apply; do
   awk -v n="$fn" 'index($0, n "() {") == 1 { p = 1 } p { print } p && /^}$/ { exit }' install.sh
 done >"$lib"
 if ! grep -q '^agent_static_keys_apply() {' "$lib"; then
@@ -295,7 +295,7 @@ else
     out="$(bash -c '
       set -euo pipefail
       STACK_DIR="$1"; AGENT_TOKENS_ON=1
-      STATIC_KEY_IDS_LIST="$2"; EXISTING_GATEWAY_IDS="$3"; EXISTING_MCP_IDS="$4"; PRIOR_GW_PRESENT="$6"
+      STATIC_KEY_IDS_LIST="$2"; EXISTING_GATEWAY_IDS="$3"; EXISTING_MCP_IDS="$4"; PRIOR_GW_PRESENT="$6"; REMOVED_STATIC_IDS=""
       die() { echo "DIE: $*"; exit 3; }
       note() { :; }
       . "$5"
@@ -316,26 +316,32 @@ else
   # (name, held keys, STATIC_KEY_IDS, existing gateway ids, broker keys, existing broker ids, want gw, want mcp, prior list present)
   allow_case "a fresh box names felyx and broker, and no broker static key" \
     'S1:felyx,S2:broker,S3:agents' '' '' 'S9:stack-single' '' 'felyx,broker' 'stack-single'
-  # 1.3.2 (CLAUDE.md invariant 53): a re-run keeps EXACTLY the list the last run wrote. The installer's own
+  # 1.4.0 (CLAUDE.md invariant 53): a re-run keeps EXACTLY the list the last run wrote. The installer's own
   # agents and fire-drills keys are held on the box but were never on the list, so they must not join it.
   allow_case "a re-run keeps exactly the list it had, and never adds a key the installer minted" \
     'S1:felyx,S2:broker,S3:agents,S4:drills' '' 'felyx broker' 'S9:stack-single' 'stack-single' 'felyx,broker' 'stack-single' 1
+  # 1.4.0 (decision of the supervisor): a list a 1.3.1 re-run widened loses the installer's own agents and
+  # drills keys, unless the operator names them in STATIC_KEY_IDS. The broker's list is cut the same way.
+  allow_case "a list widened by a 1.3.1 re-run loses agents and drills, on both doors" \
+    'S1:felyx,S2:broker,S3:agents,S4:drills' '' 'felyx broker agents drills' 'S9:stack-single,S3:agents,S4:drills' 'stack-single agents drills' 'felyx,broker' 'stack-single' 1
+  allow_case "an operator who names agents in STATIC_KEY_IDS keeps it on both doors" \
+    'S1:felyx,S2:broker,S3:agents,S4:drills' 'agents' 'felyx broker agents drills' 'S9:stack-single,S3:agents,S4:drills' 'stack-single agents drills' 'felyx,broker,agents' 'stack-single,agents' 1
   allow_case "a box from before the list keeps its own keys, not the minted agents or drills" \
     'S1:felyx,S2:broker,S3:agents,S4:drills,S5:ops' '' 'ops' 'S9:stack-single' 'stack-single' 'felyx,broker,ops' 'stack-single'
-  allow_case "a key the box does not hold is never named, even if it was there before" \
-    'S1:felyx,S3:agents' '' 'agents ghost' 'S9:stack-single' '' 'felyx,agents' 'stack-single'
+  allow_case "a key the box does not hold is never named, and a re-run never keeps the installer's agents key" \
+    'S1:felyx,S3:agents' '' 'agents ghost' 'S9:stack-single' '' 'felyx' 'stack-single'
   allow_case "a box without a broker key does not name broker" \
     'S1:felyx,S3:agents' '' '' 'S9:stack-single' '' 'felyx' 'stack-single'
   allow_case "STATIC_KEY_IDS naming a key the box does not hold is refused" \
     'S1:felyx,S3:agents' 'ghost' '' 'S9:stack-single' '' '' DIE
 fi
 
-# I. TWO RUNS ON ONE BOX (CLAUDE.md invariant 53, 1.3.2). The installer runs twice against one .env: the
+# I. TWO RUNS ON ONE BOX (CLAUDE.md invariant 53, 1.4.0). The installer runs twice against one .env: the
 # first run mints felyx, broker, agents and drills, and writes the list; the second reads the list back
 # and must write the same one. A run that widens the list on its second pass admits, without a token, the
 # keys the installer minted for the agents and the fire drills: the defect this section exists to catch.
 lib2="$scratch/tworuns.sh"
-for fn in client_key_ids identity_env_get identity_env_set identity_env_has agent_tokens_resolve agent_static_keys_apply; do
+for fn in client_key_ids identity_env_get identity_env_set identity_env_has static_keep_ok agent_tokens_resolve agent_static_keys_apply; do
   awk -v n="$fn" 'index($0, n "() {") == 1 { p = 1 } p { print } p && /^}$/ { exit }' install.sh
 done >"$lib2"
 if ! grep -q '^agent_tokens_resolve() {' "$lib2" || ! grep -q '^agent_static_keys_apply() {' "$lib2"; then
@@ -367,6 +373,52 @@ else
   printf '%s\n' "$second" | grep -qx 'GW=felyx,broker' \
     || fail "I. the second run widened the allow-list to $(printf '%s' "$second" | grep -E '^(GW=|DIE)' | head -1); a re-run must keep exactly the list the first run wrote"
 fi
+
+# J. A WIDENED .ENV, RUN THROUGH THE INSTALLER'S OWN RESOLVE AND ALLOW-LIST (CLAUDE.md invariant 53, 1.4.0).
+# A 1.3.1 re-run wrote agents and drills onto both static lists. The next run must drop them, unless the
+# operator names them in STATIC_KEY_IDS, and it must say so. Run twice on the same .env, as the installer does.
+if [ -f "${lib2:-}" ]; then
+  wide="$(mktemp -d "$scratch/wide.XXXXXX")"
+  printf "%s\n" \
+    "GATEWAY_CLIENT_KEYS='S1:felyx,S2:broker,S3:agents,S4:drills'" \
+    "TOKENFUSE_AGENT_TOKENS_STATIC_KEYS='felyx,broker,agents,drills'" \
+    "TOKENFUSE_MCP_KEYS='S9:stack-single,S3:agents,S4:drills'" \
+    "TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS='stack-single,agents,drills'" >"$wide/.env"
+  wide_run() { # STATIC_KEY_IDS value (may be empty)
+    bash -c '
+      set -euo pipefail
+      STACK_DIR="$1"; MINT_ON=1; WITH_AGENT_TOKENS=""; WITH_DELEGATION=""; STATIC_KEY_IDS="$3"
+      AGENT_TOKENS_ON=0; DELEGATION_ON=0; STATIC_KEY_IDS_LIST=""; EXISTING_GATEWAY_IDS=""; EXISTING_MCP_IDS=""
+      STATIC_GATEWAY_LIST=""; STATIC_MCP_LIST=""; PRIOR_GW_PRESENT=0; REMOVED_STATIC_IDS=""
+      die() { echo "DIE: $*"; exit 3; }
+      note() { :; }
+      . "$2"
+      agent_tokens_resolve
+      agent_static_keys_apply
+      printf "GW=%s\nMCP=%s\nREMOVED=%s\n" "$(identity_env_get TOKENFUSE_AGENT_TOKENS_STATIC_KEYS)" \
+        "$(identity_env_get TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS)" "$REMOVED_STATIC_IDS"
+    ' _ "$wide" "$lib2" "$1" 2>&1
+  }
+  out="$(wide_run "")" || out="DIE: $out"
+  printf '%s\n' "$out" | grep -qx 'GW=felyx,broker' \
+    || fail "J. a .env widened by a 1.3.1 re-run keeps agents and drills on the gateway list: $(printf '%s' "$out" | grep -E '^(GW=|DIE)' | head -1); the upgrade must drop them unless STATIC_KEY_IDS names them"
+  printf '%s\n' "$out" | grep -qx 'MCP=stack-single' \
+    || fail "J. a .env widened by a 1.3.1 re-run keeps agents and drills on the broker's list: $(printf '%s' "$out" | grep -E '^MCP=' | head -1)"
+  printf '%s\n' "$out" | grep -q '^REMOVED=.*agents' \
+    || fail "J. the run does not report that it removed agents from the static lists, so the closing report cannot say so"
+  out="$(wide_run "agents")" || out="DIE: $out"
+  printf '%s\n' "$out" | grep -qx 'GW=felyx,broker,agents' \
+    || fail "J. STATIC_KEY_IDS=agents does not keep agents on the gateway list: $(printf '%s' "$out" | grep -E '^(GW=|DIE)' | head -1)"
+  printf '%s\n' "$out" | grep -qx 'MCP=stack-single,agents' \
+    || fail "J. STATIC_KEY_IDS=agents does not keep agents on the broker's list: $(printf '%s' "$out" | grep -E '^MCP=' | head -1)"
+else
+  fail "J. the two-run section did not lift the installer's functions, so the widened .env was not measured"
+fi
+# J, the report: the closing report says what the run removed, and how to keep one.
+printf '%s\n' "$BLOCK" | grep -q 'Removed from the static allow-lists on this run' \
+  || fail "J. the closing report does not say which keys this run removed from the static allow-lists"
+printf '%s\n' "$BLOCK" | grep -q 'To keep one, name it in STATIC_KEY_IDS' \
+  || fail "J. the closing report does not say how to keep a removed key (STATIC_KEY_IDS)"
 
 if [ "$problems" -ne 0 ]; then
   printf 'agent-tokens-are-wired: %d problem(s)\n' "$problems"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Enforces invariant 49 of CLAUDE.md (1.3.2, D7 and D8): every volume a service mounts read-write
+# Enforces invariant 49 of CLAUDE.md (1.4.0, D7 and D8): every volume a service mounts read-write
 # is given to that service's uid, recursively, by a root one-shot on every `up`. The uid is read
 # from compose.yaml's own `user:` line for the service, never written into this script.
 #

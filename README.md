@@ -667,13 +667,18 @@ The installer prints the allow-list in its closing report, under "static keys st
 move these agents to tokens". On a fresh box that list is the console's own key (`felyx`) and the
 broker's taint-relay key (`broker`), because neither can sign a proof. On a re-run it keeps
 exactly the list the last run wrote, so nothing that worked yesterday stops, and it never adds a key
-the installer minted for the agents or the fire drills. To keep another client,
+the installer minted for the agents or the fire drills. An upgrade does take them off a list a 1.3.1 re-run
+had widened, on both doors, unless `STATIC_KEY_IDS` names them: `STATIC_KEY_IDS=agents ./install.sh` keeps
+agents. The closing report says which ids the run removed. To keep another client,
 name its key id in `STATIC_KEY_IDS` (comma-separated, for a client that cannot sign a proof), and
 the installer refuses a name that is not one of the box's keys. Moving an agent to a token is the
 way to take it off the list.
 
 #### Upgrading a box with static-key agents (1.3.0)
 
+- A box that ran 1.3.1 more than once had the agents' and the fire drills' keys on its static lists. This run removes
+  them from both lists, unless `STATIC_KEY_IDS` names them (`STATIC_KEY_IDS=agents ./install.sh` keeps agents).
+  A call with a removed static key is refused `401` `agent_token_required` until the agent uses a token.
 - An agent that calls with a static key it does not hold on the list is refused `401`
   `agent_token_required` after the first run of this release. The same key on a re-run keeps
   working, because the re-run keeps every key id the box already had.

@@ -377,7 +377,7 @@ for n in sorted(subjects):
             note(f"{init_name[0]} never mounts {data_vol}, so a fresh named volume (root:root 0755) is one the console cannot write")
         else:
             d = re.escape(imounts[data_vol].rstrip("/"))
-            # 1.3.2 (invariant 49): the data volume is re-owned by a recursive chown (`chown -R`), which this accepts.
+            # 1.4.0 (invariant 49): the data volume is re-owned by a recursive chown (`chown -R`), which this accepts.
             chown = re.search(r"chown\s+(?:-R\s+)?([0-9]+):([0-9]+)\s+" + d + r"(?=[\s&]|$)", itext)
             if not chown:
                 note(f"{init_name[0]} does not chown {imounts[data_vol]}, the console's data volume")

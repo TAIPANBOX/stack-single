@@ -245,7 +245,7 @@ elif clash:
 elif dd.startswith("/var/lib/stack/traces/"):
     sub = dd[len("/var/lib/stack/traces/"):].rstrip("/")
     init = "\n".join(blocks.get("init-volumes", []))
-    # 1.3.2 (invariant 49): the door's uid is the one compose.yaml gives it (`user:`), not a number written here.
+    # 1.4.0 (invariant 49): the door's uid is the one compose.yaml gives it (`user:`), not a number written here.
     door_uid = None
     for l in blocks.get(door, []):
         m = re.match(r'\s*user:\s*"?([0-9]+)', l)
@@ -578,7 +578,7 @@ PY
   fi
   grep -q '^\[ "\$DOOR_ON" != 1 \] || UP_PROFILES+=(--profile openai-door)$' install.sh \
     || fail "section 5 does not start the door's profile when the door is on"
-  # 1.3.2 (invariant 50): every off profile is removed by one call after up, and the door is one of them.
+  # 1.4.0 (invariant 50): every off profile is removed by one call after up, and the door is one of them.
   # profiles-off-are-removed.sh holds that cleanup per profile. The call is matched alone on its line, since the
   # function's own definition line carries the same name.
   rm_line="$(grep -n '^profiles_off_remove$' install.sh | cut -d: -f1 | head -1 || true)"
