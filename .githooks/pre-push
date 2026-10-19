@@ -75,6 +75,7 @@ step "the Keyryx root keys are files, never in .env or an environment" "./script
 step "the Keyryx witness is a process apart from custody" "./scripts/witness-is-separate.sh"
 step "every image this launcher runs is pinned by digest (invariant 44)" "./scripts/images-are-digest-pinned.sh"
 step "every TAIPANBOX image is signature-checked before it is pulled (invariant 44)" "./scripts/images-are-verified.sh"
+step "no credential reaches an argument list (invariant 46)" "./scripts/no-secret-on-argv.sh"
 # Reaches the network (a tarball from the sibling repo), which is why it is
 # last: everything that can be judged offline has already spoken by here.
 step "every image has the files it copies" "./scripts/build-context-complete.sh"

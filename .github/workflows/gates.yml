@@ -116,6 +116,8 @@ jobs:
         run: ./scripts/images-are-digest-pinned.sh
       - name: every TAIPANBOX image is signature-checked before it is pulled (invariant 44)
         run: ./scripts/images-are-verified.sh
+      - name: no credential reaches an argument list (invariant 46)
+        run: ./scripts/no-secret-on-argv.sh
 
       # Last, because it mutates tracked files and restores them. It needs a
       # clean tree and says so plainly, so it also reports any earlier step

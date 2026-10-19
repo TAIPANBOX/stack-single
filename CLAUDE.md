@@ -83,6 +83,7 @@ change here is a change to something with root on somebody else's box.
 ./scripts/witness-is-separate.sh
 ./scripts/images-are-digest-pinned.sh
 ./scripts/images-are-verified.sh
+./scripts/no-secret-on-argv.sh
 ./scripts/gates-have-teeth.sh   # invariant 8; needs a clean tree
 ```
 
@@ -1494,6 +1495,34 @@ an absent invariant.
     values and both refusals; teeth in `scripts/gates-have-teeth.sh`. Not covered:
     a live install over a box that ran an earlier release, which CI's install leg
     does on a fresh box only.)*
+
+46. **No credential reaches a process's argument list in what the installer runs.**
+    `@decided 2026-10-17` (paraphrased, finding F-015 of the 2026-10-17 agent-security
+    review): a key or a token is not put where another local user can read it: not in
+    `ps`, not on a container's command line, not in a git URL that git writes into a
+    clone's configuration. `@claude 2026-10-19`: the checks that prove the stack answers
+    its own keys (`code`, `fuse_refusal`, `mcp_status`, `mcp_ask_answered`) send each
+    request through `http_request`, which writes the request, headers and key included,
+    to the stdin of a throwaway busybox that sends it with `nc`, so no argument of
+    `docker run` or of the container carries a key. The console clone hands git its
+    token through a credential helper that reads `CONSOLE_TOKEN` from the environment of
+    that one command, and the clone URL carries no credential.
+    *(gate: `scripts/no-secret-on-argv.sh`: no credential in a command-line URL, no
+    `--header` or `-H` flag, no secret expanded on a line that runs an argument-carrying
+    program unless it sits in single quotes or prefixes one command, no secret in a
+    compose command, entrypoint, healthcheck or flag. It lifts the `# argv-free-http:`
+    block and runs it against a stub docker, and lifts the console clone and runs it
+    against a stub git; it refuses to report OK with no request helper, no clone line or
+    no subject to read. 9 teeth cases in `scripts/gates-have-teeth.sh`; scenarios in
+    `features/no-secret-on-argv.feature`. `@measured` by hand 2026-10-19, not gated: the
+    clone line run against a local git http-backend behind Basic authentication, with a
+    fresh token, a wrong token and the old URL form: the new form's clone wrote no token
+    into `.git/config`, a wrong token failed with "Authentication failed", and the old
+    form left the token in `.git/config`. Not covered: a credential in a container's
+    environment (`docker inspect` shows it for the container's life, as it shows every
+    other environment value here), the database DSN the installer writes into `.env`,
+    the CI workflow's own `curl -H` on its ephemeral runner, the gates' own fixtures with
+    fake credentials, and a live `ps` during an install on a Debian box.)*
 
 ## Decisions that have no gate yet
 
