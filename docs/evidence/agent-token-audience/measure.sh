@@ -32,14 +32,14 @@ has() { python3 -c 'import json,sys;d=json.load(sys.stdin);print("yes" if str(d[
 cd "$here" || exit 1
 
 echo "== 1. token exchange, with resource=$AUDIENCE"
-out="$(ENROL_SECRET="$ENROL_SECRET" python3 dpop_exchange.py "$VX_URL" "$agent" "$ENROL_SECRET" "$htu_token" "$AUDIENCE" "$WORK/dpop.pem" "$WORK/token" )"
+out="$(ENROL_SECRET="$ENROL_SECRET" python3 dpop_exchange.py "$VX_URL" "$agent" "$htu_token" "$AUDIENCE" "$WORK/dpop.pem" "$WORK/token" )"
 echo "$out"
 expect "with resource: status" "$(json "$out" status)" "200"
 expect "with resource: token_type" "$(json "$(python3 -c 'import json,sys;print(json.dumps(json.load(sys.stdin)["body"]))' <<<"$out")" token_type)" "DPoP"
 expect "with resource: a token was written" "$([ -s "$WORK/token" ] && echo yes || echo no)" "yes"
 
 echo "== 2. token exchange, with no resource"
-out="$(python3 dpop_exchange.py "$VX_URL" "$agent" "$ENROL_SECRET" "$htu_token" - "$WORK/dpop.pem")"
+out="$(ENROL_SECRET="$ENROL_SECRET" python3 dpop_exchange.py "$VX_URL" "$agent" "$htu_token" - "$WORK/dpop.pem")"
 echo "$out"
 expect "no resource: status" "$(json "$out" status)" "400"
 expect "no resource: error" "$(python3 -c 'import json,sys;print(json.load(sys.stdin)["body"].get("error",""))' <<<"$out")" "invalid_target"

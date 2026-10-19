@@ -3405,6 +3405,11 @@ run_case "no-secret-on-argv: the request helper pipes into nc and loses the answ
 	"end of input before the server answers"
 
 
+run_case "no-secret-on-argv: an evidence script passes its enrolment secret on argv" fail \
+	'./scripts/no-secret-on-argv.sh' \
+	"$(py 'edit("docs/evidence/agent-token-audience/measure.sh", "\"$agent\" \"$htu_token\" \"$AUDIENCE\"", "\"$agent\" \"$ENROL_SECRET\" \"$htu_token\" \"$AUDIENCE\"")')" \
+	"a secret is expanded on a line that runs an argument-carrying program"
+
 echo
 if [ -n "$(git status --porcelain)" ]; then
 	printf 'FAIL: this script left the tree dirty, so it cannot be trusted about anything above\n'
