@@ -251,11 +251,41 @@ check_log() { # name, command
 
 # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
 probe() { docker run --rm --network "$NET" busybox:1.36 wget -q -T5 -O /dev/null "$1"; }
-# Prints the HTTP status only, so a check can assert 401 and 403 as PASSES.
+# argv-free-http: begin
+# A request that carries a credential goes to a throwaway busybox's STDIN and is sent
+# with nc. It is never a --header on a command line: docker run, the container's own
+# command line and ps would each show the key for as long as the request lasts, and
+# a container's command line stays in docker inspect (the 2026-10-17 review's F-015).
+# The headers are CRLF-terminated lines in one string, and the body follows a blank
+# line. Prints the whole response. (gate: scripts/no-secret-on-argv.sh lifts this block.)
+# shellcheck disable=SC2329,SC2317  # invoked indirectly, from code() and the checks that call it
+http_request() { # method, url, headers (CRLF-terminated, may hold a key), body
+  local method="$1" url="$2" hdrs="$3" body="$4" rest hostport path
+  rest="${url#*://}"
+  hostport="${rest%%/*}"
+  path="/"
+  [ "$rest" = "$hostport" ] || path="/${rest#*/}"
+  {
+    printf '%s %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n' "$method" "$path" "$hostport"
+    printf '%s' "$hdrs"
+    [ -z "$body" ] || printf 'Content-Length: %s\r\n' "${#body}"
+    printf '\r\n%s' "$body"
+  } | docker run -i --rm --network "$NET" busybox:1.36 \
+        sh -c 'cat | nc -w 5 "$1" "$2"' sh "${hostport%%:*}" "${hostport##*:}"
+}
+# The status code on a response's first line, 0 when nothing answered.
+# shellcheck disable=SC2329,SC2317  # invoked indirectly, from code() and the checks that call it
+status_of() {
+  local line code_
+  line="${1%%$'\n'*}"
+  read -r _ code_ _ <<<"${line%$'\r'}" || true
+  printf '%s' "${code_:-0}"
+}
+# Prints the HTTP status only, so a check can assert 401 and 403 as PASSES. The
+# Authorization header is sent even when the key is empty, as it always was.
 # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
-code() { docker run --rm --network "$NET" busybox:1.36 \
-           wget -S -q -T5 -O /dev/null --header="Authorization: Bearer $2" "$1" 2>&1 \
-         | awk '/^  HTTP\//{c=$2} END{print c+0}'; }
+code() { status_of "$(http_request GET "$1" "Authorization: Bearer $2"$'\r\n' "")"; }
+# argv-free-http: end
 # Same as code(), minus the header entirely: an empty bearer token is still a
 # credential, and the point of this one is that none was presented at all.
 # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
@@ -356,8 +386,8 @@ check "gateway serves /v1/runs with the admin key" \
 # that one, see .github/workflows/install.yml).
 # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
 fuse_refusal() { # client key or "" for none, then main (default) or openai: prints the status of a metered call
-  local hdrs=(--header="Content-Type: application/json" --header="x-fuse-run-id: install-check" --header="x-fuse-budget-usd: 0.000001")
-  local url=http://tokenfuse-gateway:4100/v1/messages
+  local hdrs url body
+  url=http://tokenfuse-gateway:4100/v1/messages
   local body='{"model":"claude-haiku-4-5","max_tokens":1,"messages":[{"role":"user","content":"install check"}]}'
   if [ "${2:-main}" = openai ]; then
     # The OpenAI door's own route and body shape: the other route answers 400 on
@@ -365,10 +395,9 @@ fuse_refusal() { # client key or "" for none, then main (default) or openai: pri
     url=http://tokenfuse-gateway-openai:4100/v1/chat/completions
     body='{"model":"gpt-4o-mini","max_tokens":1,"messages":[{"role":"user","content":"install check"}]}'
   fi
-  [ -z "$1" ] || hdrs+=(--header="x-fuse-key: $1")
-  docker run --rm --network "$NET" busybox:1.36 wget -S -q -T5 -O /dev/null "${hdrs[@]}" \
-      --post-data="$body" "$url" 2>&1 \
-    | awk '/^  HTTP\//{c=$2} END{print c+0}'
+  hdrs="Content-Type: application/json"$'\r\n'"x-fuse-run-id: install-check"$'\r\n'"x-fuse-budget-usd: 0.000001"$'\r\n'
+  [ -z "$1" ] || hdrs+="x-fuse-key: $1"$'\r\n'
+  status_of "$(http_request POST "$url" "$hdrs" "$body")"
 }
 if [ "$IDENTITY_KEYS_COUNT" -gt 0 ]; then
   check_log "client keys: the gateway holds $IDENTITY_KEYS_COUNT" \
@@ -561,12 +590,11 @@ if compose_has tokenfuse-mcp-broker; then
   # here.
   # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
   mcp_status() { # url, key (may be empty), method
-    local url="$1" key="${2:-}" method="$3"
-    local hdrs=(--header="Content-Type: application/json" --header="X-Fuse-Mcp-Upstream: typryx")
-    [ -n "$key" ] && hdrs+=(--header="x-fuse-key: $key")
-    docker run --rm --network "$NET" busybox:1.36 wget -S -q -T5 -O /dev/null \
-        "${hdrs[@]}" --post-data="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"$method\"}" "$url" 2>&1 \
-      | awk '/^  HTTP\//{c=$2} END{print c+0}'
+    local url="$1" key="${2:-}" method="$3" hdrs body
+    hdrs="Content-Type: application/json"$'\r\n'"X-Fuse-Mcp-Upstream: typryx"$'\r\n'
+    [ -z "$key" ] || hdrs+="x-fuse-key: $key"$'\r\n'
+    body="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"$method\"}"
+    status_of "$(http_request POST "$url" "$hdrs" "$body")"
   }
   MCP_BROKER_KEY="$(sed -n 's/^TOKENFUSE_MCP_KEYS=\([^:]*\):.*/\1/p' .env 2>/dev/null | head -1)"
   # Named "reaches typryx", not "answers": the MCP wire reports an upstream
@@ -582,16 +610,16 @@ if compose_has tokenfuse-mcp-broker; then
   # _meta credential reading is typryx#6, not in v0.1.0.
   # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
   mcp_ask_answered() { # url, key
-    local hdrs=(--header="Content-Type: application/json" --header="X-Fuse-Mcp-Upstream: typryx" --header="x-fuse-key: $2")
+    local hdrs
+    hdrs="Content-Type: application/json"$'\r\n'"X-Fuse-Mcp-Upstream: typryx"$'\r\n'"x-fuse-key: $2"$'\r\n'
     # The broker is a policy enforcement point on every box (invariant 36): it
     # asks wardryx about each tools/call and refuses one it cannot attribute, so
     # the check names an agent. No starter rule targets this id, so wardryx
     # allows it.
-    hdrs+=(--header="x-fuse-agent-id: agent://local.invalid/install-check")
-    docker run --rm --network "$NET" busybox:1.36 wget -q -T5 -O - \
-        "${hdrs[@]}" \
-        --post-data='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ask","arguments":{"template":"eval.outcome_met","state":{"task":"2+2","final_answer":"4"}},"_meta":{"typryx/key":"{{secret:typryx_key}}"}}}' \
-        "$1" 2>/dev/null | grep -q '"isError":false'
+    hdrs+="x-fuse-agent-id: agent://local.invalid/install-check"$'\r\n'
+    http_request POST "$1" "$hdrs" \
+        '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ask","arguments":{"template":"eval.outcome_met","state":{"task":"2+2","final_answer":"4"}},"_meta":{"typryx/key":"{{secret:typryx_key}}"}}}' \
+      | grep -q '"isError":false'
   }
   if [ "$TYPED_PLANE" = jev ]; then
     # Not asked on purpose: this ask would go to TypeSafe's API, on every run
@@ -2512,7 +2540,13 @@ if [ -n "$BUILD_FROM_SOURCE" ]; then
   elif [ -d "$SRC_DIR/genaryx-a360" ]; then
     note "console source already present and not a checkout, leaving it alone"
   elif [ -n "$CONSOLE_TOKEN" ]; then
-    git clone --depth 1 -q "https://x-access-token:${CONSOLE_TOKEN}@github.com/TAIPANBOX/genaryx.git" genaryx-a360 \
+    # The token is handed to git by a credential helper that reads it from this command's
+    # environment when git asks for it. It is in no URL and on no argument list, so git
+    # writes it into neither the clone's .git/config nor its remote URL.
+    # (gate: scripts/no-secret-on-argv.sh)
+    # shellcheck disable=SC2016  # the helper is a string git runs later: its $CONSOLE_TOKEN must not expand here
+    CONSOLE_TOKEN="$CONSOLE_TOKEN" git -c credential.helper='!f() { echo username=x-access-token; printf "password=%s\n" "$CONSOLE_TOKEN"; }; f' \
+      clone --depth 1 -q "https://github.com/TAIPANBOX/genaryx.git" genaryx-a360 \
       || die "could not clone the console with the token given; is it valid for your fork?"
   else
     git clone --depth 1 -q "https://github.com/TAIPANBOX/genaryx.git" genaryx-a360 \

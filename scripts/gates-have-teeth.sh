@@ -3277,6 +3277,52 @@ run_case "demo-issuer-and-smtp-tls: a reworded comment is not a fault" pass \
 	""
 
 
+run_case "no-secret-on-argv: the request helper passes the key as an argument" fail \
+	'./scripts/no-secret-on-argv.sh' \
+	"$(py 'edit("install.sh", "\"${hostport##*:}\"", "\"${hostport##*:}\" \"$hdrs\"")')" \
+	"puts a key on the docker argument list"
+
+run_case "no-secret-on-argv: a header goes back on a command line" fail \
+	'./scripts/no-secret-on-argv.sh' \
+	"$(py 'edit("install.sh", "NET=\"agent-stack_core\"\n", "NET=\"agent-stack_core\"\nlegacy_probe() { docker run --rm --network \"$NET\" busybox:1.36 wget -q -O /dev/null --header=\"Authorization: Bearer $CONSOLE_TOKEN\" \"$1\"; }\n")')" \
+	"a --header or -H flag on a command line"
+
+run_case "no-secret-on-argv: a secret expanded into a docker command is refused" fail \
+	'./scripts/no-secret-on-argv.sh' \
+	"$(py 'edit("install.sh", "NET=\"agent-stack_core\"\n", "NET=\"agent-stack_core\"\ndocker run --rm -e \"CHECK_SECRET=$CONSOLE_TOKEN\" busybox:1.36 true >/dev/null 2>&1 || true\n")')" \
+	"a secret is expanded on a line that runs an argument-carrying program"
+
+run_case "no-secret-on-argv: the console clone puts the token back in its URL" fail \
+	'./scripts/no-secret-on-argv.sh' \
+	"$(py 'edit("install.sh", "      clone --depth 1 -q \"https://github.com/TAIPANBOX/genaryx.git\"", "      clone --depth 1 -q \"https://x-access-token:${CONSOLE_TOKEN}@github.com/TAIPANBOX/genaryx.git\"")')" \
+	"carries a credential in its URL"
+
+run_case "no-secret-on-argv: the credential helper stops handing git the token" fail \
+	'./scripts/no-secret-on-argv.sh' \
+	"$(py 'edit("install.sh", "printf \"password=%s\\n\" \"$CONSOLE_TOKEN\"", "printf \"password=%s\\n\" \"not-the-token\"")')" \
+	"does not hand git the token"
+
+run_case "no-secret-on-argv: the console clone no longer uses a credential helper" fail \
+	'./scripts/no-secret-on-argv.sh' \
+	"$(py 'edit("install.sh", "git -c credential.helper=", "git -c core.abbrev=")')" \
+	"clone line, so the console's token was not measured"
+
+run_case "no-secret-on-argv: a compose command carries a secret" fail \
+	'./scripts/no-secret-on-argv.sh' \
+	"$(py 'edit("compose.yaml", "command: [\"/usr/local/bin/tokenfuse-cloud\"]", "command: [\"/usr/local/bin/tokenfuse-cloud\", \"--token=${TOKENFUSE_CLOUD_KEYS}\"]")')" \
+	"a secret is expanded into a compose command"
+
+run_case "no-secret-on-argv: the request helper is gone" fail \
+	'./scripts/no-secret-on-argv.sh' \
+	"$(py 'edit("install.sh", "# argv-free-http: begin", "# argv-free-http: begun")')" \
+	"no argument-free request was measured"
+
+run_case "no-secret-on-argv: a comment naming a header flag is not a fault" pass \
+	'./scripts/no-secret-on-argv.sh' \
+	"$(py 'edit("install.sh", "# argv-free-http: begin\n", "# argv-free-http: begin\n# A --header flag named in a comment is not a command line.\n")')" \
+	""
+
+
 echo
 if [ -n "$(git status --porcelain)" ]; then
 	printf 'FAIL: this script left the tree dirty, so it cannot be trusted about anything above\n'
