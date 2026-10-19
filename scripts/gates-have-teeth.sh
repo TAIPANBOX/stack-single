@@ -3153,7 +3153,7 @@ run_case "images-are-verified: the pull comes before the check" fail \
 
 run_case "images-are-verified: a refused signature does not stop the install" fail \
 	'./scripts/images-are-verified.sh' \
-	"$(py 'edit("install.sh", "    die \"${ref%%@*} has no signature", "    note \"${ref%%@*} has no signature")')" \
+	"$(py 'edit("install.sh", "die \x22could not check the signature of $name", "note \x22could not check the signature of $name")')" \
 	"did not stop the install"
 
 run_case "images-are-verified: the signer accepts any identity" fail \

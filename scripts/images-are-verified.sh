@@ -291,7 +291,7 @@ fi
 # G. a failed cosign download names the host that failed.
 if out_g="$(DRIVER_INSTALL=1 STUB_CURL_ERR='curl: (6) Could not resolve host: release-assets.githubusercontent.com' bash "$scratch/driver.sh" 2>&1)"; then
   fail "a cosign download that failed was accepted"
-elif ! grep -qF 'release-assets.githubusercontent.com' <<<"$out_g"; then
+elif ! grep -qF 'Could not resolve host: release-assets.githubusercontent.com' <<<"$out_g"; then
   fail "a failed cosign download does not name the host that failed: $(head -1 <<<"$out_g")"
 fi
 
