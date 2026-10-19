@@ -2175,7 +2175,7 @@ edit("compose.yaml", "      typryx:\n        condition: service_started", "     
 run_case "typed-data-mode: compose names no typryx image to read a pin from" fail \
 	'./scripts/typed-data-mode.sh' \
 	"$(py 's = open("compose.yaml").read()
-a = "image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.4.1}"
+a = "image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.4.1@sha256:c49bceb2003e6486a6d2c82b34a7c7cc3834933b9c6108e8074fefa35b926502}"
 assert s.count(a) == 2, "expected the typryx service and the risk-signal proxy to name the image"
 open("compose.yaml", "w").write(s.replace(a, "image: ${TYPRYX_IMAGE:-registry.invalid/typryx}"))')" \
 	"names no ghcr.io/taipanbox/typryx"

@@ -1461,7 +1461,7 @@ services:
   # volume, holding no capability of its own.
   wg:
     <<: *restart
-    image: ${WG_IMAGE:-ghcr.io/taipanbox/stack-wg:v1.1.43@sha256:797af6fbacd2566f506a4b29de2fa284e18512e12c9558442db0c99b24af9ca8}
+    image: ${WG_IMAGE:-ghcr.io/taipanbox/stack-wg:v1.1.47@sha256:9b40e62acd99a115c4ac3ea5acb44cbfe556e50dc523b2283aa70d8c6e9847d6}
     networks:
       - edge
     cap_add:
@@ -1498,7 +1498,7 @@ services:
   # simply cannot happen over WireGuard, on any device.
   caddy:
     <<: *restart
-    image: ${CADDY_IMAGE:-ghcr.io/taipanbox/stack-caddy:v1.1.43@sha256:6ac53d207414ff0ca67068f234637d5e774fd4f4c7ce07e6dc01078bdea36f2c}
+    image: ${CADDY_IMAGE:-ghcr.io/taipanbox/stack-caddy:v1.1.47@sha256:bc25472c32d2098b0273ec2ae90241c79b11e46bc69bcf047eca8f8cc37814de}
     networks:
       - edge
       - front
@@ -1518,7 +1518,7 @@ services:
 
   console:
     <<: *restart
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.1.46@sha256:54218cfb989f7499da3a92d52d917ef8bc67b938d1b54070ba63e88fdf164bdd}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.1.47@sha256:0f688de13628990984b9b422a14b1e3c1b0803bf3d1e08310adfb8903478d739}
     networks:
       - core
       - agents
@@ -1883,7 +1883,7 @@ services:
 
   verdryx-drift:
     <<: *restart
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.1.46@sha256:54218cfb989f7499da3a92d52d917ef8bc67b938d1b54070ba63e88fdf164bdd}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.1.47@sha256:0f688de13628990984b9b422a14b1e3c1b0803bf3d1e08310adfb8903478d739}
     networks:
       - core
     user: "10001:10001"
