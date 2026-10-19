@@ -19,7 +19,7 @@
 #
 # WHAT IT JUDGES, AND HOW
 #
-#   1. Static, over install.sh, compose.yaml and scripts/*.sh (not this gate and
+#   1. Static, over install.sh, compose.yaml, scripts/*.sh and docs/evidence/**/*.sh (not this gate and
 #      not the teeth harness, whose mutations are text): no credential in a URL,
 #      no --header or -H on a line (the request helper writes headers to stdin),
 #      no secret expansion on a line that runs an argument-carrying program
@@ -66,7 +66,7 @@ SECRET_EXPANSION = re.compile(
     r"\$\{?(?:[A-Za-z0-9_]*_)?(?:KEYS?|SECRETS?|TOKENS?|PASSWORD|PASS|ADMIN|BEARER|CREDENTIALS?"
     r"|WARDRYX_GATEWAY|WARDRYX_ADMIN|GATEWAY_ADMIN|CLOUD_ADMIN)\}?(?![A-Za-z0-9_])"
 )
-ARG_PROGRAM = re.compile(r"\b(docker|wget|curl|git|nc|ssh|scp|rsync|openssl|psql|mysql)\b")
+ARG_PROGRAM = re.compile(r"\b(docker|wget|curl|git|nc|ssh|scp|rsync|openssl|psql|mysql|python3?)\b")
 URL_CREDENTIAL = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s/'\"@]*:[^\s/'\"@]*@")
 HEADER_FLAG = re.compile(r"--header\b|(?:^|\s)-H(?:\s|=|['\"])")
 COMPOSE_EXEC_KEY = re.compile(r"\b(command|entrypoint|test|args)\s*:")
@@ -116,7 +116,8 @@ except OSError:
     fail("install.sh is not there, so this gate measured NOTHING")
 
 subjects = {"install.sh": install}
-for path in sorted(glob.glob("scripts/*.sh")):
+# The evidence scripts run on the CI runner with the installer's own secret (#140, invariant 46).
+for path in sorted(glob.glob("scripts/*.sh")) + sorted(glob.glob("docs/evidence/**/*.sh", recursive=True)):
     base = os.path.basename(path)
     if base in ("gates-have-teeth.sh", "no-secret-on-argv.sh"):
         continue

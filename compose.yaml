@@ -128,12 +128,12 @@ services:
         # its own. Each names its own file, never another writer's, for the
         # one-appender-per-file reason above. heraldyx reads this whole
         # directory, so it can now alert on typryx's own events; record-seal
-        # reads it too and counts typryx's four event types refused rather than
-        # sealing them: they carry agent-event v1.0, which trailryx 1.0 does
-        # not read (unknown_schema, measured on stack-up 2026-09-26), and past
-        # the schema its mapper refuses all four by name on purpose
-        # (trailryx#81: an answer to a question is not a decision the agent
-        # took).
+        # reads it too. It refused typryx's four event types as unknown_schema
+        # under trailryx 1.0 (measured on stack-up 2026-09-26). trailryx 1.4.0
+        # (agent-event v1.0 accepted) reads that schema, so whether the record
+        # plane seals the four is NOT measured for this release; the record
+        # plane is opt-in (WITH_RECORD=1). trailryx#81 (an answer to a question
+        # is not a decision the agent took) is what its mapper intended.
         #
         # tokenfuse-openai.ndjson is the OpenAI door's own file (profile
         # openai-door, opt-in): the tokenfuse image again, so it cannot create
@@ -317,7 +317,7 @@ services:
 
   wardryx:
     <<: *restart
-    image: ${WARDRYX_IMAGE:-ghcr.io/taipanbox/wardryx:v2.2.1@sha256:67718da5ef5551767156ef0ea893765f448c484fcbb5dcce5923a0ca83b8c309}
+    image: ${WARDRYX_IMAGE:-ghcr.io/taipanbox/wardryx:v2.3.0@sha256:eaa8cff9fe3722f7040e9f9b3aac2f57c5e66afb7a012a0eda1a62e63b647543}
     # Its own uid (CLAUDE.md invariant 41): wardryx.ndjson is its stream, and
     # no other plane's uid can write it. The GID stays the bus group, so it
     # reads the other streams. group_add 20001 is for the Keyryx socket
@@ -366,6 +366,19 @@ services:
       # The loss is one-way, which is why this is set now rather than when
       # somebody first wants a replay: it works forward from this day only.
       WARDRYX_POLICY_ARCHIVE: /var/lib/stack/events/wardryx-policy-archive
+      # Agent tokens, verified here and not taken from the door's word (wardryx 2.3.0,
+      # CLAUDE.md invariant 47). install.sh writes all of these when agent tokens are on
+      # (the default) and none when WITH_AGENT_TOKENS=0. An empty value is unset to
+      # wardryx (cmd/wardryx/agent_tokens.go), so the off path verifies nothing. The
+      # issuer, audience and key set are vouchryx's, the same the doors verify against.
+      # The door origins are where an agent addresses each door, because a DPoP proof
+      # names the URL it was sent to (htu): the gateway and the broker by service name,
+      # and loopback, which is where the operator's own agents reach them.
+      WARDRYX_AGENT_TOKEN_ISSUER: ${WARDRYX_AGENT_TOKEN_ISSUER:-}
+      WARDRYX_AGENT_TOKEN_AUDIENCES: ${WARDRYX_AGENT_TOKEN_AUDIENCES:-}
+      WARDRYX_AGENT_TOKEN_JWKS_URL: ${WARDRYX_AGENT_TOKEN_JWKS_URL:-}
+      WARDRYX_AGENT_TOKEN_REVOCATION_URL: ${WARDRYX_AGENT_TOKEN_REVOCATION_URL:-}
+      WARDRYX_AGENT_TOKEN_DOOR_ORIGINS: ${WARDRYX_AGENT_TOKEN_DOOR_ORIGINS:-}
     volumes:
       - events:/var/lib/stack/events
       - ./policy.yaml:/etc/wardryx/policy.yaml:ro
@@ -391,7 +404,7 @@ services:
   # writes, and the mount says so.
   idryx:
     <<: *restart
-    image: ${IDRYX_IMAGE:-ghcr.io/taipanbox/idryx:v1.2.2@sha256:d92eb2e794d15484053b6b0b6dbfdc14314fb9b899c4caf4b2634ce6b6fc0213}
+    image: ${IDRYX_IMAGE:-ghcr.io/taipanbox/idryx:v1.3.0@sha256:aa1ee80aeafcb35beaf9fc115081570fcbd13507e1299541148527f4600dc96d}
     networks:
       - core
     user: "65532:10001"
@@ -749,11 +762,10 @@ services:
       # that agent-passport SPEC 6.2 registers typryx's four event types
       # (typed_answer, typed_unanswered, typed_refused, calibration_drift).
       # heraldyx reads this whole directory, so it can now alert on them.
-      # record-seal reads the same directory and counts all four refused,
-      # never sealed: they carry agent-event v1.0, which trailryx 1.0 does not
-      # read (unknown_schema, measured on stack-up 2026-09-26), and past the
-      # schema its mapper refuses them by name on purpose (trailryx#81). So
-      # this does not seal typryx's events; it lets them reach the notifier.
+      # record-seal reads the same directory. Under trailryx 1.0 it refused the
+      # four as unknown_schema (measured on stack-up 2026-09-26). Under trailryx
+      # 1.4.0 whether it seals them is not measured here. So this line is about
+      # the notifier: it lets heraldyx see typryx's events.
       TYPRYX_EVENTS: /var/lib/stack/events/typryx.ndjson
       # The ledger is a different kind of store, typryx's own answer/outcome
       # record rather than an agent-event stream, so it stays off the bus.
@@ -813,7 +825,7 @@ services:
   tokenfuse-mcp-broker:
     <<: *restart
     profiles: ["typed"]
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.18.0@sha256:7cbaa794670560468b15a7a6a3c37396767435332e8eca3a30af627de29ad6d9}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.19.0@sha256:32139654fc63ebc3026720413f1a9c16f07fb2507509714d946f50ffcf2a2434}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20012:10001"
@@ -888,9 +900,12 @@ services:
       # must fit inside this one or the call is refused for being slow.
       TOKENFUSE_MCP_WARDRYX_TIMEOUT_MS: "7000"
       # Agent tokens, the same switch and the same delegation door as the gateway,
-      # for this door's own audience and origin (CLAUDE.md invariant 40). Off
-      # unless the operator asks for WITH_AGENT_TOKENS=1.
-      TOKENFUSE_AGENT_TOKENS: ${TOKENFUSE_AGENT_TOKENS:-off}
+      # for this door's own audience and origin (CLAUDE.md invariants 40 and 47).
+      # require by default: a static key is admitted only when its key id is named
+      # in TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS, which install.sh writes from the
+      # keys it can prove are still in use. WITH_AGENT_TOKENS=0 writes off.
+      TOKENFUSE_AGENT_TOKENS: ${TOKENFUSE_AGENT_TOKENS:-require}
+      TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS: ${TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS:-}
       TOKENFUSE_DELEGATION_ISSUER: ${TOKENFUSE_DELEGATION_ISSUER:-}
       TOKENFUSE_DELEGATION_JWKS: ${TOKENFUSE_DELEGATION_JWKS:-}
       # The Keyryx key set for delegated tokens (CLAUDE.md invariant 42, TF5a). Empty is
@@ -1117,7 +1132,7 @@ services:
   # ---- money: the control API ----------------------------------------------
   tokenfuse-cloud:
     <<: *restart
-    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v1.18.0@sha256:c6160a8eed3d83d9caf42b426e82444cfe48a14027cb90ad4338340587a9d372}
+    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v1.19.0@sha256:201f4dc7faf556f16038a5cc380f5945dc7b87b79a8ab7940402988844b17949}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20013:10001"
@@ -1163,7 +1178,7 @@ services:
   # gets a hard refusal rather than a log line.
   tokenfuse-gateway:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.18.0@sha256:7cbaa794670560468b15a7a6a3c37396767435332e8eca3a30af627de29ad6d9}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.19.0@sha256:32139654fc63ebc3026720413f1a9c16f07fb2507509714d946f50ffcf2a2434}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20010:10001"
@@ -1299,13 +1314,21 @@ services:
       # gateway does not need it to be.
       TOKENFUSE_DELEGATION_REVOCATIONS: ${TOKENFUSE_DELEGATION_REVOCATIONS:-}
       TOKENFUSE_DELEGATION_REVOCATIONS_INTERVAL_MS: ${TOKENFUSE_DELEGATION_REVOCATIONS_INTERVAL_MS:-}
-      # Agent tokens (CLAUDE.md invariant 40): off unless the operator asks for
-      # WITH_AGENT_TOKENS=1, which writes accept into .env. On accept tokenfuse
-      # refuses to start without the audience and a revocation list that fails
-      # closed (tokenfuse agenttoken.rs). The fail mode is written out here, not
-      # left to tokenfuse's default: a list that failed open would honour a
-      # stopped agent. `agent-tokens-are-wired.sh` holds both.
-      TOKENFUSE_AGENT_TOKENS: ${TOKENFUSE_AGENT_TOKENS:-off}
+      # Agent tokens (CLAUDE.md invariants 40 and 47): require by default, so a
+      # static key is refused unless its key id is named in
+      # TOKENFUSE_AGENT_TOKENS_STATIC_KEYS. WITH_AGENT_TOKENS=0 writes off into
+      # .env, the explicit way out. require refuses to start without the audience
+      # and a revocation list that fails closed (tokenfuse agenttoken.rs). The fail
+      # mode is written out here, not left to tokenfuse's default: a list that
+      # failed open would honour a stopped agent. `agent-tokens-are-wired.sh`
+      # holds all of it.
+      TOKENFUSE_AGENT_TOKENS: ${TOKENFUSE_AGENT_TOKENS:-require}
+      # The named allow-list of static client keys that stay admitted under
+      # require (tokenfuse 1.19.0, invariant 138). Written by install.sh: the
+      # key ids a box can prove are still in use, plus the operator's own
+      # (STATIC_KEY_IDS). Every id must also be a key in TOKENFUSE_CLIENT_KEYS:
+      # the gateway refuses to start on a listed id it does not hold.
+      TOKENFUSE_AGENT_TOKENS_STATIC_KEYS: ${TOKENFUSE_AGENT_TOKENS_STATIC_KEYS:-}
       TOKENFUSE_DELEGATION_REVOCATIONS_FAILMODE: closed
       # Client keys and the identity map (tokenfuse docs/20): who may call this
       # gateway (`x-fuse-key`), which agent ids each key may speak as, and which
@@ -1391,7 +1414,7 @@ services:
   #     reading of the variables being absent.
   tokenfuse-gateway-openai:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.18.0@sha256:7cbaa794670560468b15a7a6a3c37396767435332e8eca3a30af627de29ad6d9}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.19.0@sha256:32139654fc63ebc3026720413f1a9c16f07fb2507509714d946f50ffcf2a2434}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20011:10001"
@@ -1666,7 +1689,7 @@ services:
   # a promise.
   record-seal:
     <<: *restart
-    image: ${TRAILRYX_IMAGE:-ghcr.io/taipanbox/trailryx-node:v1.3.1@sha256:ab305ac6a65444e08090b56d6f666498b56d560f7351c96a8a84137ece9e6d37}
+    image: ${TRAILRYX_IMAGE:-ghcr.io/taipanbox/trailryx-node:v1.4.0@sha256:79da026eab19b2b8ade994cbb65850b39f644c4b632edf1de411f70bddd047d3}
     networks:
       - core
     user: "10001:10001"
@@ -1795,7 +1818,7 @@ services:
   # The sixth, trailryx-seal, is the `record` profile above.
   focus-export:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.18.0@sha256:7cbaa794670560468b15a7a6a3c37396767435332e8eca3a30af627de29ad6d9}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.19.0@sha256:32139654fc63ebc3026720413f1a9c16f07fb2507509714d946f50ffcf2a2434}
     networks:
       - core
     user: "10001:10001"
@@ -1873,7 +1896,7 @@ services:
   # on the console, and both of those have a shell.
   idryx-detect:
     restart: "no"
-    image: ${IDRYX_IMAGE:-ghcr.io/taipanbox/idryx:v1.2.2@sha256:d92eb2e794d15484053b6b0b6dbfdc14314fb9b899c4caf4b2634ce6b6fc0213}
+    image: ${IDRYX_IMAGE:-ghcr.io/taipanbox/idryx:v1.3.0@sha256:aa1ee80aeafcb35beaf9fc115081570fcbd13507e1299541148527f4600dc96d}
     networks:
       - core
     user: "65532:10001"
@@ -2024,7 +2047,7 @@ services:
   costcrew:
     <<: *restart
     profiles: ["finops"]
-    image: ${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.9.0@sha256:4f7883951aac2a0b723e5b0d7b36cf4005c8b94e4a6335ed051c14370a37b9b7}
+    image: ${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.10.0@sha256:26316b1c99706529a4589a328b2ddd3fc5f4db4cf0b5a46466e8be1ddd8f0de9}
     networks:
       - agents
       - core
@@ -2037,6 +2060,11 @@ services:
       # which inside a container nothing else can reach, the published port
       # included. What reaches the host is decided by `ports:` below.
       - 0.0.0.0:8321
+      # costcrew 0.10.0 refuses a non-loopback -addr without -behind-tls or -insecure-http.
+      # No TLS proxy is in front of this console, so -insecure-http is the flag, and it is
+      # honest only because the port stays on 127.0.0.1 and is reached through an encrypted
+      # SSH tunnel (ssh -L 8321:127.0.0.1:8321). CLAUDE.md invariant 24.
+      - -insecure-http
       - -data
       - /var/lib/costcrew
       - -stack-events

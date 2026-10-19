@@ -1,7 +1,10 @@
 """Exchange an agent's enrolment secret at vouchryx's token endpoint, with a DPoP proof.
 
 stdlib + openssl only. Prints the HTTP status and the JSON body of each exchange.
-usage: dpop_exchange.py BASE_URL CLIENT_ID SECRET HTU [resource]
+usage: ENROL_SECRET=... dpop_exchange.py BASE_URL CLIENT_ID HTU [resource|-] [KEY_PEM] [TOKEN_OUT]
+
+The enrolment secret comes from the environment (ENROL_SECRET), never from argv: an argument list
+is readable by every local user (CLAUDE.md invariant 46).
 """
 import base64, hashlib, json, os, subprocess, sys, tempfile, time, urllib.parse, urllib.request, uuid
 
@@ -72,13 +75,16 @@ def exchange(base, client_id, secret, htu, resource, workdir, key=None):
 
 
 if __name__ == "__main__":
-    # usage: dpop_exchange.py BASE CLIENT_ID SECRET HTU RESOURCE|- KEY_PEM [TOKEN_OUT]
-    base, client_id, secret, htu, resource, key = sys.argv[1:7]
+    # usage: ENROL_SECRET=... dpop_exchange.py BASE CLIENT_ID HTU RESOURCE|- KEY_PEM [TOKEN_OUT]
+    secret = os.environ.get("ENROL_SECRET", "")
+    if not secret:
+        sys.exit("dpop_exchange.py: ENROL_SECRET is not set in the environment of this command")
+    base, client_id, htu, resource, key = sys.argv[1:6]
     resource = None if resource == "-" else resource
     wd = tempfile.mkdtemp(prefix="dpop-")
     status, body = exchange(base, client_id, secret, htu, resource, wd, key)
-    if "access_token" in body and len(sys.argv) > 7:
-        open(sys.argv[7], "w").write(body["access_token"])
+    if "access_token" in body and len(sys.argv) > 6:
+        open(sys.argv[6], "w").write(body["access_token"])
     shown = dict(body)
     if "access_token" in shown:
         tok = shown["access_token"]

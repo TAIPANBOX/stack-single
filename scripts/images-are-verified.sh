@@ -250,8 +250,8 @@ chmod +x "$scratch/bin"/* "$scratch/cosign-stub"
 
 cat > "$scratch/refs.sh" <<'SH'
 refs=(
-  "ghcr.io/taipanbox/tokenfuse:v1.18.0@sha256:7cbaa794670560468b15a7a6a3c37396767435332e8eca3a30af627de29ad6d9"
-  "ghcr.io/taipanbox/wardryx:v2.2.1@sha256:67718da5ef5551767156ef0ea893765f448c484fcbb5dcce5923a0ca83b8c309"
+  "ghcr.io/taipanbox/tokenfuse:v1.19.0@sha256:32139654fc63ebc3026720413f1a9c16f07fb2507509714d946f50ffcf2a2434"
+  "ghcr.io/taipanbox/wardryx:v2.3.0@sha256:eaa8cff9fe3722f7040e9f9b3aac2f57c5e66afb7a012a0eda1a62e63b647543"
   "ghcr.io/taipanbox/vouchryx:v0.6.0@sha256:4a2b6b31be44b5391974785bdfca597a88bcc5ddd834d50830bd6b9537e9ab3d"
 )
 SH
@@ -310,7 +310,7 @@ else
   if [ "$n_verify" -ne 3 ] || [ "$n_pull" -ne 3 ]; then
     fail "the run verified $n_verify and pulled $n_pull of the 3 TAIPANBOX images"
   fi
-  for ref in "tokenfuse:v1.18.0" "wardryx:v2.2.1" "vouchryx:v0.6.0"; do
+  for ref in "tokenfuse:v1.19.0" "wardryx:v2.3.0" "vouchryx:v0.6.0"; do
     v=$(grep -n "^verify .*taipanbox/$ref" "$scratch/log" | head -1 | cut -d: -f1)
     p=$(grep -n "^pull .*taipanbox/$ref" "$scratch/log" | head -1 | cut -d: -f1)
     if [ -z "$v" ] || [ -z "$p" ] || [ "$v" -ge "$p" ]; then
@@ -322,7 +322,7 @@ fi
 # C. a refused signature stops the run before that image is pulled, and nothing after it.
 : > "$scratch/log"
 STUB_LOG="$scratch/log" \
-  STUB_FAIL_REF="ghcr.io/taipanbox/wardryx:v2.2.1@sha256:67718da5ef5551767156ef0ea893765f448c484fcbb5dcce5923a0ca83b8c309" \
+  STUB_FAIL_REF="ghcr.io/taipanbox/wardryx:v2.3.0@sha256:eaa8cff9fe3722f7040e9f9b3aac2f57c5e66afb7a012a0eda1a62e63b647543" \
   bash "$scratch/driver.sh" >/dev/null 2>&1
 rc=$?
 if [ "$rc" -eq 0 ]; then

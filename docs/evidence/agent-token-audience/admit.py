@@ -20,9 +20,11 @@ if token:
     headers["Authorization"] = "DPoP " + token
     headers["DPoP"] = proof
     import os
-    if os.environ.get("XHDR"):
-        k, v = os.environ["XHDR"].split(":", 1)
-        headers[k.strip()] = v.strip()
+    # XHDR names one extra header per line ("Name: value"), so a call can carry several.
+    for line in os.environ.get("XHDR", "").split("\n"):
+        if line.strip():
+            k, v = line.split(":", 1)
+            headers[k.strip()] = v.strip()
 req = urllib.request.Request(url, data=body, method=method, headers=headers)
 try:
     with urllib.request.urlopen(req, timeout=10) as r:

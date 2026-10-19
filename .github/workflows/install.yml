@@ -27,7 +27,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        profile: [default, delegation, typed-risk, identity, openai-door]
+        profile: [default, delegation, typed-risk, identity, openai-door, static-only]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -117,7 +117,10 @@ jobs:
           extra=""
           [ "${{ matrix.profile }}" = delegation ] && extra="WITH_DELEGATION=1 WITH_DELEGATION_DEMO_ISSUER=1"
           [ "${{ matrix.profile }}" = typed-risk ] && extra="WITH_TYPED=1 TYPED_RISK_SIGNAL=1"
-          [ "${{ matrix.profile }}" = identity ] && extra="CLIENT_KEYS_FILE=$IDENTITY_IN/keys.txt IDENTITY_MAP_FILE=$IDENTITY_IN/identity.json"
+          # The identity leg gives its own keys and no broker line, which agent tokens refuse by default, so it
+          # turns them off by name (CLAUDE.md invariant 47). static-only is the weaker way out, on purpose.
+          [ "${{ matrix.profile }}" = identity ] && extra="CLIENT_KEYS_FILE=$IDENTITY_IN/keys.txt IDENTITY_MAP_FILE=$IDENTITY_IN/identity.json WITH_AGENT_TOKENS=0"
+          [ "${{ matrix.profile }}" = static-only ] && extra="WITH_AGENT_TOKENS=0"
           [ "${{ matrix.profile }}" = openai-door ] && extra="OPENAI_DOOR=1 OPENAI_DOOR_UPSTREAM=$DOOR_UPSTREAM_CI OPENAI_DOOR_CLIENT_KEYS_FILE=$DOOR_IN/keys.txt OPENAI_DOOR_IDENTITY_MAP_FILE=$DOOR_IN/identity.json"
           sudo env STACK_DIR=/opt/agent-stack $extra ./install.sh 2>&1 | tee install-1.log
           grep -q "every check passed" install-1.log || { echo "::error::the first install did not pass every check"; exit 1; }
@@ -131,6 +134,30 @@ jobs:
           sudo grep -E '^(GENARYX_COPILOT_FUSE_KEY|GATEWAY_AGENT_KEY|GATEWAY_CLIENT_KEYS)=' .env | sort | sha256sum >"$RUNNER_TEMP/minted-1.sha"
           sudo sha256sum agent-key >>"$RUNNER_TEMP/minted-1.sha"
 
+      # A fresh box names two static keys, felyx and broker, and refuses any other static key until it is
+      # moved to a token or named on purpose (CLAUDE.md invariant 47). This runs BEFORE the re-run, because
+      # the re-run keeps every key id the box already had on the list.
+      - name: a fresh box refuses a static key it does not list
+        if: matrix.profile != 'identity' && matrix.profile != 'static-only'
+        run: |
+          cd /opt/agent-stack
+          sudo grep -qx "TOKENFUSE_AGENT_TOKENS='require'" .env || { echo "::error::.env does not set the gateway to require agent tokens"; exit 1; }
+          sudo grep -qx "TOKENFUSE_AGENT_TOKENS_STATIC_KEYS='felyx,broker'" .env \
+            || { echo "::error::the gateway's static-key list on a fresh box is not felyx,broker"; sudo grep '^TOKENFUSE_AGENT_TOKENS_STATIC_KEYS=' .env; exit 1; }
+          akey="$(sudo cat agent-key)"
+          fkey="$(sudo sed -n "s/^GENARYX_COPILOT_FUSE_KEY='\(.*\)'\$/\1/p" .env)"
+          call() {
+            curl -s -o "$RUNNER_TEMP/body.json" -w '%{http_code}' -X POST http://127.0.0.1:4100/v1/messages \
+              -H 'content-type: application/json' -H "x-fuse-run-id: ci-$RANDOM" -H 'x-fuse-budget-usd: 0.000001' \
+              "$@" -d '{"model":"claude-haiku-4-5","max_tokens":1,"messages":[{"role":"user","content":"ci"}]}'
+            printf ' %s\n' "$(sed -n 's/.*"type":"\([a-z_]*\)".*/\1/p' "$RUNNER_TEMP/body.json")"
+          }
+          a="$(call -H "x-fuse-key: $akey" -H 'x-fuse-agent-id: agent://local/agents/ci')"
+          b="$(call -H "x-fuse-key: $fkey" -H 'x-fuse-agent-id: agent://local/genaryx/felyx')"
+          echo "the agents' static key, not listed: $a | Felyx's listed key: $b"
+          [ "$a" = "401 agent_token_required" ] || { echo "::error::a static key the box does not list was not refused 401 agent_token_required: $a"; exit 1; }
+          [ "${b%% *}" = 402 ] || { echo "::error::Felyx's listed key did not get past identity to the budget (402): $b"; exit 1; }
+
       - name: re-run over the same box
         run: |
           # The re-run says nothing about the risk signal: it must stay on from
@@ -141,14 +168,16 @@ jobs:
           extra=""
           [ "${{ matrix.profile }}" = delegation ] && extra="WITH_DELEGATION=1 WITH_DELEGATION_DEMO_ISSUER=1"
           [ "${{ matrix.profile }}" = typed-risk ] && extra="WITH_TYPED=1"
+          [ "${{ matrix.profile }}" = identity ] && extra="WITH_AGENT_TOKENS=0"
+          [ "${{ matrix.profile }}" = static-only ] && extra="WITH_AGENT_TOKENS=0"
           sudo env STACK_DIR=/opt/agent-stack $extra ./install.sh 2>&1 | tee install-2.log
           grep -q "every check passed" install-2.log || { echo "::error::the re-run did not pass every check"; exit 1; }
 
-      - name: the delegation plane is up only when asked for
+      - name: vouchryx runs with agent tokens on by default, and not with them off
         run: |
           cd /opt/agent-stack
           if sudo docker compose ps --services | grep -qx vouchryx; then running=yes; else running=no; fi
-          want=no; [ "${{ matrix.profile }}" = delegation ] && want=yes
+          want=yes; case "${{ matrix.profile }}" in identity|static-only) want=no ;; esac
           echo "vouchryx running: $running (want $want)"
           [ "$running" = "$want" ]
 
@@ -285,11 +314,56 @@ jobs:
           d="$(call -H "x-fuse-key: $fkey" -H 'x-fuse-agent-id: agent://local/genaryx/felyx')"
           e="$(call -H "x-fuse-key: $fkey" -H 'x-fuse-agent-id: agent://local/agents/ci')"
           echo "no key: $a | agents' key as an agent: $b | agents' key as Felyx: $c | Felyx's key as Felyx: $d | Felyx's key as an agent: $e"
-          [ "$a" = "401 unauthorized" ] || { echo "::error::a call with no key was not refused 401"; exit 1; }
+          # With agent tokens on (the default) the gateway names a call with no credential agent_token_required;
+          # with WITH_AGENT_TOKENS=0 (static-only) it is the plain 401 unauthorized (CLAUDE.md invariant 47).
+          noauth="401 agent_token_required"
+          [ "${{ matrix.profile }}" = static-only ] && noauth="401 unauthorized"
+          [ "$a" = "$noauth" ] || { echo "::error::a call with no key was not refused $noauth: $a"; exit 1; }
           [ "${b%% *}" = 402 ] || { echo "::error::the agents' key speaking as an agent did not get past identity to the budget (402)"; exit 1; }
           [ "$c" = "403 identity_mismatch" ] || { echo "::error::the agents' key speaking as Felyx was not refused 403 identity_mismatch"; exit 1; }
           [ "${d%% *}" = 402 ] || { echo "::error::Felyx's key speaking as Felyx did not get past identity to the budget (402)"; exit 1; }
           [ "$e" = "403 identity_mismatch" ] || { echo "::error::Felyx's key speaking as an agent was not refused 403 identity_mismatch"; exit 1; }
+
+      - name: "static-only: agent tokens are off, nothing enrols, and no static-key list is written"
+        if: matrix.profile == 'static-only'
+        run: |
+          cd /opt/agent-stack
+          sudo grep -qx "TOKENFUSE_AGENT_TOKENS='off'" .env || { echo "::error::WITH_AGENT_TOKENS=0 did not write off"; exit 1; }
+          if sudo grep -qE '^(TOKENFUSE_AGENT_TOKENS_STATIC_KEYS|TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS|WARDRYX_AGENT_TOKEN_ISSUER)=' .env; then
+            echo "::error::the off path left a static-key list or a wardryx token setting in .env"; exit 1
+          fi
+
+      # The agent's own token, end to end (CLAUDE.md invariant 47), on the leg that runs the gateway, the MCP
+      # broker and typryx. vouchryx publishes nothing to the host, so the runner exchanges the enrolment secret
+      # at vouchryx's container address on agent-stack_core (an internal bridge the runner's host routes to).
+      # The checks are docs/evidence/agent-token-audience/measure.sh (#140), run unchanged except for the
+      # budget and the tools/call added there. Expectations: a token is issued (200); no resource is refused (400);
+      # the gateway admits the token and refuses the budget, which is admission past identity (402, no provider
+      # is needed); the broker answers the token's tools/list (200) and its tools/call to typryx is answered (not
+      # refused by the agent-token door); a tampered token is refused (401). The wardryx log holds no agent-token
+      # refusal for the run. The static-key checks are the steps above.
+      - name: "agent tokens, end to end: issued, admitted at the gateway (402 past identity) and the broker, asked of typryx, and no resource refused"
+        if: matrix.profile == 'typed-risk'
+        run: |
+          set -euo pipefail
+          cd /opt/agent-stack
+          vx="$(sudo docker compose ps -q vouchryx)"
+          vxip="$(sudo docker inspect -f '{{with index .NetworkSettings.Networks "agent-stack_core"}}{{.IPAddress}}{{end}}' "$vx")"
+          [ -n "$vxip" ] || { echo "::error::vouchryx has no address on agent-stack_core"; exit 1; }
+          td="$(sudo sed -n "s/^RECORD_TRUST_DOMAIN='\(.*\)'\$/\1/p" .env)"; td="${td:-local}"
+          work="$RUNNER_TEMP/agent-tokens"; mkdir -p "$work"
+          ENROL_SECRET="$(sudo cat agent-token.key)" \
+          VX_URL="http://$vxip:4310" \
+          AUDIENCE="https://stack-single.$td" \
+          GATEWAY_URL=http://127.0.0.1:4100 \
+          BROKER_URL=http://127.0.0.1:4200 \
+          BUDGET_USD=0.000001 \
+          WORK="$work" \
+            "$GITHUB_WORKSPACE/docs/evidence/agent-token-audience/measure.sh" 2>&1 | tee agent-tokens.log
+          # The D3(b) log check: wardryx refused no agent token during this run.
+          n="$(sudo docker run --rm -v agent-stack_events:/e:ro busybox:1.36 sh -c 'grep -cE "agent_token_(proof_invalid|invalid|required)|agent_contradicts_token" /e/wardryx.ndjson || true')"
+          [ "$n" = 0 ] || { echo "::error::wardryx logged $n agent-token refusal(s) during the run"; exit 1; }
+          echo "wardryx refused no agent token during this run"
 
       - name: a box given its own files carries no minted keys
         if: matrix.profile == 'identity'

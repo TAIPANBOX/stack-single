@@ -1,38 +1,36 @@
 #!/usr/bin/env bash
 #
-# Enforces invariant 40 of CLAUDE.md: an agent can present its own short-lived,
-# sender-constrained token instead of a static client key, when the operator opts in
-# with WITH_AGENT_TOKENS=1, and the doors that accept such a token are wired to verify
-# it: against vouchryx's own issuer and key set, for their own audience, with a
-# revocation list that fails closed. Off by default: a box that did not ask for it runs
-# what it ran before, and nothing about it changes.
+# Enforces invariant 40 of CLAUDE.md (as amended by invariant 47): an agent presents its
+# own short-lived, sender-constrained token, and the doors that take one verify it.
+# Since v1.3.0 this is the DEFAULT: the gateway and the MCP broker run
+# TOKENFUSE_AGENT_TOKENS=require, a static client key is admitted only when its key id
+# is on the named allow-list, and wardryx verifies the token itself (WARDRYX_AGENT_TOKEN_*).
+# WITH_AGENT_TOKENS=0 is the explicit way out: the doors run off, the static keys are
+# what they were, and wardryx verifies nothing.
 #
-# WHAT THIS IS ABOUT
+# WHAT THIS CHECKS, in the resolved configuration of compose.yaml three ways: with
+# nothing set (the default), with TOKENFUSE_AGENT_TOKENS=off (WITH_AGENT_TOKENS=0), and
+# with the token settings install.sh writes when agent tokens are on:
 #
-# Findings F-001 and F-005 of the 2026-10-17 review, the launcher half: a static client
-# key is one shared secret per namespace, it is never revoked per agent at runtime, and
-# nothing outside tokenfuse can check it. Wave 1 design section 1 (decisions D1 a, D2 a,
-# D8 a) gives each enrolled agent a secret of its own, stored as a digest in vouchryx,
-# exchanged for a five-minute DPoP-bound token, which the gateway and the MCP broker
-# verify offline. Stopping an agent is one revocation that every door polls.
-#
-# WHAT THIS CHECKS, in the resolved configuration of compose.yaml with the switch on
-# and with it left off, and in install.sh:
-#
-#   A. OFF BY DEFAULT. With TOKENFUSE_AGENT_TOKENS unset, the gateway and the broker
-#      read the switch as off, and vouchryx has no agent registry (VOUCHRYX_AGENTS empty).
-#   B. ON, THE GATEWAY. TOKENFUSE_AGENT_TOKENS is accept, and the delegation door it
-#      verifies against is complete: the issuer is vouchryx's own origin, the key set is a
-#      file, the audience is a non-empty name of its own, the origin is this gateway's,
-#      the revocation list is polled from vouchryx, and the list FAILS CLOSED.
-#   C. ON, THE BROKER. The same, for the MCP broker, with its own audience, its own
-#      origin, and the taint gateway's key read from a file the installer wrote
-#      (TOKENFUSE_MCP_TAINT_GATEWAY_KEY_FILE, the broker's `broker` client key).
+#   A. REQUIRE BY DEFAULT. With TOKENFUSE_AGENT_TOKENS unset, the gateway and the broker
+#      read require, and each has its static allow-list variable (empty is a list of none).
+#   A2. OFF IS EXPLICIT. With TOKENFUSE_AGENT_TOKENS=off the gateway and the broker read
+#      off, vouchryx enrols nobody, and wardryx verifies no agent token (no issuer and no
+#      other WARDRYX_AGENT_TOKEN_* setting).
+#   B. ON, THE GATEWAY. The gateway verifies against vouchryx's own issuer and key set,
+#      for its own audience, polls the revocation list from vouchryx, and that list FAILS
+#      CLOSED. Its delegation origin is set, so the DPoP htu of a proof can be checked.
+#   C. ON, THE BROKER. The same, for the MCP broker, with the taint gateway's key read from
+#      a file the installer wrote (TOKENFUSE_MCP_TAINT_GATEWAY_KEY_FILE).
 #   D. ON, VOUCHRYX. Its agent registry is set, it publishes nothing to the host, and it
 #      signs for the audiences the two doors name (VOUCHRYX_ALLOWED_AUDIENCES).
-#   E. THE INSTALLER. The `# agent-tokens:` block mints the enrolment secret into a 0600
-#      file, writes only its digest into VOUCHRYX_AGENTS, and never writes the secret
-#      itself to .env.
+#   E. ONE AUDIENCE for both doors: one agent token verifies at the gateway and at the broker.
+#   F. ON, WARDRYX. It verifies the token itself: its issuer is vouchryx's origin, the same
+#      the gateway names, its audience is the doors' audience, its key set and revocation
+#      list come from vouchryx, and its door origins name where the agent addresses each door.
+#   G. THE INSTALLER. The `# agent-tokens:` block mints the enrolment secret into a 0600
+#      file, writes only its digest into VOUCHRYX_AGENTS, never writes the secret itself to
+#      .env, writes require (never accept), and writes the wardryx settings with the switch.
 #
 # AND IT REFUSES TO REPORT OK ON NOTHING: no compose file, no docker compose, no gateway
 # subject, or no installer block are each reported and fail.
@@ -72,8 +70,11 @@ resolve() {
   fi
 }
 
+OFF_ENV="TOKENFUSE_AGENT_TOKENS=off"
 ON_ENV="$(printf '%s\n' \
-  "TOKENFUSE_AGENT_TOKENS=accept" \
+  "TOKENFUSE_AGENT_TOKENS=require" \
+  "TOKENFUSE_AGENT_TOKENS_STATIC_KEYS=felyx,broker" \
+  "TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS=" \
   "TOKENFUSE_DELEGATION_ISSUER=http://vouchryx:4310" \
   "TOKENFUSE_DELEGATION_JWKS=/etc/tokenfuse/delegation/vouchryx.jwks.json" \
   "TOKENFUSE_DELEGATION_AUDIENCE=https://stack-single.gate.example" \
@@ -85,55 +86,75 @@ ON_ENV="$(printf '%s\n' \
   "MCP_BROKER_DELEGATION_URL=http://127.0.0.1:4200" \
   "BROKER_GATEWAY_KEY_FILE=/run/broker/key" \
   "BROKER_TAINT_GATEWAY=http://tokenfuse-gateway:4100" \
-  "VOUCHRYX_ALLOWED_AUDIENCES=https://stack-single.gate.example")"
-resolve "$scratch/off.json" "" || exit 1
+  "VOUCHRYX_ALLOWED_AUDIENCES=https://stack-single.gate.example" \
+  "WARDRYX_AGENT_TOKEN_ISSUER=http://vouchryx:4310" \
+  "WARDRYX_AGENT_TOKEN_AUDIENCES=https://stack-single.gate.example" \
+  "WARDRYX_AGENT_TOKEN_JWKS_URL=http://vouchryx:4310/.well-known/jwks.json" \
+  "WARDRYX_AGENT_TOKEN_REVOCATION_URL=http://vouchryx:4310/v1/revocations" \
+  "WARDRYX_AGENT_TOKEN_DOOR_ORIGINS=http://tokenfuse-gateway:4100,http://tokenfuse-mcp-broker:4200,http://127.0.0.1:4100,http://127.0.0.1:4200")"
+resolve "$scratch/default.json" "" || exit 1
+resolve "$scratch/off.json" "$OFF_ENV" || exit 1
 resolve "$scratch/on.json" "$ON_ENV" || exit 1
 
-python3 - "$scratch/off.json" "$scratch/on.json" <<'PY' || problems=$((problems + 1))
+python3 - "$scratch/default.json" "$scratch/off.json" "$scratch/on.json" <<'PY' || problems=$((problems + 1))
 import json
 import sys
 
-off = json.load(open(sys.argv[1]))["services"]
-on = json.load(open(sys.argv[2]))["services"]
+default = json.load(open(sys.argv[1]))["services"]
+off = json.load(open(sys.argv[2]))["services"]
+on = json.load(open(sys.argv[3]))["services"]
 
 GATEWAY = "tokenfuse-gateway"
 BROKER = "tokenfuse-mcp-broker"
 VOUCH = "vouchryx"
+WARDRYX = "wardryx"
 problems = []
-
-
-def is_gateway(s):
-    return str(s.get("image", "")).startswith("ghcr.io/taipanbox/tokenfuse:") and s.get("command") == ["/usr/local/bin/tokenfuse"]
 
 
 def env(svc, name):
     return (svc.get("environment") or {}).get(name)
 
 
+def has(svc, name):
+    return name in (svc.get("environment") or {})
+
+
 def mounts(svc):
     return [v for v in svc.get("volumes") or [] if isinstance(v, dict)]
 
 
-for name in (GATEWAY, BROKER, VOUCH):
-    if name not in on:
-        problems.append("the resolved configuration has no %s service, so this gate measured NOTHING about it" % name)
+for cfg in (default, off, on):
+    for name in (GATEWAY, BROKER, VOUCH, WARDRYX):
+        if name not in cfg:
+            problems.append("the resolved configuration has no %s service, so this gate measured NOTHING about it" % name)
 if problems:
     for p in problems:
         print("FAIL: " + p)
     sys.exit(1)
 
-# A. off by default.
+# A. require by default, each door with its own static allow-list variable.
+for name, listvar in ((GATEWAY, "TOKENFUSE_AGENT_TOKENS_STATIC_KEYS"), (BROKER, "TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS")):
+    got = env(default[name], "TOKENFUSE_AGENT_TOKENS")
+    if got != "require":
+        problems.append("A. %s reads TOKENFUSE_AGENT_TOKENS %r with the switch unset; the default must be require (invariant 40 as amended by 47)" % (name, got))
+    if not has(default[name], listvar):
+        problems.append("A. %s has no %s, so static keys are not named as an allow-list" % (name, listvar))
+
+# A2. off is explicit: nothing verifies, nothing is enrolled, wardryx verifies no token.
 for name in (GATEWAY, BROKER):
     got = env(off[name], "TOKENFUSE_AGENT_TOKENS")
-    if got not in (None, "", "off"):
-        problems.append("A. %s reads TOKENFUSE_AGENT_TOKENS %r with the switch unset; it must be off" % (name, got))
+    if got != "off":
+        problems.append("A2. %s reads TOKENFUSE_AGENT_TOKENS %r with WITH_AGENT_TOKENS=0; it must be off" % (name, got))
 if env(off[VOUCH], "VOUCHRYX_AGENTS") not in (None, ""):
-    problems.append("A. vouchryx has an agent registry with the switch unset; a default box must not enrol anyone")
+    problems.append("A2. vouchryx has an agent registry with agent tokens off; nobody may be enrolled")
+for k in sorted(k for k in (off[WARDRYX].get("environment") or {}) if k.startswith("WARDRYX_AGENT_TOKEN_")):
+    if env(off[WARDRYX], k) not in (None, ""):
+        problems.append("A2. wardryx sets %s with agent tokens off; it must verify no token then" % k)
 
 # B. the gateway verifies agent tokens against vouchryx, for its own audience, fail closed.
 g = on[GATEWAY]
-if env(g, "TOKENFUSE_AGENT_TOKENS") != "accept":
-    problems.append("B. the gateway reads TOKENFUSE_AGENT_TOKENS %r with the switch on, not accept" % env(g, "TOKENFUSE_AGENT_TOKENS"))
+if env(g, "TOKENFUSE_AGENT_TOKENS") != "require":
+    problems.append("B. the gateway reads TOKENFUSE_AGENT_TOKENS %r with the switch on, not require" % env(g, "TOKENFUSE_AGENT_TOKENS"))
 if env(g, "TOKENFUSE_DELEGATION_ISSUER") != "http://vouchryx:4310":
     problems.append("B. the gateway's delegation issuer is %r, not vouchryx's own origin" % env(g, "TOKENFUSE_DELEGATION_ISSUER"))
 if not env(g, "TOKENFUSE_DELEGATION_JWKS"):
@@ -146,11 +167,13 @@ if not str(env(g, "TOKENFUSE_DELEGATION_REVOCATIONS") or "").startswith("http://
     problems.append("B. the gateway polls no revocation list at vouchryx, so a stopped agent keeps working here")
 if env(g, "TOKENFUSE_DELEGATION_REVOCATIONS_FAILMODE") != "closed":
     problems.append("B. the gateway's revocation list does not fail closed (TOKENFUSE_DELEGATION_REVOCATIONS_FAILMODE is %r)" % env(g, "TOKENFUSE_DELEGATION_REVOCATIONS_FAILMODE"))
+if env(g, "TOKENFUSE_AGENT_TOKENS_STATIC_KEYS") is None:
+    problems.append("B. the gateway names no TOKENFUSE_AGENT_TOKENS_STATIC_KEYS, so require admits no static key by a named list")
 
 # C. the broker, the same, for its own audience and origin, and its own key.
 b = on[BROKER]
-if env(b, "TOKENFUSE_AGENT_TOKENS") != "accept":
-    problems.append("C. the broker reads TOKENFUSE_AGENT_TOKENS %r with the switch on, not accept" % env(b, "TOKENFUSE_AGENT_TOKENS"))
+if env(b, "TOKENFUSE_AGENT_TOKENS") != "require":
+    problems.append("C. the broker reads TOKENFUSE_AGENT_TOKENS %r with the switch on, not require" % env(b, "TOKENFUSE_AGENT_TOKENS"))
 if not str(env(b, "TOKENFUSE_DELEGATION_AUDIENCE") or "").strip():
     problems.append("C. the broker's TOKENFUSE_DELEGATION_AUDIENCE is empty")
 if env(b, "TOKENFUSE_DELEGATION_REVOCATIONS_FAILMODE") != "closed":
@@ -161,6 +184,8 @@ if env(b, "TOKENFUSE_MCP_TAINT_GATEWAY_KEY_FILE") != "/run/broker/key":
     problems.append("C. the broker reads its taint-gateway key from %r, not /run/broker/key" % env(b, "TOKENFUSE_MCP_TAINT_GATEWAY_KEY_FILE"))
 if not any(m.get("target") == "/run/broker" and m.get("read_only") is True and str(m.get("source", "")).endswith("/broker") for m in mounts(b)):
     problems.append("C. the broker does not mount ./broker at /run/broker read only, so its key file cannot be read")
+if not has(b, "TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS"):
+    problems.append("C. the broker names no TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS")
 
 # D. vouchryx: its registry is set, nothing is published to the host, and it signs for
 # the audiences the two doors name.
@@ -182,6 +207,23 @@ for aud in (env(g, "TOKENFUSE_DELEGATION_AUDIENCE"), env(b, "TOKENFUSE_DELEGATIO
 if env(g, "TOKENFUSE_DELEGATION_AUDIENCE") != env(b, "TOKENFUSE_DELEGATION_AUDIENCE"):
     problems.append("E. the gateway's audience %r and the broker's %r differ: one agent token must verify at both doors" % (env(g, "TOKENFUSE_DELEGATION_AUDIENCE"), env(b, "TOKENFUSE_DELEGATION_AUDIENCE")))
 
+# F. wardryx verifies the token itself (wardryx 2.3.0): issuer, audience, key set, revocation, door origins.
+w = on[WARDRYX]
+if env(w, "WARDRYX_AGENT_TOKEN_ISSUER") != env(g, "TOKENFUSE_DELEGATION_ISSUER"):
+    problems.append("F. wardryx's WARDRYX_AGENT_TOKEN_ISSUER %r is not the issuer the gateway verifies against %r" % (env(w, "WARDRYX_AGENT_TOKEN_ISSUER"), env(g, "TOKENFUSE_DELEGATION_ISSUER")))
+if env(w, "WARDRYX_AGENT_TOKEN_AUDIENCES") != env(g, "TOKENFUSE_DELEGATION_AUDIENCE"):
+    problems.append("F. wardryx's WARDRYX_AGENT_TOKEN_AUDIENCES %r is not the doors' audience %r" % (env(w, "WARDRYX_AGENT_TOKEN_AUDIENCES"), env(g, "TOKENFUSE_DELEGATION_AUDIENCE")))
+if not str(env(w, "WARDRYX_AGENT_TOKEN_JWKS_URL") or "").startswith("http://vouchryx:4310/"):
+    problems.append("F. wardryx's key set is not vouchryx's JWKS (WARDRYX_AGENT_TOKEN_JWKS_URL is %r)" % env(w, "WARDRYX_AGENT_TOKEN_JWKS_URL"))
+if not str(env(w, "WARDRYX_AGENT_TOKEN_REVOCATION_URL") or "").startswith("http://vouchryx:4310/"):
+    problems.append("F. wardryx polls no revocation list at vouchryx; a stopped agent keeps working at the decision")
+origins = [o.strip() for o in str(env(w, "WARDRYX_AGENT_TOKEN_DOOR_ORIGINS") or "").split(",") if o.strip()]
+for door in ("http://tokenfuse-gateway:4100", "http://tokenfuse-mcp-broker:4200"):
+    if door not in origins:
+        problems.append("F. wardryx's WARDRYX_AGENT_TOKEN_DOOR_ORIGINS does not name the door %s; a proof addressed to it is refused" % door)
+if any(not o.startswith(("http://", "https://")) or o.endswith("/") or "@" in o for o in origins):
+    problems.append("F. a WARDRYX_AGENT_TOKEN_DOOR_ORIGINS entry is not a bare scheme://host:port origin")
+
 # C2. tokenfuse 1.18.0 (invariant 129) refuses a broker that names a taint gateway without the file that holds its key.
 if env(b, "TOKENFUSE_MCP_TAINT_GATEWAY") and not env(b, "TOKENFUSE_MCP_TAINT_GATEWAY_KEY_FILE"):
     problems.append("C. the broker names a taint gateway but no TOKENFUSE_MCP_TAINT_GATEWAY_KEY_FILE: tokenfuse 1.18.0 refuses to start")
@@ -190,10 +232,11 @@ for p in problems:
     print("FAIL: " + p)
 if problems:
     sys.exit(1)
-print("OK: with the switch on, the gateway and the broker verify agent tokens against vouchryx for their own audiences, fail closed, and vouchryx enrols the agent and publishes nothing; with it off, nothing changes")
+print("OK: by default the gateway and the broker require agent tokens, with a named static allow-list; off is explicit; with the token settings on, the doors and wardryx verify tokens against vouchryx for one audience, fail closed, and vouchryx enrols the agent and publishes nothing")
 PY
 
-# E. the installer mints the enrolment secret into a 0600 file and writes only its digest.
+# G. the installer mints the enrolment secret into a 0600 file, writes only its digest,
+# and writes require (never accept) with the wardryx settings.
 BLOCK="$(sed -n '/^# agent-tokens: begin$/,/^# agent-tokens: end$/p' install.sh)"
 if [ -z "$BLOCK" ]; then
   fail "install.sh has no '# agent-tokens: begin' .. 'end' block, so nothing enrols an agent for a token"
@@ -204,6 +247,26 @@ else
     || fail "the agent-tokens block does not write the allowed audience from AGENT_AUDIENCE; vouchryx refuses a plain name at startup"
   printf '%s\n' "$BLOCK" | grep -q 'AGENT_AUDIENCE="https://' \
     || fail "the agent-tokens block names no https audience: tokenfuse 1.17.0 refuses an agent audience that is not an https URL"
+  printf '%s\n' "$BLOCK" | grep -q 'identity_env_set TOKENFUSE_AGENT_TOKENS require' \
+    || fail "the agent-tokens block does not write TOKENFUSE_AGENT_TOKENS=require: the default is require (invariant 47)"
+  printf '%s\n' "$BLOCK" | grep -q 'TOKENFUSE_AGENT_TOKENS accept' \
+    && fail "the agent-tokens block still writes accept: a static key would be admitted without a named list"
+  printf '%s\n' "$BLOCK" | grep -q 'WARDRYX_AGENT_TOKEN_ISSUER' \
+    || fail "the agent-tokens block writes no WARDRYX_AGENT_TOKEN_ISSUER: wardryx would not verify the token (invariant 47)"
+  for want in \
+      'identity_env_set WARDRYX_AGENT_TOKEN_ISSUER http://vouchryx:4310' \
+      'identity_env_set WARDRYX_AGENT_TOKEN_AUDIENCES "$AGENT_AUDIENCE"' \
+      'identity_env_set WARDRYX_AGENT_TOKEN_JWKS_URL http://vouchryx:4310/.well-known/jwks.json' \
+      'identity_env_set WARDRYX_AGENT_TOKEN_REVOCATION_URL http://vouchryx:4310/v1/revocations'; do
+    printf '%s\n' "$BLOCK" | grep -qF "$want" \
+      || fail "the agent-tokens block does not write '$want': wardryx would verify a token against the wrong key set, audience or revocation list (invariant 47)"
+  done
+  printf '%s\n' "$BLOCK" | grep -qF 'http://tokenfuse-gateway:4100,http://tokenfuse-mcp-broker:4200' \
+    || fail "wardryx's door origins do not name the gateway and the broker: a proof addressed to either is refused (invariant 47)"
+  printf '%s\n' "$BLOCK" | grep -qF 'chown 20012:10001 "$STACK_DIR/broker/key"' \
+    || fail "the broker's key is not owned by uid 20012, the uid the broker runs as: it cannot read its taint-gateway key and refuses to start (invariant 47)"
+  printf '%s\n' "$BLOCK" | grep -qF 'TOKENFUSE_AGENT_TOKENS_STATIC_KEYS TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS; do' \
+    || fail "the off path does not clear the static-key lists: tokenfuse 1.19.0 refuses a list under any mode but require (invariant 47)"
   # Any write of a name that carries a secret into .env, in either spelling: the
   # NAME=value form printf writes, and the identity_env_set / add_env_default call.
   if printf '%s\n' "$BLOCK" | grep -E '^[[:space:]]*(add_env_default|identity_env_set)[[:space:]]+[A-Z_]*(SECRET|_KEY)([[:space:]]|$)' >/dev/null \
@@ -212,8 +275,58 @@ else
   fi
 fi
 
+# H. THE ALLOW-LIST, RUN FOR REAL. The installer's own helpers are lifted out of install.sh and
+# run against scratch .env files. A static key is named only when the box holds it (tokenfuse
+# 1.19.0 refuses a listed id the gateway does not hold); felyx and broker are named when held;
+# an id this box had before stays named on a re-run; STATIC_KEY_IDS naming a key it does not
+# hold is refused, not silently dropped.
+lib="$scratch/allowlist.sh"
+for fn in client_key_ids identity_env_get identity_env_set agent_static_keys_apply; do
+  awk -v n="$fn" 'index($0, n "() {") == 1 { p = 1 } p { print } p && /^}$/ { exit }' install.sh
+done >"$lib"
+if ! grep -q '^agent_static_keys_apply() {' "$lib"; then
+  fail "H. agent_static_keys_apply is not in install.sh, so the allow-list was not measured"
+else
+  allow_case() { # NAME KEYS STATIC_KEY_IDS EXISTING_GATEWAY MCP_KEYS EXISTING_MCP WANT_GATEWAY WANT_MCP
+    local name="$1" d out rc
+    d="$(mktemp -d "$scratch/allow.XXXXXX")"
+    printf "GATEWAY_CLIENT_KEYS='%s'\nTOKENFUSE_MCP_KEYS='%s'\n" "$2" "$5" >"$d/.env"
+    out="$(bash -c '
+      set -euo pipefail
+      STACK_DIR="$1"; AGENT_TOKENS_ON=1
+      STATIC_KEY_IDS_LIST="$2"; EXISTING_GATEWAY_IDS="$3"; EXISTING_MCP_IDS="$4"
+      die() { echo "DIE: $*"; exit 3; }
+      note() { :; }
+      . "$5"
+      agent_static_keys_apply
+      printf "GW=%s\nMCP=%s\n" "$(identity_env_get TOKENFUSE_AGENT_TOKENS_STATIC_KEYS)" "$(identity_env_get TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS)"
+    ' _ "$d" "$3" "$4" "$6" "$lib" 2>&1)" && rc=0 || rc=$?
+    if [ "$8" = DIE ]; then
+      [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q 'DIE: STATIC_KEY_IDS names' \
+        || fail "H. $name: a STATIC_KEY_IDS entry the box does not hold was not refused ($out)"
+      return 0
+    fi
+    [ "$rc" -eq 0 ] || { fail "H. $name: agent_static_keys_apply failed: $out"; return 0; }
+    printf '%s\n' "$out" | grep -qx "GW=$7" \
+      || fail "H. $name: the gateway's allow-list is $(printf '%s' "$out" | grep '^GW=') and should be GW=$7; a listed id the box does not hold, or a held id it dropped, is wrong"
+    printf '%s\n' "$out" | grep -qx "MCP=$8" \
+      || fail "H. $name: the broker's allow-list is $(printf '%s' "$out" | grep '^MCP=') and should be MCP=$8"
+  }
+  # (name, held keys, STATIC_KEY_IDS, existing gateway ids, broker keys, existing broker ids, want gw, want mcp)
+  allow_case "a fresh box names felyx and broker, and no broker static key" \
+    'S1:felyx,S2:broker,S3:agents' '' '' 'S9:stack-single' '' 'felyx,broker' 'stack-single'
+  allow_case "a re-run keeps every key id it already had" \
+    'S1:felyx,S2:broker,S3:agents,S4:drills' '' 'agents drills' 'S9:stack-single' 'stack-single' 'felyx,broker,agents,drills' 'stack-single'
+  allow_case "a key the box does not hold is never named, even if it was there before" \
+    'S1:felyx,S3:agents' '' 'agents ghost' 'S9:stack-single' '' 'felyx,agents' 'stack-single'
+  allow_case "a box without a broker key does not name broker" \
+    'S1:felyx,S3:agents' '' '' 'S9:stack-single' '' 'felyx' 'stack-single'
+  allow_case "STATIC_KEY_IDS naming a key the box does not hold is refused" \
+    'S1:felyx,S3:agents' 'ghost' '' 'S9:stack-single' '' '' DIE
+fi
+
 if [ "$problems" -ne 0 ]; then
   printf 'agent-tokens-are-wired: %d problem(s)\n' "$problems"
   exit 1
 fi
-echo "OK: agent-tokens-are-wired (invariant 40)"
+echo "OK: agent-tokens-are-wired (invariants 40 and 47)"

@@ -56,9 +56,8 @@
 # registered its four event types: it names its own file, TYPRYX_EVENTS, so
 # the writer table below carries a var name per service rather than assuming
 # TOKENFUSE_EVENTS_PATH for everyone. That does not mean record-seal SEALS
-# typryx's events: it counts all four refused (agent-event v1.0 is a schema
-# trailryx 1.0 does not read, and its mapper refuses the four by name on
-# purpose, trailryx#81).
+# typryx's events. Trailryx 1.0 refused the four (agent-event v1.0 is a schema it does not
+# read); trailryx 1.4.0 reads that schema, and what the record plane does with them is open.
 # What moving the journal here buys is heraldyx alerting on them, since
 # heraldyx reads the whole directory.
 #

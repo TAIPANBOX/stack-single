@@ -338,10 +338,10 @@ an absent invariant.
     in sync.** @decided 2026-09-26: `typryx`'s journal moves onto the shared
     `events` volume now that agent-passport registers its four event types
     (typed_answer, typed_unanswered, typed_refused, calibration_drift), so
-    heraldyx can alert on them; `record-seal` counts all four refused rather than
-    sealed: they carry agent-event v1.0, a schema trailryx 1.0 does not read
-    (unknown_schema), and past the schema its mapper refuses the four by name
-    on purpose (trailryx#81).
+    heraldyx can alert on them. Under trailryx 1.0 `record-seal` refused the four
+    as unknown_schema. trailryx 1.4.0 (`@claude 2026-10-19`, from its release notes, not run here)
+    reads agent-event v1.0, so whether the record plane seals them is open; it is
+    opt-in (`WITH_RECORD=1`).
     `tokenfuse-mcp-broker`, a new opt-in service fronting `typryx` by
     configuration alone (tokenfuse's own code is not touched), publishes on
     `${GATEWAY_BIND:-127.0.0.1}:4200`, the identical expression
@@ -387,6 +387,10 @@ an absent invariant.
     `./delegation-public`. A bind mount keeps host ownership, so on Linux a
     root-owned 0700 directory stops both containers (measured 2026-09-27 on
     Debian 13: both exited 2); Docker Desktop on macOS hides it.
+    `@claude 2026-10-19`, amended by invariant 47: agent tokens are on by default, and they start
+    vouchryx, so a default box now runs it. `WITH_AGENT_TOKENS=0` is the way back to a box without it.
+    The gate below names the delegation profile's own switch, `WITH_DELEGATION`; the agent-token default
+    is judged by invariant 47's gate.
     *(gate: `scripts/delegation-off-by-default.sh`, `scripts/delegation-key-not-printed.sh`,
     `scripts/delegation-key-reused-on-rerun.sh`, `scripts/delegation-dirs-are-split.sh`;
     teeth in `scripts/gates-have-teeth.sh`)*
@@ -732,7 +736,10 @@ an absent invariant.
     `costcrew-init` gave it, which the chain verifier reads through the "other"
     bits. Published on `127.0.0.1:8321` only, written as a literal: stack-caddy
     serves one site, baked into an image in another repository, so a second
-    would change the core; no `-behind-tls` for the same reason. @measured
+    would change the core; no `-behind-tls` for the same reason. `@claude 2026-10-19`: costcrew 0.10.0 refuses a non-loopback
+    `-addr` without `-behind-tls` or `-insecure-http`, so the console now starts with `-insecure-http`;
+    the port stays on `127.0.0.1` and is reached through an SSH tunnel. Prompt data stays `masked`, the
+    0.10.0 default, and the console's `.session-secret` rule is unchanged for this box. @measured
     `docker compose config` of origin/main's compose.yaml against this one,
     same fake `.env`, project path normalised, 2026-10-07: the default rendering
     is identical. @measured scratch compose project `finopstest` on Docker
@@ -1390,7 +1397,7 @@ an absent invariant.
 
 40. **An agent can present its own short-lived token, and the doors that accept it
     verify it where it is judged, for their own audience, against a revocation list that
-    fails closed. Off unless the operator asks.** `@decided 2026-10-18` (paraphrased, wave 1
+    fails closed. Required by default since invariant 47; off only with WITH_AGENT_TOKENS=0.** `@decided 2026-10-18` (paraphrased, wave 1
     design sections 1.2 to 1.7, decisions D1 a, D2 a and D8 a): a static client key is one
     secret per namespace that cannot be stopped for one agent at runtime (findings F-001 and
     F-005, launcher half). `@claude 2026-10-18`: `WITH_AGENT_TOKENS=1` writes
@@ -1409,6 +1416,9 @@ an absent invariant.
     `.env`. The broker's taint relay uses its own `broker` client key from a file, and the
     installer mints that key only on a box it gives keys to; a box with its own keys file
     must add the line itself. The OpenAI door keeps static keys only.
+    `@claude 2026-10-19`, amended by invariant 47: the switch is no longer off by default. Unset, the
+    gateway and the broker run `require`; `WITH_AGENT_TOKENS=0` is the way off, and `accept` is no longer
+    written. Where the text below says the switch is off by default, it describes the 2026-10-18 shape.
     *(gate: `scripts/agent-tokens-are-wired.sh`: with the switch off, the gateway and the broker
     read it as off and vouchryx enrols nobody; with it on, the gateway and the broker verify
     against vouchryx's issuer and key set for one https audience they share, poll the
@@ -1527,6 +1537,33 @@ an absent invariant.
     other environment value here), the database DSN the installer writes into `.env`,
     the CI workflow's own `curl -H` on its ephemeral runner, the gates' own fixtures with
     fake credentials, and a live `ps` during an install on a Debian box.)*
+
+47. **Agent tokens are the default credential: the doors require them, a static key is admitted only
+    by a named list, and wardryx verifies the token itself.** `@decided 2026-10-19` (paraphrased,
+    decision D8 with D3(b) of the 2026-10-17 agent-security review): static client keys stop being the
+    default credential. `@claude 2026-10-19`: a box that sets nothing runs the gateway and the MCP
+    broker with `TOKENFUSE_AGENT_TOKENS=require` (tokenfuse 1.19.0, invariant 138), so a static client
+    key is refused 401 `agent_token_required` unless its key id is named in
+    `TOKENFUSE_AGENT_TOKENS_STATIC_KEYS` (the broker: `TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS`). The
+    list is written by install.sh, and the closing report prints it under "static keys still admitted;
+    move these agents to tokens": felyx and broker, which cannot sign a proof and are in use on every
+    box that has them; the operator's `STATIC_KEY_IDS`; and, on a re-run, every key id the box already
+    had. A listed id must be a key the door holds, or the door refuses to start, so the installer cuts
+    the list to the keys held. `WITH_AGENT_TOKENS=0` writes `TOKENFUSE_AGENT_TOKENS=off`, clears both
+    lists (tokenfuse refuses a list under any mode but require), and the closing report calls it the
+    weaker setting. wardryx 2.3.0 verifies the agent's token and DPoP proof itself
+    (`WARDRYX_AGENT_TOKEN_ISSUER`, `_AUDIENCES`, `_JWKS_URL`, `_REVOCATION_URL` and `_DOOR_ORIGINS`),
+    written with the switch on and absent when off; wardryx reads an empty value as unset. The OpenAI
+    door keeps static keys only (invariant 40) and is outside this rule.
+    *(gate: `scripts/agent-tokens-are-wired.sh`: the resolved configuration with nothing set, with
+    `off`, and with the token settings on; the doors' and wardryx's wiring; the lines the installer
+    writes, checked as text; and section H, which lifts `agent_static_keys_apply` out of install.sh and
+    runs it against scratch `.env` files for a fresh box, a re-run, a key the box does not hold, and a
+    `STATIC_KEY_IDS` entry it does not hold. Teeth in `scripts/gates-have-teeth.sh`; scenarios in
+    `features/an-agent-presents-its-own-token.feature`. Not covered: a live install (CI's install legs
+    run it on a fresh Ubuntu runner, and were not run here), a real agent's token and proof measured
+    against the running doors, the replay of a captured proof that wardryx 2.3.0 does not refuse, and a
+    box whose static key was listed by hand.)*
 
 ## Decisions that have no gate yet
 
