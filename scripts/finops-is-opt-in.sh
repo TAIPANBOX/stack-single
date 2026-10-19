@@ -322,7 +322,7 @@ for n in sorted(subjects):
     if "no-new-privileges:true" not in listing(b, "security_opt"):
         note(f"{n}: no no-new-privileges")
     img = field(b, "image") or ""
-    if not re.search(r"\$\{COSTCREW_IMAGE:-ghcr\.io/taipanbox/costcrew:v[0-9]+\.[0-9]+\.[0-9]+\}$", img):
+    if not re.search(r"\$\{COSTCREW_IMAGE:-ghcr\.io/taipanbox/costcrew:v[0-9]+\.[0-9]+\.[0-9]+(@sha256:[0-9a-f]{64})?\}$", img):
         note(f"{n}: image {img} is not the pinned `${{COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:vX.Y.Z}}` form")
 
     # published ports: loopback, written as a literal

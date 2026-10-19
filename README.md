@@ -1308,6 +1308,34 @@ day. The box's own stack is still what this README installs.
 beyond the file transport; the passkey ceremony; the WireGuard door
 reached from outside the LAN; `down -v`; a full disk; a lost `.env`.
 
+## Images: pinned by digest, and ours checked before they start
+
+Every image the stack runs is pinned to the digest of the bytes it names. The
+tag stays beside it for reading. A tag can be moved by whoever controls the
+registry; a digest cannot, so a box running `wardryx:v2.2.0@sha256:c91c...` runs
+that build and nothing else.
+
+The images this project publishes (`ghcr.io/taipanbox/...`) are also signed,
+keyless, by the release workflow that built them, and carry a provenance
+attestation. Before the installer pulls one of them it checks that signature
+against a TAIPANBOX release tag. The installer fetches a pinned cosign release,
+checks its SHA-256 before anything can run it, and refuses to start the stack
+if one of our images does not verify. The refusal names the image and stops
+before anything is pulled further or started.
+
+What this does not do:
+
+- Third-party images (`busybox`, `postgres`) are pinned by digest but are not
+  signature-checked. Nothing here verifies who published them.
+- `BUILD_FROM_SOURCE=1` builds the planes on your own box. Nothing built that way
+  is signed or checked. It is your choice to make, and the installer says so.
+- A digest says which bytes a box runs. It does not say those bytes are safe.
+  The signature says which release workflow built them.
+
+To move a pin, change the tag and its digest together in `compose.yaml` and in
+`components.json`, and in the one place `install.sh` names the same image.
+`scripts/images-are-digest-pinned.sh` refuses a pair that disagrees.
+
 ## What the installer will not do quietly
 
 It verifies itself and tells you what it found. Three of its checks have to
