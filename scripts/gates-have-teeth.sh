@@ -3139,7 +3139,7 @@ run_case "images-are-digest-pinned: a published image loses its digest" fail \
 
 run_case "images-are-digest-pinned: a digest is cut short" fail \
 	'./scripts/images-are-digest-pinned.sh' \
-	"$(py 'edit("compose.yaml", "trailryx-node:v1.3.1@sha256:ab305ac6a65444e08090b56d6f666498b56d560f7351c96a8a84137ece9e6d37}", "trailryx-node:v1.3.1@sha256:ab305ac6a65444e08090b56d6f666498b56d560f7351c96a8a84137ece9e6d37}")')" \
+	"$(py 'edit("compose.yaml", "trailryx-node:v1.3.1@sha256:ab305ac6a65444e08090b56d6f666498b56d560f7351c96a8a84137ece9e6d37}", "trailryx-node:v1.3.1@sha256:ab305ac6a65444e08090b56d6f666498b56d560f7351c96a8a84137ece9e6d3}")')" \
 	"is not pinned by a full sha256 digest"
 
 run_case "images-are-digest-pinned: the third-party postgres loses its digest" fail \
@@ -3234,7 +3234,7 @@ run_case "images-are-verified: a reworded comment in the block is not a fault" p
 run_case "demo-issuer-and-smtp-tls: the migration rewrites any line naming the demo host" fail \
 	'./scripts/demo-issuer-and-smtp-tls.sh' \
 	"$(py 'edit("install.sh", "\x27$0 == old { print new; next } { print }\x27", "\x27$0 ~ /idp[.]stack-single[.]local/ { print new; next } { print }\x27")')" \
-	"a line that only contains the demo line was rewritten"
+	"names the demo host, next to the demo line, was rewritten"
 
 run_case "demo-issuer-and-smtp-tls: the new demo line drops |unbound" fail \
 	'./scripts/demo-issuer-and-smtp-tls.sh' \

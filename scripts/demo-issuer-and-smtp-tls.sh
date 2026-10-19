@@ -64,6 +64,12 @@ run_demo "$scratch/a.env" || fail "A. the migration refused an old demo line"
 want="$(printf '%s\n' "ALERT_TO='ops@example.com'" "VOUCHRYX_TRUSTED_ISSUERS='$NEW'" "VOUCHRYX_REVOKE_KEYS='x'")"
 [ "$(cat "$scratch/a.env")" = "$want" ] || fail "A. the old demo line was not rewritten to the |unbound form, or another line changed: $(cat "$scratch/a.env")"
 
+# B3. a line that names the demo host is not the demo line, even when the demo line sits beside it.
+printf '%s\n' "VOUCHRYX_TRUSTED_ISSUERS='$OLD'" "NOTE='see $OLD'" >"$scratch/b3.env"
+run_demo "$scratch/b3.env" || fail "B3. the migration refused a file with a note that names the demo host"
+want3="$(printf '%s\n' "VOUCHRYX_TRUSTED_ISSUERS='$NEW'" "NOTE='see $OLD'")"
+[ "$(cat "$scratch/b3.env")" = "$want3" ] || fail "B3. a line that names the demo host, next to the demo line, was rewritten: $(cat "$scratch/b3.env")"
+
 # B. an operator's own line is never touched, not even one that starts with the demo line.
 printf '%s\n' "VOUCHRYX_TRUSTED_ISSUERS='https://idp.example.com|tokenfuse|/etc/vouchryx/jwks.json'" >"$scratch/b1.env"
 cp "$scratch/b1.env" "$scratch/b1.before"
