@@ -363,7 +363,7 @@ e = svc['typryx']['environment']
 assert e['TYPRYX_BACKEND'] == 'stub', 'backend is ' + e['TYPRYX_BACKEND']
 assert not e.get('TYPRYX_JEV_KEY_FILE'), 'a jev key file is named on the stub'
 assert not e.get('TYPRYX_TRAINING_DIR'), 'a training log is on by default: TYPRYX_TRAINING_DIR is ' + repr(e.get('TYPRYX_TRAINING_DIR'))
-assert svc['typryx']['image'].endswith('/typryx:v0.4.1'), 'the typryx pin is ' + svc['typryx']['image']
+assert svc['typryx']['image'].split('@')[0].endswith('/typryx:v0.4.1'), 'the typryx pin is ' + svc['typryx']['image']
 " --profile typed </dev/null
 
   check_cfg "training on names a directory inside a writable volume, beside the ledger" "

@@ -3116,6 +3116,76 @@ run_case "witness-is-separate: no keyryx service left to judge" fail \
 	"measured nothing"
 
 
+# ---- images-are-digest-pinned and images-are-verified (CLAUDE.md invariant 44) --
+run_case "images-are-digest-pinned: a published image loses its digest" fail \
+	'./scripts/images-are-digest-pinned.sh' \
+	"$(py 'edit("compose.yaml", "trailryx-node:v1.2.1@sha256:86fe5a3fd17c09c33a955040d2570879eff5a1886c104bd237e4428389c213a3}", "trailryx-node:v1.2.1}")')" \
+	"trailryx-node:v1.2.1 is not pinned"
+
+run_case "images-are-digest-pinned: a digest is cut short" fail \
+	'./scripts/images-are-digest-pinned.sh' \
+	"$(py 'edit("compose.yaml", "trailryx-node:v1.2.1@sha256:86fe5a3fd17c09c33a955040d2570879eff5a1886c104bd237e4428389c213a3}", "trailryx-node:v1.2.1@sha256:86fe5a3fd17c09c33a955040d2570879eff5a1886c104bd237e4428389c213a}")')" \
+	"trailryx-node:v1.2.1 is not pinned"
+
+run_case "images-are-digest-pinned: the third-party postgres loses its digest" fail \
+	'./scripts/images-are-digest-pinned.sh' \
+	"$(py 'edit("compose.yaml", "postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea", "postgres:16-alpine")')" \
+	"postgres:16-alpine is not pinned"
+
+run_case "images-are-digest-pinned: the installer names a digest compose does not run" fail \
+	'./scripts/images-are-digest-pinned.sh' \
+	"$(py 'edit_all("install.sh", "b650f01aeac9baa89f60ca86f71f589fc7c7c7d25d3237793814a186eb8f5cea", "1111111111111111111111111111111111111111111111111111111111111111")')" \
+	"pinned to a digest compose.yaml does not run"
+
+run_case "images-are-digest-pinned: no image line left to judge" fail \
+	'./scripts/images-are-digest-pinned.sh' \
+	"$(py 'edit_all("compose.yaml", "    image: ", "    imagex: ")')" \
+	"measured NOTHING"
+
+run_case "images-are-digest-pinned: a reworded comment is not a fault" pass \
+	'./scripts/images-are-digest-pinned.sh' \
+	"$(py 'edit("install.sh", "# ---- 3c. the images, pulled ", "# ---- 3c. the images, pulled and checked ")')"
+
+run_case "images-are-verified: the pull comes before the check" fail \
+	'./scripts/images-are-verified.sh' \
+	"$(py 'edit("install.sh", "        image_verify \"$img\"\n        note \"pulling $img\"\n        docker pull -q \"$img\" >/dev/null || die \"could not pull $img\"\n", "        note \"pulling $img\"\n        docker pull -q \"$img\" >/dev/null || die \"could not pull $img\"\n        image_verify \"$img\"\n")')" \
+	"pulls before it verifies"
+
+run_case "images-are-verified: a refused signature does not stop the install" fail \
+	'./scripts/images-are-verified.sh' \
+	"$(py 'edit("install.sh", "    die \"${ref%%@*} has no signature", "    note \"${ref%%@*} has no signature")')" \
+	"was pulled after cosign refused its signature"
+
+run_case "images-are-verified: the signer accepts any identity" fail \
+	'./scripts/images-are-verified.sh' \
+	"$(py 'edit("install.sh", "TAIPANBOX/[^/]+/", "[^/]+/[^/]+/")')" \
+	"not the pinned value"
+
+run_case "images-are-verified: the verify call skips the transparency log" fail \
+	'./scripts/images-are-verified.sh' \
+	"$(py 'edit("install.sh", "--certificate-oidc-issuer \"$TAIPANBOX_ISSUER\" \"$ref\"", "--certificate-oidc-issuer \"$TAIPANBOX_ISSUER\" --insecure-ignore-tlog \"$ref\"")')" \
+	"weakens the check"
+
+run_case "images-are-verified: a cosign binary with the wrong bytes is installed" fail \
+	'./scripts/images-are-verified.sh' \
+	"$(py 'edit("install.sh", "\"$dest.download\" | sha256sum -c --status", "\"$dest.download\" | cat >/dev/null")')" \
+	"was installed at bin/cosign"
+
+run_case "images-are-verified: a third-party image goes to cosign" fail \
+	'./scripts/images-are-verified.sh' \
+	"$(py 'edit("install.sh", "      ghcr.io/*)", "      *)")')" \
+	"for the check to sit in"
+
+run_case "images-are-verified: no image-verify block left to judge" fail \
+	'./scripts/images-are-verified.sh' \
+	"$(py 'edit("install.sh", "# image-verify: begin", "# image-verify: begun")')" \
+	"measured NOTHING"
+
+run_case "images-are-verified: a reworded comment in the block is not a fault" pass \
+	'./scripts/images-are-verified.sh' \
+	"$(py 'edit("install.sh", "# A signature is accepted only from", "# A signature is accepted solely from")')"
+
+
 echo
 if [ -n "$(git status --porcelain)" ]; then
 	printf 'FAIL: this script left the tree dirty, so it cannot be trusted about anything above\n'

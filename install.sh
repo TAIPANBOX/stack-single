@@ -3037,7 +3037,7 @@ posture and README says so."
   if [ ! -f delegation/signing.pem ]; then
     note "vouchryx: minting a signing key"
     docker run --rm --user 0:0 -v "$STACK_DIR/delegation:/out" \
-        --entrypoint vouchryx-demo "${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.4.0}" \
+        --entrypoint vouchryx-demo "${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.4.0@sha256:b650f01aeac9baa89f60ca86f71f589fc7c7c7d25d3237793814a186eb8f5cea}" \
         keygen -out /out/signing >/dev/null \
       || die "could not mint vouchryx's signing key"
     chown 20002:20002 delegation/signing.pem delegation/signing.jwks.json
@@ -3054,7 +3054,7 @@ posture and README says so."
     if [ ! -f delegation/idp.pem ]; then
       note "vouchryx: minting a demo issuer (WITH_DELEGATION_DEMO_ISSUER=1, never for production)"
       docker run --rm --user 0:0 -v "$STACK_DIR/delegation:/out" \
-          --entrypoint vouchryx-demo "${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.4.0}" \
+          --entrypoint vouchryx-demo "${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.4.0@sha256:b650f01aeac9baa89f60ca86f71f589fc7c7c7d25d3237793814a186eb8f5cea}" \
           keygen -out /out/idp -kid stack-single-demo-idp >/dev/null \
         || die "could not mint the demo issuer key"
       chown 20002:20002 delegation/idp.pem delegation/idp.jwks.json
@@ -3083,6 +3083,65 @@ posture and README says so."
   # the key's thumbprint as `kid`, not whatever label a keygen run gave it.
 fi
 
+# image-verify: begin
+# CLAUDE.md invariant 44. The images this project publishes are signed keyless by
+# the release workflows of the TAIPANBOX repositories, by digest, with the job's
+# GitHub OIDC identity, and carry a provenance attestation. Before this installer
+# pulls one of them it checks that signature, and a signature that does not check
+# stops the install before anything is started. Third-party images (busybox,
+# postgres) are pinned by digest and are not signature-checked.
+COSIGN_VERSION="v3.1.3"
+# The SHA-256 of each cosign release binary, copied from that release's own
+# cosign_checksums.txt. That file is signed by the sigstore release identity
+# (keyless@projectsigstore.iam.gserviceaccount.com, issuer accounts.google.com),
+# and the signature was checked before these values were copied.
+# shellcheck disable=SC2034 # both are read by name, as ${!want}, in cosign_install below
+COSIGN_SHA256_amd64="4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71"
+# shellcheck disable=SC2034 # read by name, as ${!want}, in cosign_install below
+COSIGN_SHA256_arm64="c5d324e091826b0d7a78eb16fef316450b4eb9aaec045611c08ba06f5e73220a"
+# A signature is accepted only from a GitHub Actions release workflow of the
+# TAIPANBOX organisation, run on a version tag, signed through GitHub's own OIDC
+# issuer. Nothing wider: not a branch, not another organisation.
+TAIPANBOX_SIGNER='^https://github\.com/TAIPANBOX/[^/]+/\.github/workflows/[^@]+@refs/tags/v[0-9].*$'
+TAIPANBOX_ISSUER='https://token.actions.githubusercontent.com'
+
+cosign_install() {
+  local arch want dest url
+  case "$(uname -m)" in
+    x86_64|amd64) arch=amd64 ;;
+    aarch64|arm64) arch=arm64 ;;
+    *) die "no pinned cosign for $(uname -m): image signatures are checked on amd64 and arm64 only" ;;
+  esac
+  want="COSIGN_SHA256_$arch"
+  want="${!want}"
+  dest="$STACK_DIR/bin/cosign"
+  # A binary already in place with the pinned bytes is kept, so a re-run downloads nothing.
+  if [ -f "$dest" ] && printf '%s  %s\n' "$want" "$dest" | sha256sum -c --status; then
+    return 0
+  fi
+  url="https://github.com/sigstore/cosign/releases/download/$COSIGN_VERSION/cosign-linux-$arch"
+  mkdir -p "$STACK_DIR/bin"
+  note "fetching cosign $COSIGN_VERSION for $arch"
+  curl -fsSL -o "$dest.download" "$url" || die "could not fetch cosign $COSIGN_VERSION from $url"
+  # The bytes are checked before anything can run them. A download that does not match
+  # the SHA-256 pinned above is removed and never installed.
+  if ! printf '%s  %s\n' "$want" "$dest.download" | sha256sum -c --status; then
+    rm -f "$dest.download"
+    die "the cosign binary from $url does not match its pinned SHA-256, so it was not installed"
+  fi
+  chmod 0755 "$dest.download"
+  mv -f "$dest.download" "$dest"
+}
+
+image_verify() {
+  local ref="$1"
+  if ! "$STACK_DIR/bin/cosign" verify --certificate-identity-regexp "$TAIPANBOX_SIGNER" --certificate-oidc-issuer "$TAIPANBOX_ISSUER" "$ref" >/dev/null 2>&1; then
+    die "${ref%%@*} has no signature from a TAIPANBOX release workflow for its digest, so it was not pulled and the stack was not started"
+  fi
+  note "signature verified: ${ref%%@*}"
+}
+# image-verify: end
+
 # ---- 3c. the images, pulled ---------------------------------------------------
 # Here rather than in section 2, and the reason is mechanical: the list comes
 # from `docker compose config`, which interpolates .env, and .env does not
@@ -3094,6 +3153,8 @@ fi
 # would download what this box was told not to use.
 if [ -z "$BUILD_FROM_SOURCE" ]; then
   say "pulling published images"
+  # Invariant 44: the cosign binary that checks our images is fetched and checked first.
+  cosign_install
   # The list is READ from compose.yaml rather than repeated here. A tag bumped
   # in one place and forgotten in the other would pull one version and run
   # another, and the symptom is a container that works until it restarts.
@@ -3120,6 +3181,8 @@ if [ -z "$BUILD_FROM_SOURCE" ]; then
   while read -r img; do
     case "$img" in
       ghcr.io/*)
+        # Every ghcr.io image here is one of ours, and each is checked before it is pulled.
+        image_verify "$img"
         note "pulling $img"
         docker pull -q "$img" >/dev/null || die "could not pull $img"
         pulled=$((pulled + 1))

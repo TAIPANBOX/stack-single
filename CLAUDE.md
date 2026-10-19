@@ -80,6 +80,8 @@ change here is a change to something with root on somebody else's box.
 ./scripts/no-plane-writes-another-planes-stream.sh
 ./scripts/keyryx-root-is-not-in-env.sh
 ./scripts/witness-is-separate.sh
+./scripts/images-are-digest-pinned.sh
+./scripts/images-are-verified.sh
 ./scripts/gates-have-teeth.sh   # invariant 8; needs a clean tree
 ```
 
