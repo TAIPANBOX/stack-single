@@ -3010,6 +3010,11 @@ run_case "no-provider-key-outside-the-gateway: a box with only Felyx's key is no
 	"$(py 'edit("install.sh", "the provider key Felyx used before 1.2.0", "an older key")')" \
 	"does not stop a box whose only provider key is GENARYX_COPILOT_KEY"
 
+run_case "no-provider-key-outside-the-gateway: a re-owned key file is left readable by everyone" fail \
+	'./scripts/no-provider-key-outside-the-gateway.sh' \
+	"$(py 'edit("install.sh", "chmod 0400 \"$1\"", "chmod 0444 \"$1\"")')" \
+	"does not set mode 0400 on an existing key file it re-owns"
+
 run_case "no-provider-key-outside-the-gateway: a harmless variable is not a fault" pass \
 	'./scripts/no-provider-key-outside-the-gateway.sh' \
 	"$(py 'edit("compose.yaml", "      GENARYX_COPILOT_FUSE_KEY: ${GENARYX_COPILOT_FUSE_KEY:-}\n", "      GENARYX_COPILOT_FUSE_KEY: ${GENARYX_COPILOT_FUSE_KEY:-}\n      GATE_HARMLESS_NOTE: \"one\"\n")')"

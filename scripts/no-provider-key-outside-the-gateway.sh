@@ -171,7 +171,11 @@ if [ -z "$BLOCK" ]; then
   fail "install.sh has no '# upstream-key: begin' .. 'end' block, so nothing writes the provider key a gateway holds"
 else
   # The commands, not the comments: the block's own prose says 0400 too.
-  printf '%s\n' "$BLOCK" | grep -q 'chmod 0400' || fail "the upstream-key block does not set mode 0400 on the key file"
+  # Both writers, each by its own line: a new file (upstream_put, on its temp file) and an
+  # existing one re-owned on every run (upstream_own). One generic match let a mode
+  # change in either pass while the other still said 0400.
+  printf '%s\n' "$BLOCK" | grep -qF 'chmod 0400 "$tmp"' || fail "the upstream-key block does not set mode 0400 on the key file it writes"
+  printf '%s\n' "$BLOCK" | grep -qF 'chmod 0400 "$1"' || fail "the upstream-key block does not set mode 0400 on an existing key file it re-owns"
   # Each door's key file goes to THAT door's uid, read from compose.yaml, never a uid
   # written into this gate: until 1.3.1 this line required uid 10001 while the
   # gateway ran as 20010, so the gate held the defect in place (GOTCHAS, stack-single
