@@ -2990,6 +2990,31 @@ run_case "no-provider-key-outside-the-gateway: the key file is readable by every
 	"$(py 'edit("install.sh", "chmod 0400 \"$tmp\"", "chmod 0444 \"$tmp\"")')" \
 	"does not set mode 0400 on the key file"
 
+run_case "no-provider-key-outside-the-gateway: the gateway's key file goes back to uid 10001" fail \
+	'./scripts/no-provider-key-outside-the-gateway.sh' \
+	"$(py 'edit("install.sh", "UP_UID_ANTHROPIC=20010   # tokenfuse-gateway", "UP_UID_ANTHROPIC=10001   # tokenfuse-gateway")')" \
+	"runs as uid 20010 in compose.yaml"
+
+run_case "no-provider-key-outside-the-gateway: the gateway runs as a uid the key file is not given to" fail \
+	'./scripts/no-provider-key-outside-the-gateway.sh' \
+	"$(py 'edit("compose.yaml", "    user: \"20010:10001\"", "    user: \"20099:10001\"")')" \
+	"runs as uid 20099 in compose.yaml"
+
+run_case "no-provider-key-outside-the-gateway: Felyx's key is moved without the operator's word" fail \
+	'./scripts/no-provider-key-outside-the-gateway.sh' \
+	"$(py 'edit("install.sh", "elif [ \"$UP_ADOPT_COPILOT\" = 1 ] && [ ! -f", "elif [ ! -f")')" \
+	"without the operator's GATEWAY_HOLDS_COPILOT_KEY=1"
+
+run_case "no-provider-key-outside-the-gateway: a box with only Felyx's key is no longer stopped" fail \
+	'./scripts/no-provider-key-outside-the-gateway.sh' \
+	"$(py 'edit("install.sh", "the provider key Felyx used before 1.2.0", "an older key")')" \
+	"does not stop a box whose only provider key is GENARYX_COPILOT_KEY"
+
+run_case "no-provider-key-outside-the-gateway: a re-owned key file is left readable by everyone" fail \
+	'./scripts/no-provider-key-outside-the-gateway.sh' \
+	"$(py 'edit("install.sh", "chmod 0400 \"$1\"", "chmod 0444 \"$1\"")')" \
+	"does not set mode 0400 on an existing key file it re-owns"
+
 run_case "no-provider-key-outside-the-gateway: a harmless variable is not a fault" pass \
 	'./scripts/no-provider-key-outside-the-gateway.sh' \
 	"$(py 'edit("compose.yaml", "      GENARYX_COPILOT_FUSE_KEY: ${GENARYX_COPILOT_FUSE_KEY:-}\n", "      GENARYX_COPILOT_FUSE_KEY: ${GENARYX_COPILOT_FUSE_KEY:-}\n      GATE_HARMLESS_NOTE: \"one\"\n")')"

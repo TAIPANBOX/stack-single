@@ -1369,8 +1369,10 @@ an absent invariant.
     agent that holds the provider key can call the model with no gateway in the
     way, and the gateway used to forward whatever key a caller sent (finding F-002).
     So each door reads its provider key from a file, `TOKENFUSE_UPSTREAM_KEY_FILE`,
-    that the installer writes mode 0400 and owned by uid 10001, the uid the gateway
-    runs as, mounted read only into that door alone: `./upstream/anthropic` for the
+    that the installer writes mode 0400 and owned by that door's own uid (20010 for
+    the Anthropic door, 20011 for the OpenAI door, as compose.yaml runs them; until
+    1.3.1 it was uid 10001 and the gateway could not read it), mounted read only into
+    that door alone: `./upstream/anthropic` for the
     Anthropic door, `./upstream/openai` for the OpenAI door. `@claude 2026-10-18`:
     the agent presents its gateway credential and the door supplies the provider
     credential. Once the key is held, a caller's own provider key is refused 401
@@ -1378,14 +1380,23 @@ an absent invariant.
     installer takes the key as a file, `ANTHROPIC_KEY_FILE` or `OPENAI_KEY_FILE`,
     and never prints it. Felyx, the console's copilot, presents its own gateway key,
     `GENARYX_COPILOT_FUSE_KEY` (invariant 35), and no longer has the provider key as
-    `GENARYX_COPILOT_KEY`; a re-run copies that value into the key file once, and the
-    `.env` line stays, unused. With no key file the gateway forwards the caller's
+    `GENARYX_COPILOT_KEY`. A key the gateway holds pays for every agent's calls, so
+    who pays changes only on the operator's word (`@claude 2026-10-19`, under the
+    owner's delegation to choose the more secure and future-proof way): a box whose only
+    provider key is `GENARYX_COPILOT_KEY` is stopped before anything is changed and
+    told the two ways on, `ANTHROPIC_KEY_FILE` or `GATEWAY_HOLDS_COPILOT_KEY=1` (which
+    moves that `.env` value into the gateway's file, never printed); the `.env` line
+    stays, unused. 1.2.0 and 1.3.0 moved it silently; a file they wrote is kept and
+    re-owned to its door on every run. With no key file the gateway forwards the caller's
     own key as before and says so at startup and in the closing report.
     *(gate: `scripts/no-provider-key-outside-the-gateway.sh`: the resolved
     configuration of every gateway; no service carries a provider key as an
     environment value or by reference; each door reads its own file from its own
     read-only directory and no other service mounts one; the installer's
-    `# upstream-key:` block writes the file 0400 for uid 10001; refuses to report
+    `# upstream-key:` block writes each door's file 0400 for the uid compose.yaml gives
+    the service that mounts it (read from compose.yaml, not written into the gate),
+    copies `GENARYX_COPILOT_KEY` only under `GATEWAY_HOLDS_COPILOT_KEY=1`, and stops a
+    box whose only key is that one; refuses to report
     OK on no gateway subject, no compose file or no installer block; 10 teeth cases
     in `scripts/gates-have-teeth.sh`; `features/the-provider-key-stays-with-the-gateway.feature`.
     Not covered: a live refused call from a caller that holds a provider key, which

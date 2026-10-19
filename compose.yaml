@@ -158,7 +158,7 @@ services:
         chown 20002:10001 /vol/events/vouchryx.ndjson && chmod 0640 /vol/events/vouchryx.ndjson
         # wardryx's policy archive is a directory in the bus (WARDRYX_POLICY_ARCHIVE),
         # made here so that wardryx, which cannot create in the bus, owns it.
-        mkdir -p /vol/events/wardryx-policy-archive && chown 20001:10001 /vol/events/wardryx-policy-archive && chmod 0750 /vol/events/wardryx-policy-archive
+        mkdir -p /vol/events/wardryx-policy-archive && chown -R 20001:10001 /vol/events/wardryx-policy-archive && chmod 0750 /vol/events/wardryx-policy-archive
         # Keyryx's two state directories, each owned by the one process that uses it.
         chown 20101:20101 /vol/keyryx && chmod 0700 /vol/keyryx
         chown 20100:20100 /vol/keyryxw && chmod 0700 /vol/keyryxw

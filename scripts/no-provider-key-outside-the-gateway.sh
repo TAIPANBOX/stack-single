@@ -30,7 +30,8 @@
 #      .env variable gives. No other service mounts any upstream directory or the
 #      /run/upstream target.
 #   D. THE INSTALLER WRITES THE FILE. install.sh has an `# upstream-key:` block that
-#      writes the key with mode 0400 and owner 10001, the uid the gateway runs as.
+#      writes the key with mode 0400, owned by the uid of the door that mounts it, and
+#      copies Felyx's old key only on the operator's GATEWAY_HOLDS_COPILOT_KEY=1.
 #
 # AND IT REFUSES TO REPORT OK ON NOTHING: no compose.yaml, no docker compose, no
 # gateway subject, or no installer block is each reported and fails.
@@ -170,8 +171,48 @@ if [ -z "$BLOCK" ]; then
   fail "install.sh has no '# upstream-key: begin' .. 'end' block, so nothing writes the provider key a gateway holds"
 else
   # The commands, not the comments: the block's own prose says 0400 too.
-  printf '%s\n' "$BLOCK" | grep -q 'chmod 0400' || fail "the upstream-key block does not set mode 0400 on the key file"
-  printf '%s\n' "$BLOCK" | grep -q 'chown 10001:10001' || fail "the upstream-key block does not give the key file to uid 10001, the uid the gateway runs as"
+  # Both writers, each by its own line: a new file (upstream_put, on its temp file) and an
+  # existing one re-owned on every run (upstream_own). One generic match let a mode
+  # change in either pass while the other still said 0400.
+  printf '%s\n' "$BLOCK" | grep -qF 'chmod 0400 "$tmp"' || fail "the upstream-key block does not set mode 0400 on the key file it writes"
+  printf '%s\n' "$BLOCK" | grep -qF 'chmod 0400 "$1"' || fail "the upstream-key block does not set mode 0400 on an existing key file it re-owns"
+  # Each door's key file goes to THAT door's uid, read from compose.yaml, never a uid
+  # written into this gate: until 1.3.1 this line required uid 10001 while the
+  # gateway ran as 20010, so the gate held the defect in place (GOTCHAS, stack-single
+  # 1.3.1: "Permission denied" and a gateway that would not start).
+  door_uid() { # DIR: the uid of the one compose service that mounts ./upstream/DIR
+    python3 - "$1" <<'PYU'
+import re, sys
+want = "./upstream/%s:" % sys.argv[1]
+svc, uid, found = None, {}, []
+for line in open("compose.yaml"):
+    m = re.match(r"^  ([a-z0-9-]+):\s*$", line)
+    if m: svc = m.group(1)
+    m = re.match(r'^    user: "(\d+):\d+"', line)
+    if m and svc: uid[svc] = m.group(1)
+    if want in line and svc: found.append(svc)
+found = sorted(set(found))
+print(uid.get(found[0], "") if len(found) == 1 else "")
+PYU
+  }
+  for d in anthropic:UP_UID_ANTHROPIC openai:UP_UID_OPENAI; do
+    dir="${d%%:*}" var="${d#*:}"
+    want="$(door_uid "$dir")"
+    got="$(printf '%s\n' "$BLOCK" | sed -n "s/^$var=\([0-9]*\).*/\1/p" | head -1)"
+    if [ -z "$want" ]; then
+      fail "no single compose service with a user: mounts ./upstream/$dir, so whose key file it is cannot be judged"
+    elif [ "$got" != "$want" ]; then
+      fail "the upstream-key block gives ./upstream/$dir/key to uid '${got}' ($var), but the door that mounts it runs as uid $want in compose.yaml"
+    fi
+    printf '%s\n' "$BLOCK" | grep -qE "upstream_put \"\\\$k\" \"\\\$STACK_DIR/upstream/$dir\" \"\\\$$var\"" \
+      || fail "the upstream-key block does not write ./upstream/$dir/key for \$$var"
+  done
+  # Who pays is never changed in silence: the copy of Felyx's old key runs only on the
+  # operator's GATEWAY_HOLDS_COPILOT_KEY=1, and a box with only that key is stopped.
+  printf '%s\n' "$BLOCK" | grep -q 'elif \[ "\$UP_ADOPT_COPILOT" = 1 \]' \
+    || fail "the upstream-key block copies GENARYX_COPILOT_KEY into the gateway's key file without the operator's GATEWAY_HOLDS_COPILOT_KEY=1"
+  printf '%s\n' "$BLOCK" | grep -q 'the provider key Felyx used before 1.2.0' \
+    || fail "the upstream-key block does not stop a box whose only provider key is GENARYX_COPILOT_KEY"
 fi
 
 if [ "$problems" -ne 0 ]; then
