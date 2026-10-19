@@ -605,7 +605,7 @@ run. Felyx authenticates with this key and never with your provider key.
 A console that carries genaryx invariant 24 can present a key of its own:
 `compose.yaml` already hands it `GENARYX_COPILOT_FUSE_KEY_REF`, which points at
 `GENARYX_COPILOT_FUSE_KEY` in `.env`, and such a console sends that key as
-`x-fuse-key`. The console pinned here (v1.1.47) carries it; an older one ignores
+`x-fuse-key`. The console pinned here (v1.1.48) carries it; an older one ignores
 the setting. Measured 2026-10-13 with two throwaway v1.1.44 consoles against a
 gateway holding client keys: with the key set, a question to Felyx was answered;
 with it empty, the gateway answered 401. To give Felyx a key:
@@ -1609,8 +1609,8 @@ into `./closure/secret`, readable only by the console. Nothing prints it, and a
 re-run keeps it. To turn closing off again, remove `CLOSURE_SECRET` and
 `CLOSURE_SECRET_FILE` from `.env` and run `docker compose up -d`.
 
-It needs tokenfuse v1.9.0 or later and console v1.1.34 or later. The images pinned here are tokenfuse v1.16.0 and
-console v1.1.47; an older image ignores the setting.
+It needs tokenfuse v1.9.0 or later and console v1.1.34 or later. The images pinned here are tokenfuse v1.18.0 and
+console v1.1.48; an older image ignores the setting.
 
 ## The console
 
