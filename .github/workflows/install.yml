@@ -314,7 +314,11 @@ jobs:
           d="$(call -H "x-fuse-key: $fkey" -H 'x-fuse-agent-id: agent://local/genaryx/felyx')"
           e="$(call -H "x-fuse-key: $fkey" -H 'x-fuse-agent-id: agent://local/agents/ci')"
           echo "no key: $a | agents' key as an agent: $b | agents' key as Felyx: $c | Felyx's key as Felyx: $d | Felyx's key as an agent: $e"
-          [ "$a" = "401 unauthorized" ] || { echo "::error::a call with no key was not refused 401"; exit 1; }
+          # With agent tokens on (the default) the gateway names a call with no credential agent_token_required;
+          # with WITH_AGENT_TOKENS=0 (static-only) it is the plain 401 unauthorized (CLAUDE.md invariant 47).
+          noauth="401 agent_token_required"
+          [ "${{ matrix.profile }}" = static-only ] && noauth="401 unauthorized"
+          [ "$a" = "$noauth" ] || { echo "::error::a call with no key was not refused $noauth: $a"; exit 1; }
           [ "${b%% *}" = 402 ] || { echo "::error::the agents' key speaking as an agent did not get past identity to the budget (402)"; exit 1; }
           [ "$c" = "403 identity_mismatch" ] || { echo "::error::the agents' key speaking as Felyx was not refused 403 identity_mismatch"; exit 1; }
           [ "${d%% *}" = 402 ] || { echo "::error::Felyx's key speaking as Felyx did not get past identity to the budget (402)"; exit 1; }

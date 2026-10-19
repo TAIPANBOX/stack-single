@@ -606,6 +606,17 @@ if compose_has tokenfuse-mcp-broker; then
     body="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"$method\"}"
     status_of "$(http_request POST "$url" "$hdrs" "$body")"
   }
+  # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
+  mcp_refused_without_key() { # url: a tools/call with no credential is refused; with tokens on, by name
+    local out status
+    out="$(http_request POST "$1" "Content-Type: application/json"$'\r\n'"X-Fuse-Mcp-Upstream: typryx"$'\r\n' \
+          '{"jsonrpc":"2.0","id":1,"method":"tools/call"}')"
+    status="$(status_of "$out")"
+    case "$status" in 401|403) ;; *) return 1 ;; esac
+    if [ "$(identity_env_get TOKENFUSE_AGENT_TOKENS)" = require ]; then
+      grep -q agent_token_required <<<"$out"
+    fi
+  }
   MCP_BROKER_KEY="$(sed -n 's/^TOKENFUSE_MCP_KEYS=\([^:]*\):.*/\1/p' .env 2>/dev/null | head -1)"
   # Named "reaches typryx", not "answers": the MCP wire reports an upstream
   # refusal as a JSON-RPC error object over HTTP 200, so this proves only that
@@ -680,8 +691,10 @@ if compose_has tokenfuse-mcp-broker; then
   # Must fail to pass, like the admin-key checks above: a call this broker
   # would forward with nobody's key on it is the same open door those checks
   # exist to catch on a different plane.
+  # Refused with no credential at all. With agent tokens on (the default) the broker names the refusal
+  # agent_token_required; with them off it is a plain 401 or 403.
   install_only check "typed plane: a tools/call with no broker key is refused" \
-        "c=\$(mcp_status http://tokenfuse-mcp-broker:4200/mcp '' tools/call); case \"\$c\" in 401|403) true ;; *) false ;; esac"
+        "mcp_refused_without_key http://tokenfuse-mcp-broker:4200/mcp"
 fi
 
 # The delegation plane's own checks, only when WITH_DELEGATION actually
@@ -1891,12 +1904,12 @@ upstream_resolve() {
   fi
 }
 
-upstream_put() { # KEY DIR: DIR/key holds KEY, 0400, owned by uid 10001. Never prints KEY.
-  local k="$1" dir="$2" tmp
+upstream_put() { # KEY DIR [OWNER]: DIR/key holds KEY, 0400, owned by OWNER (uid 10001 unless named). Never prints KEY.
+  local k="$1" dir="$2" owner="${3:-10001:10001}" tmp
   tmp="$dir/.key.tmp"
   ( umask 077; printf '%s' "$k" >"$tmp" ) || die "could not write the provider key into $dir"
-  if ! { chown 10001:10001 "$tmp" && chmod 0400 "$tmp" && mv -f "$tmp" "$dir/key"; }; then
-    die "could not put the provider key in place in $dir (mode 0400, uid 10001)"
+  if ! { chown "$owner" "$tmp" && chmod 0400 "$tmp" && mv -f "$tmp" "$dir/key"; }; then
+    die "could not put the provider key in place in $dir (mode 0400, owner $owner)"
   fi
 }
 
@@ -2092,8 +2105,11 @@ agent_tokens_apply() {
   broker="$(identity_env_get GATEWAY_BROKER_KEY)"
   why="$(identity_entry_why "$broker:broker")"
   [ -z "$why" ] || die "GATEWAY_BROKER_KEY in .env, the broker's client key, $why. Empty that line and the installer mints one. Nothing was started."
-  upstream_put "$broker" "$STACK_DIR/broker"
-  note "the broker's key: in $STACK_DIR/broker/key (0400, uid 10001, never printed)"
+  # The broker runs as uid 20012 (CLAUDE.md invariant 41), so the key it reads is its own: owned by that uid,
+  # 0400. A key owned by 10001 is unreadable to the broker, which then refuses to start (tokenfuse
+  # mcpbroker.rs: "TOKENFUSE_MCP_TAINT_GATEWAY_KEY_FILE is not set") and restarts in a loop.
+  upstream_put "$broker" "$STACK_DIR/broker" 20012:10001
+  note "the broker's key: in $STACK_DIR/broker/key (0400, uid 20012, never printed)"
 }
 
 # Section 3e, after mint_apply, when every client key is in .env: the static allow-lists the two doors
@@ -2116,8 +2132,10 @@ agent_static_keys_apply() {
   identity_env_set TOKENFUSE_AGENT_TOKENS_STATIC_KEYS "$STATIC_GATEWAY_LIST"
   # The broker's own list: only the key ids this box had before, since a fresh box has none to keep.
   have_mcp=" $(client_key_ids "$(identity_env_get TOKENFUSE_MCP_KEYS)" | tr '\n' ' ')"
-  for id in $EXISTING_MCP_IDS; do
-    case "$have_mcp" in *" $id "*) mcp="$mcp $id" ;; esac
+  # stack-single is the installer's own key for the broker: its checks (tools/list, an ask, a refused call)
+  # present it. It is named here, on purpose, with that reason in the closing report.
+  for id in stack-single $EXISTING_MCP_IDS; do
+    case "$have_mcp" in *" $id "*) case " $mcp " in *" $id "*) ;; *) mcp="$mcp $id" ;; esac ;; esac
   done
   mcp="${mcp# }"
   STATIC_MCP_LIST="$(printf '%s' "$mcp" | tr ' ' ',')"
@@ -2140,7 +2158,7 @@ agent_tokens_reach_note() {
   printf '  Authorization: DPoP <token> with a proof (carrying ath, RFC 9449). Stop the agent with one call:\n'
   printf '  POST http://vouchryx:4310/v1/revoke with ban, using VOUCHRYX_REVOKE_KEYS from .env.\n'
   printf '  Static keys still admitted at the gateway: %s\n' "${STATIC_GATEWAY_LIST:-none}"
-  printf '  Static keys still admitted at the MCP broker: %s\n' "${STATIC_MCP_LIST:-none}"
+  printf '  Static keys still admitted at the MCP broker: %s (stack-single is the installer'"'"'s own check key there; felyx and broker at the gateway are the console and the broker'"'"'s taint relay)\n' "${STATIC_MCP_LIST:-none}"
   printf '  static keys still admitted; move these agents to tokens, or name each one in STATIC_KEY_IDS on purpose.'
 }
 # agent-tokens: end

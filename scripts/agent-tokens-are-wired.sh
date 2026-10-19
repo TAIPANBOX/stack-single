@@ -263,6 +263,8 @@ else
   done
   printf '%s\n' "$BLOCK" | grep -qF 'http://tokenfuse-gateway:4100,http://tokenfuse-mcp-broker:4200' \
     || fail "wardryx's door origins do not name the gateway and the broker: a proof addressed to either is refused (invariant 47)"
+  printf '%s\n' "$BLOCK" | grep -qF 'upstream_put "$broker" "$STACK_DIR/broker" 20012:10001' \
+    || fail "the broker's key is not owned by uid 20012, the uid the broker runs as: it cannot read its taint-gateway key and refuses to start (invariant 47)"
   printf '%s\n' "$BLOCK" | grep -qF 'TOKENFUSE_AGENT_TOKENS_STATIC_KEYS TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS; do' \
     || fail "the off path does not clear the static-key lists: tokenfuse 1.19.0 refuses a list under any mode but require (invariant 47)"
   # Any write of a name that carries a secret into .env, in either spelling: the
@@ -312,13 +314,13 @@ else
   }
   # (name, held keys, STATIC_KEY_IDS, existing gateway ids, broker keys, existing broker ids, want gw, want mcp)
   allow_case "a fresh box names felyx and broker, and no broker static key" \
-    'S1:felyx,S2:broker,S3:agents' '' '' 'S9:stack-single' '' 'felyx,broker' ''
+    'S1:felyx,S2:broker,S3:agents' '' '' 'S9:stack-single' '' 'felyx,broker' 'stack-single'
   allow_case "a re-run keeps every key id it already had" \
     'S1:felyx,S2:broker,S3:agents,S4:drills' '' 'agents drills' 'S9:stack-single' 'stack-single' 'felyx,broker,agents,drills' 'stack-single'
   allow_case "a key the box does not hold is never named, even if it was there before" \
-    'S1:felyx,S3:agents' '' 'agents ghost' 'S9:stack-single' '' 'felyx,agents' ''
+    'S1:felyx,S3:agents' '' 'agents ghost' 'S9:stack-single' '' 'felyx,agents' 'stack-single'
   allow_case "a box without a broker key does not name broker" \
-    'S1:felyx,S3:agents' '' '' 'S9:stack-single' '' 'felyx' ''
+    'S1:felyx,S3:agents' '' '' 'S9:stack-single' '' 'felyx' 'stack-single'
   allow_case "STATIC_KEY_IDS naming a key the box does not hold is refused" \
     'S1:felyx,S3:agents' 'ghost' '' 'S9:stack-single' '' '' DIE
 fi
