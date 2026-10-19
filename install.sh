@@ -1952,39 +1952,55 @@ upstream_reach_note() {
 
 # ---- 3b-agent. agent tokens: vouchryx enrols one agent, the doors verify its token ----
 # agent-tokens: begin
-# @decided 2026-10-18 (paraphrased, wave 1 design section 1, decisions D1 a, D2 a and
-# D8 a): an agent presents a short-lived, sender-constrained token of its own instead of a
-# static client key, when the operator asks for it with WITH_AGENT_TOKENS=1. Off by
-# default, so a box that did not ask runs what it ran before (CLAUDE.md invariant 40).
-# On, vouchryx starts with the delegation plane (invariant 15's profile, but no trusted
-# issuer is invented: the agent's own registry line is the trust), enrols ONE agent, and
-# the gateway and the MCP broker verify its token offline for their own audience, against
-# a revocation list that fails closed. A stopped agent is one vouchryx revocation.
+# @decided 2026-10-19 (paraphrased, decision D8): agent tokens are the default credential.
+# An agent presents a short-lived, sender-constrained token of its own, and the two doors
+# that take one (the gateway and the MCP broker) run require: a static client key is refused
+# unless its key id is named on an allow-list. WITH_AGENT_TOKENS=0 is the explicit way out:
+# the doors run off, static keys are admitted as before, and the closing report calls that
+# weaker (CLAUDE.md invariant 47). On, vouchryx starts with the delegation plane (invariant
+# 15's profile, but no trusted issuer is invented: the agent's own registry line is the
+# trust), enrols ONE agent, the doors verify its token offline for their own audience against
+# a revocation list that fails closed, and wardryx verifies the token itself (wardryx 2.3.0)
+# rather than taking the door's word for who the agent is. A stopped agent is one vouchryx
+# revocation.
 #
-# What this wave does NOT do, named here and in the report: vouchryx reads its registry
-# from one environment variable, so this installer enrols one agent per box (the
-# operator's, `agent://<td>/agents/operator`). More agents need the registry read from a
-# file, which vouchryx does not do yet. The enrolment secret never reaches .env or a log:
-# it lives in $STACK_DIR/agent-token.key (0600), and .env holds only its SHA-256 digest.
+# What this does NOT do, named here and in the report: vouchryx reads its registry from one
+# environment variable, so this installer enrols one agent per box (the operator's,
+# `agent://<td>/agents/operator`). The enrolment secret never reaches .env or a log: it lives
+# in $STACK_DIR/agent-token.key (0600), and .env holds only its SHA-256 digest.
 #
-# The broker's own gateway client key (taint relay, tokenfuse invariant 123) is minted
-# only on a box the installer gives keys to (MINT_ON): a box with its own keys file must
-# add a `broker` line itself, so the installer never edits a file it did not write.
-AGENT_TOKENS_ON=0      # 1 when this run turns agent tokens on
-DELEGATION_ON=0        # 1 when vouchryx runs this run: WITH_DELEGATION or agent tokens
-AGENT_TOKEN_AGENT=""   # the one agent enrolled: agent://<td>/agents/operator
+# The broker's own gateway client key (taint relay, tokenfuse invariant 123) is minted only
+# on a box the installer gives keys to (MINT_ON): a box with its own keys file must add a
+# `broker` line itself, so the installer never edits a file it did not write.
+AGENT_TOKENS_ON=0        # 1 when this run turns agent tokens on (the default)
+DELEGATION_ON=0          # 1 when vouchryx runs this run: WITH_DELEGATION or agent tokens
+AGENT_TOKEN_AGENT=""     # the one agent enrolled: agent://<td>/agents/operator
+EXISTING_GATEWAY_IDS=""  # the gateway client key ids this box had before this run
+EXISTING_MCP_IDS=""      # the broker's client key ids this box had before this run
+STATIC_KEY_IDS_LIST=""   # STATIC_KEY_IDS as validated words, set by agent_tokens_resolve
+STATIC_GATEWAY_LIST=""   # what this run wrote to TOKENFUSE_AGENT_TOKENS_STATIC_KEYS
+STATIC_MCP_LIST=""       # what this run wrote to TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS
+
+# The key id of each secret:key_id entry in SPEC, one per line. A key id is the text after
+# the LAST colon, as tokenfuse splits it. Nothing here echoes a secret.
+client_key_ids() {
+  local IFS=',' e
+  for e in $1; do
+    e="${e##*:}"
+    [ -z "$e" ] || printf '%s\n' "$e"
+  done
+}
 
 # Section 0, before anything is installed: refuses a value it does not read, and a pair
 # it cannot honour. Writes nothing. Runs after mint_resolve, which decides MINT_ON.
 agent_tokens_resolve() {
-  local td
+  local td id
   # The delegation plane runs for its own switch as well as for agent tokens.
   [ -z "${WITH_DELEGATION:-}" ] || DELEGATION_ON=1
   case "${WITH_AGENT_TOKENS:-}" in
-    "") return 0 ;;
-    1) ;;
+    ""|1) ;;
     0) return 0 ;;
-    *) die "WITH_AGENT_TOKENS must be 1 (agent tokens on) or 0 (off), not what it was given. Nothing was installed." ;;
+    *) die "WITH_AGENT_TOKENS must be unset or 1 (agent tokens on, the default) or 0 (off: static keys only, the weaker way out), not what it was given. Nothing was installed." ;;
   esac
   AGENT_TOKENS_ON=1
   DELEGATION_ON=1
@@ -1998,27 +2014,46 @@ agent_tokens_resolve() {
   # absolute https URL, and one agent token must verify at the gateway and at the broker). Nothing serves
   # it, and it need not: it is a name the token is minted for.
   AGENT_AUDIENCE="https://stack-single.$td"
+  # The key ids this box already has, read before this run writes anything. On a re-run every one of
+  # them stays on the static allow-list, so nothing that worked yesterday stops working (invariant 47).
+  EXISTING_GATEWAY_IDS="$(client_key_ids "$(identity_env_get GATEWAY_CLIENT_KEYS)" | tr '\n' ' ')"
+  EXISTING_MCP_IDS="$(client_key_ids "$(identity_env_get TOKENFUSE_MCP_KEYS)" | tr '\n' ' ')"
+  # The operator's own allow-list: STATIC_KEY_IDS, comma-separated key ids for clients that cannot sign
+  # a proof. Each word is checked here, and a value that is not one is refused without being echoed.
+  if [ -n "${STATIC_KEY_IDS:-}" ]; then
+    local IFS=','
+    for id in $STATIC_KEY_IDS; do
+      [[ "$id" =~ ^[A-Za-z0-9._-]{1,128}$ ]] \
+        || die "STATIC_KEY_IDS holds an entry that is not a key id (A-Z a-z 0-9 . _ - , 1 to 128 characters, comma separated). Its value is not printed. Nothing was installed."
+      STATIC_KEY_IDS_LIST="$STATIC_KEY_IDS_LIST $id"
+    done
+    unset IFS
+  fi
   [ "$MINT_ON" = 1 ] \
-    || die "WITH_AGENT_TOKENS=1 on a box given its own client keys: the MCP broker needs a key of its own, so give it a line 'broker:<secret>' in your keys file, bound in your identity map to agent://$td/agents/*. Or remove CLIENT_KEYS_FILE and IDENTITY_MAP_FILE and let the installer mint the keys. Nothing was installed."
+    || die "agent tokens are on (the default) on a box given its own client keys: the MCP broker needs a key of its own, so give it a line 'broker:<secret>' in your keys file, bound in your identity map to agent://$td/agents/*. Or set WITH_AGENT_TOKENS=0 to keep static keys only (the weaker way out), or remove CLIENT_KEYS_FILE and IDENTITY_MAP_FILE and let the installer mint the keys. Nothing was installed."
 }
 
-# Section 3, after .env exists and before section 3e reads the keys: the enrolment
-# secret into its file, the registry line and the settings the doors read, and the
-# broker's own key into its file. Off, a run that said WITH_AGENT_TOKENS=0 forgets the
-# lines that turn the plane on and keeps every secret it minted.
+# Section 3, after .env exists and before section 3e reads the keys: the enrolment secret into its
+# file, the registry line and the settings the doors read, the settings that make wardryx verify the
+# token itself, and the broker's own key into its file. With WITH_AGENT_TOKENS=0 the doors are written
+# off and every line that turns the plane on is forgotten; the secrets it minted stay in their files.
 agent_tokens_apply() {
   local f="$STACK_DIR/agent-token.key" secret digest broker why v
   # The broker's key directory exists on every box, so compose never creates it as root.
   mkdir -p "$STACK_DIR/broker" || die "could not make $STACK_DIR/broker for the broker's key"
   chmod 0755 "$STACK_DIR/broker" || die "could not set the mode of $STACK_DIR/broker"
   if [ "$AGENT_TOKENS_ON" != 1 ]; then
-    if [ "${WITH_AGENT_TOKENS:-}" = 0 ] && [ -n "$(identity_env_get VOUCHRYX_AGENTS)" ]; then
+    if [ "${WITH_AGENT_TOKENS:-}" = 0 ]; then
       identity_env_set TOKENFUSE_AGENT_TOKENS off
+      # tokenfuse 1.19.0 refuses a static-key list under any mode but require, so the lists go too.
       for v in VOUCHRYX_AGENTS VOUCHRYX_ALLOWED_AUDIENCES BROKER_TAINT_GATEWAY BROKER_GATEWAY_KEY_FILE \
-          MCP_BROKER_DELEGATION_AUDIENCE MCP_BROKER_DELEGATION_URL; do
+          MCP_BROKER_DELEGATION_AUDIENCE MCP_BROKER_DELEGATION_URL \
+          WARDRYX_AGENT_TOKEN_ISSUER WARDRYX_AGENT_TOKEN_AUDIENCES WARDRYX_AGENT_TOKEN_JWKS_URL \
+          WARDRYX_AGENT_TOKEN_REVOCATION_URL WARDRYX_AGENT_TOKEN_DOOR_ORIGINS \
+          TOKENFUSE_AGENT_TOKENS_STATIC_KEYS TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS; do
         mint_env_forget "$v"
       done
-      note "agent tokens: off. The enrolment secret and the broker key stay in their files; nothing accepts them"
+      note "agent tokens: OFF (WITH_AGENT_TOKENS=0). Static keys only, as before this release, which is the weaker setting; the closing report says so. The enrolment secret and the broker key stay in their files"
     fi
     return 0
   fi
@@ -2035,7 +2070,7 @@ agent_tokens_apply() {
   # vouchryx reads each audience as an absolute URL (RFC 8707 resources), and the two doors name the
   # same https identifier, so one token verifies at both (CLAUDE.md invariant 40).
   identity_env_set VOUCHRYX_ALLOWED_AUDIENCES "$AGENT_AUDIENCE"
-  identity_env_set TOKENFUSE_AGENT_TOKENS accept
+  identity_env_set TOKENFUSE_AGENT_TOKENS require
   identity_env_set TOKENFUSE_DELEGATION_ISSUER http://vouchryx:4310
   identity_env_set TOKENFUSE_DELEGATION_AUDIENCE "$AGENT_AUDIENCE"
   identity_env_set TOKENFUSE_DELEGATION_URL "http://$GATEWAY_PROBE:4100"
@@ -2045,6 +2080,14 @@ agent_tokens_apply() {
   identity_env_set MCP_BROKER_DELEGATION_URL "http://$GATEWAY_PROBE:4200"
   identity_env_set BROKER_TAINT_GATEWAY http://tokenfuse-gateway:4100
   identity_env_set BROKER_GATEWAY_KEY_FILE /run/broker/key
+  # wardryx verifies the agent's token itself (wardryx 2.3.0, CLAUDE.md invariant 47): the same issuer,
+  # audience and key set the doors use, vouchryx's revocation list, and the origin each door is
+  # addressed by, because a DPoP proof names the URL it was sent to.
+  identity_env_set WARDRYX_AGENT_TOKEN_ISSUER http://vouchryx:4310
+  identity_env_set WARDRYX_AGENT_TOKEN_AUDIENCES "$AGENT_AUDIENCE"
+  identity_env_set WARDRYX_AGENT_TOKEN_JWKS_URL http://vouchryx:4310/.well-known/jwks.json
+  identity_env_set WARDRYX_AGENT_TOKEN_REVOCATION_URL http://vouchryx:4310/v1/revocations
+  identity_env_set WARDRYX_AGENT_TOKEN_DOOR_ORIGINS "http://tokenfuse-gateway:4100,http://tokenfuse-mcp-broker:4200,http://$GATEWAY_PROBE:4100,http://$GATEWAY_PROBE:4200"
   mint_env_secret GATEWAY_BROKER_KEY
   broker="$(identity_env_get GATEWAY_BROKER_KEY)"
   why="$(identity_entry_why "$broker:broker")"
@@ -2053,16 +2096,52 @@ agent_tokens_apply() {
   note "the broker's key: in $STACK_DIR/broker/key (0400, uid 10001, never printed)"
 }
 
-agent_tokens_reach_note() {
+# Section 3e, after mint_apply, when every client key is in .env: the static allow-lists the two doors
+# read under require (CLAUDE.md invariant 47). A key id is a static key only when it is NAMED here: felyx
+# and broker, which cannot sign a proof and are in use on every box that has them; the operator's
+# STATIC_KEY_IDS; and, on a re-run, every key id this box already had. A listed id must be a key the
+# door holds, or the door refuses to start, so STATIC_KEY_IDS naming a key this box does not have is refused.
+agent_static_keys_apply() {
+  local have id gw="" mcp="" have_mcp
   [ "$AGENT_TOKENS_ON" = 1 ] || return 0
-  printf '\n  Agent tokens are ON. The agent %s enrols at vouchryx, not published to the\n' "$AGENT_TOKEN_AGENT"
+  have=" $(client_key_ids "$(identity_env_get GATEWAY_CLIENT_KEYS)" | tr '\n' ' ')"
+  for id in $STATIC_KEY_IDS_LIST; do
+    case "$have" in *" $id "*) ;; *) die "STATIC_KEY_IDS names $id, which is not a client key this box holds. Nothing was started." ;; esac
+  done
+  for id in felyx broker $STATIC_KEY_IDS_LIST $EXISTING_GATEWAY_IDS; do
+    case "$have" in *" $id "*) case " $gw " in *" $id "*) ;; *) gw="$gw $id" ;; esac ;; esac
+  done
+  gw="${gw# }"
+  STATIC_GATEWAY_LIST="$(printf '%s' "$gw" | tr ' ' ',')"
+  identity_env_set TOKENFUSE_AGENT_TOKENS_STATIC_KEYS "$STATIC_GATEWAY_LIST"
+  # The broker's own list: only the key ids this box had before, since a fresh box has none to keep.
+  have_mcp=" $(client_key_ids "$(identity_env_get TOKENFUSE_MCP_KEYS)" | tr '\n' ' ')"
+  for id in $EXISTING_MCP_IDS; do
+    case "$have_mcp" in *" $id "*) mcp="$mcp $id" ;; esac
+  done
+  mcp="${mcp# }"
+  STATIC_MCP_LIST="$(printf '%s' "$mcp" | tr ' ' ',')"
+  identity_env_set TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS "$STATIC_MCP_LIST"
+}
+
+agent_tokens_reach_note() {
+  if [ "$AGENT_TOKENS_ON" != 1 ]; then
+    [ "${WITH_AGENT_TOKENS:-}" = 0 ] || return 0
+    printf '\n  Agent tokens are OFF (WITH_AGENT_TOKENS=0). This is the WEAKER setting: the gateway and\n'
+    printf '  the MCP broker admit every static client key, and wardryx verifies no agent token.\n'
+    printf '  Unset WITH_AGENT_TOKENS and run this installer again to turn them back on (CLAUDE.md invariant 47).'
+    return 0
+  fi
+  printf '\n  Agent tokens are ON (the default). The agent %s enrols at vouchryx, not published to the\n' "$AGENT_TOKEN_AGENT"
   printf '  host, with the secret in %s/agent-token.key (0600, never printed). It\n' "$STACK_DIR"
   printf '  exchanges that for a five-minute token bound to its DPoP key. It asks for the\n'
   printf '  audience with resource=%s (RFC 8707; audience= works too). A request that\n' "$AGENT_AUDIENCE"
   printf '  names none is refused audience_not_allowed. It then sends\n'
-  printf '  Authorization: DPoP <token> with a proof (carrying ath, RFC 9449). A static key still works beside it\n'
-  printf '  until you turn it off (CLAUDE.md invariant 40). Stop the agent with one call:\n'
-  printf '  POST http://vouchryx:4310/v1/revoke with ban, using VOUCHRYX_REVOKE_KEYS from .env.'
+  printf '  Authorization: DPoP <token> with a proof (carrying ath, RFC 9449). Stop the agent with one call:\n'
+  printf '  POST http://vouchryx:4310/v1/revoke with ban, using VOUCHRYX_REVOKE_KEYS from .env.\n'
+  printf '  Static keys still admitted at the gateway: %s\n' "${STATIC_GATEWAY_LIST:-none}"
+  printf '  Static keys still admitted at the MCP broker: %s\n' "${STATIC_MCP_LIST:-none}"
+  printf '  static keys still admitted; move these agents to tokens, or name each one in STATIC_KEY_IDS on purpose.'
 }
 # agent-tokens: end
 
@@ -3387,6 +3466,7 @@ door_identity_check "$DOOR_IMAGE" "$DOOR_CHECK_IMAGE"
 identity_apply
 door_identity_apply
 mint_apply
+agent_static_keys_apply
 
 # ---- 4. the files the services read -----------------------------------------
 if [ ! -f policy.yaml ]; then
