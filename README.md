@@ -1308,6 +1308,27 @@ day. The box's own stack is still what this README installs.
 beyond the file transport; the passkey ceremony; the WireGuard door
 reached from outside the LAN; `down -v`; a full disk; a lost `.env`.
 
+## What the install needs from the network
+
+The installer runs as root on a Debian or Ubuntu box you own. Outbound HTTPS is
+needed to these hosts. A step that cannot reach one stops there, and the message
+names the host and what cosign or curl reported.
+
+| Host | What it is for | When |
+|---|---|---|
+| `github.com`, `release-assets.githubusercontent.com` | the pinned cosign v3.1.3 binary. github.com redirects the file to the release-assets host, so both are needed | each install and re-run, until the binary in `/opt/agent-stack/bin/cosign` matches its pinned SHA-256 |
+| `tuf-repo-cdn.sigstore.dev` | the Sigstore trust root that cosign checks each signature against | before each signature check |
+| `ghcr.io` (and the blob host it redirects to) | the image manifests, the signatures, and the pulls | as before this release |
+| `raw.githubusercontent.com`, `api.github.com`, `api.ipify.org` | the compose file, the stack-k8s tarball, and the box's public address | as before this release |
+
+Checked on 2026-10-19 with cosign v3.1.3: a signature check does not contact the
+Rekor transparency log or Fulcio, because the inclusion proof travels with the
+signature. Blocking either host did not stop the check. Blocking the trust root
+host or the registry did.
+
+`BUILD_FROM_SOURCE=1` builds the planes locally. It pulls no published image and
+checks no signature, so it does not fetch cosign either.
+
 ## Images: pinned by digest, and ours checked before they start
 
 Every image the stack runs is pinned to the digest of the bytes it names. The

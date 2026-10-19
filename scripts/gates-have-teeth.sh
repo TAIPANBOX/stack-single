@@ -3171,6 +3171,21 @@ run_case "images-are-verified: the signer refuses the release workflow" fail \
 	"$(py 'edit("install.sh", "/\\.github/workflows/release\\.yml|", "/\\.github/workflows/release-x\\.yml|")')" \
 	"refuses the release identity"
 
+run_case "images-are-verified: a refused fetch of cosign names no host" fail \
+	'./scripts/images-are-verified.sh' \
+	"$(py 'edit("install.sh", "\x22$dest.download\x22 \x22$url\x22 2>&1)\x22", "\x22$dest.download\x22 \x22$url\x22 2>/dev/null)\x22")')" \
+	"does not name the host that failed"
+
+run_case "images-are-verified: an unreachable Sigstore trust root is not named" fail \
+	'./scripts/images-are-verified.sh' \
+	"$(py 'edit("install.sh", "die \x22could not reach the Sigstore trust root at tuf-repo-cdn.sigstore.dev, so", "die \x22could not check, so")')" \
+	"is not named as one, with its host"
+
+run_case "images-are-verified: a missing signature is reported as having some" fail \
+	'./scripts/images-are-verified.sh' \
+	"$(py 'edit("install.sh", "die \x22$name has no signature from a TAIPANBOX release workflow", "die \x22$name has no signed release from a TAIPANBOX release workflow")')" \
+	"is not reported as having none"
+
 run_case "images-are-verified: the signer accepts a branch ref" fail \
 	'./scripts/images-are-verified.sh' \
 	"$(py 'edit("install.sh", "@refs/tags/v[0-9][A-Za-z0-9._+-]*$", "@refs/[^@]*$")')" \

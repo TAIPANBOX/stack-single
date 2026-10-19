@@ -224,6 +224,7 @@ while [ $# -gt 0 ]; do
     *) shift ;;
   esac
 done
+if [ -n "${STUB_CURL_ERR:-}" ]; then printf '%s\n' "$STUB_CURL_ERR" >&2; exit 6; fi
 printf '%s' "${STUB_CURL_BYTES:-}" > "$out"
 SH
 
@@ -241,6 +242,7 @@ cat > "$scratch/cosign-stub" <<'SH'
 #!/usr/bin/env bash
 ref="${*: -1}"
 echo "verify $ref" >> "$STUB_LOG"
+if [ -n "${STUB_COSIGN_ERR:-}" ]; then printf '%s\n' "$STUB_COSIGN_ERR" >&2; exit 1; fi
 if [ -n "${STUB_FAIL_REF:-}" ] && [ "$ref" = "$STUB_FAIL_REF" ]; then exit 10; fi
 exit 0
 SH
@@ -286,6 +288,13 @@ elif ! grep -qF "does not match its pinned SHA-256" <<<"$out"; then
   fail "the cosign refusal does not say it does not match its pinned SHA-256: $(head -1 <<<"$out")"
 fi
 
+# G. a failed cosign download names the host that failed.
+if out_g="$(DRIVER_INSTALL=1 STUB_CURL_ERR='curl: (6) Could not resolve host: release-assets.githubusercontent.com' bash "$scratch/driver.sh" 2>&1)"; then
+  fail "a cosign download that failed was accepted"
+elif ! grep -qF 'release-assets.githubusercontent.com' <<<"$out_g"; then
+  fail "a failed cosign download does not name the host that failed: $(head -1 <<<"$out_g")"
+fi
+
 # Runs B and C use the stub as the installed cosign.
 cp "$scratch/cosign-stub" "$scratch/stack/bin/cosign"
 
@@ -322,6 +331,22 @@ elif grep -q '^pull .*wardryx' "$scratch/log"; then
   fail "wardryx was pulled after cosign refused its signature"
 elif grep -q '^pull .*vouchryx' "$scratch/log"; then
   fail "an image after the refused one was pulled, so the run did not stop at the refusal"
+fi
+
+# D. a refusal says why: a missing signature, an unreachable trust root and an
+# unreachable registry are three different messages, and the host is named.
+: > "$scratch/log"
+out_d="$(STUB_LOG="$scratch/log" STUB_COSIGN_ERR='Error: setting up clients and keys: getting rekor public keys: tuf: failed to download 13.root.json: Get "https://tuf-repo-cdn.sigstore.dev/13.root.json": dial tcp: lookup tuf-repo-cdn.sigstore.dev: no such host' bash "$scratch/driver.sh" 2>&1)"
+if ! grep -qF 'tuf-repo-cdn.sigstore.dev' <<<"$out_d" || ! grep -qF 'trust root' <<<"$out_d"; then
+  fail "an unreachable Sigstore trust root is not named as one, with its host: $(head -1 <<<"$out_d")"
+fi
+out_e="$(STUB_LOG="$scratch/log" STUB_COSIGN_ERR='Error: no signatures found' bash "$scratch/driver.sh" 2>&1)"
+if ! grep -qF 'has no signature from a TAIPANBOX release workflow' <<<"$out_e"; then
+  fail "an image with no signature is not reported as having none: $(head -1 <<<"$out_e")"
+fi
+out_f="$(STUB_LOG="$scratch/log" STUB_COSIGN_ERR='Error: ghcr.io: dial tcp: lookup ghcr.io: no such host' bash "$scratch/driver.sh" 2>&1)"
+if ! grep -qF 'registry ghcr.io' <<<"$out_f"; then
+  fail "an unreachable registry is not named as one: $(head -1 <<<"$out_f")"
 fi
 
 if [ "$problems" -gt 0 ]; then

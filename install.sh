@@ -3124,7 +3124,12 @@ cosign_install() {
   url="https://github.com/sigstore/cosign/releases/download/$COSIGN_VERSION/cosign-linux-$arch"
   mkdir -p "$STACK_DIR/bin"
   note "fetching cosign $COSIGN_VERSION for $arch"
-  curl -fsSL -o "$dest.download" "$url" || die "could not fetch cosign $COSIGN_VERSION from $url"
+  # curl names the host that failed in its own message. The file is served by github.com,
+  # which redirects it to release-assets.githubusercontent.com, so either can be the one.
+  if ! fetch_err="$(curl -fsSL -o "$dest.download" "$url" 2>&1)"; then
+    rm -f "$dest.download"
+    die "could not download cosign $COSIGN_VERSION (needs outbound HTTPS to github.com and release-assets.githubusercontent.com; see README, \"What the install needs from the network\"). curl said: ${fetch_err%%$'\n'*}"
+  fi
   # The bytes are checked before anything can run them. A download that does not match
   # the SHA-256 pinned above is removed and never installed.
   if ! printf '%s  %s\n' "$want" "$dest.download" | sha256sum -c --status; then
@@ -3136,11 +3141,23 @@ cosign_install() {
 }
 
 image_verify() {
-  local ref="$1"
-  if ! "$STACK_DIR/bin/cosign" verify --certificate-identity-regexp "$TAIPANBOX_SIGNER" --certificate-oidc-issuer "$TAIPANBOX_ISSUER" "$ref" >/dev/null 2>&1; then
-    die "${ref%%@*} has no signature from a TAIPANBOX release workflow for its digest, so it was not pulled and the stack was not started"
+  local ref="$1" out why name
+  name="${ref%%@*}"
+  # cosign's stderr is kept, so a refusal can say whether the image has no signature or
+  # cosign could not reach the services that check one.
+  if ! out="$("$STACK_DIR/bin/cosign" verify --certificate-identity-regexp "$TAIPANBOX_SIGNER" --certificate-oidc-issuer "$TAIPANBOX_ISSUER" "$ref" 2>&1 >/dev/null)"; then
+    why="$(grep -i -m1 'error' <<<"$out" || printf '%s' "${out%%$'\n'*}")"
+    if grep -qiE 'no matching signatures|no signatures found' <<<"$out"; then
+      die "$name has no signature from a TAIPANBOX release workflow for its digest, so it was not pulled and the stack was not started"
+    elif grep -qiE 'tuf|trusted root|trusted_root' <<<"$out"; then
+      die "could not reach the Sigstore trust root at tuf-repo-cdn.sigstore.dev, so $name was not checked and was not pulled. This install needs outbound HTTPS to tuf-repo-cdn.sigstore.dev (see README, \"What the install needs from the network\"). cosign said: $why"
+    elif grep -qi 'ghcr.io' <<<"$out"; then
+      die "could not reach the registry ghcr.io to check $name, so it was not pulled. This install needs outbound HTTPS to ghcr.io. cosign said: $why"
+    else
+      die "could not check the signature of $name, so it was not pulled. cosign said: $why"
+    fi
   fi
-  note "signature verified: ${ref%%@*}"
+  note "signature verified: $name"
 }
 # image-verify: end
 

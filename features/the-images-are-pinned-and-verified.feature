@@ -71,6 +71,14 @@ Feature: Images are pinned by digest, and ours are verified before anything star
     Then it carries no flag that skips the transparency log, the SCT or the identity
     # -> gates-have-teeth.sh "images-are-verified: the verify call skips the transparency log"
 
+  Scenario: A refusal names the host it could not reach, and says whether a signature is missing
+    Given cosign cannot be downloaded, or cannot reach its trust root or the registry, or an image has no signature
+    When the installer stops
+    Then the message names the host, or says the image has no signature
+    # -> gates-have-teeth.sh "images-are-verified: a refused fetch of cosign names no host"
+    # -> gates-have-teeth.sh "images-are-verified: an unreachable Sigstore trust root is not named"
+    # -> gates-have-teeth.sh "images-are-verified: a missing signature is reported as having some"
+
   Scenario: The cosign binary is never run unless its SHA-256 matches the pin
     Given a cosign download whose bytes differ from the pinned SHA-256
     When the installer fetches it
