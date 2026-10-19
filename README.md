@@ -666,10 +666,12 @@ WITH_AGENT_TOKENS=0 ./install.sh   # the weaker way out: static keys only, as be
 The installer prints the allow-list in its closing report, under "static keys still admitted;
 move these agents to tokens". On a fresh box that list is the console's own key (`felyx`) and the
 broker's taint-relay key (`broker`), because neither can sign a proof. On a re-run it keeps
-exactly the list the last run wrote, so nothing that worked yesterday stops, and it never adds a key
+exactly the list the last run wrote, and it names `felyx` and the broker again whenever the box holds them, so nothing that worked yesterday stops, and it never adds a key
 the installer minted for the agents or the fire drills. An upgrade does take them off a list a 1.3.1 re-run
 had widened, on both doors, unless `STATIC_KEY_IDS` names them: `STATIC_KEY_IDS=agents ./install.sh` keeps
-agents. The closing report says which ids the run removed. To keep another client,
+agents. The closing report says which ids the run removed. The choice is not sticky: a run without
+`STATIC_KEY_IDS=agents` removes the agents' key again. Name it on every run while the agents move to
+tokens, or the agents are refused until they do. To keep another client,
 name its key id in `STATIC_KEY_IDS` (comma-separated, for a client that cannot sign a proof), and
 the installer refuses a name that is not one of the box's keys. Moving an agent to a token is the
 way to take it off the list.
@@ -677,7 +679,9 @@ way to take it off the list.
 #### Upgrading a box with static-key agents (1.3.0)
 
 - A box that ran 1.3.1 more than once had the agents' and the fire drills' keys on its static lists. This run removes
-  them from both lists, unless `STATIC_KEY_IDS` names them (`STATIC_KEY_IDS=agents ./install.sh` keeps agents).
+  them from both lists, unless `STATIC_KEY_IDS` names them. The choice is not sticky: name it on every run
+  (`STATIC_KEY_IDS=agents ./install.sh`) while the agents move to tokens, or a run without it removes
+  the agents' key again.
   A call with a removed static key is refused `401` `agent_token_required` until the agent uses a token.
 - An agent that calls with a static key it does not hold on the list is refused `401`
   `agent_token_required` after the first run of this release. The same key on a re-run keeps
@@ -1393,6 +1397,21 @@ host or the registry did.
 
 `BUILD_FROM_SOURCE=1` builds the planes locally. It pulls no published image and
 checks no signature, so it does not fetch cosign either.
+
+## Compose profiles: what a re-run does to each one
+
+Every profile in `compose.yaml` is one of two kinds, and the installer treats each by its own rule. The
+two lists are one table in `install.sh` (`PROFILES_INSTALLED` and `PROFILES_OPERATOR`).
+
+- **Installer-managed** (`record`, `typed`, `typed-risk-signal`, `delegation`, `openai-door`): this installer
+  starts them from its own flags. A run that turns one off stops and removes its containers, by name.
+- **Operator-started** (`egress`, `egress-browser`, `finops`, `routines`, `manual`): you start them with
+  `docker compose --profile P up -d`, and the installer never removes them. A running container of one is
+  started again at this run's pinned image, so an upgrade leaves no old image behind. A stopped one stays
+  stopped. The closing report lists each one it kept, with its image.
+
+A profile in `compose.yaml` that is in neither list, or in both, is refused by the gate
+`scripts/profiles-off-are-removed.sh`, so a new profile cannot fall through either rule.
 
 ## Images: pinned by digest, and ours checked before they start
 

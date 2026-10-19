@@ -18,3 +18,9 @@ Feature: a re-run keeps the static allow-list it had and widens nothing
     When the installer writes the allow-list
     Then agent-tokens-are-wired.sh fails if the agents key is named by the first run
     # -> gates-have-teeth.sh "agent-tokens-are-wired: the agents key joins the list on the first run"
+
+  Scenario: felyx and the broker are named on every run the box holds them, even after an empty list
+    Given a box whose list was written empty by a run that held neither, and that later holds felyx
+    When the installer runs again
+    Then agent-tokens-are-wired.sh fails if felyx is not named on the gateway's list
+    # -> gates-have-teeth.sh "agent-tokens-are-wired: the allow-list drops felyx"

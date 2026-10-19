@@ -2101,10 +2101,8 @@ agent_tokens_resolve() {
   # .env. Only a box whose .env predates the list takes its ids from its keys, and then never the two
   # keys the installer minted for the agents and the fire drills, which must go through a token.
   if identity_env_has TOKENFUSE_AGENT_TOKENS_STATIC_KEYS; then
-    PRIOR_GW_PRESENT=1
     EXISTING_GATEWAY_IDS="$(identity_env_get TOKENFUSE_AGENT_TOKENS_STATIC_KEYS | tr ',' ' ')"
   else
-    PRIOR_GW_PRESENT=0
     EXISTING_GATEWAY_IDS="$(client_key_ids "$(identity_env_get GATEWAY_CLIENT_KEYS)" | grep -v -x -E 'felyx|broker|agents|drills' | tr '\n' ' ' || true)"
   fi
   if identity_env_has TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS; then
@@ -2268,10 +2266,10 @@ agent_static_keys_apply() {
   for id in $STATIC_KEY_IDS_LIST; do
     case "$have" in *" $id "*) ;; *) die "STATIC_KEY_IDS names $id, which is not a client key this box holds. Nothing was started." ;; esac
   done
-  # felyx and the broker are named on a box's first run, by design. A re-run names what the last run named
-  # (EXISTING_GATEWAY_IDS, read from .env), and the operator's STATIC_KEY_IDS, and nothing else.
-  named=""
-  [ "${PRIOR_GW_PRESENT:-0}" = 1 ] || named="felyx broker"
+  # felyx and the broker are named on every run the box holds them (1.4.0, supervisor review of f39c64b): a
+  # list written empty by a box that held neither must not refuse a key added later. A re-run names what the
+  # last run named (EXISTING_GATEWAY_IDS, read from .env), and the operator's STATIC_KEY_IDS, and nothing else.
+  named="felyx broker"
   for id in $named $EXISTING_GATEWAY_IDS $STATIC_KEY_IDS_LIST; do
     case "$have" in *" $id "*) ;; *) continue ;; esac
     if ! static_keep_ok "$id"; then
@@ -3871,16 +3869,21 @@ fi
 # reads the files. A refusal here is before any container starts.
 egress_override .
 "${COMPOSE[@]}" "${UP_PROFILES[@]}" up -d --remove-orphans
-# `up --remove-orphans` does not remove a container whose profile this run does
-# not name (measured 2026-10-04 on Docker Desktop's compose v2: a proxy started
-# under typed-risk-signal kept running through an `up` without it). So every profile
-# this compose file defines that this run does not name is stopped and its containers
-# removed, by name, under that profile (CLAUDE.md invariant 50, 1.4.0). Before 1.4.0
-# two profiles were removed by hand and the rest were left to chance: after the
-# 1.1.35 to 1.3.1 upgrade on forge the costcrew container of profile finops still ran
-# image v0.6.0. A profile this run names is left to `up`, which recreates a container
-# whose pinned image or configuration changed. A box that never had a container of a
-# profile has nothing to remove, which is why a failure is ignored.
+# profile-table: begin
+# The compose profiles of this file, in the two kinds the installer treats differently (CLAUDE.md invariant 50).
+# PROFILES_INSTALLED: this installer starts these from its own flags. A run that turns one off stops and removes
+# its containers by name. PROFILES_OPERATOR: an operator starts these with `docker compose --profile P up -d`.
+# This installer never removes them; a RUNNING one is re-upped at this run's pinned image, so an upgrade leaves
+# no stale image behind (forge's costcrew stayed on v0.6.0 after 1.1.35 to 1.3.1). One place: a profile of
+# compose.yaml that is in neither list, or in both, is refused by scripts/profiles-off-are-removed.sh.
+PROFILES_INSTALLED="record typed typed-risk-signal delegation openai-door"
+PROFILES_OPERATOR="egress egress-browser finops routines manual"
+# profile-table: end
+
+# `up --remove-orphans` does not remove a container whose profile this run does not name (measured 2026-10-04).
+# So an installer-managed profile this run turns off has its containers removed by name, under that profile.
+# An operator-started profile is never removed: a running container of it is re-upped at this run's pinned
+# image (`up -d <service>`), and the closing report lists it with its image (CLAUDE.md invariant 50, 1.4.0).
 profile_is_named() { # NAME: whether this run names the profile
   local a prev=""
   for a in "${UP_PROFILES[@]}"; do
@@ -3889,8 +3892,15 @@ profile_is_named() { # NAME: whether this run names the profile
   done
   return 1
 }
+profile_kind() { # NAME: installer, operator, or unknown when the table does not list it
+  case " $PROFILES_INSTALLED " in *" $1 "*) echo installer; return 0 ;; esac
+  case " $PROFILES_OPERATOR " in *" $1 "*) echo operator; return 0 ;; esac
+  echo unknown
+}
+# "PROFILE SERVICE IMAGE" lines of operator-started services kept on this run, for the closing report.
+PROFILE_KEPT=""
 profiles_off_remove() {
-  local p s base named_svcs="" list off_list=""
+  local p s base named_svcs="" list off_list="" svc img state now
   base="$("${COMPOSE[@]}" config --services 2>/dev/null | sort -u || true)"
   # The services of the profiles this run names: a service that also belongs to one is never removed.
   for p in $("${COMPOSE[@]}" config --profiles 2>/dev/null || true); do
@@ -3899,16 +3909,45 @@ profiles_off_remove() {
   done
   for p in $("${COMPOSE[@]}" config --profiles 2>/dev/null || true); do
     profile_is_named "$p" && continue
-    list="$("${COMPOSE[@]}" --profile "$p" config --services 2>/dev/null | sort -u | comm -23 - <(printf '%s\n' "$base") || true)"
-    off_list=""
-    for s in $list; do
-      case " $named_svcs " in *" $s "*) ;; *) off_list="$off_list $s" ;; esac
-    done
-    [ -n "$off_list" ] || continue
-    for s in $off_list; do
-      "${COMPOSE[@]}" --profile "$p" rm -sf "$s" >/dev/null 2>&1 || true
-    done
+    case "$(profile_kind "$p")" in
+      operator)
+        while IFS=' ' read -r svc img state; do
+          [ "$state" = running ] || continue
+          "${COMPOSE[@]}" --profile "$p" up -d "$svc" >/dev/null 2>&1 \
+            || die "could not re-up $svc, the running $p service, at this run's pinned image. Nothing else was removed by this step."
+          now="$("${COMPOSE[@]}" --profile "$p" ps --format '{{.Image}}' "$svc" 2>/dev/null || true)"
+          now="${now%%$'\n'*}"
+          PROFILE_KEPT="$PROFILE_KEPT$p $svc ${now:-$img}
+"
+        done < <("${COMPOSE[@]}" --profile "$p" ps --format '{{.Service}} {{.Image}} {{.State}}' 2>/dev/null || true)
+        ;;
+      installer)
+        list="$("${COMPOSE[@]}" --profile "$p" config --services 2>/dev/null | sort -u | comm -23 - <(printf '%s\n' "$base") || true)"
+        off_list=""
+        for s in $list; do
+          case " $named_svcs " in *" $s "*) ;; *) off_list="$off_list $s" ;; esac
+        done
+        for s in $off_list; do
+          "${COMPOSE[@]}" --profile "$p" rm -sf "$s" >/dev/null 2>&1 || true
+        done
+        ;;
+      *)
+        note "profile $p is in neither profile list in install.sh, so it is left alone"
+        ;;
+    esac
   done
+}
+profile_reach_note() {
+  printf '\n  Operator-started profiles kept on this run. This installer never removes them; a running\n'
+  printf '  container of one is re-upped at this run'"'"'s pinned image.'
+  if [ -z "${PROFILE_KEPT// /}" ]; then
+    printf '\n  none running on this box'
+  else
+    while IFS=' ' read -r p svc img; do
+      [ -n "$p" ] || continue
+      printf '\n  %s: %s, image %s' "$p" "$svc" "$img"
+    done <<<"$PROFILE_KEPT"
+  fi
 }
 profiles_off_remove
 # The gateway reads its identity map once, at start, and a new map behind the same
@@ -4171,7 +4210,7 @@ elif [ "$IDENTITY_KEYS_COUNT" -gt 0 ]; then
 fi
 # The gateway always holds client keys now (compose requires them), so the branch
 # for a map with no keys, which used to follow, is gone with it.
-IDENTITY_REACH="$IDENTITY_REACH$(felyx_gateway_note)$(upstream_reach_note)$(agent_tokens_reach_note)"
+IDENTITY_REACH="$IDENTITY_REACH$(felyx_gateway_note)$(upstream_reach_note)$(agent_tokens_reach_note)$(profile_reach_note)"
 
 # The OpenAI door, when this box runs it: where an agent points, what it sends,
 # who pays, and what this box does not see of it. Its keys are named by where they

@@ -717,7 +717,11 @@ an absent invariant.
     FinOps console, is such an add-on. `costcrew` and its one-shot
     `costcrew-init` sit behind the `finops` profile and nothing else; the only
     way to start it is `docker compose --profile finops up -d costcrew`, typed
-    by a person. `install.sh` has no flag for it and no line that names it,
+    by a person.
+    1.4.0: the profile table in install.sh (invariant 50) names the profile once, in PROFILES_OPERATOR, so
+    the installer never removes a running one and re-ups it at this run's pins. That table line is the only
+    line of install.sh that names the add-on; a start, a `--profile finops`, or a row in PROFILES_INSTALLED is
+    still refused by finops-is-opt-in.sh. `install.sh` has no flag for it and no line that names it,
     because the other ways of switching a profile on (`--profile`,
     `COMPOSE_PROFILES`) are each one line in a script that runs as root on
     somebody else's box, for a console that script has nothing to verify about.
@@ -1601,17 +1605,21 @@ an absent invariant.
     `features/the-volumes-are-re-owned-on-every-up.feature`. Not covered: a service without a `user:` line, a file a
     process writes as another uid than its service, and an upgrade run on a live box.)*
 
-50. **A compose profile this run does not name has no container left behind, and a profile it names keeps its containers.**
-    `@claude 2026-10-19`: `up --remove-orphans` does not remove a container whose profile the run does not name
-    (measured 2026-10-04). Before this release two profiles were removed by hand, and forge's costcrew (profile
-    `finops`) still ran image v0.6.0 after the 1.1.35 to 1.3.1 upgrade. The cleanup asks compose for every profile the
-    file defines, stops and removes the services of each profile that is off (by name, under that profile), and never
-    removes a service that a named profile also names. *(gate: `scripts/profiles-off-are-removed.sh`, which runs the
-    installer's cleanup slice against a stub compose that knows every profile; 3 teeth cases in
-    `scripts/gates-have-teeth.sh`; `features/every-profile-that-is-off-is-removed.feature`. Not covered: a profile this run
-    names keeping a container whose pinned image is stale. Compose recreates a container whose configuration changed,
-    which a digest pin does change, but no gate measures that; a live install would.)*
-
+50. **Every compose profile is installer-managed or operator-started, and the installer treats each kind by its own rule.**
+    `@claude 2026-10-19`, revised 1.4.0. The first version removed every profile a run did not name, which also removed
+    what the README tells an operator to start by hand (egress, egress-browser, finops, routines). One table in
+    install.sh (`# profile-table:`) sorts each profile. Installer-managed (`record`, `typed`, `typed-risk-signal`,
+    `delegation`, `openai-door`): started from the installer's flags; a run that turns one off stops and removes its
+    containers by name. Operator-started (`egress`, `egress-browser`, `finops`, `routines`, `manual`): never removed by
+    the installer; a RUNNING container of one is re-upped at this run's pinned image (`up -d <service>`), so an upgrade
+    leaves no stale image (forge's costcrew stayed on v0.6.0 after 1.1.35 to 1.3.1); a stopped one stays stopped; the
+    closing report lists each one kept, with its image. *(gate: `scripts/profiles-off-are-removed.sh`, which runs the
+    installer's cleanup slice against a stub compose: a running finops costcrew and egress scopyx are re-upped and kept,
+    the installer-managed profiles that are off are removed, WITH_RECORD=0 removes record-seal, and every compose
+    profile is in exactly one list; 8 teeth cases in `scripts/gates-have-teeth.sh`;
+    `features/every-profile-that-is-off-is-removed.feature`. Not covered: a re-upped operator service whose new image
+    fails to start (the step dies and says so), and a profile this run names keeping a stale image; compose recreates a
+    container whose configuration changed, which a digest pin does change, and no gate measures that on a live stack.)*
 51. **The record plane is a core control: on by default, from the pinned trailryx-node image, and `WITH_RECORD=0` is the explicit way off.**
     `@claude 2026-10-19`: before this release an unset WITH_RECORD meant off, WITH_RECORD=1 built trailryx from
     source, and the `up` never named the record profile, so a default box ran no record plane. The image is the
@@ -1638,9 +1646,10 @@ an absent invariant.
     fire drills' keys without a token, because the list was built from every key the box held. Now the list comes from
     the `TOKENFUSE_AGENT_TOKENS_STATIC_KEYS` the last run wrote (and the MCP list from its own). Only a box whose `.env`
     predates the list takes its ids from its keys, and then not the two keys the installer minted. felyx and the broker are
-    named on a first run, by design. An upgrade removes
+    named on every run the box holds them (1.4.0). An upgrade removes
     agents and drills from both lists, a list a 1.3.1 re-run had widened, unless STATIC_KEY_IDS names them, and the
-    closing report says which it removed (1.4.0). *(gate: `scripts/agent-tokens-are-wired.sh`, section H (the list per case) and section I
+    closing report says which it removed (1.4.0). Named once, a key stays named only while a run names it:
+    the choice is not sticky, so the operator names it on every run. *(gate: `scripts/agent-tokens-are-wired.sh`, section H (the list per case) and section I
     (two runs on one `.env`, the second must write what the first wrote); 2 teeth cases plus the existing ones in
     `scripts/gates-have-teeth.sh`; `features/a-re-run-keeps-its-allow-list.feature`. Not covered: a live second install on a
     box, and a box whose static key was listed by hand.)*

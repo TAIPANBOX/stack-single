@@ -385,8 +385,23 @@ for n in sorted(subjects):
                 note(f"{init_name[0]} gives {imounts[data_vol]} to {chown.group(1)}:{chown.group(2)} but the console runs as {user}")
 
 # ---- B. install.sh does not know it exists -----------------------------------
+# 1.4.0 (CLAUDE.md invariant 50): the profile table in install.sh names this profile ONCE, as operator-started
+# (PROFILES_OPERATOR), which is what keeps the installer from ever removing a running one. That line is the only
+# one allowed to name it. Any other line that names it, a start, a `--profile finops`, or a row in the other list,
+# is still refused, because an install must not know about the add-on so that it cannot start it.
+table_lines = set()
+in_table = False
+for i, l in enumerate(install.split("\n")):
+    if l.startswith("# profile-table: begin"):
+        in_table = True
+    elif l.startswith("# profile-table: end"):
+        in_table = False
+    elif in_table and re.match(r"^PROFILES_OPERATOR=", l):
+        table_lines.add(i + 1)
 code_lines = [(i + 1, l.split("#", 1)[0]) for i, l in enumerate(install.split("\n"))]
 for no, l in code_lines:
+    if no in table_lines:
+        continue
     # `finops` as the profile's own lowercase word: install.sh's closing report
     # says "FinOps export" about stack-up's routine, which is not this.
     if re.search(r"(?i:costcrew)|\bfinops\b", l):

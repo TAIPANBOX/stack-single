@@ -320,6 +320,10 @@ else
   # agents and fire-drills keys are held on the box but were never on the list, so they must not join it.
   allow_case "a re-run keeps exactly the list it had, and never adds a key the installer minted" \
     'S1:felyx,S2:broker,S3:agents,S4:drills' '' 'felyx broker' 'S9:stack-single' 'stack-single' 'felyx,broker' 'stack-single' 1
+  # 1.4.0 (supervisor review of f39c64b): felyx and the broker are named whenever the box holds them, on every
+  # run. A box whose list was written empty (it held neither) and that later gets a felyx key must not be refused.
+  allow_case "felyx and the broker are named on a re-run when the box holds them, even if the list was empty" \
+    'S1:felyx,S2:broker' '' '' 'S9:stack-single' '' 'felyx,broker' 'stack-single' 1
   # 1.4.0 (decision of the supervisor): a list a 1.3.1 re-run widened loses the installer's own agents and
   # drills keys, unless the operator names them in STATIC_KEY_IDS. The broker's list is cut the same way.
   allow_case "a list widened by a 1.3.1 re-run loses agents and drills, on both doors" \

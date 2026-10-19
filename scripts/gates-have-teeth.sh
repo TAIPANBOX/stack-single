@@ -3077,7 +3077,7 @@ run_case "agent-tokens-are-wired: the off path keeps its static-key list" fail \
 
 run_case "agent-tokens-are-wired: the allow-list drops felyx" fail \
 	'./scripts/agent-tokens-are-wired.sh' \
-	"$(py 'edit("install.sh", "|| named=\"felyx broker\"", "|| named=\"broker\"")')" \
+	"$(py 'edit("install.sh", "named=\"felyx broker\"", "named=\"broker\"")')" \
 	"H. a fresh box names felyx"
 
 run_case "agent-tokens-are-wired: the allow-list lists a key the box does not hold" fail \
@@ -3088,7 +3088,7 @@ run_case "agent-tokens-are-wired: the allow-list lists a key the box does not ho
 run_case "agent-tokens-are-wired: a re-run drops an existing key id" fail \
 	'./scripts/agent-tokens-are-wired.sh' \
 	"$(py 'edit("install.sh", "for id in $named $EXISTING_GATEWAY_IDS $STATIC_KEY_IDS_LIST; do", "for id in $named $STATIC_KEY_IDS_LIST; do")')" \
-	"H. a re-run keeps"
+	"H. a box from before the list keeps its own keys"
 
 run_case "agent-tokens-are-wired: the gateway's audience is empty" fail \
 	'./scripts/agent-tokens-are-wired.sh' \
@@ -3466,13 +3466,13 @@ run_case "broker-key: a comment beside the broker refusal is not a fault" pass \
 
 run_case "agent-tokens-are-wired: a re-run widens the static list again (the minted agents and drills join it)" fail \
 	'./scripts/agent-tokens-are-wired.sh' \
-	"$(py 'edit("install.sh", "  if identity_env_has TOKENFUSE_AGENT_TOKENS_STATIC_KEYS; then\n    PRIOR_GW_PRESENT=1", "  if false; then\n    PRIOR_GW_PRESENT=1")
+	"$(py 'edit("install.sh", "  if identity_env_has TOKENFUSE_AGENT_TOKENS_STATIC_KEYS; then\n", "  if false; then\n")
 edit("install.sh", "grep -v -x -E '\''felyx|broker|agents|drills'\'' | tr", "tr")')" \
 	"the second run widened the allow-list"
 
 run_case "agent-tokens-are-wired: the agents key joins the list on the first run" fail \
 	'./scripts/agent-tokens-are-wired.sh' \
-	"$(py 'edit("install.sh", "|| named=\"felyx broker\"", "|| named=\"felyx broker\"\n  STATIC_KEY_IDS_LIST=\"$STATIC_KEY_IDS_LIST agents\"")')" \
+	"$(py 'edit("install.sh", "named=\"felyx broker\"", "named=\"felyx broker\"\n  STATIC_KEY_IDS_LIST=\"$STATIC_KEY_IDS_LIST agents\"")')" \
 	"a fresh box names felyx and broker"
 
 run_case "agent-tokens-are-wired: a re-run keeps the agents key the upgrade dropped" fail \
@@ -3492,23 +3492,58 @@ run_case "agent-tokens-are-wired: a comment about the own agents key is not a fa
 
 run_case "agent-tokens-are-wired: a comment in the allow-list block is not a fault" pass \
 	'./scripts/agent-tokens-are-wired.sh' \
-	"$(py 'edit("install.sh", "  [ \"${PRIOR_GW_PRESENT:-0}\" = 1 ] || named=\"felyx broker\"\n", "  # a comment in the allow-list block is not a fault\n  [ \"${PRIOR_GW_PRESENT:-0}\" = 1 ] || named=\"felyx broker\"\n")')" \
+	"$(py 'edit("install.sh", "  named=\"felyx broker\"\n", "  # a comment in the allow-list block is not a fault\n  named=\"felyx broker\"\n")')" \
 	""
 
 run_case "profiles-off-are-removed: the cleanup names the off profiles by hand and misses finops" fail \
 	'./scripts/profiles-off-are-removed.sh' \
 	"$(py 'edit("install.sh", "  for p in $(\"${COMPOSE[@]}\" config --profiles 2>/dev/null || true); do\n    profile_is_named \"$p\" && continue\n", "  for p in typed-risk-signal openai-door; do\n    profile_is_named \"$p\" && continue\n")')" \
-	"the stale costcrew of profile finops is not removed"
+	"the stale typryx of profile typed is not removed"
 
 run_case "profiles-off-are-removed: the cleanup removes the containers of a profile this run names, with no shared-service guard" fail \
 	'./scripts/profiles-off-are-removed.sh' \
-	"$(py 'edit("install.sh", "    profile_is_named \"$p\" && continue\n    list=", "    list=")
+	"$(py 'edit("install.sh", "    profile_is_named \"$p\" && continue\n    case \"$(profile_kind \"$p\")\" in", "    case \"$(profile_kind \"$p\")\" in")
 edit("install.sh", "      case \" $named_svcs \" in *\" $s \"*) ;; *) off_list=\"$off_list $s\" ;; esac", "      off_list=\"$off_list $s\"")')" \
-	"B. record-seal belongs to a profile this run names"
+	"C. record-seal belongs to a profile this run names"
 
 run_case "profiles-off-are-removed: a comment in the profile cleanup is not a fault" pass \
 	'./scripts/profiles-off-are-removed.sh' \
 	"$(py 'edit("install.sh", "profiles_off_remove() {\n", "profiles_off_remove() {\n  # a comment in the cleanup is not a fault\n")')" \
+	""
+
+run_case "profiles-off-are-removed: a running operator-started container is removed, not kept" fail \
+	'./scripts/profiles-off-are-removed.sh' \
+	"$(py 'edit("install.sh", "up -d \"$svc\" >/dev/null 2>&1", "rm -sf \"$svc\" >/dev/null 2>&1")')" \
+	"belongs to an operator-started profile, and the installer removed it"
+
+run_case "profiles-off-are-removed: a running operator-started container is not re-upped at this run's pins" fail \
+	'./scripts/profiles-off-are-removed.sh' \
+	"$(py 'edit("install.sh", "\"${COMPOSE[@]}\" --profile \"$p\" up -d \"$svc\"", "true")')" \
+	"is not re-upped at this run"
+
+run_case "profiles-off-are-removed: a profile the two lists leave out is refused" fail \
+	'./scripts/profiles-off-are-removed.sh' \
+	"$(py 'edit("install.sh", "PROFILES_OPERATOR=\"egress egress-browser finops routines manual\"", "PROFILES_OPERATOR=\"egress egress-browser finops manual\"")')" \
+	"compose.yaml's profile routines is in neither"
+
+run_case "profiles-off-are-removed: the record plane left out of the installer list keeps record-seal under WITH_RECORD=0" fail \
+	'./scripts/profiles-off-are-removed.sh' \
+	"$(py 'edit("install.sh", "PROFILES_INSTALLED=\"record typed typed-risk-signal delegation openai-door\"", "PROFILES_INSTALLED=\"typed typed-risk-signal delegation openai-door\"")')" \
+	"D. with WITH_RECORD=0 the running record-seal is not removed"
+
+run_case "finops-is-opt-in: the installer-managed list names the add-on, so the installer could start it" fail \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("install.sh", "PROFILES_INSTALLED=\"record typed", "PROFILES_INSTALLED=\"finops record typed")')" \
+	"names the add-on"
+
+run_case "finops-is-opt-in: a line starts the add-on outside the table" fail \
+	'./scripts/finops-is-opt-in.sh' \
+	"$(py 'edit("install.sh", "profiles_off_remove\n", "profiles_off_remove\n\"${COMPOSE[@]}\" --profile finops up -d costcrew\n")')" \
+	"names the add-on"
+
+run_case "profiles-off-are-removed: a comment beside the profile table is not a fault" pass \
+	'./scripts/profiles-off-are-removed.sh' \
+	"$(py 'edit("install.sh", "PROFILES_OPERATOR=\"egress", "# a comment beside the table is not a fault\nPROFILES_OPERATOR=\"egress")')" \
 	""
 
 run_case "volumes-are-reowned: the gateway's traces are re-owned without -R, so its old journal stays uid 10001" fail \
