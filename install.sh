@@ -1904,12 +1904,12 @@ upstream_resolve() {
   fi
 }
 
-upstream_put() { # KEY DIR [OWNER]: DIR/key holds KEY, 0400, owned by OWNER (uid 10001 unless named). Never prints KEY.
-  local k="$1" dir="$2" owner="${3:-10001:10001}" tmp
+upstream_put() { # KEY DIR: DIR/key holds KEY, 0400, owned by uid 10001. Never prints KEY.
+  local k="$1" dir="$2" tmp
   tmp="$dir/.key.tmp"
   ( umask 077; printf '%s' "$k" >"$tmp" ) || die "could not write the provider key into $dir"
-  if ! { chown "$owner" "$tmp" && chmod 0400 "$tmp" && mv -f "$tmp" "$dir/key"; }; then
-    die "could not put the provider key in place in $dir (mode 0400, owner $owner)"
+  if ! { chown 10001:10001 "$tmp" && chmod 0400 "$tmp" && mv -f "$tmp" "$dir/key"; }; then
+    die "could not put the provider key in place in $dir (mode 0400, uid 10001)"
   fi
 }
 
@@ -2108,7 +2108,8 @@ agent_tokens_apply() {
   # The broker runs as uid 20012 (CLAUDE.md invariant 41), so the key it reads is its own: owned by that uid,
   # 0400. A key owned by 10001 is unreadable to the broker, which then refuses to start (tokenfuse
   # mcpbroker.rs: "TOKENFUSE_MCP_TAINT_GATEWAY_KEY_FILE is not set") and restarts in a loop.
-  upstream_put "$broker" "$STACK_DIR/broker" 20012:10001
+  upstream_put "$broker" "$STACK_DIR/broker"
+  chown 20012:10001 "$STACK_DIR/broker/key" || die "could not give the broker's key to uid 20012 in $STACK_DIR/broker"
   note "the broker's key: in $STACK_DIR/broker/key (0400, uid 20012, never printed)"
 }
 

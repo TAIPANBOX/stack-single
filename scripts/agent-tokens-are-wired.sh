@@ -263,7 +263,7 @@ else
   done
   printf '%s\n' "$BLOCK" | grep -qF 'http://tokenfuse-gateway:4100,http://tokenfuse-mcp-broker:4200' \
     || fail "wardryx's door origins do not name the gateway and the broker: a proof addressed to either is refused (invariant 47)"
-  printf '%s\n' "$BLOCK" | grep -qF 'upstream_put "$broker" "$STACK_DIR/broker" 20012:10001' \
+  printf '%s\n' "$BLOCK" | grep -qF 'chown 20012:10001 "$STACK_DIR/broker/key"' \
     || fail "the broker's key is not owned by uid 20012, the uid the broker runs as: it cannot read its taint-gateway key and refuses to start (invariant 47)"
   printf '%s\n' "$BLOCK" | grep -qF 'TOKENFUSE_AGENT_TOKENS_STATIC_KEYS TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS; do' \
     || fail "the off path does not clear the static-key lists: tokenfuse 1.19.0 refuses a list under any mode but require (invariant 47)"
