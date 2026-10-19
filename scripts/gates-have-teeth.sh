@@ -125,6 +125,11 @@ cases=0
 # including one this harness caused itself.
 run_case() {
 	local name="$1" expect="$2" gate="$3" edit="$4" needle="${5:-}"
+	# TEETH_ONLY=REGEX runs only the cases whose name matches REGEX (1.3.2): a change runs the cases it
+	# touches, and CI runs the whole list. Unset, every case runs, as before.
+	if [ -n "${TEETH_ONLY:-}" ] && ! printf '%s' "$name" | grep -q -E -- "$TEETH_ONLY"; then
+		return 0
+	fi
 	cases=$((cases + 1))
 
 	# The baseline applies to EVERY case, not only the ones expecting a failure.
@@ -316,7 +321,7 @@ run_case "bus-has-a-writer: a written volume is not mounted by init-volumes" fai
 # Mounted but given to the wrong owner: the same symptom with a subtler cause.
 run_case "bus-has-a-writer: a volume is owned by somebody else" fail \
 	'./scripts/bus-has-a-writer.sh' \
-	"$(py 'edit("compose.yaml", "chown 65532:65532 /vol/scopyx", "chown 10001:10001 /vol/scopyx")')" \
+	"$(py 'edit("compose.yaml", "chown -R 65532:65532 /vol/scopyx", "chown 10001:10001 /vol/scopyx")')" \
 	"neither the uid nor the gid matches"
 
 # A read-only mount is not a write, and must not be asked for an owner.
@@ -1400,7 +1405,7 @@ run_case "chain-verifier: its stream is given to another uid" fail \
 
 run_case "chain-verifier: its state volume has no owner" fail \
 	'./scripts/chain-verifier-is-contained.sh' \
-	"$(py 'edit("compose.yaml", "        chown 10002:10002 /vol/conform && chmod 0775 /vol/conform\n", "")')" \
+	"$(py 'edit("compose.yaml", "        chown -R 10002:10002 /vol/conform && chmod 0775 /vol/conform\n", "")')" \
 	"does not chown /vol/conform"
 
 run_case "chain-verifier: another plane is told to write its stream" fail \
@@ -1733,7 +1738,7 @@ run_case "openai-door: the door's profile is passed whatever DOOR_ON says" fail 
 
 run_case "openai-door: the door is left running when it is turned off" fail \
 	'./scripts/openai-door.sh' \
-	"$(py 'edit("install.sh", "if [ \"$DOOR_ON\" != 1 ]; then \"${COMPOSE[@]}\" --profile openai-door rm -sf tokenfuse-gateway-openai >/dev/null 2>&1 || true; fi\n", "")')" \
+	"$(py 'edit("install.sh", "\nprofiles_off_remove\n", "\n")')" \
 	"does not remove tokenfuse-gateway-openai"
 
 run_case "openai-door: a new door map does not restart the door" fail \
@@ -2331,7 +2336,7 @@ run_case "finops: its stream cannot be read by the chain verifier" fail \
 
 run_case "finops: its data volume has no owner" fail \
 	'./scripts/finops-is-opt-in.sh' \
-	"$(py 'edit("compose.yaml", "        chown 10003:10003 /vol/costcrew && chmod 0750 /vol/costcrew\n", "")')" \
+	"$(py 'edit("compose.yaml", "        chown -R 10003:10003 /vol/costcrew && chmod 0750 /vol/costcrew\n", "")')" \
 	"does not chown /vol/costcrew"
 
 run_case "finops: the one-shot stops waiting for init-volumes" fail \
@@ -2382,7 +2387,7 @@ json.dump(d, open(p, "w"), indent=2)')" \
 # The bus gates see the add-on's preparer as a preparer, and still judge it.
 run_case "bus-has-a-writer: the add-on's data volume is prepared by nobody" fail \
 	'./scripts/bus-has-a-writer.sh' \
-	"$(py 'edit("compose.yaml", "        chown 10003:10003 /vol/costcrew && chmod 0750 /vol/costcrew\n", "")')" \
+	"$(py 'edit("compose.yaml", "        chown -R 10003:10003 /vol/costcrew && chmod 0750 /vol/costcrew\n", "")')" \
 	"no chown line there names /vol/costcrew"
 
 run_case "bus-has-a-writer: the add-on's stream is given to no one it runs as" fail \
@@ -3072,7 +3077,7 @@ run_case "agent-tokens-are-wired: the off path keeps its static-key list" fail \
 
 run_case "agent-tokens-are-wired: the allow-list drops felyx" fail \
 	'./scripts/agent-tokens-are-wired.sh' \
-	"$(py 'edit("install.sh", "for id in felyx broker $STATIC_KEY_IDS_LIST $EXISTING_GATEWAY_IDS; do", "for id in broker $STATIC_KEY_IDS_LIST $EXISTING_GATEWAY_IDS; do")')" \
+	"$(py 'edit("install.sh", "|| named=\"felyx broker\"", "|| named=\"broker\"")')" \
 	"H. a fresh box names felyx"
 
 run_case "agent-tokens-are-wired: the allow-list lists a key the box does not hold" fail \
@@ -3082,7 +3087,7 @@ run_case "agent-tokens-are-wired: the allow-list lists a key the box does not ho
 
 run_case "agent-tokens-are-wired: a re-run drops an existing key id" fail \
 	'./scripts/agent-tokens-are-wired.sh' \
-	"$(py 'edit("install.sh", "for id in felyx broker $STATIC_KEY_IDS_LIST $EXISTING_GATEWAY_IDS; do", "for id in felyx broker $STATIC_KEY_IDS_LIST; do")')" \
+	"$(py 'edit("install.sh", "for id in $named $STATIC_KEY_IDS_LIST $EXISTING_GATEWAY_IDS; do", "for id in $named $STATIC_KEY_IDS_LIST; do")')" \
 	"H. a re-run keeps"
 
 run_case "agent-tokens-are-wired: the gateway's audience is empty" fail \
@@ -3434,6 +3439,112 @@ run_case "no-secret-on-argv: an evidence script passes its enrolment secret on a
 	'./scripts/no-secret-on-argv.sh' \
 	"$(py 'edit("docs/evidence/agent-token-audience/measure.sh", "\"$agent\" \"$htu_token\" \"$AUDIENCE\"", "\"$agent\" \"$ENROL_SECRET\" \"$htu_token\" \"$AUDIENCE\"")')" \
 	"a secret is expanded on a line that runs an argument-carrying program"
+
+# ---- 1.3.2: the broker line (invariant 48), the re-run allow-list (53), every profile (50), re-owned volumes (49),
+# the record plane on by default (51), and the costcrew stream's directory (52). Each fault is planted and the
+# named gate must go red; each pass case is a comment, which must leave the gate green.
+
+run_case "broker-key: the README asks for broker:<secret> again" fail \
+	'./scripts/broker-key-is-the-keys-file-line.sh' \
+	"$(py 'edit("README.md", "`<secret>:broker` line (the secret", "`broker:<secret>` line (the secret")')" \
+	"still says broker:<secret>"
+
+run_case "broker-key: the installer refuses a keys file that holds its broker line" fail \
+	'./scripts/broker-key-is-the-keys-file-line.sh' \
+	"$(py 'edit("install.sh", "    if [ \"$nbl\" = 1 ]; then\n      BROKER_SOURCE=\"file\"", "    if [ \"$nbl\" = 9 ]; then\n      BROKER_SOURCE=\"file\"")')" \
+	"a keys file with a '<secret>:broker' line was refused"
+
+run_case "broker-key: ADD_BROKER_KEY=1 appends without checking the identity map" fail \
+	'./scripts/broker-key-is-the-keys-file-line.sh' \
+	"$(py 'edit("install.sh", "    if [ -n \"${IDENTITY_MAP_FILE:-}\" ] && ! identity_map_binds_broker", "    if false && ! identity_map_binds_broker")')" \
+	"was accepted with an identity map that does not bind broker"
+
+run_case "broker-key: a comment beside the broker refusal is not a fault" pass \
+	'./scripts/broker-key-is-the-keys-file-line.sh' \
+	"$(py 'edit("install.sh", "  BROKER_SOURCE=\"mint\"\n", "  # a comment that names the broker line is not a fault\n  BROKER_SOURCE=\"mint\"\n")')" \
+	""
+
+run_case "agent-tokens-are-wired: a re-run widens the static list again (the minted agents and drills join it)" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("install.sh", "  if identity_env_has TOKENFUSE_AGENT_TOKENS_STATIC_KEYS; then\n    PRIOR_GW_PRESENT=1", "  if false; then\n    PRIOR_GW_PRESENT=1")
+edit("install.sh", "grep -v -x -E '\''felyx|broker|agents|drills'\'' | tr", "tr")')" \
+	"the second run widened the allow-list"
+
+run_case "agent-tokens-are-wired: the agents key joins the list on the first run" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("install.sh", "|| named=\"felyx broker\"", "|| named=\"felyx broker agents\"")')" \
+	"a fresh box names felyx and broker"
+
+run_case "agent-tokens-are-wired: a comment in the allow-list block is not a fault" pass \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("install.sh", "  local named=\"\"\n", "  # a comment in the allow-list block is not a fault\n  local named=\"\"\n")')" \
+	""
+
+run_case "profiles-off-are-removed: the cleanup names the off profiles by hand and misses finops" fail \
+	'./scripts/profiles-off-are-removed.sh' \
+	"$(py 'edit("install.sh", "  for p in $(\"${COMPOSE[@]}\" config --profiles 2>/dev/null || true); do\n    profile_is_named \"$p\" && continue\n", "  for p in typed-risk-signal openai-door; do\n    profile_is_named \"$p\" && continue\n")')" \
+	"the stale costcrew of profile finops is not removed"
+
+run_case "profiles-off-are-removed: the cleanup removes the containers of a profile this run names, with no shared-service guard" fail \
+	'./scripts/profiles-off-are-removed.sh' \
+	"$(py 'edit("install.sh", "    profile_is_named \"$p\" && continue\n    list=", "    list=")
+edit("install.sh", "      case \" $named_svcs \" in *\" $s \"*) ;; *) off_list=\"$off_list $s\" ;; esac", "      off_list=\"$off_list $s\"")')" \
+	"B. record-seal belongs to a profile this run names"
+
+run_case "profiles-off-are-removed: a comment in the profile cleanup is not a fault" pass \
+	'./scripts/profiles-off-are-removed.sh' \
+	"$(py 'edit("install.sh", "profiles_off_remove() {\n", "profiles_off_remove() {\n  # a comment in the cleanup is not a fault\n")')" \
+	""
+
+run_case "volumes-are-reowned: the gateway's traces are re-owned without -R, so its old journal stays uid 10001" fail \
+	'./scripts/volumes-are-reowned.sh' \
+	"$(py 'edit("compose.yaml", "chown -R 20010:10001 /vol/traces", "chown 20010:10001 /vol/traces")')" \
+	"tokenfuse-gateway (uid 20010) writes traces"
+
+run_case "volumes-are-reowned: typryx's ledger volume is never re-owned" fail \
+	'./scripts/volumes-are-reowned.sh' \
+	"$(py 'edit("compose.yaml", "        chown -R 20005:10001 /vol/typryx && chmod 0775 /vol/typryx\n", "        chmod 0775 /vol/typryx\n")')" \
+	"typryx (uid 20005) writes typryxdata"
+
+run_case "volumes-are-reowned: a comment in init-volumes is not a fault" pass \
+	'./scripts/volumes-are-reowned.sh' \
+	"$(py 'edit("compose.yaml", "        chown -R 20013:10001 /vol/cloud && chmod 0775 /vol/cloud\n", "        # a comment about the cloud volume is not a fault\n        chown -R 20013:10001 /vol/cloud && chmod 0775 /vol/cloud\n")')" \
+	""
+
+run_case "record-plane-is-on-by-default: an unset WITH_RECORD turns the record plane off again" fail \
+	'./scripts/record-plane-is-on-by-default.sh' \
+	"$(py 'edit("install.sh", "    \"\"|1) RECORD_ON=1 ;;", "    \"\"|1) RECORD_ON=0 ;;")')" \
+	"WITH_RECORD='' does not turn the record plane on"
+
+run_case "record-plane-is-on-by-default: the up list never names the record profile" fail \
+	'./scripts/record-plane-is-on-by-default.sh' \
+	"$(py 'edit("install.sh", "if [ \"$RECORD_ON\" = 1 ]; then UP_PROFILES+=(--profile record); fi", ":")')" \
+	"the up profile list never names the record profile"
+
+run_case "record-plane-is-on-by-default: WITH_RECORD builds trailryx from source again" fail \
+	'./scripts/record-plane-is-on-by-default.sh' \
+	"$(py 'edit("install.sh", "  if [ -n \"$BUILD_FROM_SOURCE\" ]; then\n    [ -f \"$SRC_DIR/stack-k8s/images/trailryx.Dockerfile\" ]", "  if [ -n \"${WITH_RECORD:-}\" ]; then\n    [ -f \"$SRC_DIR/stack-k8s/images/trailryx.Dockerfile\" ]")')" \
+	"install.sh still builds trailryx when WITH_RECORD is set"
+
+run_case "record-plane-is-on-by-default: a comment in the record block is not a fault" pass \
+	'./scripts/record-plane-is-on-by-default.sh' \
+	"$(py 'edit("install.sh", "RECORD_ON=1\nrecord_resolve() {", "RECORD_ON=1\n# a comment in the record block is not a fault\nrecord_resolve() {")')" \
+	""
+
+run_case "costcrew-can-reach-its-stream: the bus directory goes back to 0750, so costcrew cannot enter it" fail \
+	'./scripts/costcrew-can-reach-its-stream.sh' \
+	"$(py 'edit("compose.yaml", "chown 0:10001 /vol/events && chmod 0751 /vol/events", "chown 0:10001 /vol/events && chmod 0750 /vol/events")')" \
+	"others have no execute bit"
+
+run_case "costcrew-can-reach-its-stream: costcrew joins the bus group" fail \
+	'./scripts/costcrew-can-reach-its-stream.sh' \
+	"$(py 'edit("compose.yaml", "    user: \"10003:10003\"", "    user: \"10003:10003\"\n    group_add: [\"10001\"]")')" \
+	"has a group_add"
+
+run_case "costcrew-can-reach-its-stream: a comment beside the bus directory is not a fault" pass \
+	'./scripts/costcrew-can-reach-its-stream.sh' \
+	"$(py 'edit("compose.yaml", "        chown 0:10001 /vol/events && chmod 0751 /vol/events\n", "        # a comment about the bus directory is not a fault\n        chown 0:10001 /vol/events && chmod 0751 /vol/events\n")')" \
+	""
 
 echo
 if [ -n "$(git status --porcelain)" ]; then

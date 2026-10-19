@@ -38,7 +38,7 @@
 # read pages assembled in the browser.
 #
 #   WITH_BROWSER=1 ./install.sh           # also builds stack/scopyx-browser:dev
-#   WITH_RECORD=1 ./install.sh            # also builds stack/trailryx:dev
+#   WITH_RECORD=0 ./install.sh            # turns the record plane off (on by default, from the pinned image)
 #   WITH_TYPED=1 ./install.sh             # pulls AND starts the typed plane (stub backend)
 #   TYPED_MODE=jev TYPED_JEV_KEY_FILE=/path/to/key ./install.sh
 #   TYPED_MODE=own-model TYPED_MODEL_URL=http://host.docker.internal:11434/v1 \
@@ -1304,6 +1304,21 @@ pii_apply() {
 # pii-mode: end
 pii_resolve
 
+# record-plane: begin
+# 1.3.2 (CLAUDE.md invariant 51, D10): the record plane is a core control, so it is ON by default, from
+# the pinned trailryx-node image (no build). WITH_RECORD=0 is the explicit way off. Before 1.3.2 an unset
+# WITH_RECORD meant off, and WITH_RECORD=1 built trailryx from source. BUILD_FROM_SOURCE=1 still builds it.
+RECORD_ON=1
+record_resolve() {
+  case "${WITH_RECORD:-}" in
+    ""|1) RECORD_ON=1 ;;
+    0) RECORD_ON=0 ;;
+    *) die "WITH_RECORD must be unset or 1 (the record plane, on by default) or 0 (off), not what it was given. Nothing was installed." ;;
+  esac
+}
+record_resolve
+# record-plane: end
+
 # ---- 0f. client keys and the identity map ------------------------------------
 # Who may call the gateway, which agent ids each caller may speak as, and which
 # business unit its spend lands in (tokenfuse docs/20). On by default since
@@ -2036,6 +2051,26 @@ client_key_ids() {
   done
 }
 
+# NAME: .env holds a line for NAME, whatever its value (an empty value is a line too).
+identity_env_has() {
+  [ -f "$STACK_DIR/.env" ] && grep -q "^$1=" "$STACK_DIR/.env"
+}
+
+# FILE: the `<secret>:broker` lines of a keys file, comments and blank lines skipped. Never printed.
+keys_file_broker_lines() {
+  grep -v -E '^[[:space:]]*(#|$)' "$1" | grep -E ':broker[[:space:]]*$' || true
+}
+
+# FILE: the secret of the first broker line of a keys file, and nothing else.
+keys_file_broker_secret() {
+  keys_file_broker_lines "$1" | head -1 | sed -e 's/:broker[[:space:]]*$//'
+}
+
+# FILE: the identity map binds a key id `broker` (a keys[] entry with that key_id).
+identity_map_binds_broker() {
+  grep -q -E '"key_id"[[:space:]]*:[[:space:]]*"broker"' "$1"
+}
+
 # Section 0, before anything is installed: refuses a value it does not read, and a pair
 # it cannot honour. Writes nothing. Runs after mint_resolve, which decides MINT_ON.
 agent_tokens_resolve() {
@@ -2061,8 +2096,21 @@ agent_tokens_resolve() {
   AGENT_AUDIENCE="https://stack-single.$td"
   # The key ids this box already has, read before this run writes anything. On a re-run every one of
   # them stays on the static allow-list, so nothing that worked yesterday stops working (invariant 47).
-  EXISTING_GATEWAY_IDS="$(client_key_ids "$(identity_env_get GATEWAY_CLIENT_KEYS)" | tr '\n' ' ')"
-  EXISTING_MCP_IDS="$(client_key_ids "$(identity_env_get TOKENFUSE_MCP_KEYS)" | tr '\n' ' ')"
+  # 1.3.2 (CLAUDE.md invariant 53): a re-run keeps EXACTLY the list the last run wrote, read back from
+  # .env. Only a box whose .env predates the list takes its ids from its keys, and then never the two
+  # keys the installer minted for the agents and the fire drills, which must go through a token.
+  if identity_env_has TOKENFUSE_AGENT_TOKENS_STATIC_KEYS; then
+    PRIOR_GW_PRESENT=1
+    EXISTING_GATEWAY_IDS="$(identity_env_get TOKENFUSE_AGENT_TOKENS_STATIC_KEYS | tr ',' ' ')"
+  else
+    PRIOR_GW_PRESENT=0
+    EXISTING_GATEWAY_IDS="$(client_key_ids "$(identity_env_get GATEWAY_CLIENT_KEYS)" | grep -v -x -E 'felyx|broker|agents|drills' | tr '\n' ' ' || true)"
+  fi
+  if identity_env_has TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS; then
+    EXISTING_MCP_IDS="$(identity_env_get TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS | tr ',' ' ')"
+  else
+    EXISTING_MCP_IDS="$(client_key_ids "$(identity_env_get TOKENFUSE_MCP_KEYS)" | grep -v -x 'stack-single' | tr '\n' ' ' || true)"
+  fi
   # The operator's own allow-list: STATIC_KEY_IDS, comma-separated key ids for clients that cannot sign
   # a proof. Each word is checked here, and a value that is not one is refused without being echoed.
   if [ -n "${STATIC_KEY_IDS:-}" ]; then
@@ -2074,8 +2122,32 @@ agent_tokens_resolve() {
     done
     unset IFS
   fi
-  [ "$MINT_ON" = 1 ] \
-    || die "agent tokens are on (the default) on a box given its own client keys: the MCP broker needs a key of its own, so give it a line 'broker:<secret>' in your keys file, bound in your identity map to agent://$td/agents/*. Or set WITH_AGENT_TOKENS=0 to keep static keys only (the weaker way out), or remove CLIENT_KEYS_FILE and IDENTITY_MAP_FILE and let the installer mint the keys. Nothing was installed."
+  # A box given its own keys file needs the broker's own key in it, as a line `<secret>:broker` (the
+  # format the keys file reads: split on the LAST colon). 1.3.2 (CLAUDE.md invariant 48): with that line
+  # the box is accepted and the broker's key is its secret; without it, ADD_BROKER_KEY=1 has the installer
+  # mint the secret and append the line, and without either the refusal names both.
+  BROKER_SOURCE="mint"
+  if [ "$MINT_ON" != 1 ]; then
+    local nbl
+    nbl="$(keys_file_broker_lines "$CLIENT_KEYS_FILE" | grep -c . || true)"
+    case "${ADD_BROKER_KEY:-}" in
+      ""|0|1) ;;
+      *) die "ADD_BROKER_KEY is 1 (mint the broker's key and append it to your keys file) or unset, not what it was given. Nothing was installed." ;;
+    esac
+    if [ "$nbl" -gt 1 ]; then
+      die "your keys file holds more than one '<secret>:broker' line, so the broker's key is not clear. Keep one. Nothing was installed."
+    fi
+    if [ "$nbl" = 1 ]; then
+      BROKER_SOURCE="file"
+    elif [ "${ADD_BROKER_KEY:-}" = 1 ]; then
+      BROKER_SOURCE="add"
+    else
+      die "this box gave its own CLIENT_KEYS_FILE, and the MCP broker needs its own key in it, as a line '<secret>:broker' (the secret, a colon, then the word broker), bound in your identity map to agent://$td/agents/*. Add that line yourself, or set ADD_BROKER_KEY=1 and the installer mints the secret and appends the line, keeping the file's mode. Or WITH_AGENT_TOKENS=0 keeps static keys only (the weaker way out). Nothing was installed."
+    fi
+    if [ -n "${IDENTITY_MAP_FILE:-}" ] && ! identity_map_binds_broker "$IDENTITY_MAP_FILE"; then
+      die "your identity map does not bind key_id broker. Add a keys[] entry with key_id broker and agents agent://$td/agents/* to $IDENTITY_MAP_FILE, then run again. Nothing was installed."
+    fi
+  fi
 }
 
 # Section 3, after .env exists and before section 3e reads the keys: the enrolment secret into its
@@ -2118,6 +2190,11 @@ agent_tokens_apply() {
   identity_env_set TOKENFUSE_AGENT_TOKENS require
   identity_env_set TOKENFUSE_DELEGATION_ISSUER http://vouchryx:4310
   identity_env_set TOKENFUSE_DELEGATION_AUDIENCE "$AGENT_AUDIENCE"
+  # TODO(1.3.2, D13, not waiting on it): the gateway accepts a DPoP proof for ONE door origin, so a proof
+  # addressed to http://tokenfuse-gateway:4100 and one addressed to http://127.0.0.1:4100 cannot both
+  # verify. When the tokenfuse release that lists DPoP door origins lands, set its list to both gateway
+  # origins, and the broker's to its pair (http://tokenfuse-mcp-broker:4200 and http://$GATEWAY_PROBE:4200).
+  # The setting's name is not in any tokenfuse release this pin reads: take it from that release's notes.
   identity_env_set TOKENFUSE_DELEGATION_URL "http://$GATEWAY_PROBE:4100"
   identity_env_set TOKENFUSE_DELEGATION_REVOCATIONS http://vouchryx:4310/v1/revocations
   identity_env_set TOKENFUSE_DELEGATION_REVOCATIONS_INTERVAL_MS 12000
@@ -2133,10 +2210,34 @@ agent_tokens_apply() {
   identity_env_set WARDRYX_AGENT_TOKEN_JWKS_URL http://vouchryx:4310/.well-known/jwks.json
   identity_env_set WARDRYX_AGENT_TOKEN_REVOCATION_URL http://vouchryx:4310/v1/revocations
   identity_env_set WARDRYX_AGENT_TOKEN_DOOR_ORIGINS "http://tokenfuse-gateway:4100,http://tokenfuse-mcp-broker:4200,http://$GATEWAY_PROBE:4100,http://$GATEWAY_PROBE:4200"
-  mint_env_secret GATEWAY_BROKER_KEY
-  broker="$(identity_env_get GATEWAY_BROKER_KEY)"
-  why="$(identity_entry_why "$broker:broker")"
-  [ -z "$why" ] || die "GATEWAY_BROKER_KEY in .env, the broker's client key, $why. Empty that line and the installer mints one. Nothing was started."
+  if [ "$MINT_ON" = 1 ]; then
+    mint_env_secret GATEWAY_BROKER_KEY
+    broker="$(identity_env_get GATEWAY_BROKER_KEY)"
+    why="$(identity_entry_why "$broker:broker")"
+    [ -z "$why" ] || die "GATEWAY_BROKER_KEY in .env, the broker's client key, $why. Empty that line and the installer mints one. Nothing was started."
+  else
+    # A box with its own keys file: the broker's key is the secret of that file's broker line (1.3.2,
+    # CLAUDE.md invariant 48), or, on ADD_BROKER_KEY=1, a secret minted now and appended to that file.
+    # The file keeps its mode (>> does not change it), and the secret is never printed.
+    case "$BROKER_SOURCE" in
+      file)
+        broker="$(keys_file_broker_secret "$CLIENT_KEYS_FILE")"
+        ;;
+      add)
+        broker="$(gen 40)"
+        if [ -s "$CLIENT_KEYS_FILE" ] && [ -n "$(tail -c1 "$CLIENT_KEYS_FILE")" ]; then
+          printf '\n' >>"$CLIENT_KEYS_FILE" || die "could not add to $CLIENT_KEYS_FILE. Nothing was started."
+        fi
+        printf '%s:broker\n' "$broker" >>"$CLIENT_KEYS_FILE" \
+          || die "could not append the broker's line to $CLIENT_KEYS_FILE. Nothing was started."
+        note "ADD_BROKER_KEY=1: appended the broker's line to $CLIENT_KEYS_FILE (its mode is kept, the secret is never printed)"
+        ;;
+      *) die "internal: the broker's key has no source. Nothing was started." ;;
+    esac
+    [ -n "$broker" ] || die "the broker's key is empty. Nothing was started."
+    why="$(identity_entry_why "$broker:broker")"
+    [ -z "$why" ] || die "the broker's line in your keys file, $why. Nothing was started."
+  fi
   # The broker runs as uid 20012 (CLAUDE.md invariant 41), so the key it reads is its own: owned by that uid,
   # 0400. A key owned by 10001 is unreadable to the broker, which then refuses to start (tokenfuse
   # mcpbroker.rs: "TOKENFUSE_MCP_TAINT_GATEWAY_KEY_FILE is not set") and restarts in a loop.
@@ -2156,7 +2257,12 @@ agent_static_keys_apply() {
   for id in $STATIC_KEY_IDS_LIST; do
     case "$have" in *" $id "*) ;; *) die "STATIC_KEY_IDS names $id, which is not a client key this box holds. Nothing was started." ;; esac
   done
-  for id in felyx broker $STATIC_KEY_IDS_LIST $EXISTING_GATEWAY_IDS; do
+  # felyx and the broker are named on a box's first run, by design. A re-run names exactly what the last
+  # run named (EXISTING_GATEWAY_IDS, read from .env): it adds nothing, least of all the keys the installer
+  # minted for the agents and the fire drills (1.3.2, CLAUDE.md invariant 53).
+  local named=""
+  [ "${PRIOR_GW_PRESENT:-0}" = 1 ] || named="felyx broker"
+  for id in $named $STATIC_KEY_IDS_LIST $EXISTING_GATEWAY_IDS; do
     case "$have" in *" $id "*) case " $gw " in *" $id "*) ;; *) gw="$gw $id" ;; esac ;; esac
   done
   gw="${gw# }"
@@ -2663,7 +2769,7 @@ cd "$SRC_DIR"
 if [ -n "$BUILD_FROM_SOURCE" ]; then
   note "BUILD_FROM_SOURCE is set: cloning every plane and compiling here"
   repos=(tokenfuse wardryx idryx qryx mockryx heraldyx scopyx verdryx engram)
-  [ -z "${WITH_RECORD:-}" ] || repos+=(trailryx)
+  repos+=(trailryx)
   for r in "${repos[@]}"; do
     # A && B || C here is deliberate: the refresh is best-effort and C is `true`.
     # shellcheck disable=SC2015
@@ -2713,9 +2819,9 @@ if [ -n "$BUILD_FROM_SOURCE" ]; then
       --build-arg SRC=./scopyx -t stack/scopyx-browser:dev . >/dev/null \
       || die "image build failed: scopyx-browser"
   fi
-  if [ -n "${WITH_RECORD:-}" ]; then
+  if [ -n "$BUILD_FROM_SOURCE" ]; then
     [ -f "$SRC_DIR/stack-k8s/images/trailryx.Dockerfile" ] \
-      || die "WITH_RECORD is set but the stack-k8s tarball has no images/trailryx.Dockerfile"
+      || die "BUILD_FROM_SOURCE is set but the stack-k8s tarball has no images/trailryx.Dockerfile"
     note "building trailryx (the record plane, and slow: Rust)"
     # The CONTEXT is ./trailryx, not `.` with a SRC build-arg. This file does
     # `COPY . .` into /src and takes no SRC, exactly like tokenfuse.Dockerfile,
@@ -3420,7 +3526,7 @@ if [ -z "$BUILD_FROM_SOURCE" ]; then
   # this is the same set docker will actually run.
   profiles=()
   [ -z "${WITH_BROWSER:-}" ] || profiles+=(--profile egress-browser)
-  [ -z "${WITH_RECORD:-}" ]  || profiles+=(--profile record)
+  if [ "$RECORD_ON" = 1 ]; then profiles+=(--profile record); fi
   [ -z "${WITH_EGRESS:-}" ]  || profiles+=(--profile egress)
   [ "$TYPED_PLANE" = off ]   || profiles+=(--profile typed)
   # The risk-signal proxy's image is the typryx image already pulled for the
@@ -3674,6 +3780,7 @@ UP_PROFILES=()
 # `egress` and `record` do. Section 8 below verifies the broker answers and
 # refuses a caller with no key, and a check that verifies a service nothing
 # started would be verifying nothing.
+if [ "$RECORD_ON" = 1 ]; then UP_PROFILES+=(--profile record); fi
 [ "$TYPED_PLANE" = off ]      || UP_PROFILES+=(--profile typed)
 # The typed risk signal (TYPED_RISK_SIGNAL=1) starts the proxy beside the broker
 # it serves, and only with typed answers on: a flag with no typryx was refused
@@ -3738,15 +3845,44 @@ egress_override .
 "${COMPOSE[@]}" "${UP_PROFILES[@]}" up -d --remove-orphans
 # `up --remove-orphans` does not remove a container whose profile this run does
 # not name (measured 2026-10-04 on Docker Desktop's compose v2: a proxy started
-# under typed-risk-signal kept running through an `up` without it). So turning
-# the signal off, or typed answers off, has to remove the proxy by name, or "off"
-# would leave it running beside a broker that no longer points at it. A box that
-# never had one has nothing to remove, which is why the failure is ignored.
-if [ "$TYPED_PLANE" = off ] || [ "$TYPED_RISK_ON" != 1 ]; then "${COMPOSE[@]}" --profile typed-risk-signal rm -sf typryx-wardryx-proxy >/dev/null 2>&1 || true; fi
-# The same for the OpenAI door: off, or never asked for, it is removed by name, or
-# "off" would leave it answering on 4110. A box that never had one has nothing to
-# remove, which is why the failure is ignored.
-if [ "$DOOR_ON" != 1 ]; then "${COMPOSE[@]}" --profile openai-door rm -sf tokenfuse-gateway-openai >/dev/null 2>&1 || true; fi
+# under typed-risk-signal kept running through an `up` without it). So every profile
+# this compose file defines that this run does not name is stopped and its containers
+# removed, by name, under that profile (CLAUDE.md invariant 50, 1.3.2). Before 1.3.2
+# two profiles were removed by hand and the rest were left to chance: after the
+# 1.1.35 to 1.3.1 upgrade on forge the costcrew container of profile finops still ran
+# image v0.6.0. A profile this run names is left to `up`, which recreates a container
+# whose pinned image or configuration changed. A box that never had a container of a
+# profile has nothing to remove, which is why a failure is ignored.
+profile_is_named() { # NAME: whether this run names the profile
+  local a prev=""
+  for a in "${UP_PROFILES[@]}"; do
+    [ "$prev" = --profile ] && [ "$a" = "$1" ] && return 0
+    prev="$a"
+  done
+  return 1
+}
+profiles_off_remove() {
+  local p s base named_svcs="" list off_list=""
+  base="$("${COMPOSE[@]}" config --services 2>/dev/null | sort -u || true)"
+  # The services of the profiles this run names: a service that also belongs to one is never removed.
+  for p in $("${COMPOSE[@]}" config --profiles 2>/dev/null || true); do
+    profile_is_named "$p" || continue
+    named_svcs="$named_svcs $("${COMPOSE[@]}" --profile "$p" config --services 2>/dev/null | sort -u | comm -23 - <(printf '%s\n' "$base") | tr '\n' ' ' || true)"
+  done
+  for p in $("${COMPOSE[@]}" config --profiles 2>/dev/null || true); do
+    profile_is_named "$p" && continue
+    list="$("${COMPOSE[@]}" --profile "$p" config --services 2>/dev/null | sort -u | comm -23 - <(printf '%s\n' "$base") || true)"
+    off_list=""
+    for s in $list; do
+      case " $named_svcs " in *" $s "*) ;; *) off_list="$off_list $s" ;; esac
+    done
+    [ -n "$off_list" ] || continue
+    for s in $off_list; do
+      "${COMPOSE[@]}" --profile "$p" rm -sf "$s" >/dev/null 2>&1 || true
+    done
+  done
+}
+profiles_off_remove
 # The gateway reads its identity map once, at start, and a new map behind the same
 # GATEWAY_IDENTITY_MAP line changes nothing compose compares, so `up` above left
 # the old map in force. A map this run installed is read only after a restart.

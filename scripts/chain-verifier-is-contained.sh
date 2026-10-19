@@ -241,7 +241,8 @@ for name in sorted(subjects):
             note(f"init-volumes never mounts {state_vol}, so a fresh named volume (root:root 0755) is one the verifier cannot write its state to")
         else:
             d = re.escape(init_mounts[state_vol].rstrip("/"))
-            chown = re.search(r"chown\s+([0-9]+):([0-9]+)\s+" + d + r"(?=[\s&]|$)", init_text)
+            # 1.3.2 (invariant 49): the state volume is re-owned by a recursive chown (`chown -R`), which this accepts.
+            chown = re.search(r"chown\s+(?:-R\s+)?([0-9]+):([0-9]+)\s+" + d + r"(?=[\s&]|$)", init_text)
             if not chown:
                 note(f"init-volumes does not chown {init_mounts[state_vol]}, the verifier's state volume")
             elif uid is not None and (chown.group(1), chown.group(2)) != (uid, gid):

@@ -245,9 +245,18 @@ elif clash:
 elif dd.startswith("/var/lib/stack/traces/"):
     sub = dd[len("/var/lib/stack/traces/"):].rstrip("/")
     init = "\n".join(blocks.get("init-volumes", []))
-    if not re.search(r"mkdir -p [^\n]*/vol/traces/" + re.escape(sub) + r"\b", init) or \
-       not re.search(r"chown 10001:10001 [^\n]*/vol/traces/" + re.escape(sub) + r"\b", init):
-        no(f"init-volumes does not make /vol/traces/{sub} and give it to 10001, the door's uid.")
+    # 1.3.2 (invariant 49): the door's uid is the one compose.yaml gives it (`user:`), not a number written here.
+    door_uid = None
+    for l in blocks.get(door, []):
+        m = re.match(r'\s*user:\s*"?([0-9]+)', l)
+        if m:
+            door_uid = m.group(1)
+            break
+    if door_uid is None:
+        no(f"{door} has no user: in compose.yaml, so nothing says which uid its traces are given to.")
+    elif not re.search(r"mkdir -p [^\n]*/vol/traces/" + re.escape(sub) + r"\b", init) or \
+       not re.search(r"chown (?:-R )?" + re.escape(door_uid) + r":[0-9]+ [^\n]*/vol/traces/" + re.escape(sub) + r"\b", init):
+        no(f"init-volumes does not make /vol/traces/{sub} and give it recursively to {door_uid}, the door's uid.")
 mounts = [v.lstrip("-").strip().strip('"').strip("'") for v in keyed(b, "volumes")]
 idm = [m for m in mounts if m.split(":")[1:2] == ["/etc/tokenfuse/identity"]]
 host = idm[0].split(":")[0] if idm else None
@@ -569,8 +578,11 @@ PY
   fi
   grep -q '^\[ "\$DOOR_ON" != 1 \] || UP_PROFILES+=(--profile openai-door)$' install.sh \
     || fail "section 5 does not start the door's profile when the door is on"
-  rm_line="$(ln_of 'rm -sf tokenfuse-gateway-openai')"
-  if [ -z "$rm_line" ] || ! grep -q 'DOOR_ON" != 1' <<<"$(sed -n "${rm_line}p" install.sh)" || [ "$rm_line" -lt "${main_up:-0}" ]; then
+  # 1.3.2 (invariant 50): every off profile is removed by one call after up, and the door is one of them.
+  # profiles-off-are-removed.sh holds that cleanup per profile. The call is matched alone on its line, since the
+  # function's own definition line carries the same name.
+  rm_line="$(grep -n '^profiles_off_remove$' install.sh | cut -d: -f1 | head -1 || true)"
+  if [ -z "$rm_line" ] || [ "$rm_line" -lt "${main_up:-0}" ]; then
     fail "install.sh does not remove tokenfuse-gateway-openai by name after 'up' when the door is off, and 'up --remove-orphans' leaves a profile's container running: off would keep answering on 4110"
   fi
   restart_line="$(ln_of 'restart tokenfuse-gateway-openai')"

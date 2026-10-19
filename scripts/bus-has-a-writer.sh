@@ -246,11 +246,12 @@ for name, block in blocks.items():
             note(f"{name} (user {user}) writes volume {vol} at {target}, and init-volumes never mounts it: a fresh named volume is root:root 0755, so the service cannot write")
             continue
         path = init_mounts[vol]
-        owned = re.search(r"chown\s+([0-9]+):([0-9]+)\s+([^\n&]*" + re.escape(path) + r"(?=[\s&]|$))", init_text)
+        # 1.3.2: a re-own is recursive (`chown -R`), and a user-only re-own names no group (keyryx).
+        owned = re.search(r"chown\s+(?:-R\s+)?([0-9]+)(?::([0-9]+))?\s+([^\n&]*" + re.escape(path) + r"(?=[\s&]|$))", init_text)
         if not owned:
             note(f"{name} (user {user}) writes volume {vol}, mounted by init-volumes at {path}, but no chown line there names {path}")
             continue
-        cuid, cgid = owned.group(1), owned.group(2)
+        cuid, cgid = owned.group(1), (owned.group(2) or gid)
         if cuid != uid and cgid != gid:
             # A shared bus volume can also be written through ONE FILE a
             # service owns: init-volumes pre-creates it and chowns it to that
@@ -259,7 +260,7 @@ for name, block in blocks.items():
             # stream and nothing else, so a file chowned to this uid under the
             # volume's path counts as an owner. `chain-verifier-is-contained.sh`
             # holds the rest of that shape.
-            if re.search(r"chown\s+" + re.escape(uid) + r":[0-9]+\s+\"?" + re.escape(path.rstrip("/")) + r"/\S", init_text):
+            if re.search(r"chown\s+(?:-R\s+)?" + re.escape(uid) + r"(?::[0-9]+)?\s+\"?" + re.escape(path.rstrip("/")) + r"/\S", init_text):
                 continue
             note(f"{name} runs as {user} but init-volumes gives {vol} ({path}) to {cuid}:{cgid}: neither the uid nor the gid matches, and no file under it is given to {uid}")
 if judged == 0:

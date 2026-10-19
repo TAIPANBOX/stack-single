@@ -665,8 +665,9 @@ WITH_AGENT_TOKENS=0 ./install.sh   # the weaker way out: static keys only, as be
 
 The installer prints the allow-list in its closing report, under "static keys still admitted;
 move these agents to tokens". On a fresh box that list is the console's own key (`felyx`) and the
-broker's taint-relay key (`broker`), because neither can sign a proof. On a re-run it also keeps
-every key id the box already had, so nothing that worked yesterday stops. To keep another client,
+broker's taint-relay key (`broker`), because neither can sign a proof. On a re-run it keeps
+exactly the list the last run wrote, so nothing that worked yesterday stops, and it never adds a key
+the installer minted for the agents or the fire drills. To keep another client,
 name its key id in `STATIC_KEY_IDS` (comma-separated, for a client that cannot sign a proof), and
 the installer refuses a name that is not one of the box's keys. Moving an agent to a token is the
 way to take it off the list.
@@ -676,16 +677,17 @@ way to take it off the list.
 - An agent that calls with a static key it does not hold on the list is refused `401`
   `agent_token_required` after the first run of this release. The same key on a re-run keeps
   working, because the re-run keeps every key id the box already had.
-- A box given its own `CLIENT_KEYS_FILE` must add a `broker:<secret>` line, bound in its identity
-  map, or run with `WITH_AGENT_TOKENS=0`. Without one of those, the installer refuses before it
-  installs anything.
+- A box given its own `CLIENT_KEYS_FILE` must add a `<secret>:broker` line (the secret, a colon, then
+  the word broker), bound in its identity map. Or set `ADD_BROKER_KEY=1`, and the installer mints the
+  secret and appends that line, keeping the file's mode. Or run with `WITH_AGENT_TOKENS=0`. Without one
+  of those, the installer refuses before it installs anything.
 - To move an agent to a token, it must be the one agent this box enrols at present
   (`agent://<RECORD_TRUST_DOMAIN>/agents/operator`, its secret in `$STACK_DIR/agent-token.key`). vouchryx
   reads its registry from one variable, so more agents need a change to vouchryx. Until then, name a key
   that must stay in `STATIC_KEY_IDS`, and the rest of the agents keep their key on the list.
 - Rolling back to the previous release: set `WITH_AGENT_TOKENS=0` and run the installer again. That
   writes `off`, clears the lists, and leaves every file in place.
-- The record plane (`WITH_RECORD=1`) reads agent-event v1.0 from trailryx 1.4.0. Under 1.0 it refused
+- The record plane (on by default; `WITH_RECORD=0` turns it off) reads agent-event v1.0 from trailryx 1.4.0. Under 1.0 it refused
   typryx's four event types, and whether 1.4.0 seals them is not measured for this release.
 
 The installer starts vouchryx (the delegation plane), enrols the agent
@@ -714,8 +716,8 @@ from `.env`. Every door polls the list, so the stop reaches each of them within 
 poll.
 
 Limits, as shipped: one enrolled agent per box, the OpenAI door keeps static keys
-only, and a box that gave its own keys file must add a `broker:<secret>` line itself,
-or run with `WITH_AGENT_TOKENS=0`. `WITH_AGENT_TOKENS=0` turns the doors off again and keeps the files.
+only, and a box that gave its own keys file must add a `<secret>:broker` line itself (or set
+`ADD_BROKER_KEY=1`), or run with `WITH_AGENT_TOKENS=0`. `WITH_AGENT_TOKENS=0` turns the doors off again and keeps the files.
 
 ### A second door on the OpenAI wire (opt-in, off by default)
 
@@ -954,11 +956,13 @@ old `signing.pem` are left in place and unused. Nothing is deleted.
 
 ## The record: what this box did, sealed
 
-Off unless you ask for it, like the egress plane above.
+On by default, from the pinned trailryx-node image, with no build (CLAUDE.md invariant 51). The
+installer starts it with the rest of the stack. `WITH_RECORD=0` turns it off, and an install that
+had it running stops and removes it.
 
 ```bash
-WITH_RECORD=1 ./install.sh                        # pulls the record plane
-docker compose --profile record up -d record-seal
+./install.sh                    # the record plane is on
+WITH_RECORD=0 ./install.sh      # off: record-seal is stopped and removed
 ```
 
 It reads every `*.ndjson` on the shared event bus, appends what is new to a

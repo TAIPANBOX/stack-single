@@ -295,13 +295,13 @@ else
     out="$(bash -c '
       set -euo pipefail
       STACK_DIR="$1"; AGENT_TOKENS_ON=1
-      STATIC_KEY_IDS_LIST="$2"; EXISTING_GATEWAY_IDS="$3"; EXISTING_MCP_IDS="$4"
+      STATIC_KEY_IDS_LIST="$2"; EXISTING_GATEWAY_IDS="$3"; EXISTING_MCP_IDS="$4"; PRIOR_GW_PRESENT="$6"
       die() { echo "DIE: $*"; exit 3; }
       note() { :; }
       . "$5"
       agent_static_keys_apply
       printf "GW=%s\nMCP=%s\n" "$(identity_env_get TOKENFUSE_AGENT_TOKENS_STATIC_KEYS)" "$(identity_env_get TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS)"
-    ' _ "$d" "$3" "$4" "$6" "$lib" 2>&1)" && rc=0 || rc=$?
+    ' _ "$d" "$3" "$4" "$6" "$lib" "${9:-0}" 2>&1)" && rc=0 || rc=$?
     if [ "$8" = DIE ]; then
       [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q 'DIE: STATIC_KEY_IDS names' \
         || fail "H. $name: a STATIC_KEY_IDS entry the box does not hold was not refused ($out)"
@@ -313,17 +313,59 @@ else
     printf '%s\n' "$out" | grep -qx "MCP=$8" \
       || fail "H. $name: the broker's allow-list is $(printf '%s' "$out" | grep '^MCP=') and should be MCP=$8"
   }
-  # (name, held keys, STATIC_KEY_IDS, existing gateway ids, broker keys, existing broker ids, want gw, want mcp)
+  # (name, held keys, STATIC_KEY_IDS, existing gateway ids, broker keys, existing broker ids, want gw, want mcp, prior list present)
   allow_case "a fresh box names felyx and broker, and no broker static key" \
     'S1:felyx,S2:broker,S3:agents' '' '' 'S9:stack-single' '' 'felyx,broker' 'stack-single'
-  allow_case "a re-run keeps every key id it already had" \
-    'S1:felyx,S2:broker,S3:agents,S4:drills' '' 'agents drills' 'S9:stack-single' 'stack-single' 'felyx,broker,agents,drills' 'stack-single'
+  # 1.3.2 (CLAUDE.md invariant 53): a re-run keeps EXACTLY the list the last run wrote. The installer's own
+  # agents and fire-drills keys are held on the box but were never on the list, so they must not join it.
+  allow_case "a re-run keeps exactly the list it had, and never adds a key the installer minted" \
+    'S1:felyx,S2:broker,S3:agents,S4:drills' '' 'felyx broker' 'S9:stack-single' 'stack-single' 'felyx,broker' 'stack-single' 1
+  allow_case "a box from before the list keeps its own keys, not the minted agents or drills" \
+    'S1:felyx,S2:broker,S3:agents,S4:drills,S5:ops' '' 'ops' 'S9:stack-single' 'stack-single' 'felyx,broker,ops' 'stack-single'
   allow_case "a key the box does not hold is never named, even if it was there before" \
     'S1:felyx,S3:agents' '' 'agents ghost' 'S9:stack-single' '' 'felyx,agents' 'stack-single'
   allow_case "a box without a broker key does not name broker" \
     'S1:felyx,S3:agents' '' '' 'S9:stack-single' '' 'felyx' 'stack-single'
   allow_case "STATIC_KEY_IDS naming a key the box does not hold is refused" \
     'S1:felyx,S3:agents' 'ghost' '' 'S9:stack-single' '' '' DIE
+fi
+
+# I. TWO RUNS ON ONE BOX (CLAUDE.md invariant 53, 1.3.2). The installer runs twice against one .env: the
+# first run mints felyx, broker, agents and drills, and writes the list; the second reads the list back
+# and must write the same one. A run that widens the list on its second pass admits, without a token, the
+# keys the installer minted for the agents and the fire drills: the defect this section exists to catch.
+lib2="$scratch/tworuns.sh"
+for fn in client_key_ids identity_env_get identity_env_set identity_env_has agent_tokens_resolve agent_static_keys_apply; do
+  awk -v n="$fn" 'index($0, n "() {") == 1 { p = 1 } p { print } p && /^}$/ { exit }' install.sh
+done >"$lib2"
+if ! grep -q '^agent_tokens_resolve() {' "$lib2" || ! grep -q '^agent_static_keys_apply() {' "$lib2"; then
+  fail "I. agent_tokens_resolve or agent_static_keys_apply is not in install.sh, so two runs were not measured"
+else
+  twod="$(mktemp -d "$scratch/two.XXXXXX")"
+  # Run one: a fresh box, so no key is in .env when the run starts. The installer mints the four keys
+  # after its resolve step (mint_prepare) and before the allow-list is written, which is what is emulated.
+  # Run two: the same .env, now holding the keys and the list run one wrote.
+  two_run() { # MINT: 1 on the first run (the keys appear between resolve and the allow-list), 0 on the second
+    bash -c '
+      set -euo pipefail
+      STACK_DIR="$1"; MINT_ON=1; WITH_AGENT_TOKENS=""; WITH_DELEGATION=""; STATIC_KEY_IDS=""
+      AGENT_TOKENS_ON=0; DELEGATION_ON=0; STATIC_KEY_IDS_LIST=""; EXISTING_GATEWAY_IDS=""; EXISTING_MCP_IDS=""
+      STATIC_GATEWAY_LIST=""; STATIC_MCP_LIST=""; PRIOR_GW_PRESENT=0
+      die() { echo "DIE: $*"; exit 3; }
+      note() { :; }
+      . "$2"
+      agent_tokens_resolve
+      if [ "$3" = 1 ]; then identity_env_set GATEWAY_CLIENT_KEYS "$4"; fi
+      agent_static_keys_apply
+      printf "GW=%s\n" "$(identity_env_get TOKENFUSE_AGENT_TOKENS_STATIC_KEYS)"
+    ' _ "$twod" "$lib2" "$1" 'S1:felyx,S2:broker,S3:agents,S4:drills' 2>&1
+  }
+  first="$(two_run 1)" || first="DIE on run one: $first"
+  second="$(two_run 0)" || second="DIE on run two: $second"
+  printf '%s\n' "$first" | grep -qx 'GW=felyx,broker' \
+    || fail "I. the first run's allow-list is $(printf '%s' "$first" | grep -E '^(GW=|DIE)' | head -1), and should be GW=felyx,broker"
+  printf '%s\n' "$second" | grep -qx 'GW=felyx,broker' \
+    || fail "I. the second run widened the allow-list to $(printf '%s' "$second" | grep -E '^(GW=|DIE)' | head -1); a re-run must keep exactly the list the first run wrote"
 fi
 
 if [ "$problems" -ne 0 ]; then
