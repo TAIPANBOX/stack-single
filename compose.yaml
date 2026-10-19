@@ -250,7 +250,7 @@ services:
   # the uid of the process that reads them. They are never in .env.
   keyryx:
     <<: *restart
-    image: ${KEYRYX_IMAGE:-ghcr.io/taipanbox/keyryx:v0.1.0@sha256:02e5d434e86c8f982eb2cf523abb254a4dde17823005b02861498ac38eab7c3e}
+    image: ${KEYRYX_IMAGE:-ghcr.io/taipanbox/keyryx:v0.1.1@sha256:a9f88c44b62545555baffa19e3ace4b9c699c69c3a4aadbae28089aa2b29eb51}
     # The image's own 65532 is replaced: custody runs under its own uid, and
     # no other container runs as it (invariant 41).
     user: "20101:20101"
@@ -282,7 +282,7 @@ services:
 
   keyryx-witness:
     <<: *restart
-    image: ${KEYRYX_IMAGE:-ghcr.io/taipanbox/keyryx:v0.1.0@sha256:02e5d434e86c8f982eb2cf523abb254a4dde17823005b02861498ac38eab7c3e}
+    image: ${KEYRYX_IMAGE:-ghcr.io/taipanbox/keyryx:v0.1.1@sha256:a9f88c44b62545555baffa19e3ace4b9c699c69c3a4aadbae28089aa2b29eb51}
     user: "20100:10001"
     command:
       - witness
@@ -317,7 +317,7 @@ services:
 
   wardryx:
     <<: *restart
-    image: ${WARDRYX_IMAGE:-ghcr.io/taipanbox/wardryx:v2.2.0@sha256:c91cd4f2bb2542a2be6972a612666672122e15514341fe9ac49f5370357ee903}
+    image: ${WARDRYX_IMAGE:-ghcr.io/taipanbox/wardryx:v2.2.1@sha256:67718da5ef5551767156ef0ea893765f448c484fcbb5dcce5923a0ca83b8c309}
     # Its own uid (CLAUDE.md invariant 41): wardryx.ndjson is its stream, and
     # no other plane's uid can write it. The GID stays the bus group, so it
     # reads the other streams. group_add 20001 is for the Keyryx socket
@@ -391,7 +391,7 @@ services:
   # writes, and the mount says so.
   idryx:
     <<: *restart
-    image: ${IDRYX_IMAGE:-ghcr.io/taipanbox/idryx:v1.2.1@sha256:8d8ffbf7f3fcb58f1c96603b677feb24b87fe08a1397fba4403de8c7d4e0fb17}
+    image: ${IDRYX_IMAGE:-ghcr.io/taipanbox/idryx:v1.2.2@sha256:d92eb2e794d15484053b6b0b6dbfdc14314fb9b899c4caf4b2634ce6b6fc0213}
     networks:
       - core
     user: "65532:10001"
@@ -428,7 +428,7 @@ services:
   # real and is not hidden: on one machine the boundary is the machine.
   heraldyx:
     <<: *restart
-    image: ${HERALDYX_IMAGE:-ghcr.io/taipanbox/heraldyx:v0.7.0@sha256:0774468fb06c78dc0172f99f6c7fb024423d52921c7051ddd0b0d684f22b9ef7}
+    image: ${HERALDYX_IMAGE:-ghcr.io/taipanbox/heraldyx:v0.8.0@sha256:8b4b60f61d0778e473d3a88df1bd63ea5eeb67428754fa341cf23051766b40b5}
     networks:
       - edge
       - core
@@ -453,6 +453,10 @@ services:
       HERALDYX_SMTP_FROM: ${SMTP_FROM:-}
       HERALDYX_SMTP_USER: ${SMTP_USER:-}
       HERALDYX_SMTP_PASS: ${SMTP_PASS:-}
+      # heraldyx 0.8.0: starttls by default, implicit on port 465 by itself, plain
+      # only for a loopback host. Empty is that default. Set by install.sh's SMTP
+      # prompt or in .env as SMTP_TLS (install.sh refuses any other value first).
+      HERALDYX_SMTP_TLS: ${SMTP_TLS:-}
       # Where the ONE link in an alert points. Sending mail needs none of this:
       # the notifier dials outward and the tunnel exists to let an operator in,
       # so alerts arrive on a box with no tunnel at all. What the tunnel decides
@@ -517,7 +521,7 @@ services:
   # which reads this stream too, has anything to say about its schema.
   agent-conform:
     <<: *restart
-    image: ${AGENT_CONFORM_IMAGE:-ghcr.io/taipanbox/agent-conform:v1.1.0@sha256:c0a6369c2ca2c7d7bec67c6c390ac5db8a52d042fcaf7a87f2dd6490e20abda8}
+    image: ${AGENT_CONFORM_IMAGE:-ghcr.io/taipanbox/agent-conform:v2.0.1@sha256:445608e976247b94f4c3877541fdd4ae3f2aa623b18365ee7215a99f75b85e4c}
     networks:
       - core
     user: "10002:10002"
@@ -565,7 +569,7 @@ services:
   scopyx:
     <<: *restart
     profiles: ["egress"]
-    image: ${SCOPYX_IMAGE:-ghcr.io/taipanbox/scopyx:v1.0.1@sha256:e9625b5dcae3447175b9a0c6e37f0d470aaa57272d9e3c5344c9f7d948161f68}
+    image: ${SCOPYX_IMAGE:-ghcr.io/taipanbox/scopyx:v1.1.0@sha256:f39bfa548e43d461667fc371f5738f9f34f6e58bd297702c8f49d4f667c7789d}
     networks:
       - agents
       - core
@@ -627,7 +631,7 @@ services:
   scopyx-browser:
     <<: *restart
     profiles: ["egress-browser"]
-    image: ${SCOPYX_BROWSER_IMAGE:-ghcr.io/taipanbox/scopyx:v1.0.1-chromium@sha256:f5c349dde2da08cfa5473db250bb4dd728529a7780abddc857acb6a57ead7e14}
+    image: ${SCOPYX_BROWSER_IMAGE:-ghcr.io/taipanbox/scopyx:v1.1.0-chromium@sha256:b9aa4ba69f57cb079bdebe2add99f14ebca3cdd7499e223a50e7abed88ac4bce}
     user: "65532:65532"
     # The name the rest of the box reaches it by. Same as the profile above, so
     # nothing else in this file changes when an operator switches profiles.
@@ -707,7 +711,7 @@ services:
   typryx:
     <<: *restart
     profiles: ["typed"]
-    image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.4.1@sha256:c49bceb2003e6486a6d2c82b34a7c7cc3834933b9c6108e8074fefa35b926502}
+    image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.5.0@sha256:c9278289b3722d3e89fd90f4834666c295ee0c83b4b014c0df160500f2b57a20}
     networks:
       - core
     # Group 10001, not 65532 alone, since 2026-09-26: the journal below moved
@@ -809,7 +813,7 @@ services:
   tokenfuse-mcp-broker:
     <<: *restart
     profiles: ["typed"]
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.16.0@sha256:a119ce03a6bc0b3c9eacb755707397bf6b20c75c8d1838f0eeeb0bf4f0c8354c}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.18.0@sha256:7cbaa794670560468b15a7a6a3c37396767435332e8eca3a30af627de29ad6d9}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20012:10001"
@@ -968,7 +972,7 @@ services:
   typryx-wardryx-proxy:
     <<: *restart
     profiles: ["typed-risk-signal"]
-    image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.4.1@sha256:c49bceb2003e6486a6d2c82b34a7c7cc3834933b9c6108e8074fefa35b926502}
+    image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.5.0@sha256:c9278289b3722d3e89fd90f4834666c295ee0c83b4b014c0df160500f2b57a20}
     user: "65532:65532"
     command: ["wardryx-proxy"]
     environment:
@@ -1036,7 +1040,7 @@ services:
   vouchryx:
     <<: *restart
     profiles: ["delegation"]
-    image: ${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.4.0@sha256:b650f01aeac9baa89f60ca86f71f589fc7c7c7d25d3237793814a186eb8f5cea}
+    image: ${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.6.0@sha256:4a2b6b31be44b5391974785bdfca597a88bcc5ddd834d50830bd6b9537e9ab3d}
     networks:
       - core
     # Group 10001, the same pair typryx and the money plane's writers use: its
@@ -1044,15 +1048,25 @@ services:
     # root:10001 2775, and this is how it can append there.
     user: "20002:10001"
     # Keyryx certifies vouchryx's working signing key (invariant 42). Empty, the
-    # default, keeps the file key, which is what v0.4.0 (the pin here) does. The
-    # switch moves with the pin: v0.5.0 is the first release that reads it, and
-    # when the pin moves this becomes `keyryx`. group_add 20002 is for the socket
-    # directory below, which only this uid's group may enter.
+    # default, keeps the file key. v0.6.0 (the pin here) refuses to start with
+    # VOUCHRYX_SIGNER=keyryx unless VOUCHRYX_KEYRYX_ROOT_PIN names the kids of
+    # keyryx's delegation root. The keyryx variables are passed through from .env
+    # and empty by default; this launcher keeps the file key. group_add 20002 is
+    # for the socket directory below, which only this uid's group may enter.
     group_add:
       - "20002"
     environment:
       VOUCHRYX_SIGNER: ${VOUCHRYX_SIGNER:-}
-      VOUCHRYX_KEYRYX_URL: unix:///run/keyryx/sock/vouchryx/keyryx.sock
+      VOUCHRYX_KEYRYX_ROOT_PIN: ${VOUCHRYX_KEYRYX_ROOT_PIN:-}
+      # vouchryx 0.6.0 refuses ANY keyryx variable that is set while VOUCHRYX_SIGNER
+      # is not keyryx (measured: a literal socket URL here stops the start with
+      # "VOUCHRYX_KEYRYX_URL is set, but VOUCHRYX_SIGNER is not keyryx"). So every
+      # one of them is passed through empty, and the operator sets them in .env
+      # together with VOUCHRYX_SIGNER=keyryx.
+      VOUCHRYX_KEYRYX_URL: ${VOUCHRYX_KEYRYX_URL:-}
+      VOUCHRYX_KEYRYX_CONSUMER: ${VOUCHRYX_KEYRYX_CONSUMER:-}
+      VOUCHRYX_KEYRYX_SOCKET: ${VOUCHRYX_KEYRYX_SOCKET:-}
+      VOUCHRYX_KEYRYX_CREDENTIAL_FILE: ${VOUCHRYX_KEYRYX_CREDENTIAL_FILE:-}
       VOUCHRYX_ADDR: 0.0.0.0:4310
       # This exact literal, `http://vouchryx:4310`, is also `install.sh`'s own
       # `TOKENFUSE_DELEGATION_ISSUER` default once WITH_DELEGATION=1: the
@@ -1103,7 +1117,7 @@ services:
   # ---- money: the control API ----------------------------------------------
   tokenfuse-cloud:
     <<: *restart
-    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v1.16.0@sha256:0554bd17eb7b515554be8d8f8c80bc62273f80e3203001688eaccc507144c447}
+    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v1.18.0@sha256:c6160a8eed3d83d9caf42b426e82444cfe48a14027cb90ad4338340587a9d372}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20013:10001"
@@ -1149,7 +1163,7 @@ services:
   # gets a hard refusal rather than a log line.
   tokenfuse-gateway:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.16.0@sha256:a119ce03a6bc0b3c9eacb755707397bf6b20c75c8d1838f0eeeb0bf4f0c8354c}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.18.0@sha256:7cbaa794670560468b15a7a6a3c37396767435332e8eca3a30af627de29ad6d9}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20010:10001"
@@ -1377,7 +1391,7 @@ services:
   #     reading of the variables being absent.
   tokenfuse-gateway-openai:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.16.0@sha256:a119ce03a6bc0b3c9eacb755707397bf6b20c75c8d1838f0eeeb0bf4f0c8354c}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.18.0@sha256:7cbaa794670560468b15a7a6a3c37396767435332e8eca3a30af627de29ad6d9}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20011:10001"
@@ -1461,7 +1475,7 @@ services:
   # volume, holding no capability of its own.
   wg:
     <<: *restart
-    image: ${WG_IMAGE:-ghcr.io/taipanbox/stack-wg:v1.1.47@sha256:9b40e62acd99a115c4ac3ea5acb44cbfe556e50dc523b2283aa70d8c6e9847d6}
+    image: ${WG_IMAGE:-ghcr.io/taipanbox/stack-wg:v1.1.48@sha256:b4a8d7716abc16d0be0dd4499e1e6d19ce9c558c67158a157d6b7829a52e3d2a}
     networks:
       - edge
     cap_add:
@@ -1498,7 +1512,7 @@ services:
   # simply cannot happen over WireGuard, on any device.
   caddy:
     <<: *restart
-    image: ${CADDY_IMAGE:-ghcr.io/taipanbox/stack-caddy:v1.1.47@sha256:bc25472c32d2098b0273ec2ae90241c79b11e46bc69bcf047eca8f8cc37814de}
+    image: ${CADDY_IMAGE:-ghcr.io/taipanbox/stack-caddy:v1.1.48@sha256:9d34959511379ca45c37e93fe320d1e0fa2fe4412e7954e6e7b4a333e448d0b4}
     networks:
       - edge
       - front
@@ -1518,7 +1532,7 @@ services:
 
   console:
     <<: *restart
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.1.47@sha256:0f688de13628990984b9b422a14b1e3c1b0803bf3d1e08310adfb8903478d739}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.1.48@sha256:311625121ba911746aa9a52b9fac7ae1a4730a89546636c86d6543214ea5dd07}
     networks:
       - core
       - agents
@@ -1652,7 +1666,7 @@ services:
   # a promise.
   record-seal:
     <<: *restart
-    image: ${TRAILRYX_IMAGE:-ghcr.io/taipanbox/trailryx-node:v1.2.1@sha256:86fe5a3fd17c09c33a955040d2570879eff5a1886c104bd237e4428389c213a3}
+    image: ${TRAILRYX_IMAGE:-ghcr.io/taipanbox/trailryx-node:v1.3.1@sha256:ab305ac6a65444e08090b56d6f666498b56d560f7351c96a8a84137ece9e6d37}
     networks:
       - core
     user: "10001:10001"
@@ -1781,7 +1795,7 @@ services:
   # The sixth, trailryx-seal, is the `record` profile above.
   focus-export:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.16.0@sha256:a119ce03a6bc0b3c9eacb755707397bf6b20c75c8d1838f0eeeb0bf4f0c8354c}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.18.0@sha256:7cbaa794670560468b15a7a6a3c37396767435332e8eca3a30af627de29ad6d9}
     networks:
       - core
     user: "10001:10001"
@@ -1859,7 +1873,7 @@ services:
   # on the console, and both of those have a shell.
   idryx-detect:
     restart: "no"
-    image: ${IDRYX_IMAGE:-ghcr.io/taipanbox/idryx:v1.2.1@sha256:8d8ffbf7f3fcb58f1c96603b677feb24b87fe08a1397fba4403de8c7d4e0fb17}
+    image: ${IDRYX_IMAGE:-ghcr.io/taipanbox/idryx:v1.2.2@sha256:d92eb2e794d15484053b6b0b6dbfdc14314fb9b899c4caf4b2634ce6b6fc0213}
     networks:
       - core
     user: "65532:10001"
@@ -1883,7 +1897,7 @@ services:
 
   verdryx-drift:
     <<: *restart
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.1.47@sha256:0f688de13628990984b9b422a14b1e3c1b0803bf3d1e08310adfb8903478d739}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.1.48@sha256:311625121ba911746aa9a52b9fac7ae1a4730a89546636c86d6543214ea5dd07}
     networks:
       - core
     user: "10001:10001"
@@ -2010,7 +2024,7 @@ services:
   costcrew:
     <<: *restart
     profiles: ["finops"]
-    image: ${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.7.0@sha256:b0bba08736c8e99d0db465bbb8ea8013fba6cf02c69f75171913c7bacb087066}
+    image: ${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.9.0@sha256:4f7883951aac2a0b723e5b0d7b36cf4005c8b94e4a6335ed051c14370a37b9b7}
     networks:
       - agents
       - core

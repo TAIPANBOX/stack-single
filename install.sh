@@ -722,6 +722,27 @@ case "${ID:-}${ID_LIKE:-}" in
   *) die "this expects Debian or Ubuntu; found ${PRETTY_NAME:-unknown}." ;;
 esac
 
+# smtp-tls: begin
+# heraldyx 0.8.0 sends mail only over TLS: STARTTLS by default, implicit TLS on port 465 on its own, and
+# plain only to a loopback host. SMTP_TLS is written into .env as HERALDYX_SMTP_TLS. Unset is heraldyx's
+# own default and writes nothing new. A value it does not read is refused here, before anything is installed,
+# because heraldyx itself refuses to start on one. The refusal never echoes the value.
+smtp_tls_valid() { # VALUE: one of the modes heraldyx reads, or empty for its default
+  case "$1" in ""|starttls|implicit|plain) return 0 ;; *) return 1 ;; esac
+}
+smtp_tls_loopback() { # HOST[:PORT]: true when the host is one plain may be used with
+  case "${1%:*}" in 127.*|localhost|'[::1]'|::1) return 0 ;; *) return 1 ;; esac
+}
+smtp_tls_resolve() {
+  smtp_tls_valid "${SMTP_TLS:-}" \
+    || die "SMTP_TLS must be starttls, implicit or plain, or unset for heraldyx's default (STARTTLS, or implicit on port 465). Nothing was installed."
+  if [ "${SMTP_TLS:-}" = plain ] && [ -n "${SMTP_HOST:-}" ] && ! smtp_tls_loopback "$SMTP_HOST"; then
+    die "SMTP_TLS=plain is for a loopback host only (127.0.0.0/8, ::1 or localhost), and SMTP_HOST is not one. Nothing was installed."
+  fi
+}
+smtp_tls_resolve
+# smtp-tls: end
+
 # ---- 0b. typed answers: where does the data go? ------------------------------
 # @decided 2026-09-30: an operator chooses where typed answers come from, one
 # of three, and the choice is made and checked HERE, before a package is
@@ -1935,6 +1956,10 @@ agent_tokens_resolve() {
     die "RECORD_TRUST_DOMAIN must be a name of A-Z a-z 0-9 . and - other than mockryx.local, because the agent's id is in it. Nothing was installed."
   fi
   AGENT_TOKEN_AGENT="agent://$td/agents/operator"
+  # One audience for BOTH doors, an https identifier (tokenfuse 1.17.0 refuses an audience that is not an
+  # absolute https URL, and one agent token must verify at the gateway and at the broker). Nothing serves
+  # it, and it need not: it is a name the token is minted for.
+  AGENT_AUDIENCE="https://stack-single.$td"
   [ "$MINT_ON" = 1 ] \
     || die "WITH_AGENT_TOKENS=1 on a box given its own client keys: the MCP broker needs a key of its own, so give it a line 'broker:<secret>' in your keys file, bound in your identity map to agent://$td/agents/*. Or remove CLIENT_KEYS_FILE and IDENTITY_MAP_FILE and let the installer mint the keys. Nothing was installed."
 }
@@ -1969,16 +1994,16 @@ agent_tokens_apply() {
   digest="$(printf '%s' "$secret" | openssl dgst -sha256 -hex | awk '{print $NF}')"
   [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || die "could not compute the enrolment digest. Nothing was started."
   identity_env_set VOUCHRYX_AGENTS "$AGENT_TOKEN_AGENT|agents|local|sha256:$digest"
-  # vouchryx reads each audience as an absolute URL (RFC 8707 resources), so the two
-  # doors name their own origins: a plain name is refused at startup.
-  identity_env_set VOUCHRYX_ALLOWED_AUDIENCES "http://$GATEWAY_PROBE:4100,http://$GATEWAY_PROBE:4200"
+  # vouchryx reads each audience as an absolute URL (RFC 8707 resources), and the two doors name the
+  # same https identifier, so one token verifies at both (CLAUDE.md invariant 40).
+  identity_env_set VOUCHRYX_ALLOWED_AUDIENCES "$AGENT_AUDIENCE"
   identity_env_set TOKENFUSE_AGENT_TOKENS accept
   identity_env_set TOKENFUSE_DELEGATION_ISSUER http://vouchryx:4310
-  identity_env_set TOKENFUSE_DELEGATION_AUDIENCE "http://$GATEWAY_PROBE:4100"
+  identity_env_set TOKENFUSE_DELEGATION_AUDIENCE "$AGENT_AUDIENCE"
   identity_env_set TOKENFUSE_DELEGATION_URL "http://$GATEWAY_PROBE:4100"
   identity_env_set TOKENFUSE_DELEGATION_REVOCATIONS http://vouchryx:4310/v1/revocations
   identity_env_set TOKENFUSE_DELEGATION_REVOCATIONS_INTERVAL_MS 12000
-  identity_env_set MCP_BROKER_DELEGATION_AUDIENCE "http://$GATEWAY_PROBE:4200"
+  identity_env_set MCP_BROKER_DELEGATION_AUDIENCE "$AGENT_AUDIENCE"
   identity_env_set MCP_BROKER_DELEGATION_URL "http://$GATEWAY_PROBE:4200"
   identity_env_set BROKER_TAINT_GATEWAY http://tokenfuse-gateway:4100
   identity_env_set BROKER_GATEWAY_KEY_FILE /run/broker/key
@@ -1994,8 +2019,10 @@ agent_tokens_reach_note() {
   [ "$AGENT_TOKENS_ON" = 1 ] || return 0
   printf '\n  Agent tokens are ON. The agent %s enrols at vouchryx, not published to the\n' "$AGENT_TOKEN_AGENT"
   printf '  host, with the secret in %s/agent-token.key (0600, never printed). It\n' "$STACK_DIR"
-  printf '  exchanges that for a five-minute token bound to its DPoP key and sends\n'
-  printf '  Authorization: DPoP <token> with a proof. A static key still works beside it\n'
+  printf '  exchanges that for a five-minute token bound to its DPoP key. It asks for the\n'
+  printf '  audience with resource=%s (RFC 8707; audience= works too). A request that\n' "$AGENT_AUDIENCE"
+  printf '  names none is refused audience_not_allowed. It then sends\n'
+  printf '  Authorization: DPoP <token> with a proof (carrying ath, RFC 9449). A static key still works beside it\n'
   printf '  until you turn it off (CLAUDE.md invariant 40). Stop the agent with one call:\n'
   printf '  POST http://vouchryx:4310/v1/revoke with ban, using VOUCHRYX_REVOKE_KEYS from .env.'
 }
@@ -2273,6 +2300,7 @@ SMTP_HOST="${SMTP_HOST:-}"
 SMTP_FROM="${SMTP_FROM:-}"
 SMTP_USER="${SMTP_USER:-}"
 SMTP_PASS="${SMTP_PASS:-}"
+SMTP_TLS="${SMTP_TLS:-}"
 ALERT_CONFIGURED_NOW=0
 if grep -q '^ALERT_TO=' .env 2>/dev/null; then
   note "notifications already configured in .env, left as is"
@@ -2305,6 +2333,20 @@ TXT
         *)   printf '   needs a port too: %s:587 for submission, :465 for implicit TLS.\n' "$ans" >&4 ;;
       esac
     done
+    if [ -z "$SMTP_TLS" ]; then
+      while :; do
+        printf '   TLS: blank for STARTTLS (implicit on port 465), or starttls, implicit, plain (loopback only): ' >&4
+        IFS= read -r ans <&4 || ans=""
+        ans="$(printf '%s' "$ans" | tr -d '[:space:]')"
+        case "$ans" in
+          ""|starttls|implicit) SMTP_TLS="$ans"; break ;;
+          plain)
+            if smtp_tls_loopback "$SMTP_HOST"; then SMTP_TLS=plain; break; fi
+            printf '   plain is for a loopback host only, and %s is not one.\n' "$SMTP_HOST" >&4 ;;
+          *) printf '   not a TLS mode: starttls, implicit, plain, or blank.\n' >&4 ;;
+        esac
+      done
+    fi
     printf '   sender address [%s]: ' "$ALERT_TO" >&4
     IFS= read -r ans <&4 || ans=""
     ans="$(printf '%s' "$ans" | tr -d '[:space:]')"
@@ -2721,6 +2763,7 @@ add_env_default SMTP_HOST  "$(sq_ "$SMTP_HOST")"
 add_env_default SMTP_FROM  "$(sq_ "$SMTP_FROM")"
 add_env_default SMTP_USER  "$(sq_ "$SMTP_USER")"
 add_env_default SMTP_PASS  "$(sq_ "$SMTP_PASS")"
+add_env_default SMTP_TLS   "$(sq_ "$SMTP_TLS")"
 add_env_default ALERT_MIN_SEVERITY high
 # Where an alert's one link points, when the console domain is not how you
 # reach this box. Empty means "use CONSOLE_DOMAIN", which is the tunnel. Set it
@@ -2994,6 +3037,26 @@ keyryx_prepare
 # every other plane running while the one thing the operator actually asked
 # for, a verified chain, silently never happened. So this is checked here,
 # before section 3c pulls a single image.
+# demo-issuer: begin
+# The demo IdP's line in .env. vouchryx 0.5.0 refuses a subject token with no cnf.jkt unless its issuer line
+# ends in |unbound, and the demo IdP sends unbound tokens (vouchryx-demo keygen says so). add_env_default writes
+# the line once, so a box installed before that release keeps the old one, and nothing rewrites a line that
+# exists. Only that exact line is migrated: an operator's own line can never equal it.
+DEMO_ISSUER_OLD="https://idp.stack-single.local|stack-single|/etc/vouchryx/idp.jwks.json"
+DEMO_ISSUER_NEW="$DEMO_ISSUER_OLD|unbound"
+demo_issuer_migrate() { # ENV_FILE: rewrite the old demo line in ENV_FILE to the new one, and nothing else
+  local env_file="$1" tmp
+  [ -f "$env_file" ] || return 0
+  grep -qxF "VOUCHRYX_TRUSTED_ISSUERS='$DEMO_ISSUER_OLD'" "$env_file" || return 0
+  tmp="$(mktemp)" || die "could not make a temporary file to update $env_file"
+  awk -v old="VOUCHRYX_TRUSTED_ISSUERS='$DEMO_ISSUER_OLD'" -v new="VOUCHRYX_TRUSTED_ISSUERS='$DEMO_ISSUER_NEW'" \
+    '$0 == old { print new; next } { print }' "$env_file" >"$tmp" || { rm -f "$tmp"; die "could not rewrite $env_file"; }
+  cat "$tmp" >"$env_file" || { rm -f "$tmp"; die "could not update $env_file"; }
+  rm -f "$tmp"
+  note "vouchryx: the demo issuer's line in .env now ends in |unbound (vouchryx 0.5.0 and later need it)"
+}
+# demo-issuer: end
+
 if [ "${DELEGATION_ON:-0}" = 1 ]; then
   say "delegation"
   # The value on this box now, whichever run put it there: an operator's own
@@ -3037,7 +3100,7 @@ posture and README says so."
   if [ ! -f delegation/signing.pem ]; then
     note "vouchryx: minting a signing key"
     docker run --rm --user 0:0 -v "$STACK_DIR/delegation:/out" \
-        --entrypoint vouchryx-demo "${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.4.0@sha256:b650f01aeac9baa89f60ca86f71f589fc7c7c7d25d3237793814a186eb8f5cea}" \
+        --entrypoint vouchryx-demo "${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.6.0@sha256:4a2b6b31be44b5391974785bdfca597a88bcc5ddd834d50830bd6b9537e9ab3d}" \
         keygen -out /out/signing >/dev/null \
       || die "could not mint vouchryx's signing key"
     chown 20002:20002 delegation/signing.pem delegation/signing.jwks.json
@@ -3054,7 +3117,7 @@ posture and README says so."
     if [ ! -f delegation/idp.pem ]; then
       note "vouchryx: minting a demo issuer (WITH_DELEGATION_DEMO_ISSUER=1, never for production)"
       docker run --rm --user 0:0 -v "$STACK_DIR/delegation:/out" \
-          --entrypoint vouchryx-demo "${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.4.0@sha256:b650f01aeac9baa89f60ca86f71f589fc7c7c7d25d3237793814a186eb8f5cea}" \
+          --entrypoint vouchryx-demo "${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.6.0@sha256:4a2b6b31be44b5391974785bdfca597a88bcc5ddd834d50830bd6b9537e9ab3d}" \
           keygen -out /out/idp -kid stack-single-demo-idp >/dev/null \
         || die "could not mint the demo issuer key"
       chown 20002:20002 delegation/idp.pem delegation/idp.jwks.json
@@ -3062,8 +3125,10 @@ posture and README says so."
     else
       note "vouchryx: demo issuer already present, reused"
     fi
-    VOUCHRYX_TRUSTED_ISSUERS="https://idp.stack-single.local|stack-single|/etc/vouchryx/idp.jwks.json"
+    VOUCHRYX_TRUSTED_ISSUERS="$DEMO_ISSUER_NEW"
   fi
+  demo_issuer_migrate .env
+  if [ "$VOUCHRYX_TRUSTED_ISSUERS" = "$DEMO_ISSUER_OLD" ]; then VOUCHRYX_TRUSTED_ISSUERS="$DEMO_ISSUER_NEW"; fi
   add_env_default VOUCHRYX_TRUSTED_ISSUERS "$(sq_ "$VOUCHRYX_TRUSTED_ISSUERS")"
 
   add_env_default TOKENFUSE_DELEGATION_ISSUER http://vouchryx:4310

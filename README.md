@@ -216,6 +216,14 @@ Two details worth knowing rather than discovering:
 
 ### The notifier's daily pulse and quiet hours (set in `.env`)
 
+Mail to your server is sent over TLS. `SMTP_TLS` in `.env` chooses how (heraldyx 0.8.0):
+unset is STARTTLS, which is what a server on port 587 or 25 offers, and implicit TLS on port 465
+selects itself. `starttls` and `implicit` name the two modes explicitly. `plain` is refused for
+any host that is not loopback (`127.0.0.0/8`, `::1` or `localhost`), so a relay on the box
+itself is the only place it can go. A server that offers no STARTTLS is refused rather than
+sent to in the clear. The installer asks for the mode after the server address, and a value it
+does not read is refused before anything is installed.
+
 Once a recipient is set (`ALERT_TO`), the notifier sends one mail a day saying it is alive, with
 the numbers it saw. If that mail stops arriving, the notifier or its mail path is down. Three
 settings in `.env` change how it behaves. Without them you get the defaults shown:
@@ -656,7 +664,20 @@ The installer starts vouchryx (the delegation plane), enrols the agent
 written to `.env`; only its SHA-256 digest is. The agent exchanges the secret at
 vouchryx for a five-minute token bound to a DPoP key of its own, and sends
 `Authorization: DPoP <token>` with a proof. The gateway and the MCP broker verify the
-token offline, for their own audiences, against a revocation list that fails closed.
+token offline, for their own audience, against a revocation list that fails closed.
+The gateway and the MCP broker share one audience, `https://stack-single.<RECORD_TRUST_DOMAIN>`.
+It is an identifier, not an address: nothing serves it, and it need not, because it is the
+value the token is minted for. A consequence to know: the broker's protected-resource document
+names an https URL that no server answers, so an MCP client that discovers the broker from that
+document cannot reach it. The agent in this stack gets its token from vouchryx directly, so
+nothing here depends on that discovery.
+
+To get its token, the agent asks for that audience in its token request, with
+`resource=https://stack-single.<RECORD_TRUST_DOMAIN>` (RFC 8707; `audience=` works too). A
+request that names none is refused `audience_not_allowed`: vouchryx would otherwise fall back to
+its own issuer, which this box's allow-list does not name. The DPoP proof the agent sends to the
+gateway or the broker carries `ath`, the hash of the token (RFC 9449). The measured run is in
+`docs/evidence/agent-token-audience/RUN.md`.
 
 Stopping the agent is one call to vouchryx with `ban`, using `VOUCHRYX_REVOKE_KEYS`
 from `.env`. Every door polls the list, so the stop reaches each of them within one
@@ -878,8 +899,13 @@ What is wired now, and what is not:
   `WARDRYX_APPROVAL_V2_UNTIL`. That variable is unset here, so a v2 token is refused from
   the switch. On a box with no token in flight that is correct.
 - **vouchryx** has the wiring, and its working key is still the file key. The switch
-  is `VOUCHRYX_SIGNER`, empty by default. It becomes `keyryx` when the pin moves to a
-  release that reads it (v0.5.0).
+  is `VOUCHRYX_SIGNER`, empty by default, and this launcher keeps it empty. The pin is
+  v0.6.0, which reads `keyryx` and refuses to start with it unless
+  `VOUCHRYX_KEYRYX_ROOT_PIN` names the kids of keyryx's delegation root. vouchryx 0.6.0
+  refuses any keyryx variable while the signer is not keyryx, so the keyryx variables pass
+  through from `.env` and are empty by default. Turning the switch on by hand takes
+  `VOUCHRYX_SIGNER=keyryx`, the keyryx variables and the root pin in `.env`. The installer
+  does not turn it on, and this launcher has not run that mode.
 - **the tokenfuse gateway and the MCP broker** have `TOKENFUSE_DELEGATION_JWKS_URL`
   set to empty, which is off. It takes effect with tokenfuse v1.17.0.
 - **trailryx's seal** is not wired. Its signer needs the next trailryx release.
@@ -1207,7 +1233,7 @@ post, never what Jev said.
 
 **The opt-in training log.** `@decided 2026-09-30`: typryx can keep a local
 training log, off by default. typryx v0.3.0 is the first release that has it and
-this launcher pins typryx v0.4.1, so it is there. Switch it on with `TYPED_TRAINING=1` next to any typed mode
+this launcher pins typryx v0.5.0, so it is there. Switch it on with `TYPED_TRAINING=1` next to any typed mode
 (`WITH_TYPED=1`, `TYPED_MODE=jev` or `TYPED_MODE=own-model`):
 
 ```bash
@@ -1333,7 +1359,7 @@ checks no signature, so it does not fetch cosign either.
 
 Every image the stack runs is pinned to the digest of the bytes it names. The
 tag stays beside it for reading. A tag can be moved by whoever controls the
-registry; a digest cannot, so a box running `wardryx:v2.2.0@sha256:c91c...` runs
+registry; a digest cannot, so a box running `wardryx:v2.2.1@sha256:6771...` runs
 that build and nothing else.
 
 The images this project publishes (`ghcr.io/taipanbox/...`) are also signed,
@@ -1432,6 +1458,13 @@ anything starts, naming what is missing, unless one of these is true:
   `iss|aud|jwks-path` per line, the `jwks-path` a file readable inside
   `./delegation` once the run finishes. There is no safe value to invent
   here, so nothing does.
+
+  An issuer line may end in `|unbound`. vouchryx refuses a subject token that carries
+  no `cnf.jkt` (no key binding) unless its issuer's line says so. Add the suffix only for
+  an identity provider whose tokens are unbound on purpose. The demo issuer's line ends in
+  it, because the demo IdP's tokens are not bound to a key. A `.env` that an earlier
+  release wrote with the demo line is migrated to the suffixed form on rerun, and no other
+  line is touched.
 - or `WITH_DELEGATION_DEMO_ISSUER=1`, a clearly-labelled, self-signed issuer
   this installer mints for you to try the wiring with. **This is never a
   production posture**: nothing verifies that a self-signed demo issuer is
@@ -1472,7 +1505,7 @@ cd /opt/agent-stack
 docker compose --profile finops up -d costcrew
 ```
 
-That pulls one image, `ghcr.io/taipanbox/costcrew:v0.7.0`, and starts it beside
+That pulls one image, `ghcr.io/taipanbox/costcrew:v0.9.0`, and starts it beside
 a small one-shot that prepares its volume. It is the FinOps console: cloud and
 AI spend, a crew of agents that triages it, and a person who reviews what the
 crew wrote.
@@ -1522,9 +1555,12 @@ decision about money and is yours to take, separately. The notifier does not
 read its passports, so an alert about one of its agents names the agent and not
 the person who answers for it.
 
-**Moving to a newer console.** The pin is `ghcr.io/taipanbox/costcrew:v0.7.0`.
+**Moving to a newer console.** The pin is `ghcr.io/taipanbox/costcrew:v0.9.0`.
 On a box that already ran an earlier pin, the same `up -d costcrew` picks it
-up. From v0.5.0, the release adds two nullable columns to `drivers` at start (rows
+up. From v0.8.0 every analyst's id is `agent://<host>/costcrew/<name>`. This launcher
+binds no analyst id to a gateway key, an identity map or a policy, so nothing here
+needs rebinding. From v0.9.0 the stack events file is mode 0640, readable by its
+group, which the launcher's own layout already gives it. From v0.5.0, the release adds two nullable columns to `drivers` at start (rows
 written before it read NULL, and no data is rewritten) and a new decision class,
 `driver.announced`, which only the owner's answer applies. From v0.4.0, little changes
 for this launcher: the console adds a few
