@@ -3911,7 +3911,11 @@ profiles_off_remove() {
     profile_is_named "$p" && continue
     case "$(profile_kind "$p")" in
       operator)
+        # The profile's OWN services only. `compose --profile P ps` also lists the core's services (the gateway,
+        # the console, wardryx), so each operator profile would otherwise re-up the core once per profile.
+        own_svcs=" $("${COMPOSE[@]}" --profile "$p" config --services 2>/dev/null | sort -u | comm -23 - <(printf '%s\n' "$base") | tr '\n' ' ' || true) "
         while IFS=' ' read -r svc img state; do
+          case "$own_svcs" in *" $svc "*) ;; *) continue ;; esac
           [ "$state" = running ] || continue
           "${COMPOSE[@]}" --profile "$p" up -d "$svc" >/dev/null 2>&1 \
             || die "could not re-up $svc, the running $p service, at this run's pinned image. Nothing else was removed by this step."

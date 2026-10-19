@@ -3541,6 +3541,11 @@ run_case "finops-is-opt-in: a line starts the add-on outside the table" fail \
 	"$(py 'edit("install.sh", "profiles_off_remove\n", "profiles_off_remove\n\"${COMPOSE[@]}\" --profile finops up -d costcrew\n")')" \
 	"names the add-on"
 
+run_case "profiles-off-are-removed: the operator branch re-ups the core services that ps lists" fail \
+	'./scripts/profiles-off-are-removed.sh' \
+	"$(py 'edit("install.sh", "          case \"$own_svcs\" in *\" $svc \"*) ;; *) continue ;; esac", "          :")')" \
+	"is re-upped under an operator-started profile"
+
 run_case "profiles-off-are-removed: a comment beside the profile table is not a fault" pass \
 	'./scripts/profiles-off-are-removed.sh' \
 	"$(py 'edit("install.sh", "PROFILES_OPERATOR=\"egress", "# a comment beside the table is not a fault\nPROFILES_OPERATOR=\"egress")')" \

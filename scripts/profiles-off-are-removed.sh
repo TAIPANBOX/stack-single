@@ -14,21 +14,26 @@
 # is in neither list, or in both, is refused, so a new profile cannot fall through either rule.
 #
 # WHY. `up --remove-orphans` does not remove a container whose profile the run does not name (measured
-# 2026-10-04). Before this change the cleanup removed every profile the run did not name, which also removed
-# what the README tells an operator to start by hand (egress, egress-browser, finops, routines).
+# 2026-10-04). The first fix removed every profile a run did not name, which also removed what the README tells
+# an operator to start by hand (egress, egress-browser, finops, routines). The second fix re-upped every running
+# service that `compose --profile P ps` lists, which includes the core's own services (the gateway, the console,
+# wardryx), so each operator profile restarted the core.
 #
 # WHAT THIS CHECKS, by running the installer's own cleanup slice (lifted out of install.sh, from the up that
-# starts the stack to the identity-map restart) against a stub `docker compose` that knows every profile of
-# this compose file, the services each names, which of them are running, and logs every call:
-#   A. a run that names record and delegation, with costcrew and scopyx RUNNING, and typryx running under typed
-#      (which this run does not name): the installer-managed profiles that are off have their services removed
-#      by name (typed, typed-risk-signal, openai-door);
+# starts the stack to the identity-map restart) against a stub `docker compose`. The stub knows every profile of
+# this compose file, the services each names, which are running, and lists the core's services in `ps` as
+# `compose` does; it logs every call, and the closing report text is captured.
+#   A. a run that names record and delegation, with costcrew, scopyx and typryx running (typryx under typed, which
+#      this run does not name): the installer-managed profiles that are off have their services removed by name
+#      (typed, typed-risk-signal, openai-door);
 #   B. the operator-started profiles are never removed, and their RUNNING services are re-upped at this run's
 #      pins (finops costcrew, egress scopyx); a NOT-running operator service is neither removed nor started;
 #   C. no service of a profile this run names is removed (record-seal, vouchryx);
 #   D. WITH_RECORD=0 (the run names only delegation) removes record-seal, which is installer-managed;
-#   E. the table: every profile in compose.yaml is in exactly one of the two lists;
-#   F. the closing report says which operator-started profiles it kept, and that the installer never removes them.
+#   E. the table: every profile of compose.yaml is in exactly one of the two lists;
+#   F. the closing report says which operator-started profiles it kept, and that the installer never removes them;
+#   G. no operator-started profile re-ups or lists a service of the core (the gateway, the console, wardryx), and
+#      the closing report names none of them.
 # It refuses to report OK when the slice, the table or the stub saw no profile at all.
 
 set -euo pipefail
@@ -62,7 +67,14 @@ if [ -z "$SLICE" ]; then
 fi
 printf '%s\n' "$SLICE" >"$scratch/slice.sh"
 
-# A stub compose: the profiles and services of this file, a running state per service (FAKE_RUNNING), and a log.
+# The closing report's profile note, lifted the same way.
+awk '/^profile_reach_note\(\) \{/,/^\}$/' install.sh >"$scratch/reach.sh"
+if [ ! -s "$scratch/reach.sh" ]; then
+  fail "G. install.sh has no profile_reach_note, so the closing report's profile note was not measured"
+fi
+
+# A stub compose. Its `ps` lists the core's services as well as the profile's, as compose does when a profile
+# is named: the core is always part of a project.
 cat >"$scratch/fakecompose" <<'FAKE'
 #!/usr/bin/env bash
 echo "$*" >>"$FAKE_LOG"
@@ -88,6 +100,7 @@ svc_of() {
     *) echo "" ;;
   esac
 }
+core_svcs="tokenfuse-gateway console wardryx"
 state_of() {
   case " ${FAKE_RUNNING:-} " in *" $1 "*) echo running ;; *) echo exited ;; esac
 }
@@ -95,9 +108,15 @@ case "${rest[*]:-}" in
   "config --profiles")
     printf '%s\n' egress egress-browser typed typed-risk-signal delegation openai-door finops record routines manual ;;
   "config --services")
-    printf '%s\n' tokenfuse-gateway console wardryx
+    printf '%s\n' $core_svcs
     for p in "${profiles[@]:-}"; do [ -n "$p" ] && svc_of "$p"; done ;;
+  "ps --format {{.Image}} "*)
+    svc="${rest[-1]}"
+    printf 'ghcr.io/taipanbox/%s:old\n' "$svc" ;;
   ps\ *)
+    for s in $core_svcs; do
+      printf '%s ghcr.io/taipanbox/%s:old running\n' "$s" "$s"
+    done
     for p in "${profiles[@]:-}"; do
       [ -n "$p" ] || continue
       for s in $(svc_of "$p"); do
@@ -110,10 +129,11 @@ esac
 FAKE
 chmod +x "$scratch/fakecompose"
 
-# run_slice LOG RUNNING UPS: runs the slice once. UPS is the run's `--profile P` pairs; an empty run gets a
-# name no profile has, because bash 3.2 (this gate runs on a Mac) fails on an empty array under set -u.
+# run_slice LOG RUNNING UPS REPORT: runs the slice once, then writes the closing report's profile note to REPORT.
+# UPS is the run's `--profile P` pairs; an empty run gets a name no profile has, because bash 3.2 (this gate
+# runs on a Mac) fails on an empty array under set -u.
 run_slice() {
-  local log="$1" running="$2" ups="$3" out rc
+  local log="$1" running="$2" ups="$3" report="$4" out rc
   : >"$log"
   out="$(FAKE_LOG="$log" FAKE_RUNNING="$running" UPS="${ups:---profile noflag}" bash -c '
     set -euo pipefail
@@ -123,14 +143,17 @@ run_slice() {
     note() { :; }; say() { :; }
     . "$3"
     . "$4"
-  ' _ "$scratch/fakecompose" "$scratch" "$scratch/table.sh" "$scratch/slice.sh" 2>&1)" && rc=0 || rc=$?
+    . "$6"
+    printf "%s" "$(profile_reach_note)" >"$5"
+  ' _ "$scratch/fakecompose" "$scratch" "$scratch/table.sh" "$scratch/slice.sh" "$report" "$scratch/reach.sh" 2>&1)" && rc=0 || rc=$?
   [ "$rc" -eq 0 ] || fail "the cleanup slice failed under the stub compose: $out"
 }
 
 LOG_A="$scratch/calls-a.log"
 LOG_B="$scratch/calls-b.log"
-run_slice "$LOG_A" "costcrew scopyx typryx record-seal vouchryx" "--profile record --profile delegation"
-run_slice "$LOG_B" "record-seal vouchryx" "--profile delegation"
+REPORT_A="$scratch/report-a.txt"
+run_slice "$LOG_A" "costcrew scopyx typryx record-seal vouchryx" "--profile record --profile delegation" "$REPORT_A"
+run_slice "$LOG_B" "record-seal vouchryx" "--profile delegation" "$scratch/report-b.txt"
 
 removed_a="$(grep -E ' rm ' "$LOG_A" | grep -- '-sf' || true)"
 up_a="$(grep -E ' up -d' "$LOG_A" || true)"
@@ -189,9 +212,21 @@ grep -q 'This installer never removes them' install.sh \
 grep -q 'Operator-started profiles kept on this run' install.sh \
   || fail "F. the closing report does not list the operator-started profiles it kept"
 
+# G. no operator-started profile re-ups or lists a service of the core, and the closing report names none of them.
+for s in tokenfuse-gateway console wardryx; do
+  printf '%s\n' "$up_a" | grep -q -E -- " up -d( .*)? $s( |\$)" \
+    && fail "G. the core service $s is re-upped under an operator-started profile: the run would restart the gateway, the console or wardryx as if an operator had started them"
+  grep -q -E -- ": $s, image" "$REPORT_A" \
+    && fail "G. the closing report lists the core service $s as an operator-started service"
+done
+grep -q -E -- '^[[:space:]]*finops: costcrew,' "$REPORT_A" \
+  || fail "G. the closing report does not list costcrew as the running finops service it kept (report: $(tr '\n' ' ' <"$REPORT_A"))"
+grep -q -E -- '^[[:space:]]*egress: scopyx,' "$REPORT_A" \
+  || fail "G. the closing report does not list scopyx as the running egress service it kept"
+
 if [ "$problems" -ne 0 ]; then
   printf 'profiles-off-are-removed: %d problem(s)\n' "$problems"
   printf 'run A calls:\n%s\n' "$(grep -E ' rm | up -d' "$LOG_A" || echo '  (none)')"
   exit 1
 fi
-echo "OK: profiles-off-are-removed (invariant 50): installer-managed profiles that are off are removed by name; operator-started ones are kept, and a running one is re-upped at this run's pins; every compose profile is in exactly one list"
+echo "OK: profiles-off-are-removed (invariant 50): installer-managed profiles that are off are removed by name; operator-started ones are kept, and a running one is re-upped at this run's pins, without the core's services; every compose profile is in exactly one list"
