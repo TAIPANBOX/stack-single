@@ -1994,7 +1994,7 @@ run_case "felyx-through-the-gateway: the closing report speaks of Felyx with cli
 
 run_case "felyx-through-the-gateway: the closing report never calls the note" fail \
 	'./scripts/felyx-through-the-gateway.sh' \
-	"$(py 'edit("install.sh", "IDENTITY_REACH=\"$IDENTITY_REACH$(felyx_gateway_note)$(upstream_reach_note)$(agent_tokens_reach_note)\"", "IDENTITY_REACH=\"$IDENTITY_REACH$(upstream_reach_note)$(agent_tokens_reach_note)\"")')" \
+	"$(py 'edit("install.sh", "IDENTITY_REACH=\"$IDENTITY_REACH$(felyx_gateway_note)$(upstream_reach_note)$(agent_tokens_reach_note)$(profile_reach_note)\"", "IDENTITY_REACH=\"$IDENTITY_REACH$(upstream_reach_note)$(agent_tokens_reach_note)$(profile_reach_note)\"")')" \
 	"does not call felyx_gateway_note exactly once"
 
 run_case "felyx-through-the-gateway: a comment about Felyx changes" pass \
@@ -3163,7 +3163,7 @@ run_case "no-plane-writes: a stream is world-readable (0644)" fail \
 
 run_case "no-plane-writes: the bus directory is group-writable" fail \
 	'./scripts/no-plane-writes-another-planes-stream.sh' \
-	"$(py 'edit("compose.yaml", "chown 0:10001 /vol/events && chmod 0750 /vol/events", "chown 0:10001 /vol/events && chmod 2775 /vol/events")')" \
+	"$(py 'edit("compose.yaml", "chown 0:10001 /vol/events && chmod 0751 /vol/events", "chown 0:10001 /vol/events && chmod 2775 /vol/events")')" \
 	"bus directory"
 
 run_case "no-plane-writes: a reworded comment in init-volumes is not a fault" pass \
