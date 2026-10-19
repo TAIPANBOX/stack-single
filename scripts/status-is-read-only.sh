@@ -74,6 +74,11 @@ export LOGS_FILE="$SANDBOX/logs"
 cat >"$SANDBOX/bin/docker" <<'STUB'
 #!/usr/bin/env bash
 printf 'docker %s\n' "$*" >>"$LOG"
+# A request the installer writes to a container's stdin (docker run -i, the request
+# helper in install.sh) is logged as one line: its method, path and body.
+case " $* " in
+  *" -i "*) printf 'docker-request %s\n' "$(cat | tr '\r\n' '  ')" >>"$LOG" ;;
+esac
 case "${1:-}" in
   compose)
     shift
@@ -157,6 +162,7 @@ changes() {
 	grep -E '^docker run .*(>>|[^-]> )' "$LOG" || true
 	# A POST is refused, except the broker's read-only tools/list (the typed plane's one probe).
 	grep -E '^docker run .*--post-data' "$LOG" | grep -v '"method":"tools/list"' || true
+	grep -E '^docker-request POST ' "$LOG" | grep -v '"method":"tools/list"' || true
 	grep -E '^curl .*api\.ipify\.org' "$LOG" || true
 }
 bad="$(changes)"
