@@ -1503,8 +1503,11 @@ an absent invariant.
     clone's configuration. `@claude 2026-10-19`: the checks that prove the stack answers
     its own keys (`http_status`, `fuse_refusal`, `mcp_status`, `mcp_ask_answered`) send each
     request through `http_request`, which writes the request, headers and key included,
-    to the stdin of a throwaway busybox that sends it with `nc`, so no argument of
-    `docker run` or of the container carries a key. The console clone hands git its
+    to a FIFO that a throwaway busybox reads into `nc`. The FIFO stays open until `nc`
+    exits, because busybox `nc` exits as soon as its input ends, before a Go server has
+    answered, and the server then cancels the request and sends nothing (measured 2026-10-19
+    against tokenfuse v1.18.0: every check through a pipe failed, wget got 200). So no argument
+    of `docker run` or of the container carries a key. The console clone hands git its
     token through a credential helper that reads `CONSOLE_TOKEN` from the environment of
     that one command, after an empty `credential.helper=` resets git's helper list, and the
     clone URL carries no credential. Content-Length counts bytes, under `LC_ALL=C`.
@@ -1514,7 +1517,7 @@ an absent invariant.
     compose command, entrypoint, healthcheck or flag. It lifts the `# argv-free-http:`
     block and runs it against a stub docker, and lifts the console clone and runs it
     against a stub git; it refuses to report OK with no request helper, no clone line or
-    no subject to read. 11 teeth cases in `scripts/gates-have-teeth.sh`; scenarios in
+    no subject to read, and refuses a pipe into `nc` in install.sh. 12 teeth cases in `scripts/gates-have-teeth.sh`; scenarios in
     `features/no-secret-on-argv.feature`. `@measured` by hand 2026-10-19, not gated: the
     clone line run against a local git http-backend behind Basic authentication, with a
     fresh token, a wrong token and the old URL form: the new form's clone wrote no token

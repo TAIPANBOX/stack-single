@@ -3349,6 +3349,11 @@ run_case "shell-lint: a comment naming code() is not a fault" pass \
 	"$(py 'edit("install.sh", "NET=\"agent-stack_core\"\n", "NET=\"agent-stack_core\"\n# code() is not defined here: the name belongs to a developer command.\n")')" \
 	""
 
+run_case "no-secret-on-argv: the request helper pipes into nc and loses the answer" fail \
+	'./scripts/no-secret-on-argv.sh' \
+	"$(py 'edit("install.sh", "sh -c \x27f=/tmp/nc-in; mkfifo \"$f\" || exit 1; nc -w 10 \"$1\" \"$2\" < \"$f\" & pid=$!; exec 3>\"$f\"; cat >&3; wait \"$pid\"\x27", "sh -c \x27cat | nc -w 5 \"$1\" \"$2\"\x27")')" \
+	"end of input before the server answers"
+
 
 echo
 if [ -n "$(git status --porcelain)" ]; then

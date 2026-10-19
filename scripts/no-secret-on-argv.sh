@@ -97,6 +97,8 @@ def statics(name, text, compose=False):
         # purpose; both are outside this rule.
         if not compose and name == "install.sh" and URL_CREDENTIAL.search(line) and ARG_PROGRAM.search(live_text(line)):
             fail(f"{where}: a URL carries a credential on a command line, so it is on an argument list and in .git/config")
+        if name == "install.sh" and re.search(r"\|\s*nc\b", line):
+            fail(f"{where}: a pipe into nc: nc sees end of input before the server answers and the Go servers answer nothing")
         if HEADER_FLAG.search(line) and not compose:
             fail(f"{where}: a --header or -H flag on a command line; headers go on stdin through the request helper")
         if not compose and ARG_PROGRAM.search(live_text(line)) and SECRET_EXPANSION.search(live_text(line)):
@@ -183,6 +185,11 @@ if start < 0 or end < 0 or end < start:
     fail(f"install.sh has no '{BEGIN_HTTP}' ... '{END_HTTP}' request-helper block, so no argument-free request was measured")
 else:
     block = install[start:end]
+    # busybox nc exits as soon as its stdin ends, before a Go server has answered; the server
+    # then cancels the request and sends nothing (measured 2026-10-19: CI install legs failed every
+    # check through a pipe into nc). So the helper must hold nc's stdin open until nc exits.
+    if "mkfifo" not in block or "wait" not in block:
+        fail("the request helper lets nc see end of input before the server answers: it no longer holds nc's stdin open")
     scratch = tempfile.mkdtemp(prefix="no-secret-on-argv.")
     try:
         script = (

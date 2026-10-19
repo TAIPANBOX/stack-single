@@ -273,8 +273,15 @@ http_request() { # method, url, headers (CRLF-terminated, may hold a key), body
     printf '%s' "$hdrs"
     [ -z "$body" ] || printf 'Content-Length: %s\r\n' "${#body}"
     printf '\r\n%s' "$body"
+  # nc must not see end-of-input on its stdin before the server has answered: busybox nc
+  # closes the connection the moment stdin ends, and the real servers (Go net/http) then
+  # cancel the request, so they answer nothing (measured 2026-10-19 against tokenfuse
+  # v1.18.0: nc returned 0 and no bytes for healthz and for every key check; wget got 200).
+  # So nc reads a FIFO, the request is written into it, and the FIFO stays open until nc
+  # exits, which is when the server has answered and closed. No secret is on any argv.
   } | docker run -i --rm --network "$NET" busybox:1.36 \
-        sh -c 'cat | nc -w 5 "$1" "$2"' sh "${hostport%%:*}" "${hostport##*:}"
+        sh -c 'f=/tmp/nc-in; mkfifo "$f" || exit 1; nc -w 10 "$1" "$2" < "$f" & pid=$!; exec 3>"$f"; cat >&3; wait "$pid"' \
+        sh "${hostport%%:*}" "${hostport##*:}"
 }
 # The status code on a response's first line, 0 when nothing answered.
 # shellcheck disable=SC2329,SC2317  # invoked indirectly, from http_status() and the checks that call it

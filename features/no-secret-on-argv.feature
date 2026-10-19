@@ -68,3 +68,9 @@ Feature: no credential rides on a process's argument list
     When the request helper computes Content-Length under a UTF-8 locale
     Then Content-Length counts bytes, so the server does not stop reading early
     # -> gates-have-teeth.sh "no-secret-on-argv: a non-ASCII body is measured in characters"
+
+  Scenario: the request helper keeps nc's input open until the server answers
+    Given a Go server answers a request only while the client keeps its side open
+    When the request helper pipes its request into nc, which then sees end of input
+    Then no-secret-on-argv.sh fails, because nc would close before the server answers
+    # -> gates-have-teeth.sh "no-secret-on-argv: the request helper pipes into nc and loses the answer"
