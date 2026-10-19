@@ -332,6 +332,27 @@ jobs:
           [ "${d%% *}" = 402 ] || { echo "::error::Felyx's key speaking as Felyx did not get past identity to the budget (402)"; exit 1; }
           [ "$e" = "403 identity_mismatch" ] || { echo "::error::Felyx's key speaking as an agent was not refused 403 identity_mismatch"; exit 1; }
 
+      # DIAGNOSTIC for CI run 39324693810 (CLAUDE.md invariant 38): observes the edge network's egress and the host's
+      # FORWARD and NAT rules for its bridge, before and after the STATIC_KEY_IDS install. It changes nothing and cannot
+      # fail the job (continue-on-error). Removed once the cause is fixed.
+      - name: "diagnostic: edge egress and its host rules, before the STATIC_KEY_IDS run"
+        if: matrix.profile != 'identity' && matrix.profile != 'static-only'
+        continue-on-error: true
+        run: |
+          cd /opt/agent-stack
+          net="agent-stack_edge"
+          id12="$(sudo docker network inspect "$net" -f '{{slice .Id 0 12}}')"
+          br="br-$id12"
+          echo "edge bridge $br, IPAM $(sudo docker network inspect "$net" -f '{{json .IPAM.Config}}')"
+          echo "probe on $net:"
+          sudo docker run --rm --network "$net" busybox:1.36 sh -c 'wget -T10 -O /dev/null http://example.com/; echo "wget rc=$?"; cat /etc/resolv.conf' 2>&1 || true
+          echo "ip_forward: $(sudo sysctl -n net.ipv4.ip_forward)"
+          echo "FORWARD policy and rules naming $br: $(sudo iptables -S FORWARD | head -1) / $(sudo iptables -S FORWARD | grep -c "$br")"
+          sudo iptables -S FORWARD | head -12
+          echo "nat POSTROUTING for the edge subnet:"
+          sudo iptables -t nat -S POSTROUTING | grep -E "$br|MASQUERADE" | head -8 || true
+          echo "gateway: $(sudo docker compose ps --format '{{.Name}} {{.Status}}' tokenfuse-gateway 2>&1 || true)"
+
       # 1.4.0 (CLAUDE.md invariant 53), the operator's side: naming agents in STATIC_KEY_IDS keeps the agents' key on the
       # gateway's static list, and it then answers as the agent it is bound to (402 past identity) and is still refused
       # as Felyx (403 identity_mismatch). The closing report must say that agents was kept. The run is a re-run, so the
@@ -373,6 +394,27 @@ jobs:
           [ "$c" = "403 identity_mismatch" ] || { echo "::error::the agents' key, named in STATIC_KEY_IDS, was not refused 403 identity_mismatch as Felyx: $c"; exit 1; }
           [ "${d%% *}" = 402 ] || { echo "::error::Felyx's key speaking as Felyx did not get past identity to the budget (402): $d"; exit 1; }
           [ "$e" = "403 identity_mismatch" ] || { echo "::error::Felyx's key speaking as an agent was not refused 403 identity_mismatch: $e"; exit 1; }
+
+      # DIAGNOSTIC for CI run 39324693810 (CLAUDE.md invariant 38): observes the edge network's egress and the host's
+      # FORWARD and NAT rules for its bridge, before and after the STATIC_KEY_IDS install. It changes nothing and cannot
+      # fail the job (continue-on-error). Removed once the cause is fixed.
+      - name: "diagnostic: edge egress and its host rules, after the STATIC_KEY_IDS run"
+        if: matrix.profile != 'identity' && matrix.profile != 'static-only'
+        continue-on-error: true
+        run: |
+          cd /opt/agent-stack
+          net="agent-stack_edge"
+          id12="$(sudo docker network inspect "$net" -f '{{slice .Id 0 12}}')"
+          br="br-$id12"
+          echo "edge bridge $br, IPAM $(sudo docker network inspect "$net" -f '{{json .IPAM.Config}}')"
+          echo "probe on $net:"
+          sudo docker run --rm --network "$net" busybox:1.36 sh -c 'wget -T10 -O /dev/null http://example.com/; echo "wget rc=$?"; cat /etc/resolv.conf' 2>&1 || true
+          echo "ip_forward: $(sudo sysctl -n net.ipv4.ip_forward)"
+          echo "FORWARD policy and rules naming $br: $(sudo iptables -S FORWARD | head -1) / $(sudo iptables -S FORWARD | grep -c "$br")"
+          sudo iptables -S FORWARD | head -12
+          echo "nat POSTROUTING for the edge subnet:"
+          sudo iptables -t nat -S POSTROUTING | grep -E "$br|MASQUERADE" | head -8 || true
+          echo "gateway: $(sudo docker compose ps --format '{{.Name}} {{.Status}}' tokenfuse-gateway 2>&1 || true)"
 
       - name: "static-only: agent tokens are off, nothing enrols, and no static-key list is written"
         if: matrix.profile == 'static-only'
