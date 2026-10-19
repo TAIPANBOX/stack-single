@@ -813,7 +813,7 @@ services:
   tokenfuse-mcp-broker:
     <<: *restart
     profiles: ["typed"]
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.16.0@sha256:a119ce03a6bc0b3c9eacb755707397bf6b20c75c8d1838f0eeeb0bf4f0c8354c}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.18.0@sha256:7cbaa794670560468b15a7a6a3c37396767435332e8eca3a30af627de29ad6d9}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20012:10001"
@@ -1050,15 +1050,23 @@ services:
     # Keyryx certifies vouchryx's working signing key (invariant 42). Empty, the
     # default, keeps the file key. v0.6.0 (the pin here) refuses to start with
     # VOUCHRYX_SIGNER=keyryx unless VOUCHRYX_KEYRYX_ROOT_PIN names the kids of
-    # keyryx's delegation root, so both are passed through, and neither is set by
-    # this launcher: it keeps the file key. group_add 20002 is for the socket
-    # directory below, which only this uid's group may enter.
+    # keyryx's delegation root. The keyryx variables are passed through from .env
+    # and empty by default; this launcher keeps the file key. group_add 20002 is
+    # for the socket directory below, which only this uid's group may enter.
     group_add:
       - "20002"
     environment:
       VOUCHRYX_SIGNER: ${VOUCHRYX_SIGNER:-}
       VOUCHRYX_KEYRYX_ROOT_PIN: ${VOUCHRYX_KEYRYX_ROOT_PIN:-}
-      VOUCHRYX_KEYRYX_URL: unix:///run/keyryx/sock/vouchryx/keyryx.sock
+      # vouchryx 0.6.0 refuses ANY keyryx variable that is set while VOUCHRYX_SIGNER
+      # is not keyryx (measured: a literal socket URL here stops the start with
+      # "VOUCHRYX_KEYRYX_URL is set, but VOUCHRYX_SIGNER is not keyryx"). So every
+      # one of them is passed through empty, and the operator sets them in .env
+      # together with VOUCHRYX_SIGNER=keyryx.
+      VOUCHRYX_KEYRYX_URL: ${VOUCHRYX_KEYRYX_URL:-}
+      VOUCHRYX_KEYRYX_CONSUMER: ${VOUCHRYX_KEYRYX_CONSUMER:-}
+      VOUCHRYX_KEYRYX_SOCKET: ${VOUCHRYX_KEYRYX_SOCKET:-}
+      VOUCHRYX_KEYRYX_CREDENTIAL_FILE: ${VOUCHRYX_KEYRYX_CREDENTIAL_FILE:-}
       VOUCHRYX_ADDR: 0.0.0.0:4310
       # This exact literal, `http://vouchryx:4310`, is also `install.sh`'s own
       # `TOKENFUSE_DELEGATION_ISSUER` default once WITH_DELEGATION=1: the
@@ -1109,7 +1117,7 @@ services:
   # ---- money: the control API ----------------------------------------------
   tokenfuse-cloud:
     <<: *restart
-    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v1.16.0@sha256:0554bd17eb7b515554be8d8f8c80bc62273f80e3203001688eaccc507144c447}
+    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v1.18.0@sha256:c6160a8eed3d83d9caf42b426e82444cfe48a14027cb90ad4338340587a9d372}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20013:10001"
@@ -1155,7 +1163,7 @@ services:
   # gets a hard refusal rather than a log line.
   tokenfuse-gateway:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.16.0@sha256:a119ce03a6bc0b3c9eacb755707397bf6b20c75c8d1838f0eeeb0bf4f0c8354c}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.18.0@sha256:7cbaa794670560468b15a7a6a3c37396767435332e8eca3a30af627de29ad6d9}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20010:10001"
@@ -1383,7 +1391,7 @@ services:
   #     reading of the variables being absent.
   tokenfuse-gateway-openai:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.16.0@sha256:a119ce03a6bc0b3c9eacb755707397bf6b20c75c8d1838f0eeeb0bf4f0c8354c}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.18.0@sha256:7cbaa794670560468b15a7a6a3c37396767435332e8eca3a30af627de29ad6d9}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20011:10001"
@@ -1787,7 +1795,7 @@ services:
   # The sixth, trailryx-seal, is the `record` profile above.
   focus-export:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.16.0@sha256:a119ce03a6bc0b3c9eacb755707397bf6b20c75c8d1838f0eeeb0bf4f0c8354c}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.18.0@sha256:7cbaa794670560468b15a7a6a3c37396767435332e8eca3a30af627de29ad6d9}
     networks:
       - core
     user: "10001:10001"

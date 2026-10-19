@@ -894,9 +894,11 @@ What is wired now, and what is not:
 - **vouchryx** has the wiring, and its working key is still the file key. The switch
   is `VOUCHRYX_SIGNER`, empty by default, and this launcher keeps it empty. The pin is
   v0.6.0, which reads `keyryx` and refuses to start with it unless
-  `VOUCHRYX_KEYRYX_ROOT_PIN` names the kids of keyryx's delegation root. Both pass
-  through from `.env`, so the switch can be turned on by hand; the installer does not
-  turn it on.
+  `VOUCHRYX_KEYRYX_ROOT_PIN` names the kids of keyryx's delegation root. vouchryx 0.6.0
+  refuses any keyryx variable while the signer is not keyryx, so the keyryx variables pass
+  through from `.env` and are empty by default. Turning the switch on by hand takes
+  `VOUCHRYX_SIGNER=keyryx`, the keyryx variables and the root pin in `.env`. The installer
+  does not turn it on, and this launcher has not run that mode.
 - **the tokenfuse gateway and the MCP broker** have `TOKENFUSE_DELEGATION_JWKS_URL`
   set to empty, which is off. It takes effect with tokenfuse v1.17.0.
 - **trailryx's seal** is not wired. Its signer needs the next trailryx release.
