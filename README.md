@@ -597,7 +597,7 @@ run. Felyx authenticates with this key and never with your provider key.
 A console that carries genaryx invariant 24 can present a key of its own:
 `compose.yaml` already hands it `GENARYX_COPILOT_FUSE_KEY_REF`, which points at
 `GENARYX_COPILOT_FUSE_KEY` in `.env`, and such a console sends that key as
-`x-fuse-key`. The console pinned here (v1.1.46) carries it; an older one ignores
+`x-fuse-key`. The console pinned here (v1.1.47) carries it; an older one ignores
 the setting. Measured 2026-10-13 with two throwaway v1.1.44 consoles against a
 gateway holding client keys: with the key set, a question to Felyx was answered;
 with it empty, the gateway answered 401. To give Felyx a key:
@@ -1308,6 +1308,55 @@ day. The box's own stack is still what this README installs.
 beyond the file transport; the passkey ceremony; the WireGuard door
 reached from outside the LAN; `down -v`; a full disk; a lost `.env`.
 
+## What the install needs from the network
+
+The installer runs as root on a Debian or Ubuntu box you own. Outbound HTTPS is
+needed to these hosts. A step that cannot reach one stops there, and the message
+names the host and what cosign or curl reported.
+
+| Host | What it is for | When |
+|---|---|---|
+| `github.com`, `release-assets.githubusercontent.com` | the pinned cosign v3.1.3 binary. github.com redirects the file to the release-assets host, so both are needed | each install and re-run, until the binary in `/opt/agent-stack/bin/cosign` matches its pinned SHA-256 |
+| `tuf-repo-cdn.sigstore.dev` | the Sigstore trust root that cosign checks each signature against | before each signature check |
+| `ghcr.io` (and the blob host it redirects to) | the image manifests, the signatures, and the pulls | as before this release |
+| `raw.githubusercontent.com`, `api.github.com`, `api.ipify.org` | the compose file, the stack-k8s tarball, and the box's public address | as before this release |
+
+Checked on 2026-10-19 with cosign v3.1.3: a signature check does not contact the
+Rekor transparency log or Fulcio, because the inclusion proof travels with the
+signature. Blocking either host did not stop the check. Blocking the trust root
+host or the registry did.
+
+`BUILD_FROM_SOURCE=1` builds the planes locally. It pulls no published image and
+checks no signature, so it does not fetch cosign either.
+
+## Images: pinned by digest, and ours checked before they start
+
+Every image the stack runs is pinned to the digest of the bytes it names. The
+tag stays beside it for reading. A tag can be moved by whoever controls the
+registry; a digest cannot, so a box running `wardryx:v2.2.0@sha256:c91c...` runs
+that build and nothing else.
+
+The images this project publishes (`ghcr.io/taipanbox/...`) are also signed,
+keyless, by the release workflow that built them, and carry a provenance
+attestation. Before the installer pulls one of them it checks that signature
+against the release workflows of the TAIPANBOX repositories, and the two stack-k8s image workflows, on a version tag. The installer fetches a pinned cosign release,
+checks its SHA-256 before anything can run it, and refuses to start the stack
+if one of our images does not verify. The refusal names the image and stops
+before anything is pulled further or started.
+
+What this does not do:
+
+- Third-party images (`busybox`, `postgres`) are pinned by digest but are not
+  signature-checked. Nothing here verifies who published them.
+- `BUILD_FROM_SOURCE=1` builds the planes on your own box. Nothing built that way
+  is signed or checked. It is your choice to make, and the installer says so.
+- A digest says which bytes a box runs. It does not say those bytes are safe.
+  The signature says which release workflow built them.
+
+To move a pin, change the tag and its digest together in `compose.yaml` and in
+`components.json`, and in the one place `install.sh` names the same image.
+`scripts/images-are-digest-pinned.sh` refuses a pair that disagrees.
+
 ## What the installer will not do quietly
 
 It verifies itself and tells you what it found. Three of its checks have to
@@ -1525,7 +1574,7 @@ re-run keeps it. To turn closing off again, remove `CLOSURE_SECRET` and
 `CLOSURE_SECRET_FILE` from `.env` and run `docker compose up -d`.
 
 It needs tokenfuse v1.9.0 or later and console v1.1.34 or later. The images pinned here are tokenfuse v1.16.0 and
-console v1.1.46; an older image ignores the setting.
+console v1.1.47; an older image ignores the setting.
 
 ## The console
 

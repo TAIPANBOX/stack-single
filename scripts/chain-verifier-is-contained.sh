@@ -214,7 +214,7 @@ for name in sorted(subjects):
     if "no-new-privileges:true" not in listing(b, "security_opt"):
         note(f"{name}: no no-new-privileges")
     img = field(b, "image") or ""
-    if not re.search(r"ghcr\.io/taipanbox/agent-conform:v[0-9]+\.[0-9]+\.[0-9]+\}?$", img):
+    if not re.search(r"ghcr\.io/taipanbox/agent-conform:v[0-9]+\.[0-9]+\.[0-9]+(@sha256:[0-9a-f]{64})?\}?$", img):
         note(f"{name}: image {img} is not pinned to a released vX.Y.Z tag")
 
     # ---- 3. init-volumes prepares exactly its file and its state volume

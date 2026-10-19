@@ -811,7 +811,7 @@ run_case "typed-data-mode: no volume is mounted where the training log lives" fa
 
 run_case "typed-data-mode: compose still pins a typryx older than the pin" fail \
 	'./scripts/typed-data-mode.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/typryx:v0.4.1}", "ghcr.io/taipanbox/typryx:v0.2.0}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/typryx:v0.4.1@sha256:c49bceb2003e6486a6d2c82b34a7c7cc3834933b9c6108e8074fefa35b926502}", "ghcr.io/taipanbox/typryx:v0.2.0}")')" \
 	"compose.yaml pins typryx v0.2.0"
 
 run_case "typed-data-mode: components.json keeps the old typryx pin" fail \
@@ -1415,7 +1415,7 @@ run_case "chain-verifier: its root filesystem becomes writable" fail \
 
 run_case "chain-verifier: its image is unpinned" fail \
 	'./scripts/chain-verifier-is-contained.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/agent-conform:v1.1.0}", "ghcr.io/taipanbox/agent-conform:latest}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/agent-conform:v1.1.0@sha256:c0a6369c2ca2c7d7bec67c6c390ac5db8a52d042fcaf7a87f2dd6490e20abda8}", "ghcr.io/taipanbox/agent-conform:latest}")')" \
 	"is not pinned to a released"
 
 run_case "chain-verifier: its loop is removed" fail \
@@ -1425,7 +1425,7 @@ run_case "chain-verifier: its loop is removed" fail \
 
 run_case "chain-verifier: no verifier service left to judge" fail \
 	'./scripts/chain-verifier-is-contained.sh' \
-	"$(py 'edit("compose.yaml", "${AGENT_CONFORM_IMAGE:-ghcr.io/taipanbox/agent-conform:v1.1.0}", "${AGENT_CONFORM_IMAGE:-registry.invalid/agent-conform}")')" \
+	"$(py 'edit("compose.yaml", "${AGENT_CONFORM_IMAGE:-ghcr.io/taipanbox/agent-conform:v1.1.0@sha256:c0a6369c2ca2c7d7bec67c6c390ac5db8a52d042fcaf7a87f2dd6490e20abda8}", "${AGENT_CONFORM_IMAGE:-registry.invalid/agent-conform}")')" \
 	"measured NOTHING about the chain verifier"
 
 # The bus gate's own half: a shared volume is written through ONE FILE a service
@@ -1519,22 +1519,22 @@ open("README.md", "w").write(s.replace("when_absent: hold", "when_absent_gone: h
 
 run_case "typed-risk-signal: typryx is pinned before the proxy existed" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/typryx:v0.4.1}", "ghcr.io/taipanbox/typryx:v0.3.0}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/typryx:v0.4.1@sha256:c49bceb2003e6486a6d2c82b34a7c7cc3834933b9c6108e8074fefa35b926502}", "ghcr.io/taipanbox/typryx:v0.3.0}")')" \
 	"the proxy (wardryx-proxy) does not exist before it"
 
 run_case "typed-risk-signal: wardryx is pinned before it read signals" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.2.0}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.2.0@sha256:c91cd4f2bb2542a2be6972a612666672122e15514341fe9ac49f5370357ee903}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
 	"hold_if_signal and signals on /v1/decide do not exist before it"
 
 run_case "typed-risk-signal: wardryx is pinned before when_absent" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.2.0}", "ghcr.io/taipanbox/wardryx:v1.3.2}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.2.0@sha256:c91cd4f2bb2542a2be6972a612666672122e15514341fe9ac49f5370357ee903}", "ghcr.io/taipanbox/wardryx:v1.3.2}")')" \
 	"needs v1.4.0 or later"
 
 run_case "typed-risk-signal: tokenfuse is pinned before it sent the tool call" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/tokenfuse:v1.16.0}", "ghcr.io/taipanbox/tokenfuse:v1.4.1}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/tokenfuse:v1.16.0@sha256:a119ce03a6bc0b3c9eacb755707397bf6b20c75c8d1838f0eeeb0bf4f0c8354c}", "ghcr.io/taipanbox/tokenfuse:v1.4.1}")')" \
 	"the broker sends no tool_call to the policy plane before it"
 
 run_case "typed-risk-signal: install.sh starts the proxy profile unconditionally" fail \
@@ -2175,7 +2175,7 @@ edit("compose.yaml", "      typryx:\n        condition: service_started", "     
 run_case "typed-data-mode: compose names no typryx image to read a pin from" fail \
 	'./scripts/typed-data-mode.sh' \
 	"$(py 's = open("compose.yaml").read()
-a = "image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.4.1}"
+a = "image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.4.1@sha256:c49bceb2003e6486a6d2c82b34a7c7cc3834933b9c6108e8074fefa35b926502}"
 assert s.count(a) == 2, "expected the typryx service and the risk-signal proxy to name the image"
 open("compose.yaml", "w").write(s.replace(a, "image: ${TYPRYX_IMAGE:-registry.invalid/typryx}"))')" \
 	"names no ghcr.io/taipanbox/typryx"
@@ -2295,7 +2295,7 @@ run_case "finops: its root filesystem becomes writable" fail \
 
 run_case "finops: its image is unpinned" fail \
 	'./scripts/finops-is-opt-in.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.7.0}", "ghcr.io/taipanbox/costcrew:latest}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.7.0@sha256:b0bba08736c8e99d0db465bbb8ea8013fba6cf02c69f75171913c7bacb087066}", "ghcr.io/taipanbox/costcrew:latest}")')" \
 	"is not the pinned"
 
 run_case "finops: it is published on every address" fail \
@@ -2346,7 +2346,7 @@ run_case "finops: the console stops waiting for its one-shot" fail \
 
 run_case "finops: no console left to judge" fail \
 	'./scripts/finops-is-opt-in.sh' \
-	"$(py 'edit("compose.yaml", "${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.7.0}", "${COSTCREW_IMAGE:-registry.invalid/costcrew}")')" \
+	"$(py 'edit("compose.yaml", "${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.7.0@sha256:b0bba08736c8e99d0db465bbb8ea8013fba6cf02c69f75171913c7bacb087066}", "${COSTCREW_IMAGE:-registry.invalid/costcrew}")')" \
 	"measured NOTHING about the FinOps console"
 
 # The rendering half: text a parser accepts and compose does not.
@@ -2424,7 +2424,7 @@ run_case "finops: the owner default changes" pass \
 
 run_case "finops: the pinned tag moves" pass \
 	'./scripts/finops-is-opt-in.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.7.0}", "ghcr.io/taipanbox/costcrew:v0.6.1}")')"
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.7.0@sha256:b0bba08736c8e99d0db465bbb8ea8013fba6cf02c69f75171913c7bacb087066}", "ghcr.io/taipanbox/costcrew:v0.6.1}")')"
 
 run_case "finops: the loopback port moves" pass \
 	'./scripts/finops-is-opt-in.sh' \
@@ -3114,6 +3114,106 @@ run_case "witness-is-separate: no keyryx service left to judge" fail \
 	'./scripts/witness-is-separate.sh' \
 	"$(py 'edit("compose.yaml", "  keyryx-witness:\n", "  keyryx-witness-moved:\n")')" \
 	"measured nothing"
+
+
+# ---- images-are-digest-pinned and images-are-verified (CLAUDE.md invariant 44) --
+run_case "images-are-digest-pinned: a published image loses its digest" fail \
+	'./scripts/images-are-digest-pinned.sh' \
+	"$(py 'edit("compose.yaml", "trailryx-node:v1.2.1@sha256:86fe5a3fd17c09c33a955040d2570879eff5a1886c104bd237e4428389c213a3}", "trailryx-node:v1.2.1}")')" \
+	"trailryx-node:v1.2.1 is not pinned"
+
+run_case "images-are-digest-pinned: a digest is cut short" fail \
+	'./scripts/images-are-digest-pinned.sh' \
+	"$(py 'edit("compose.yaml", "trailryx-node:v1.2.1@sha256:86fe5a3fd17c09c33a955040d2570879eff5a1886c104bd237e4428389c213a3}", "trailryx-node:v1.2.1@sha256:86fe5a3fd17c09c33a955040d2570879eff5a1886c104bd237e4428389c213a}")')" \
+	"is not pinned by a full sha256 digest"
+
+run_case "images-are-digest-pinned: the third-party postgres loses its digest" fail \
+	'./scripts/images-are-digest-pinned.sh' \
+	"$(py 'edit("compose.yaml", "postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea", "postgres:16-alpine")')" \
+	"postgres:16-alpine is not pinned"
+
+run_case "images-are-digest-pinned: the installer names a digest compose does not run" fail \
+	'./scripts/images-are-digest-pinned.sh' \
+	"$(py 'edit_all("install.sh", "b650f01aeac9baa89f60ca86f71f589fc7c7c7d25d3237793814a186eb8f5cea", "1111111111111111111111111111111111111111111111111111111111111111")')" \
+	"pinned to a digest compose.yaml does not run"
+
+run_case "images-are-digest-pinned: no image line left to judge" fail \
+	'./scripts/images-are-digest-pinned.sh' \
+	"$(py 'edit_all("compose.yaml", "    image: ", "    imagex: ")')" \
+	"measured NOTHING"
+
+run_case "images-are-digest-pinned: a reworded comment is not a fault" pass \
+	'./scripts/images-are-digest-pinned.sh' \
+	"$(py 'edit("install.sh", "# ---- 3c. the images, pulled ", "# ---- 3c. the images, pulled and checked ")')"
+
+run_case "images-are-verified: the pull comes before the check" fail \
+	'./scripts/images-are-verified.sh' \
+	"$(py 'edit("install.sh", "        image_verify \"$img\"\n        note \"pulling $img\"\n        docker pull -q \"$img\" >/dev/null || die \"could not pull $img\"\n", "        note \"pulling $img\"\n        docker pull -q \"$img\" >/dev/null || die \"could not pull $img\"\n        image_verify \"$img\"\n")')" \
+	"pulls before it verifies"
+
+run_case "images-are-verified: a refused signature does not stop the install" fail \
+	'./scripts/images-are-verified.sh' \
+	"$(py 'edit("install.sh", "die \x22could not check the signature of $name", "note \x22could not check the signature of $name")')" \
+	"did not stop the install"
+
+run_case "images-are-verified: the signer accepts any identity" fail \
+	'./scripts/images-are-verified.sh' \
+	"$(py 'edit("install.sh", "TAIPANBOX/(?:", "(?:")')" \
+	"not the pinned value"
+
+run_case "images-are-verified: the signer accepts a signer from another workflow file" fail \
+	'./scripts/images-are-verified.sh' \
+	"$(py 'edit("install.sh", "/\\.github/workflows/release\\.yml|", "/\\.github/workflows/[^@]+|")')" \
+	"accepts a signer from another workflow file"
+
+run_case "images-are-verified: the signer refuses the release workflow" fail \
+	'./scripts/images-are-verified.sh' \
+	"$(py 'edit("install.sh", "/\\.github/workflows/release\\.yml|", "/\\.github/workflows/release-x\\.yml|")')" \
+	"refuses the release identity"
+
+run_case "images-are-verified: a refused fetch of cosign names no host" fail \
+	'./scripts/images-are-verified.sh' \
+	"$(py 'edit("install.sh", "\x22$dest.download\x22 \x22$url\x22 2>&1)\x22", "\x22$dest.download\x22 \x22$url\x22 2>/dev/null)\x22")')" \
+	"does not name the host that failed"
+
+run_case "images-are-verified: an unreachable Sigstore trust root is not named" fail \
+	'./scripts/images-are-verified.sh' \
+	"$(py 'edit("install.sh", "die \x22could not reach the Sigstore trust root at tuf-repo-cdn.sigstore.dev, so", "die \x22could not check, so")')" \
+	"is not named as one, with its host"
+
+run_case "images-are-verified: a missing signature is reported as having some" fail \
+	'./scripts/images-are-verified.sh' \
+	"$(py 'edit("install.sh", "die \x22$name has no signature from a TAIPANBOX release workflow", "die \x22$name has no signed release from a TAIPANBOX release workflow")')" \
+	"is not reported as having none"
+
+run_case "images-are-verified: the signer accepts a branch ref" fail \
+	'./scripts/images-are-verified.sh' \
+	"$(py 'edit("install.sh", "@refs/tags/v[0-9][A-Za-z0-9._+-]*$", "@refs/[^@]*$")')" \
+	"accepts a branch ref"
+
+run_case "images-are-verified: the verify call skips the transparency log" fail \
+	'./scripts/images-are-verified.sh' \
+	"$(py 'edit("install.sh", "--certificate-oidc-issuer \"$TAIPANBOX_ISSUER\" \"$ref\"", "--certificate-oidc-issuer \"$TAIPANBOX_ISSUER\" --insecure-ignore-tlog \"$ref\"")')" \
+	"weakens the check"
+
+run_case "images-are-verified: a cosign binary with the wrong bytes is installed" fail \
+	'./scripts/images-are-verified.sh' \
+	"$(py 'edit("install.sh", "\"$dest.download\" | sha256sum -c --status", "\"$dest.download\" | cat >/dev/null")')" \
+	"was installed at bin/cosign"
+
+run_case "images-are-verified: a third-party image goes to cosign" fail \
+	'./scripts/images-are-verified.sh' \
+	"$(py 'edit("install.sh", "      ghcr.io/*)", "      *)")')" \
+	"for the check to sit in"
+
+run_case "images-are-verified: no image-verify block left to judge" fail \
+	'./scripts/images-are-verified.sh' \
+	"$(py 'edit("install.sh", "# image-verify: begin", "# image-verify: begun")')" \
+	"measured NOTHING"
+
+run_case "images-are-verified: a reworded comment in the block is not a fault" pass \
+	'./scripts/images-are-verified.sh' \
+	"$(py 'edit("install.sh", "# A signature is accepted only from", "# A signature is accepted solely from")')"
 
 
 echo

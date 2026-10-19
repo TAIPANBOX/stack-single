@@ -80,6 +80,8 @@ change here is a change to something with root on somebody else's box.
 ./scripts/no-plane-writes-another-planes-stream.sh
 ./scripts/keyryx-root-is-not-in-env.sh
 ./scripts/witness-is-separate.sh
+./scripts/images-are-digest-pinned.sh
+./scripts/images-are-verified.sh
 ./scripts/gates-have-teeth.sh   # invariant 8; needs a clean tree
 ```
 
@@ -1463,6 +1465,9 @@ an absent invariant.
     `scripts/gates-have-teeth.sh`. Not covered: a live custody refusing a bad root
     file (keyryx's own tests), the witness's time-stamping authority (off), and
     checkpoint checks, since no producer writes one yet.)*
+
+44. **Every image the launcher runs is pinned by digest, and every image this project publishes is signature-checked before it is pulled.** `@decided 2026-10-18` (paraphrased, wave 3 of the 2026-10-17 agent-security review, finding F-016): images are pinned by digest, and their signatures are verified before the stack starts. `@claude 2026-10-19`: a pin is written `${VAR:-ghcr.io/taipanbox/name:tag@sha256:...}` in `compose.yaml` (the form `keyryx` already used), mirrored in `components.json`, and in the one place `install.sh` names an image itself. The installer fetches cosign v3.1.3 and runs it only when its SHA-256 matches the value pinned in `install.sh`, which was copied from that release's own checksum file, whose signature was checked against the sigstore release identity. Each `ghcr.io/taipanbox` image is checked with `cosign verify` against the regexp (the release workflow of a TAIPANBOX repository, or one of the two stack-k8s image workflows, on a version tag) `^https://github\.com/TAIPANBOX/(?:[A-Za-z0-9._-]+/\.github/workflows/release\.yml|stack-k8s/\.github/workflows/(?:console-image|tunnel-images)\.yml)@refs/tags/v[0-9][A-Za-z0-9._+-]*$` and GitHub's OIDC issuer, inside the pull loop of section 3c, before its `docker pull`. A signature that does not check stops the install before the stack starts. Third-party images (`busybox`, `postgres`) are digest-pinned and not signature-checked. `BUILD_FROM_SOURCE` builds locally, and nothing it builds is signed or checked; that is the operator's explicit choice.
+*(gate: `scripts/images-are-digest-pinned.sh` for the pins; `scripts/images-are-verified.sh` for the pinned cosign SHA-256, the signer and the issuer, the order in section 3c, and a run of the installer's block against stubs: a binary with the wrong bytes is refused and never installed, and a refused signature stops the run before that image is pulled; teeth in `scripts/gates-have-teeth.sh`; scenarios in `features/the-images-are-pinned-and-verified.feature`. Not covered: that every live image verifies, which is a registry measurement, and an end-to-end install on Debian or Ubuntu with signed images; CI's install legs are where that runs.)*
 
 ## Decisions that have no gate yet
 
