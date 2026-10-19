@@ -258,7 +258,7 @@ probe() { docker run --rm --network "$NET" busybox:1.36 wget -q -T5 -O /dev/null
 # a container's command line stays in docker inspect (the 2026-10-17 review's F-015).
 # The headers are CRLF-terminated lines in one string, and the body follows a blank
 # line. Prints the whole response. (gate: scripts/no-secret-on-argv.sh lifts this block.)
-# shellcheck disable=SC2329,SC2317  # invoked indirectly, from code() and the checks that call it
+# shellcheck disable=SC2329,SC2317  # invoked indirectly, from http_status() and the checks that call it
 http_request() { # method, url, headers (CRLF-terminated, may hold a key), body
   # Content-Length counts BYTES. Under a UTF-8 locale ${#body} counts characters, which
   # is shorter than the bytes sent for any non-ASCII body, so the server would stop reading early.
@@ -277,7 +277,7 @@ http_request() { # method, url, headers (CRLF-terminated, may hold a key), body
         sh -c 'cat | nc -w 5 "$1" "$2"' sh "${hostport%%:*}" "${hostport##*:}"
 }
 # The status code on a response's first line, 0 when nothing answered.
-# shellcheck disable=SC2329,SC2317  # invoked indirectly, from code() and the checks that call it
+# shellcheck disable=SC2329,SC2317  # invoked indirectly, from http_status() and the checks that call it
 status_of() {
   local line code_
   line="${1%%$'\n'*}"
@@ -287,9 +287,9 @@ status_of() {
 # Prints the HTTP status only, so a check can assert 401 and 403 as PASSES. The
 # Authorization header is sent even when the key is empty, as it always was.
 # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
-code() { status_of "$(http_request GET "$1" "Authorization: Bearer $2"$'\r\n' "")"; }
+http_status() { status_of "$(http_request GET "$1" "Authorization: Bearer $2"$'\r\n' "")"; }
 # argv-free-http: end
-# Same as code(), minus the header entirely: an empty bearer token is still a
+# Same as http_status(), minus the header entirely: an empty bearer token is still a
 # credential, and the point of this one is that none was presented at all.
 # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
 codenokey() { docker run --rm --network "$NET" busybox:1.36 \
@@ -362,9 +362,9 @@ check "policy plane reaches its store" "probe http://wardryx:8090/readyz"
 # The three below are about the KEYS, and they exist because a plane with a
 # malformed key spec starts cleanly, authenticates nobody, and answers 401 to
 # its own console. Reachability alone would have called that deployment green.
-check "policy plane accepts its admin key"   "[ \"\$(code http://wardryx:8090/v1/policies '$WARDRYX_ADMIN')\" = 200 ]"
-check "policy plane rejects an unknown key"  "[ \"\$(code http://wardryx:8090/v1/policies nonsense-not-a-key)\" = 401 ]"
-check "gateway's key cannot write policy"    "[ \"\$(code http://wardryx:8090/v1/policies '$WARDRYX_GATEWAY')\" = 403 ]"
+check "policy plane accepts its admin key"   "[ \"\$(http_status http://wardryx:8090/v1/policies '$WARDRYX_ADMIN')\" = 200 ]"
+check "policy plane rejects an unknown key"  "[ \"\$(http_status http://wardryx:8090/v1/policies nonsense-not-a-key)\" = 401 ]"
+check "gateway's key cannot write policy"    "[ \"\$(http_status http://wardryx:8090/v1/policies '$WARDRYX_GATEWAY')\" = 403 ]"
 
 # The gateway's own admin key, the same shape of check for the same reason:
 # this one MUST fail to pass, exactly like the "not reachable from the host"
@@ -373,7 +373,7 @@ check "gateway's key cannot write policy"    "[ \"\$(code http://wardryx:8090/v1
 check "gateway refuses /v1/runs without the admin key" \
       "c=\$(codenokey http://tokenfuse-gateway:4100/v1/runs); case \"\$c\" in 401|403) true ;; *) false ;; esac"
 check "gateway serves /v1/runs with the admin key" \
-      "[ \"\$(code http://tokenfuse-gateway:4100/v1/runs '$GATEWAY_ADMIN')\" = 200 ]"
+      "[ \"\$(http_status http://tokenfuse-gateway:4100/v1/runs '$GATEWAY_ADMIN')\" = 200 ]"
 
 # Client keys and the identity map (sections 0f and 3e), only on a box that has
 # them. Read from the running gateway, not from .env: its own start-up lines, and

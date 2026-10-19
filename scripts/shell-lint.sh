@@ -18,7 +18,7 @@
 #           trap arguments.
 #   SC1091  `Not following /etc/os-release` and `./.env`. Both live on the
 #           target machine, not in this repo.
-#   SC2329  `probe() and code() are never invoked`. They are, indirectly: both
+#   SC2329  `probe() and http_status() are never invoked`. They are, indirectly: both
 #           are passed as strings to `check`, which evaluates them. shellcheck
 #           says as much in its own message.
 #
@@ -56,6 +56,21 @@ if ! command -v shellcheck >/dev/null 2>&1; then
   echo "FAIL: shellcheck is not installed, so install.sh was linted by nothing."
   echo "      Install it (brew install shellcheck / apt-get install shellcheck)"
   echo "      rather than skipping: a skipped check reports silence as health."
+  exit 1
+fi
+
+# A shell function named after a command a developer has shadows that command wherever
+# install.sh or a script calls it. install.sh once defined `code`, and a check that ran
+# without that function called the real VS Code CLI, which opened an application on the
+# owner's Mac (2026-10-19). So no function may take one of these names. A variable, or a
+# comment, with the name is not a function and passes. (test: teeth case in
+# scripts/gates-have-teeth.sh, shell-lint: a function named code is refused.)
+DEV_COMMANDS='code|open|test|cat|curl|docker|git|gh|make|node|python|ls'
+shadowing="$(grep -nE "^[[:space:]]*(function[[:space:]]+)?($DEV_COMMANDS)([[:space:]]*\(\)|[[:space:]]+\{)" install.sh scripts/*.sh .githooks/pre-push 2>/dev/null)"
+if [ -n "$shadowing" ]; then
+  echo "FAIL: a shell function is named after a developer command, so a call to the real command runs the function instead:"
+  printf '%s\n' "$shadowing" | sed 's/^/        /'
+  echo "Rename the function. A name that is not a command on a developer machine, such as http_status, is the fix."
   exit 1
 fi
 

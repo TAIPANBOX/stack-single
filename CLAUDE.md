@@ -1501,7 +1501,7 @@ an absent invariant.
     review): a key or a token is not put where another local user can read it: not in
     `ps`, not on a container's command line, not in a git URL that git writes into a
     clone's configuration. `@claude 2026-10-19`: the checks that prove the stack answers
-    its own keys (`code`, `fuse_refusal`, `mcp_status`, `mcp_ask_answered`) send each
+    its own keys (`http_status`, `fuse_refusal`, `mcp_status`, `mcp_ask_answered`) send each
     request through `http_request`, which writes the request, headers and key included,
     to the stdin of a throwaway busybox that sends it with `nc`, so no argument of
     `docker run` or of the container carries a key. The console clone hands git its

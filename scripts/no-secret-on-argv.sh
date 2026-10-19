@@ -187,7 +187,7 @@ else:
     try:
         script = (
             'NET=agent-stack_core\n' + block + '\n'
-            'code http://wardryx:8090/v1/policies "$FAKE"\n'
+            'http_status http://wardryx:8090/v1/policies "$FAKE"\n'
             'http_request POST http://tokenfuse-gateway:4100/v1/runs '
             '"Content-Type: application/json"$\'\\r\\n\'"x-fuse-key: $FAKE"$\'\\r\\n\' \'{"a":1}\'\n'
             'http_request POST http://tokenfuse-gateway:4100/v1/runs "Content-Type: application/json"$\'\\r\\n\' "$MBODY"\n'

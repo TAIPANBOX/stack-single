@@ -3334,6 +3334,22 @@ run_case "no-secret-on-argv: a non-ASCII body is measured in characters" fail \
 	"a Content-Length in characters, not bytes"
 
 
+run_case "shell-lint: a function named code is refused" fail \
+	'./scripts/shell-lint.sh' \
+	"$(py 'edit("install.sh", "NET=\"agent-stack_core\"\n", "NET=\"agent-stack_core\"\ncode() { :; }\n")')" \
+	"named after a developer command"
+
+run_case "shell-lint: a function named open, with the keyword, is refused" fail \
+	'./scripts/shell-lint.sh' \
+	"$(py 'edit("install.sh", "NET=\"agent-stack_core\"\n", "NET=\"agent-stack_core\"\nfunction open { :; }\n")')" \
+	"named after a developer command"
+
+run_case "shell-lint: a comment naming code() is not a fault" pass \
+	'./scripts/shell-lint.sh' \
+	"$(py 'edit("install.sh", "NET=\"agent-stack_core\"\n", "NET=\"agent-stack_core\"\n# code() is not defined here: the name belongs to a developer command.\n")')" \
+	""
+
+
 echo
 if [ -n "$(git status --porcelain)" ]; then
 	printf 'FAIL: this script left the tree dirty, so it cannot be trusted about anything above\n'
