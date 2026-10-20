@@ -1677,8 +1677,8 @@ an absent invariant.
     volume read only and lists the file itself (never its directory) in `HERALDYX_EVENTS`
     beside the bus; the console mounts it read only and names the file in
     `GENARYX_EVENTS_EXTRA`, a setting of the console release that carries genaryx's
-    extra read-only streams (the console pinned here is older and ignores it, so until
-    that pin moves only heraldyx reads the findings). The witness still mounts the bus and
+    extra read-only streams (the console pinned here, v1.7.0, reads it; an older console
+    ignores it, and then only heraldyx reads the findings). The witness still mounts the bus and
     the checkpoints read only, and its state volume, with its log and keys, is mounted by
     no reader. The file's stem is what heraldyx reads as source `keyryx` (invariant 23).
     Mail goes out at `HERALDYX_MIN_SEVERITY`, `high` by default, so the medium findings
