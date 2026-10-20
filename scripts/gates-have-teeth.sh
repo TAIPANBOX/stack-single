@@ -268,8 +268,8 @@ run_case "record-is-not-on-the-bus: the record is written to the bus volume" fai
 run_case "record-is-not-on-the-bus: a second service writes the record store" fail \
 	'./scripts/record-is-not-on-the-bus.sh' \
 	"$(py 'edit("compose.yaml",
-     "      - events:/var/lib/stack/events\n      - ./environments",
-     "      - events:/var/lib/stack/events\n      - records:/var/lib/stack/records\n      - ./environments")')" \
+     "      - keyryxalerts:/var/lib/keyryx-alerts:ro\n      - ./environments",
+     "      - keyryxalerts:/var/lib/keyryx-alerts:ro\n      - records:/var/lib/stack/records\n      - ./environments")')" \
 	"is also written by"
 
 # invariant 10: the bus has a writer, and every volume a non-root service
