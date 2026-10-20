@@ -100,3 +100,26 @@ Feature: a typed risk signal can hold a tool call, and only when the operator as
     Then typed-risk-signal.sh still passes
     # -> gates-have-teeth.sh "typed-risk-signal: the broker's deadline is raised"
     # -> gates-have-teeth.sh "typed-risk-signal: the proxy's ask deadline default moves"
+
+  Scenario: the seeded hold is written only when the signal is on
+    Given the typed risk signal is off
+    When install.sh writes policy.yaml
+    Then no typed-risk-hold rule is in it, and the starter rules are unchanged
+    # -> gates-have-teeth.sh "typed-risk-signal: the seeded hold is written with the flag off"
+    # -> gates-have-teeth.sh "typed-risk-signal: the managed hold survives the flag going off"
+
+  Scenario: the seeded rule holds a call with no signal, and the three high-risk classes at 0.8, and no other
+    Given the typed risk signal is on
+    When a tool call arrives with no action.risk_class signal, or marked destructive, external_send or financial at 0.8 or more
+    Then it is held for a person, and a call the classifier marks read_only or reversible_change is not
+    # -> gates-have-teeth.sh "typed-risk-signal: the seeded hold does not hold on absence"
+    # -> gates-have-teeth.sh "typed-risk-signal: the seeded hold holds a class that carries no risk"
+    # -> gates-have-teeth.sh "typed-risk-signal: the seeded hold drops a high-risk class"
+    # -> gates-have-teeth.sh "typed-risk-signal: the seeded hold's threshold is lowered"
+    # -> gates-have-teeth.sh "typed-risk-signal: the seeded hold narrows its target"
+
+  Scenario: the block that carries the seeded hold is not lost
+    Given install.sh has the managed block between its markers
+    When the markers go or the block is removed
+    Then typed-risk-signal.sh says it measured nothing, never OK
+    # -> gates-have-teeth.sh "typed-risk-signal: the policy block is gone"

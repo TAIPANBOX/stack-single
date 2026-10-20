@@ -81,6 +81,12 @@ step "every read-write volume is re-owned to its uid on every up (invariant 49)"
 step "a profile this run does not name has no container left behind (invariant 50)" "./scripts/profiles-off-are-removed.sh"
 step "the record plane is on by default, from the pinned image (invariant 51)" "./scripts/record-plane-is-on-by-default.sh"
 step "the FinOps console can reach its own stream on the bus (invariant 52)" "./scripts/costcrew-can-reach-its-stream.sh"
+step "the console password is not printed (invariant 56)" "./scripts/console-password-is-not-printed.sh"
+step "the CostCrew runner spends only through the gateway (invariant 57)" "./scripts/costcrew-runner-spends-through-the-gateway.sh"
+step "the approver key is minted and wardryx checks statements (invariant 58)" "./scripts/approver-key-is-wired.sh"
+step "the record seal signs through keyryx and the witness attests (invariant 59)" "./scripts/record-is-signed-by-keyryx.sh"
+step "the record seal pins custody's trailryx-root kid at install (invariant 60)" "./scripts/trailryx-root-is-pinned.sh"
+step "the 1.5.0 wave runs its released pins and names its origins (invariant 61)" "./scripts/wave3-pins-are-released.sh"
 # Reaches the network (a tarball from the sibling repo), which is why it is
 # last: everything that can be judged offline has already spoken by here.
 step "every image has the files it copies" "./scripts/build-context-complete.sh"

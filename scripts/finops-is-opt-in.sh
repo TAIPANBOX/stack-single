@@ -180,10 +180,15 @@ def depends(block):
 
 
 # ---- subjects, derived from the image and from what the console waits for -----
+# The runner (costcrew-run, invariant 57) runs the same image and is judged by its own
+# gate, costcrew-runner-spends-through-the-gateway.sh; it is not the console, and it is
+# excluded here so that its gateway and its profile are not taken for the console's.
+runners = sorted(n for n, b in blocks.items() if any(re.search(r"entrypoint:.*costcrew-run", l) for l in b))
 subjects = [
     n
     for n, b in blocks.items()
     if any(re.match(r"^\s*image:\s*.*ghcr\.io/taipanbox/costcrew:", l) for l in b)
+    and n not in runners
 ]
 if not subjects:
     print("FAIL: no service in compose.yaml runs ghcr.io/taipanbox/costcrew, so this gate")
@@ -208,7 +213,7 @@ for n in sorted(addon):
 
 # ---- A2. the core never names the add-on -------------------------------------
 for n, b in sorted(blocks.items()):
-    if n in addon:
+    if n in addon or n in runners:
         continue
     for l in code(b):
         if re.search(r"costcrew", l, re.I):
@@ -399,8 +404,21 @@ for i, l in enumerate(install.split("\n")):
     elif in_table and re.match(r"^PROFILES_OPERATOR=", l):
         table_lines.add(i + 1)
 code_lines = [(i + 1, l.split("#", 1)[0]) for i, l in enumerate(install.split("\n"))]
+# Two places may name the add-on, and nothing else: the identity-mint block (the
+# runner's client key is one of the keys it mints, invariant 57) and the costcrew-runner
+# block (its ceiling), plus the two calls that run that block's functions.
+exempt_lines = set()
+_inside = False
+for _i, _l in enumerate(install.split("\n"), 1):
+    if re.match(r"^# (identity-mint|costcrew-runner): begin$", _l):
+        _inside = True
+    if _inside:
+        exempt_lines.add(_i)
+    if re.match(r"^# (identity-mint|costcrew-runner): end$", _l):
+        _inside = False
+EXEMPT_CALLS = {"costcrew_ceiling_resolve", "costcrew_ceiling_apply"}
 for no, l in code_lines:
-    if no in table_lines:
+    if no in table_lines or no in exempt_lines or l.strip() in EXEMPT_CALLS:
         continue
     # `finops` as the profile's own lowercase word: install.sh's closing report
     # says "FinOps export" about stack-up's routine, which is not this.
@@ -414,7 +432,7 @@ if problems:
     sys.exit(1)
 print("compose.yaml and install.sh, by text: " + ", ".join(sorted(addon)) + " sit behind profile finops alone,")
 print("    nothing else names them, no gateway is named, the stream is costcrew.ndjson in the bus,")
-print("    and install.sh does not mention them.")
+print("    and install.sh names them only in its identity-mint and costcrew-runner blocks.")
 PY
 
 # ---- C. the rendering ---------------------------------------------------------

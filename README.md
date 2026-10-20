@@ -72,7 +72,7 @@ This is the other thing. The differences are the whole point:
 | Toolchains on your host | Rust, Go, Node, Python | docker and git |
 | Where the planes come from | compiled on your machine | pulled from ghcr.io, pinned |
 | Survives a reboot | no | yes |
-| Console sign-in | no console at all | generated, shown once |
+| Console sign-in | no console at all | generated into a 0600 file under `STACK_DIR`, never printed |
 | Credentials | a dev key | unique per box, 0600, never printed twice |
 | Governance routines on a schedule | six by default, plus an opt-in drill, as OS timers | none, see below |
 
@@ -174,7 +174,8 @@ The sequence for your first session:
    it printed on that run) into your WireGuard client, and connect
 2. open `https://<your CONSOLE_DOMAIN>`, trusting this box's own CA first if
    you did not set `CLOUDFLARE_API_TOKEN` (see the next section)
-3. sign in with the password `install.sh` printed
+3. sign in with the password in the file the closing report names (`sudo cat` it,
+   then delete the file once you have saved the password)
 4. enrol a passkey under Session > Passkeys
 
 Only after step 4 do kill, budget, approval and device commands work.
@@ -311,6 +312,7 @@ on which, and why an agent's container has no route to the internet:
 | `keyryx` | 4340 (compose network only) | none. Key custody: it holds the keys that sign approvals and seal roots. See "Key custody and the witness" below |
 | `keyryx-witness` | none | none. It has no network at all. It reads the event record and checks it. See "Key custody and the witness" below |
 | `costcrew` | 8321 | **opt-in, off unless you ask for it** (profile `finops`; `install.sh` never starts it). Loopback only. See "The FinOps console" below |
+| `costcrew-run` | none | **opt-in, started by hand** (profile `crew`, run once per run). Its model calls go through the gateway. See "The crew's runner" below |
 
 ### Networks
 
@@ -321,7 +323,7 @@ directly never needed the gateway. Now there are five networks:
 | Network | Internal | Who is on it |
 |---|---|---|
 | `edge` | no | the one route out: heraldyx (mail), the gateways (provider calls), scopyx and the browser (the web), wg and caddy. typryx and its risk-signal proxy join it only when `TYPED_MODE` is `jev` or `own-model`, because only then do they call a provider |
-| `agents` | yes | where an agent's container joins (`agent-stack_agents`). Its only peers are the two gateways, the MCP broker, scopyx, the browser, the console and costcrew |
+| `agents` | yes | where an agent's container joins (`agent-stack_agents`). Its only peers are the two gateways, the MCP broker, scopyx, the browser, the console, costcrew and its runner costcrew-run |
 | `core` | yes | the planes, which reach each other and the doors. No agent container is on it |
 | `risk-signal` | yes | the typed risk signal's proxy, the MCP broker and wardryx, and nothing else |
 | `browser-policy` | yes | the browser's one path to a decision: scopyx-browser and wardryx, which decides every fetch the browser makes, and nothing else |
@@ -939,14 +941,30 @@ What is wired now, and what is not:
   own socket. A v2 token, signed with the shared secret, is accepted only until
   `WARDRYX_APPROVAL_V2_UNTIL`. That variable is unset here, so a v2 token is refused from
   the switch. On a box with no token in flight that is correct.
-- **vouchryx** has the wiring, and its working key is still the file key. The switch
-  is `VOUCHRYX_SIGNER`, empty by default, and this launcher keeps it empty. The pin is
-  v0.6.0, which reads `keyryx` and refuses to start with it unless
-  `VOUCHRYX_KEYRYX_ROOT_PIN` names the kids of keyryx's delegation root. vouchryx 0.6.0
-  refuses any keyryx variable while the signer is not keyryx, so the keyryx variables pass
-  through from `.env` and are empty by default. Turning the switch on by hand takes
-  `VOUCHRYX_SIGNER=keyryx`, the keyryx variables and the root pin in `.env`. The installer
-  does not turn it on, and this launcher has not run that mode.
+- **vouchryx** signs its delegation tokens with a working key that keyryx certifies.
+  The switch is `VOUCHRYX_SIGNER`, `keyryx` by default (CLAUDE.md invariant 55). Writing
+  `VOUCHRYX_SIGNER=file` in `.env` keeps the file key, and the next run removes the keyryx
+  lines. The installer writes the three keyryx lines and takes the root pin, the kids of
+  keyryx's delegation root, from keyryx on this box before vouchryx first starts. It keeps
+  the pin in `.env` as `VOUCHRYX_KEYRYX_ROOT_PIN` and never refreshes it: a rotated root
+  stops vouchryx at its start, and the variable's name is in the log. Trusting this box's
+  keyryx at that first start is the first-use trust keyryx's witness also takes. Pinning
+  the root from a copy the operator fetched is the stricter way, and it is not built here.
+  Not measured here: a live keyryx certifying vouchryx's key. CI's install legs run it.
+  The pin is read from keyryx's key set for its delegation root, `/v1/jwks/keyryx.delegation-root`,
+  over the compose network's `core` network. No host port publishes keyryx. The consumer socket is
+  vouchryx's own way in for signing, and the pin read does not use it.
+- **Re-pinning keyryx's delegation root, on purpose.** The pin is kept, never refreshed. A changed
+  root stops vouchryx at its next start, and the start message names `VOUCHRYX_KEYRYX_ROOT_PIN`.
+  Two things are true of this launcher today: it sets no `KEYRYX_ADMIN_KEYS`, so keyryx's own rotate
+  and revoke routes refuse every call on a box it installed, and so a root cannot be rotated from
+  this stack yet. To move the pin to a root that keyryx now serves, after you have confirmed that
+  root out of band (the pin is the trust root, and the run trusts the keyryx that answers it):
+  1. `cd /opt/agent-stack`, then delete the pin line: `sudo sed -i '/^VOUCHRYX_KEYRYX_ROOT_PIN=/d' .env`
+  2. `sudo ./install.sh` as before. The run takes the pin from the keyryx that is serving now,
+     checks its shape, writes it back, and recreates vouchryx with it. A run that finds a pin
+     already there leaves it alone.
+  Not measured here: that keyryx's own rotation, and the re-pin on a live box.
 - **the tokenfuse gateway and the MCP broker** have `TOKENFUSE_DELEGATION_JWKS_URL`
   set to empty, which is off. It takes effect with tokenfuse v1.17.0.
 - **trailryx's seal** is not wired. Its signer needs the next trailryx release.
@@ -968,6 +986,19 @@ old `signing.pem` are left in place and unused. Nothing is deleted.
 On by default, from the pinned trailryx-node image, with no build (CLAUDE.md invariant 51). The
 installer starts it with the rest of the stack. `WITH_RECORD=0` turns it off, and an install that
 had it running stops and removes it.
+**Signed through keyryx (CLAUDE.md invariants 59 and 60).** The seal signs each sealed root
+through this box's keyryx. Its credential, `keyryx/record-seal.key`, is minted once, read
+only by the seal, and kept across re-runs; keyryx holds only its digest. The keyryx
+witness reads the records and attests to each root, and the seal reads those attestations
+through a read-only folder of its own: the `attestations` folder of the witness's volume,
+and nothing else of the witness's. At install the seal pins the kid of keyryx's
+`trailryx-root` key set, which must hold exactly one ES384 key, and keeps the pin on every
+later run.
+
+**Rotating the record root.** The pin is not refreshed on a re-run. When keyryx's
+`trailryx-root` set holds exactly one ES384 key again, remove the `TRAILRYX_KEYRYX_KID` line
+from `.env` and re-run the installer. A set with two ES384 keys, a rotation under way, stops
+the install with its reason, on purpose.
 
 ```bash
 ./install.sh                    # the record plane is on
@@ -1107,18 +1138,24 @@ signal. The LLM gateway keeps asking wardryx directly: a model call has no
 pending tool call to classify, and typryx's latency does not belong in front of
 a path with a 250 ms deadline.
 
-**Nothing holds a call until you write the rule.** This launcher seeds no
-`hold_if_signal` policy. To hold the calls typryx is at least 80% sure are
-destructive, an external send or a payment, add this to `/opt/agent-stack/policy.yaml`
-(your own trust domain in `target`) and `docker compose restart wardryx`:
+**One rule is seeded, with the flag on.** The installer writes
+`typed-risk-hold-when-absent` into `/opt/agent-stack/policy.yaml`, between two marker
+lines (CLAUDE.md invariant 54). It holds a tool call that arrives with no
+`action.risk_class` signal, and one the classifier marks `destructive`,
+`external_send` or `financial` at 0.8 or more. That is the rule stack-up seeds. A
+`read_only` or `reversible_change` answer holds nothing. With the flag off the
+installer removes that rule and nothing else. To hold other classes, or these
+classes at another threshold, add a rule of your own to
+`/opt/agent-stack/policy.yaml` (your own trust domain in `target`) and run
+`docker compose restart wardryx`:
 
 ```yaml
-- name: hold-risky-tool-calls
+- name: hold-reversible-changes
   target: "agent://<your trust domain>/*"
   hold_if_signal:
     name: action.risk_class
-    values: [destructive, external_send, financial]
-    min_probability: 0.8
+    values: [reversible_change]
+    min_probability: 0.9
     when_absent: hold
 ```
 
@@ -1131,7 +1168,9 @@ approves it in the console.
 leaves. Without it, a tool call that arrives with no `action.risk_class` signal
 passes, and the broker sends a call over 12 KiB without its arguments, so padding
 a call past that cap was enough to get it through unread. With it, such a call is
-held for a person, and the reason says the signal was missing. The price is that
+held for a person, and the reason says the signal was missing. The installer
+writes this rule itself when the flag is on, so the example above is for holding
+by value. The price is that
 every tool call the proxy does not answer (down, slow, or its budget spent) waits
 for a person. Leave `WARDRYX_APPROVAL_SINGLE_USE` unset: a padded call carries no
 arguments, so every padded call to one tool and target has the same digest, and
@@ -1417,7 +1456,7 @@ A profile in `compose.yaml` that is in neither list, or in both, is refused by t
 
 Every image the stack runs is pinned to the digest of the bytes it names. The
 tag stays beside it for reading. A tag can be moved by whoever controls the
-registry; a digest cannot, so a box running `wardryx:v2.3.0@sha256:eaa8...` runs
+registry; a digest cannot, so a box running `wardryx:v2.4.0@sha256:8a11...` runs
 that build and nothing else.
 
 The images this project publishes (`ghcr.io/taipanbox/...`) are also signed,
@@ -1606,12 +1645,38 @@ there, with a read-only root filesystem, a 128 MB temporary directory in
 memory at `/tmp` (SQLite needs one to compact its database), and no
 capabilities.
 
-**What it does not do.** As shipped it cannot spend: no gateway is wired to it,
-which is what lets its planning calls reach a model, and the crew runner in the
-same image is not started. Sending its calls through this box's gateway is a
-decision about money and is yours to take, separately. The notifier does not
-read its passports, so an alert about one of its agents names the agent and not
-the person who answers for it.
+**What it does not do.** The console cannot spend: no gateway is wired to it, and
+it makes no model call of its own. The crew's model calls belong to the runner,
+described next. The notifier does not read its passports, so an alert about one of
+its agents names the agent and not the person who answers for it.
+
+**The crew's runner, and its ceiling (CLAUDE.md invariant 57).** The runner is
+`costcrew-run`, a one-shot in profile `crew`. Nothing starts it: not the install, not
+`up`, and not the console. A person starts it, once per run:
+
+```sh
+cd /opt/agent-stack
+docker compose --profile finops --profile crew run --rm costcrew-run
+```
+
+Its runs are recorded in the costcrew store the console reads, not on the bus: the bus
+stream `costcrew.ndjson` has one writer, the console, and a second would fork its chain. It
+runs only the work the console's cadence has marked due. With the cadence switch
+off (the console's `/cadence` page) it exits 2 and touches nothing, so turn cadence on
+there first. To run the crew on a timer, put that command in this box's own cron, after
+you have turned cadence on. Its model calls go through `tokenfuse-gateway` with the
+crew's own client key, `GATEWAY_COSTCREW_KEY` in `.env`, which install.sh mints and
+binds to `agent://<your trust domain>/costcrew/*`. The runner holds no provider key and
+has no route out except through the gateway.
+
+**The ceiling.** `COSTCREW_CEILING` in `.env` is the most one run may spend, in US
+dollars: a decimal with at most two places, such as `25.00`. It is validated before
+anything is installed, and an unset value is `0`, which spends nothing. The runner
+also refuses above the console's own cadence ceiling, and the smaller of the two
+applies. To allow spending: set `COSTCREW_CEILING`, run `./install.sh` again so the
+client key is minted and the gateway reads it, set the cadence ceiling at `/cadence`,
+then turn cadence on there. Each step is yours. Not measured here: a live run against a
+model provider.
 
 **Moving to a newer console.** The pin is `ghcr.io/taipanbox/costcrew:v0.10.0`.
 On a box that already ran an earlier pin, the same `up -d costcrew` picks it
@@ -1669,6 +1734,25 @@ re-run keeps it. To turn closing off again, remove `CLOSURE_SECRET` and
 
 It needs tokenfuse v1.9.0 or later and console v1.1.34 or later. The images pinned here are tokenfuse v1.19.0 and
 console v1.1.48; an older image ignores the setting.
+
+## Approvals and the console's approver key (wardryx 2.4.0)
+
+An approval is decided by a person in the console, after a passkey assertion. From
+wardryx 2.4.0 the decision can also carry a statement, signed by the console with
+its approver key, and wardryx checks it against the console's public key set. The
+installer mints that key once: `approver/approver.pem`, PKCS#8 P-256, mode 0600,
+owned by the console's uid, mounted into the console alone. It is kept across
+re-runs and never printed. Losing it means minting a new one and publishing a new
+key set.
+
+The key set is switched on only when the pinned console image can print it
+(`genaryx-web approver-jwks`). The console image pinned in this release (v1.1.48)
+cannot, so approver statements are off, and wardryx decides as 2.3.0 did. When a
+console image that can print it is pinned, the installer writes the key set and
+turns the check on. From then on an approval needs a statement, so a console without
+an enrolled passkey cannot sign one, and its approvals are refused with
+`approver_statement_required`. `WARDRYX_ALLOW_KEY_APPROVALS` is never set by this
+installer. Set by hand, it would let a bare key approve.
 
 ## The console
 

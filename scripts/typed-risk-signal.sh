@@ -27,9 +27,12 @@
 #   deadline (J2-DESIGN). Pointing the gateway at the proxy too would work in a
 #   demo and refuse real calls under load.
 #
-#   NOTHING IS SEEDED. The signal changes no decision until the operator writes
-#   a `hold_if_signal` rule. A launcher that shipped one would hold tool calls
-#   on a classifier's word on a box whose operator never chose that.
+#   ONE RULE IS SEEDED, AND ONLY WITH THE FLAG. A tool call that arrives with no
+#   signal is held for a person, and so is one the classifier marks destructive,
+#   external_send or financial at 0.8 or more (`when_absent: hold`, invariant 54,
+#   the rule stack-up seeds). A read_only or reversible_change answer holds
+#   nothing. Any other class or threshold is the operator's own `hold_if_signal`
+#   rule, written from the README example.
 #
 # WHAT THIS CHECKS
 #
@@ -45,8 +48,14 @@
 #      and of a key, the broker's URL and the gateway's untouched URL are each
 #      what is said above, and the network has exactly three members.
 #   C. STATIC. install.sh passes `--profile typed-risk-signal` only on a line
-#      TYPED_PLANE decides and only with the flag on; the seeded policy.yaml
-#      carries no hold_if_signal; the README shows one.
+#      TYPED_PLANE decides and only with the flag on; the starter policy.yaml
+#      heredoc carries no hold_if_signal; the README shows one.
+#   E. THE SEEDED HOLD. The `# typed-risk-policy:` block is lifted and run in
+#      scratch boxes: nothing is seeded with the flag off; with it on, one
+#      managed rule holds a call with no signal and the three high-risk classes
+#      at 0.8, and no other class; a re-run changes no byte; turning the flag
+#      off removes that rule and only that rule, and an operator's own lines
+#      survive both ways.
 #   D. THE PINS the feature needs: typryx >= 0.4.0 (the proxy), wardryx >= 1.2.0
 #      (reads signals), wardryx >= 1.4.0 (when_absent: hold, which the README
 #      example uses to hold a call no signal answered), tokenfuse >= 1.5.0 (sends
@@ -222,6 +231,101 @@ elif printf '%s' "$seeded" | grep -q 'hold_if_signal'; then
 fi
 grep -q 'hold_if_signal' README.md || fail "README.md shows no hold_if_signal example, and the signal does nothing until the operator writes one"
 grep -q 'when_absent: hold' README.md || fail "README.md shows no when_absent: hold on its example, so a tool call that arrives with no signal passes"
+
+# ---- E. the seeded hold (invariant 54) ----------------------------------------
+# With the flag on, policy.yaml carries one managed rule that holds a tool call
+# with no risk signal (wardryx 1.4.0's `when_absent: hold`); with it off, none.
+# The block is lifted and run in scratch boxes; the rule is read back as text.
+PBLOCK="$(sed -n '/^# typed-risk-policy: begin$/,/^# typed-risk-policy: end$/p' install.sh)"
+if [ -z "$PBLOCK" ]; then
+  fail "install.sh has no '# typed-risk-policy: begin' .. '# typed-risk-policy: end' block, so the seeded hold was not measured"
+elif ! printf '%s' "$PBLOCK" | grep -q '^typed_risk_policy_apply()' || ! printf '%s' "$PBLOCK" | grep -q '^typed_risk_policy_block()'; then
+  fail "the typed-risk-policy block defines no typed_risk_policy_apply or no typed_risk_policy_block, so the seeded hold was not measured"
+else
+  escratch="$(mktemp -d)"
+  trap 'rm -rf "${scratch:-}" "$escratch"' EXIT
+  STARTER="$(sed -n "/cat > policy.yaml <<'EOF'/,/^EOF\$/p" install.sh | sed '1d;$d')"
+  if [ -z "$STARTER" ]; then
+    fail "install.sh has no starter policy.yaml heredoc, so the seeded hold has nothing to be written into"
+  fi
+  erun() { # DIR ARGS...: resolve the flag, then apply the policy block, in DIR
+    local d="$1"
+    shift
+    (
+      cd "$d" || exit 99
+      env -i PATH="$PATH" HOME="$d" STACK_DIR="$d" BLOCK="$BLOCK" PBLOCK="$PBLOCK" "$@" bash -c '
+        set -euo pipefail
+        say() { :; }
+        note() { :; }
+        die() { printf "die: %s\n" "$*"; exit 1; }
+        chown() { :; }
+        eval "$BLOCK"
+        eval "$PBLOCK"
+        typed_resolve
+        typed_apply
+        typed_risk_policy_apply
+        printf "risk=%s changed=%s\n" "$TYPED_RISK_ON" "${TYPED_RISK_POLICY_CHANGED:-0}"'
+      printf 'rc=%s\n' "$?"
+    ) 2>&1
+  }
+  ebox() { # a fresh box holding the starter policy and one line of .env
+    local d
+    d="$(mktemp -d "$escratch/box.XXXXXX")"
+    printf 'SENTINEL=1\n' >"$d/.env"
+    printf '%s\n' "$STARTER" >"$d/policy.yaml"
+    printf '%s' "$d"
+  }
+  starter_file="$escratch/starter.yaml"
+  printf '%s\n' "$STARTER" >"$starter_file"
+
+  # E1. flag off: the rule is not there, and the starter is untouched byte for byte.
+  d="$(ebox)"
+  out="$(erun "$d" WITH_TYPED=1)"
+  [ "$(printf '%s' "$out" | sed -n 's/^rc=//p' | tail -1)" = 0 ] || fail "E1: a run with the flag off was refused: $out"
+  cmp -s "$d/policy.yaml" "$starter_file" || fail "E1: with the flag off policy.yaml differs from the starter, so a rule was seeded without the flag"
+  printf '%s' "$out" | grep -q 'changed=0' || fail "E1: with the flag off the run reports a policy change"
+
+  # E2. flag on: exactly one managed rule, after the starter's rules: it holds a call with
+  # no signal and the three high-risk classes at 0.8, and nothing else.
+  d="$(ebox)"
+  out="$(erun "$d" WITH_TYPED=1 TYPED_RISK_SIGNAL=1)"
+  [ "$(printf '%s' "$out" | sed -n 's/^rc=//p' | tail -1)" = 0 ] || fail "E2: the flag on was refused: $out"
+  printf '%s' "$out" | grep -q 'changed=1' || fail "E2: with the flag on the run does not report that policy.yaml changed"
+  n="$(grep -c '^- name: typed-risk-hold-when-absent$' "$d/policy.yaml" || true)"
+  [ "$n" = 1 ] || fail "E2: the flag on wrote $n typed-risk-hold-when-absent rules, not one"
+  grep -q '^# typed-risk-hold: begin' "$d/policy.yaml" && grep -q '^# typed-risk-hold: end' "$d/policy.yaml" \
+    || fail "E2: the managed rule has no begin and end marker, so a later run cannot find it"
+  head -n "$(wc -l <"$starter_file")" "$d/policy.yaml" | cmp -s - "$starter_file" \
+    || fail "E2: the starter rules changed, so the seeded rule is not an addition to them"
+  block="$(sed -n '/^# typed-risk-hold: begin/,/^# typed-risk-hold: end/p' "$d/policy.yaml")"
+  printf '%s\n' "$block" | grep -q '^  target: "agent://\*"$' || fail "E2: the seeded rule does not target every agent (agent://*)"
+  printf '%s\n' "$block" | grep -q '^    name: action.risk_class$' || fail "E2: the seeded rule reads a signal other than action.risk_class"
+  printf '%s\n' "$block" | grep -q '^    when_absent: hold$' || fail "E2: the seeded rule does not hold when the signal is absent"
+  vals="$(printf '%s\n' "$block" | sed -n 's/^    values: \[\(.*\)\]$/\1/p')"
+  [ -n "$vals" ] || fail "E2: the seeded rule has no values line in the form wardryx reads"
+  vals_set="$(printf '%s' "$vals" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | sort | paste -sd, -)"
+  [ "$vals_set" = "destructive,external_send,financial" ] \
+    || fail "E2: the seeded rule holds on $vals; it must hold on destructive, external_send and financial, the classes stack-up's rule holds, and no other"
+  printf '%s\n' "$block" | grep -q '^    min_probability: 0.8$' \
+    || fail "E2: the seeded rule's min_probability is not 0.8, the threshold stack-up's rule uses"
+
+  # E3. a re-run with the same answers changes no byte.
+  before="$(cat "$d/policy.yaml")"
+  out="$(erun "$d" WITH_TYPED=1 TYPED_RISK_SIGNAL=1)"
+  [ "$(printf '%s' "$out" | sed -n 's/^rc=//p' | tail -1)" = 0 ] && [ "$(cat "$d/policy.yaml")" = "$before" ] \
+    && printf '%s' "$out" | grep -q 'changed=0' \
+    || fail "E3: a re-run with the flag on changed policy.yaml or reported a change: $out"
+
+  # E4. the operator's own rule survives, and turning the flag off removes the managed rule only.
+  printf -- '- name: operator-own-rule\n  target: "agent://ops.example/*"\n  deny_tool:\n    - drop_table\n' >>"$d/policy.yaml"
+  out="$(erun "$d" WITH_TYPED=1 TYPED_RISK_SIGNAL=0)"
+  [ "$(printf '%s' "$out" | sed -n 's/^rc=//p' | tail -1)" = 0 ] || fail "E4: turning the flag off was refused: $out"
+  if grep -q 'typed-risk-hold' "$d/policy.yaml"; then fail "E4: turning the flag off left the managed rule in policy.yaml"; fi
+  grep -q '^- name: operator-own-rule$' "$d/policy.yaml" || fail "E4: turning the flag off removed the operator's own rule"
+  head -n "$(wc -l <"$starter_file")" "$d/policy.yaml" | cmp -s - "$starter_file" \
+    || fail "E4: turning the flag off did not restore the starter rules"
+  printf '%s' "$out" | grep -q 'changed=1' || fail "E4: turning the flag off does not report that policy.yaml changed"
+fi
 
 # ---- B. compose ------------------------------------------------------------------
 if ! docker compose version >/dev/null 2>&1; then
