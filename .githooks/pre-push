@@ -73,6 +73,7 @@ step "agent tokens are off by default, and when on, the doors verify them agains
 step "no plane writes another plane's stream, and nobody but the setup script creates a file on the bus" "./scripts/no-plane-writes-another-planes-stream.sh"
 step "the Keyryx root keys are files, never in .env or an environment" "./scripts/keyryx-root-is-not-in-env.sh"
 step "the Keyryx witness is a process apart from custody" "./scripts/witness-is-separate.sh"
+step "the witness's findings reach heraldyx and the console read only, and the witness never writes the bus (invariant 54)" "./scripts/keyryx-alerts-reach-readers.sh"
 step "every image this launcher runs is pinned by digest (invariant 44)" "./scripts/images-are-digest-pinned.sh"
 step "every TAIPANBOX image is signature-checked before it is pulled (invariant 44)" "./scripts/images-are-verified.sh"
 step "no credential reaches an argument list (invariant 46)" "./scripts/no-secret-on-argv.sh"

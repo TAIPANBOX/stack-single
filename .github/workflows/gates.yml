@@ -112,6 +112,8 @@ jobs:
         run: ./scripts/keyryx-root-is-not-in-env.sh
       - name: the Keyryx witness is a process apart from custody
         run: ./scripts/witness-is-separate.sh
+      - name: the witness's findings reach heraldyx and the console read only, and the witness never writes the bus (invariant 54)
+        run: ./scripts/keyryx-alerts-reach-readers.sh
       - name: every image this launcher runs is pinned by digest (invariant 44)
         run: ./scripts/images-are-digest-pinned.sh
       - name: every TAIPANBOX image is signature-checked before it is pulled (invariant 44)

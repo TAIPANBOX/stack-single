@@ -52,7 +52,7 @@ services:
       - sh
       - -euc
       - |
-        mkdir -p /vol/events /vol/traces /vol/cloud /vol/heraldyx /vol/records /vol/scopyx /vol/focus /vol/typryx /vol/vouchryx /vol/conform /vol/keyryx /vol/keyryxw /vol/checkpoints
+        mkdir -p /vol/events /vol/traces /vol/cloud /vol/heraldyx /vol/records /vol/scopyx /vol/focus /vol/typryx /vol/vouchryx /vol/conform /vol/keyryx /vol/keyryxw /vol/keyryxalerts /vol/checkpoints
         # Invariant 41. The bus directory is root:10001 0750: nothing but this
         # script creates a file in it, so no plane can create one, let alone
         # write another plane's. Every stream below is created here, owned by
@@ -171,6 +171,23 @@ services:
         # Keyryx's two state directories, each owned by the one process that uses it.
         chown -R 20101 /vol/keyryx && chmod 0700 /vol/keyryx
         chown -R 20100 /vol/keyryxw && chmod 0700 /vol/keyryxw
+        # The witness's findings (CLAUDE.md invariant 54). Not on the bus: the
+        # witness reads the bus and never writes it, so a compromised witness
+        # cannot add a line to the record it checks. Its one stream lives on a
+        # volume of its own, which heraldyx and the console mount READ ONLY.
+        # The directory is root's (0:10001 0750), so the witness can write its
+        # one file and cannot add, rename or swap an entry beside it; the file
+        # is the witness's (20100:10001 0640), readable by the bus group.
+        # Named keyryx.ndjson because that stem is the one heraldyx 0.8.0
+        # reads as source keyryx. Pre-created here, so the file exists before
+        # either reader starts; the witness appends to it and creates nothing.
+        # A link or anything but a regular file at that name (planted while
+        # the directory was writable) is removed before root touches it, and
+        # chown -h never follows one.
+        chown 0:10001 /vol/keyryxalerts && chmod 0750 /vol/keyryxalerts
+        if [ -L /vol/keyryxalerts/keyryx.ndjson ] || { [ -e /vol/keyryxalerts/keyryx.ndjson ] && [ ! -f /vol/keyryxalerts/keyryx.ndjson ]; }; then rm -rf /vol/keyryxalerts/keyryx.ndjson; fi
+        [ -e /vol/keyryxalerts/keyryx.ndjson ] || : > /vol/keyryxalerts/keyryx.ndjson
+        chown -R -h 20100:10001 /vol/keyryxalerts/keyryx.ndjson && chmod 0640 /vol/keyryxalerts/keyryx.ndjson
         # One checkpoint file per producer stream (agent-passport SPEC 6.5.1), each
         # written by its producer alone. Empty until a producer signs one.
         chown 0:10001 /vol/checkpoints && chmod 0750 /vol/checkpoints
@@ -218,6 +235,7 @@ services:
       - conformstate:/vol/conform
       - keyryxstate:/vol/keyryx
       - keyryxwitness:/vol/keyryxw
+      - keyryxalerts:/vol/keyryxalerts
       - checkpoints:/vol/checkpoints
     restart: "no"
 
@@ -251,7 +269,9 @@ services:
   #
   # keyryx-witness is the other role of the same binary, as its own process:
   # its own uid, its own data volume, its own root key file, and no network.
-  # It reads the bus and nothing else. Its findings go to its own volume.
+  # It reads the bus and nothing else. Its findings go to a volume of their
+  # own, keyryxalerts, which heraldyx and the console mount read only
+  # (invariant 54); its state stays on keyryxwitness, which nobody else mounts.
   # Custody's root key is never mounted into it and its key is never mounted
   # into custody (invariant 43).
   #
@@ -299,7 +319,9 @@ services:
       KEYRYX_WITNESS_DATA: /var/lib/keyryx-witness
       KEYRYX_WITNESS_ROOT_KEY_FILE: /run/keyryx/witness-root.key
       KEYRYX_WITNESS_EVENTS: /var/lib/stack/events
-      KEYRYX_WITNESS_ALERTS: /var/lib/keyryx-witness/alerts.ndjson
+      # Its findings, off the bus (invariant 54): the witness never writes the
+      # bus it witnesses. heraldyx and the console read this file read only.
+      KEYRYX_WITNESS_ALERTS: /var/lib/keyryx-alerts/keyryx.ndjson
       # Checkpoints are not read yet: no producer writes one (AS2, TF5c). The
       # directory is mounted so the witness sees them the day they exist, and
       # KEYRYX_WITNESS_CHECKPOINTS, which needs a custody URL and a stream-key
@@ -307,9 +329,10 @@ services:
     volumes:
       - keyryxwitness:/var/lib/keyryx-witness
       - ./keyryx/witness-root.key:/run/keyryx/witness-root.key:ro
-      # Read only: the witness writes nothing to the bus. Its findings go to its
-      # own volume (alerts.ndjson) until heraldyx renders the keyryx source, since
-      # a stream heraldyx does not accept is reported as unknown on every pass.
+      # The one volume besides its state that the witness writes: its findings.
+      - keyryxalerts:/var/lib/keyryx-alerts
+      # Read only: the witness writes nothing to the bus it witnesses
+      # (invariant 54). Its findings go to keyryxalerts above.
       - events:/var/lib/stack/events:ro
       - checkpoints:/var/lib/stack/checkpoints:ro
     read_only: true
@@ -456,7 +479,10 @@ services:
       - core
     user: "65532:10001"
     environment:
-      HERALDYX_EVENTS: /var/lib/stack/events
+      # The bus, and the Keyryx witness's findings, which are not on the bus
+      # (invariant 54): a file on a volume heraldyx mounts read only. Its stem,
+      # keyryx, is a source heraldyx 0.8.0 reads and renders.
+      HERALDYX_EVENTS: /var/lib/stack/events,/var/lib/keyryx-alerts/keyryx.ndjson
       HERALDYX_STATE: /var/lib/stack/heraldyx/state.json
       # "high", not stack-up's "medium": deliberately different, and
       # previously unstated anywhere. This is a real deployment governing
@@ -503,6 +529,7 @@ services:
       HERALDYX_TZ: ${HERALDYX_TZ:-}
     volumes:
       - events:/var/lib/stack/events:ro
+      - keyryxalerts:/var/lib/keyryx-alerts:ro
       - heraldyxstate:/var/lib/stack/heraldyx
     depends_on:
       init-volumes:
@@ -1586,6 +1613,10 @@ services:
       # served every install with an empty Bus Explorer (genaryx#71, #49). The
       # state volume is the one place it can write, so it is named here.
       GENARYX_STATE_DIR: /var/lib/stack/genaryx
+      # The Keyryx witness's findings, which are not on the bus (invariant 54):
+      # a stream the console tails read only beside its events directory. A
+      # console older than the one that reads GENARYX_EVENTS_EXTRA ignores it.
+      GENARYX_EVENTS_EXTRA: /var/lib/keyryx-alerts/keyryx.ndjson
       GENARYX_SCAN_TARGET: /srv/ui
       # Felyx, the console's copilot, talks to its model THROUGH this box's own
       # gateway, so its calls are priced, budgeted and policy-checked like any
@@ -1664,6 +1695,7 @@ services:
     volumes:
       - consolestate:/var/lib/stack
       - events:/var/lib/stack/events
+      - keyryxalerts:/var/lib/keyryx-alerts:ro
       - ./environments:/etc/genaryx/taipan/environments:ro
       - ./closure:/run/closure:ro
       - wgapi:/var/run/wireguard
@@ -2120,6 +2152,9 @@ volumes:
   keyryxstate:
   # Keyryx witness state, its own volume and uid (invariant 43).
   keyryxwitness:
+  # The witness's findings, keyryx.ndjson: written by the witness alone, read
+  # only by heraldyx and the console (invariant 54). Not the bus.
+  keyryxalerts:
   # One checkpoint file per producer stream, each written by that producer alone.
   checkpoints:
   traces:
