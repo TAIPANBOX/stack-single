@@ -579,7 +579,7 @@ run_case "manifest-is-true: a routine arrives and the manifest does not claim it
 # is one character in one tag, which is exactly how it would arrive.
 run_case "manifest-is-true: a pulled tag moves in compose and not in the manifest" fail \
 	'./scripts/manifest-is-true.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.3.0", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.4.0", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
 	"an image it pulls"
 
 # invariant 15: the delegation plane's default is byte-for-byte what it was
@@ -1502,7 +1502,7 @@ run_case "trailryx-root-is-pinned: a re-run fetches the pin again" fail \
 
 run_case "trailryx-root-is-pinned: the key's body leaves the function" fail \
 	'./scripts/trailryx-root-is-pinned.sh' \
-	"$(py 'edit("install.sh", "  printf '"'"'%s\n'"'"' \"$k\"", "  printf '"'"'%s\n'"'"' \"$body\"")')" \
+	"$(py 'edit("install.sh", "  printf '"'"'%s\\n'"'"' \"$k\"", "  printf '"'"'%s\\n'"'"' \"$body\"")')" \
 	"is not printed alone"
 
 run_case "trailryx-root-is-pinned: compose stops reading the pin" fail \
@@ -1590,7 +1590,7 @@ run_case "costcrew-runner-spends-through-the-gateway: the runner holds a provide
 
 run_case "costcrew-runner-spends-through-the-gateway: the runner loses its gateway" fail \
 	'./scripts/costcrew-runner-spends-through-the-gateway.sh' \
-	"$(py 'edit("compose.yaml", "      - -gateway\n      - http://tokenfuse-gateway:4100\n      - -stack-events", "      - -stack-events")')" \
+	"$(py 'edit("compose.yaml", "      - -gateway\n      - http://tokenfuse-gateway:4100\n", "")')" \
 	"would leave the box"
 
 run_case "costcrew-runner-spends-through-the-gateway: the default ceiling spends" fail \
@@ -1798,17 +1798,17 @@ run_case "typed-risk-signal: typryx is pinned before the proxy existed" fail \
 
 run_case "typed-risk-signal: wardryx is pinned before it read signals" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.3.0@sha256:eaa8cff9fe3722f7040e9f9b3aac2f57c5e66afb7a012a0eda1a62e63b647543}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.4.0@sha256:8a110dec235fd81c3907ed769d2c31a8e095767fbae4fa29316631eff5228e97}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
 	"hold_if_signal and signals on /v1/decide do not exist before it"
 
 run_case "typed-risk-signal: wardryx is pinned before when_absent" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.3.0@sha256:eaa8cff9fe3722f7040e9f9b3aac2f57c5e66afb7a012a0eda1a62e63b647543}", "ghcr.io/taipanbox/wardryx:v1.3.2}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.4.0@sha256:8a110dec235fd81c3907ed769d2c31a8e095767fbae4fa29316631eff5228e97}", "ghcr.io/taipanbox/wardryx:v1.3.2}")')" \
 	"needs v1.4.0 or later"
 
 run_case "typed-risk-signal: tokenfuse is pinned before it sent the tool call" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/tokenfuse:v1.19.0@sha256:32139654fc63ebc3026720413f1a9c16f07fb2507509714d946f50ffcf2a2434}", "ghcr.io/taipanbox/tokenfuse:v1.4.1}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/tokenfuse:v1.20.0@sha256:84f6856dcfe609410429774c965bbc531d063b29c640871dd44b1c34b07ba628}", "ghcr.io/taipanbox/tokenfuse:v1.4.1}")')" \
 	"the broker sends no tool_call to the policy plane before it"
 
 run_case "typed-risk-signal: install.sh starts the proxy profile unconditionally" fail \
@@ -3524,12 +3524,12 @@ run_case "witness-is-separate: no keyryx service left to judge" fail \
 # ---- images-are-digest-pinned and images-are-verified (CLAUDE.md invariant 44) --
 run_case "images-are-digest-pinned: a published image loses its digest" fail \
 	'./scripts/images-are-digest-pinned.sh' \
-	"$(py 'edit("compose.yaml", "trailryx-node:v1.4.0@sha256:79da026eab19b2b8ade994cbb65850b39f644c4b632edf1de411f70bddd047d3}", "trailryx-node:v1.4.0}")')" \
+	"$(py 'edit("compose.yaml", "trailryx-node:v1.5.0@sha256:f15215cd9708724e83fbd8493f2bf7d2a11980b37edf3b887081d8e17da18bab}", "trailryx-node:v1.4.0}")')" \
 	"trailryx-node:v1.4.0 is not pinned"
 
 run_case "images-are-digest-pinned: a digest is cut short" fail \
 	'./scripts/images-are-digest-pinned.sh' \
-	"$(py 'edit("compose.yaml", "trailryx-node:v1.4.0@sha256:79da026eab19b2b8ade994cbb65850b39f644c4b632edf1de411f70bddd047d3}", "trailryx-node:v1.4.0@sha256:ab305ac6a65444e08090b56d6f666498b56d560f7351c96a8a84137ece9e6d3}")')" \
+	"$(py 'edit("compose.yaml", "trailryx-node:v1.5.0@sha256:f15215cd9708724e83fbd8493f2bf7d2a11980b37edf3b887081d8e17da18bab}", "trailryx-node:v1.4.0@sha256:ab305ac6a65444e08090b56d6f666498b56d560f7351c96a8a84137ece9e6d3}")')" \
 	"is not pinned by a full sha256 digest"
 
 run_case "images-are-digest-pinned: the third-party postgres loses its digest" fail \
@@ -3833,7 +3833,7 @@ run_case "profiles-off-are-removed: a running operator-started container is not 
 
 run_case "profiles-off-are-removed: a profile the two lists leave out is refused" fail \
 	'./scripts/profiles-off-are-removed.sh' \
-	"$(py 'edit("install.sh", "PROFILES_OPERATOR=\"egress egress-browser finops routines manual\"", "PROFILES_OPERATOR=\"egress egress-browser finops manual\"")')" \
+	"$(py 'edit("install.sh", "PROFILES_OPERATOR=\"egress egress-browser finops routines manual crew\"", "PROFILES_OPERATOR=\"egress egress-browser finops manual crew\"")')" \
 	"compose.yaml's profile routines is in neither"
 
 run_case "profiles-off-are-removed: the record plane left out of the installer list keeps record-seal under WITH_RECORD=0" fail \
