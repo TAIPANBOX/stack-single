@@ -136,7 +136,7 @@ jobs:
 
       # A fresh box names two static keys, felyx and broker, and refuses any other static key until it is
       # moved to a token or named on purpose (CLAUDE.md invariant 47). This runs BEFORE the re-run, because
-      # the re-run keeps every key id the box already had on the list.
+      # the re-run keeps exactly the list the first run wrote (CLAUDE.md invariant 53).
       - name: a fresh box refuses a static key it does not list
         if: matrix.profile != 'identity' && matrix.profile != 'static-only'
         run: |
@@ -319,10 +319,60 @@ jobs:
           noauth="401 agent_token_required"
           [ "${{ matrix.profile }}" = static-only ] && noauth="401 unauthorized"
           [ "$a" = "$noauth" ] || { echo "::error::a call with no key was not refused $noauth: $a"; exit 1; }
-          [ "${b%% *}" = 402 ] || { echo "::error::the agents' key speaking as an agent did not get past identity to the budget (402)"; exit 1; }
-          [ "$c" = "403 identity_mismatch" ] || { echo "::error::the agents' key speaking as Felyx was not refused 403 identity_mismatch"; exit 1; }
+          # 1.4.0 (CLAUDE.md invariant 53): a re-run does not put the installer's own agents key on the static list, so
+          # with agent tokens on it is refused 401 agent_token_required before identity, as an agent and as Felyx.
+          # Static-only admits every static key (the off path, invariant 47), so there it still passes identity.
+          if [ "${{ matrix.profile }}" = static-only ]; then
+            [ "${b%% *}" = 402 ] || { echo "::error::the agents' key speaking as an agent did not get past identity to the budget (402)"; exit 1; }
+            [ "$c" = "403 identity_mismatch" ] || { echo "::error::the agents' key speaking as Felyx was not refused 403 identity_mismatch"; exit 1; }
+          else
+            [ "$b" = "401 agent_token_required" ] || { echo "::error::the agents' key, not on the static list, was not refused 401 agent_token_required as an agent: $b"; exit 1; }
+            [ "$c" = "401 agent_token_required" ] || { echo "::error::the agents' key, not on the static list, was not refused 401 agent_token_required as Felyx: $c"; exit 1; }
+          fi
           [ "${d%% *}" = 402 ] || { echo "::error::Felyx's key speaking as Felyx did not get past identity to the budget (402)"; exit 1; }
           [ "$e" = "403 identity_mismatch" ] || { echo "::error::Felyx's key speaking as an agent was not refused 403 identity_mismatch"; exit 1; }
+
+      # 1.4.0 (CLAUDE.md invariant 53), the operator's side: naming agents in STATIC_KEY_IDS keeps the agents' key on the
+      # gateway's static list, and it then answers as the agent it is bound to (402 past identity) and is still refused
+      # as Felyx (403 identity_mismatch). The closing report must say that agents was kept. The run is a re-run, so the
+      # minted keys must come through it unchanged, as the re-run above had to.
+      - name: "the operator names agents in STATIC_KEY_IDS: its key is kept on the list, bound to its own identity, and the closing report says so"
+        if: matrix.profile != 'identity' && matrix.profile != 'static-only'
+        run: |
+          cd /opt/agent-stack
+          extra=""
+          [ "${{ matrix.profile }}" = delegation ] && extra="WITH_DELEGATION=1 WITH_DELEGATION_DEMO_ISSUER=1"
+          [ "${{ matrix.profile }}" = typed-risk ] && extra="WITH_TYPED=1"
+          sudo env STACK_DIR=/opt/agent-stack STATIC_KEY_IDS=agents $extra ./install.sh 2>&1 | tee "$GITHUB_WORKSPACE/install-3.log"
+          grep -q "every check passed" "$GITHUB_WORKSPACE/install-3.log" || { echo "::error::the STATIC_KEY_IDS=agents run did not pass every check"; exit 1; }
+          sudo grep -qx "TOKENFUSE_AGENT_TOKENS_STATIC_KEYS='felyx,broker,agents'" .env \
+            || { echo "::error::the gateway's list is not felyx,broker,agents after STATIC_KEY_IDS=agents"; sudo grep '^TOKENFUSE_AGENT_TOKENS_STATIC_KEYS=' .env; exit 1; }
+          grep -qF "Static keys still admitted at the gateway: felyx,broker,agents" "$GITHUB_WORKSPACE/install-3.log" \
+            || { echo "::error::the closing report does not name agents as kept"; exit 1; }
+          if grep -qF "Removed from the static allow-lists" "$GITHUB_WORKSPACE/install-3.log"; then
+            echo "::error::the run removed a key it was asked to keep"; exit 1
+          fi
+          { sudo grep -E '^(GENARYX_COPILOT_FUSE_KEY|GATEWAY_AGENT_KEY|GATEWAY_CLIENT_KEYS)=' .env | sort | sha256sum; sudo sha256sum agent-key; } >"$RUNNER_TEMP/minted-3.sha"
+          diff "$RUNNER_TEMP/minted-1.sha" "$RUNNER_TEMP/minted-3.sha" >/dev/null || { echo "::error::the STATIC_KEY_IDS run changed a minted key, the spec or the agents' key file"; exit 1; }
+          akey="$(sudo cat agent-key)"
+          fkey="$(sudo sed -n "s/^GENARYX_COPILOT_FUSE_KEY='\(.*\)'\$/\1/p" .env)"
+          call() {
+            curl -s -o "$RUNNER_TEMP/body.json" -w '%{http_code}' -X POST http://127.0.0.1:4100/v1/messages \
+              -H 'content-type: application/json' -H "x-fuse-run-id: ci-$RANDOM" -H 'x-fuse-budget-usd: 0.000001' \
+              "$@" -d '{"model":"claude-haiku-4-5","max_tokens":1,"messages":[{"role":"user","content":"ci"}]}'
+            printf ' %s\n' "$(sed -n 's/.*"type":"\([a-z_]*\)".*/\1/p' "$RUNNER_TEMP/body.json")"
+          }
+          a="$(call -H 'x-fuse-agent-id: agent://local/agents/ci')"
+          b="$(call -H "x-fuse-key: $akey" -H 'x-fuse-agent-id: agent://local/agents/ci')"
+          c="$(call -H "x-fuse-key: $akey" -H 'x-fuse-agent-id: agent://local/genaryx/felyx')"
+          d="$(call -H "x-fuse-key: $fkey" -H 'x-fuse-agent-id: agent://local/genaryx/felyx')"
+          e="$(call -H "x-fuse-key: $fkey" -H 'x-fuse-agent-id: agent://local/agents/ci')"
+          echo "no key: $a | agents' key as an agent: $b | agents' key as Felyx: $c | Felyx's key as Felyx: $d | Felyx's key as an agent: $e"
+          [ "$a" = "401 agent_token_required" ] || { echo "::error::a call with no key was not refused 401 agent_token_required: $a"; exit 1; }
+          [ "${b%% *}" = 402 ] || { echo "::error::the agents' key, named in STATIC_KEY_IDS, did not get past identity to the budget (402) as an agent: $b"; exit 1; }
+          [ "$c" = "403 identity_mismatch" ] || { echo "::error::the agents' key, named in STATIC_KEY_IDS, was not refused 403 identity_mismatch as Felyx: $c"; exit 1; }
+          [ "${d%% *}" = 402 ] || { echo "::error::Felyx's key speaking as Felyx did not get past identity to the budget (402): $d"; exit 1; }
+          [ "$e" = "403 identity_mismatch" ] || { echo "::error::Felyx's key speaking as an agent was not refused 403 identity_mismatch: $e"; exit 1; }
 
       - name: "static-only: agent tokens are off, nothing enrols, and no static-key list is written"
         if: matrix.profile == 'static-only'

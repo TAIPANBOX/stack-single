@@ -118,6 +118,16 @@ jobs:
         run: ./scripts/images-are-verified.sh
       - name: no credential reaches an argument list (invariant 46)
         run: ./scripts/no-secret-on-argv.sh
+      - name: the broker's line is in the keys file the box was given (invariant 48)
+        run: ./scripts/broker-key-is-the-keys-file-line.sh
+      - name: every read-write volume is re-owned to its uid on every up (invariant 49)
+        run: ./scripts/volumes-are-reowned.sh
+      - name: a profile this run does not name has no container left behind (invariant 50)
+        run: ./scripts/profiles-off-are-removed.sh
+      - name: the record plane is on by default, from the pinned image (invariant 51)
+        run: ./scripts/record-plane-is-on-by-default.sh
+      - name: the FinOps console can reach its own stream on the bus (invariant 52)
+        run: ./scripts/costcrew-can-reach-its-stream.sh
 
       # Last, because it mutates tracked files and restores them. It needs a
       # clean tree and says so plainly, so it also reports any earlier step

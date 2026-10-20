@@ -76,6 +76,11 @@ step "the Keyryx witness is a process apart from custody" "./scripts/witness-is-
 step "every image this launcher runs is pinned by digest (invariant 44)" "./scripts/images-are-digest-pinned.sh"
 step "every TAIPANBOX image is signature-checked before it is pulled (invariant 44)" "./scripts/images-are-verified.sh"
 step "no credential reaches an argument list (invariant 46)" "./scripts/no-secret-on-argv.sh"
+step "the broker's line is in the keys file the box was given (invariant 48)" "./scripts/broker-key-is-the-keys-file-line.sh"
+step "every read-write volume is re-owned to its uid on every up (invariant 49)" "./scripts/volumes-are-reowned.sh"
+step "a profile this run does not name has no container left behind (invariant 50)" "./scripts/profiles-off-are-removed.sh"
+step "the record plane is on by default, from the pinned image (invariant 51)" "./scripts/record-plane-is-on-by-default.sh"
+step "the FinOps console can reach its own stream on the bus (invariant 52)" "./scripts/costcrew-can-reach-its-stream.sh"
 # Reaches the network (a tarball from the sibling repo), which is why it is
 # last: everything that can be judged offline has already spoken by here.
 step "every image has the files it copies" "./scripts/build-context-complete.sh"

@@ -84,6 +84,11 @@ change here is a change to something with root on somebody else's box.
 ./scripts/images-are-digest-pinned.sh
 ./scripts/images-are-verified.sh
 ./scripts/no-secret-on-argv.sh
+./scripts/broker-key-is-the-keys-file-line.sh
+./scripts/volumes-are-reowned.sh
+./scripts/profiles-off-are-removed.sh
+./scripts/record-plane-is-on-by-default.sh
+./scripts/costcrew-can-reach-its-stream.sh
 ./scripts/gates-have-teeth.sh   # invariant 8; needs a clean tree
 ```
 
@@ -712,7 +717,11 @@ an absent invariant.
     FinOps console, is such an add-on. `costcrew` and its one-shot
     `costcrew-init` sit behind the `finops` profile and nothing else; the only
     way to start it is `docker compose --profile finops up -d costcrew`, typed
-    by a person. `install.sh` has no flag for it and no line that names it,
+    by a person.
+    1.4.0: the profile table in install.sh (invariant 50) names the profile once, in PROFILES_OPERATOR, so
+    the installer never removes a running one and re-ups it at this run's pins. That table line is the only
+    line of install.sh that names the add-on; a start, a `--profile finops`, or a row in PROFILES_INSTALLED is
+    still refused by finops-is-opt-in.sh. `install.sh` has no flag for it and no line that names it,
     because the other ways of switching a profile on (`--profile`,
     `COMPOSE_PROFILES`) are each one line in a script that runs as root on
     somebody else's box, for a console that script has nothing to verify about.
@@ -1425,8 +1434,7 @@ an absent invariant.
     list at vouchryx fails closed. The
     enrolment secret lives in `agent-token.key` (0600) and only its SHA-256 digest is in
     `.env`. The broker's taint relay uses its own `broker` client key from a file, and the
-    installer mints that key only on a box it gives keys to; a box with its own keys file
-    must add the line itself. The OpenAI door keeps static keys only.
+    installer mints that key only on a box it gives keys to; a box with its own keys file must add the line itself, or set `ADD_BROKER_KEY=1` (invariant 48). The OpenAI door keeps static keys only.
     `@claude 2026-10-19`, amended by invariant 47: the switch is no longer off by default. Unset, the
     gateway and the broker run `require`; `WITH_AGENT_TOKENS=0` is the way off, and `accept` is no longer
     written. Where the text below says the switch is off by default, it describes the 2026-10-18 shape.
@@ -1575,6 +1583,76 @@ an absent invariant.
     run it on a fresh Ubuntu runner, and were not run here), a real agent's token and proof measured
     against the running doors, the replay of a captured proof that wardryx 2.3.0 does not refuse, and a
     box whose static key was listed by hand.)*
+
+48. **A box given its own client keys file carries the MCP broker's key in that file, as a `<secret>:broker` line.**
+    `@claude 2026-10-19`: measured on forge 2026-10-19 (its logs 25 to 31): the README asked for `broker:<secret>`,
+    the installer read `<secret>:broker`, and the refusal printed the README's form, so the README's own steps were
+    refused. With the line the box is accepted and the broker's key is that secret. Without it the installer refuses
+    before it writes anything, and names `ADD_BROKER_KEY=1`, which mints the secret, appends the line and keeps the
+    file's mode, only when the identity map binds `broker`. *(gate: `scripts/broker-key-is-the-keys-file-line.sh`, which
+    runs the installer's `# agent-tokens:` block against scratch files; 3 teeth cases plus a comment case in
+    `scripts/gates-have-teeth.sh`; `features/the-broker-line-is-the-keys-file-line.feature`. Not covered: the map's
+    binding being right (identity_check decides that at install), a live broker taking its key from the file.)*
+
+49. **Every read-write volume of a non-root service is re-owned to its uid, recursively, on every up.**
+    `@claude 2026-10-19`: measured on forge 2026-10-19 upgrading 1.1.35 to 1.3.1: the gateway's retained-reservation
+    journal in `traces` was still uid 10001 (the gateway runs 20010), and typryx's ledger in `typryxdata` was still uid
+    65532 (typryx runs 20005); a top-level chown in init-volumes does not reach a file an earlier release wrote. The
+    one-shots (init-volumes, costcrew-init) now `chown -R` each volume to its service's uid, on every run. The uid is
+    read from compose.yaml's `user:`. *(gate: `scripts/volumes-are-reowned.sh`, which runs each root one-shot's body in a
+    scratch root with chown recorded and requires a recursive chown per read-write mount; `events` and `checkpoints` are
+    excluded as shared bus volumes, judged by invariants 10 and 41; 3 teeth cases in `scripts/gates-have-teeth.sh`;
+    `features/the-volumes-are-re-owned-on-every-up.feature`. Not covered: a service without a `user:` line, a file a
+    process writes as another uid than its service, and an upgrade run on a live box.)*
+
+50. **Every compose profile is installer-managed or operator-started, and the installer treats each kind by its own rule.**
+    `@claude 2026-10-19`, revised 1.4.0. The first version removed every profile a run did not name, which also removed
+    what the README tells an operator to start by hand (egress, egress-browser, finops, routines). One table in
+    install.sh (`# profile-table:`) sorts each profile. Installer-managed (`record`, `typed`, `typed-risk-signal`,
+    `delegation`, `openai-door`): started from the installer's flags; a run that turns one off stops and removes its
+    containers by name. Operator-started (`egress`, `egress-browser`, `finops`, `routines`, `manual`): never removed by
+    the installer; a RUNNING container of one is re-upped at this run's pinned image (`up -d <service>`), so an upgrade
+    leaves no stale image (forge's costcrew stayed on v0.6.0 after 1.1.35 to 1.3.1); a stopped one stays stopped; the
+    closing report lists each one kept, with its image. *(gate: `scripts/profiles-off-are-removed.sh`, which runs the
+    installer's cleanup slice against a stub compose: a running finops costcrew and egress scopyx are re-upped and kept,
+    the installer-managed profiles that are off are removed, WITH_RECORD=0 removes record-seal, and every compose
+    profile is in exactly one list; 8 teeth cases in `scripts/gates-have-teeth.sh`;
+    `features/every-profile-that-is-off-is-removed.feature`. Not covered: a re-upped operator service whose new image
+    fails to start (the step dies and says so), and a profile this run names keeping a stale image; compose recreates a
+    container whose configuration changed, which a digest pin does change, and no gate measures that on a live stack.)*
+51. **The record plane is a core control: on by default, from the pinned trailryx-node image, and `WITH_RECORD=0` is the explicit way off.**
+    `@claude 2026-10-19`: before this release an unset WITH_RECORD meant off, WITH_RECORD=1 built trailryx from
+    source, and the `up` never named the record profile, so a default box ran no record plane. The image is the
+    compose pin with no build; only BUILD_FROM_SOURCE=1 builds it. An install that had the plane running and is now
+    run with WITH_RECORD=0 stops and removes record-seal (invariant 50). *(gate:
+    `scripts/record-plane-is-on-by-default.sh`, which lifts the `# record-plane:` block and runs it per value, and
+    reads both profile lists and the README; 4 teeth cases in `scripts/gates-have-teeth.sh`;
+    `features/the-record-plane-is-on-by-default.feature`. Not covered: a live record seal on a fresh box, and whether
+    trailryx 1.4.0 seals typryx's four event types, which invariant 14 leaves open.)*
+
+52. **The bus directory is traversable by others and writable by nobody but the setup script, so the FinOps console reaches its own stream.**
+    `@claude 2026-10-19`: a reading of Unix permissions, not a run. The bus directory was root:10001 0750, so costcrew
+    (10003, outside the bus group, invariant 24) could not enter it, and got "permission denied" on open of
+    `costcrew.ndjson`, which costcrew-init had created correctly (gcp2 logs 13b, 2026-10-19). The mode is 0751: others may
+    enter, and read or write nothing in it; the stream's own mode still decides who reads it, and costcrew joins no group.
+    *(gate: `scripts/costcrew-can-reach-its-stream.sh`, which reads the mode init-volumes gives `/vol/events` and
+    costcrew's service block; 3 teeth cases in `scripts/gates-have-teeth.sh`;
+    `features/costcrew-reaches-its-stream.feature`. `scripts/no-plane-writes-another-planes-stream.sh` accepts 0751.
+    Not covered: a live costcrew start on a fresh box, and a container-level measurement of the traversal, which
+    were not run here.)*
+
+53. **A re-run keeps exactly the static allow-list the last run wrote, and never adds a key the installer minted for the agents or the fire drills.** Amends invariant 47.
+    `@claude 2026-10-19`: measured on forge 2026-10-19: the second run of the installer admitted the agents' and the
+    fire drills' keys without a token, because the list was built from every key the box held. Now the list comes from
+    the `TOKENFUSE_AGENT_TOKENS_STATIC_KEYS` the last run wrote (and the MCP list from its own). Only a box whose `.env`
+    predates the list takes its ids from its keys, and then not the two keys the installer minted. felyx and the broker are
+    named on every run the box holds them (1.4.0). An upgrade removes
+    agents and drills from both lists, a list a 1.3.1 re-run had widened, unless STATIC_KEY_IDS names them, and the
+    closing report says which it removed (1.4.0). Named once, a key stays named only while a run names it:
+    the choice is not sticky, so the operator names it on every run. *(gate: `scripts/agent-tokens-are-wired.sh`, section H (the list per case) and section I
+    (two runs on one `.env`, the second must write what the first wrote); 2 teeth cases plus the existing ones in
+    `scripts/gates-have-teeth.sh`; `features/a-re-run-keeps-its-allow-list.feature`. Not covered: a live second install on a
+    box, and a box whose static key was listed by hand.)*
 
 ## Decisions that have no gate yet
 
