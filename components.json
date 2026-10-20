@@ -111,7 +111,7 @@
         "pulls_images": [
           "ghcr.io/taipanbox/agent-conform:v2.0.1@sha256:445608e976247b94f4c3877541fdd4ae3f2aa623b18365ee7215a99f75b85e4c",
           "ghcr.io/taipanbox/costcrew:v0.10.0@sha256:26316b1c99706529a4589a328b2ddd3fc5f4db4cf0b5a46466e8be1ddd8f0de9",
-          "ghcr.io/taipanbox/genaryx-console:v1.1.48@sha256:311625121ba911746aa9a52b9fac7ae1a4730a89546636c86d6543214ea5dd07",
+          "ghcr.io/taipanbox/genaryx-console:v1.7.0@sha256:2ceefbba80cf08924d60769ffeec07989e198445af998c3612c1b3e25708b144",
           "ghcr.io/taipanbox/heraldyx:v0.8.0@sha256:8b4b60f61d0778e473d3a88df1bd63ea5eeb67428754fa341cf23051766b40b5",
           "ghcr.io/taipanbox/idryx:v1.3.0@sha256:aa1ee80aeafcb35beaf9fc115081570fcbd13507e1299541148527f4600dc96d",
           "ghcr.io/taipanbox/keyryx:v0.1.1@sha256:a9f88c44b62545555baffa19e3ace4b9c699c69c3a4aadbae28089aa2b29eb51",

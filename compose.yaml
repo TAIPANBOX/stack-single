@@ -1591,7 +1591,7 @@ services:
 
   console:
     <<: *restart
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.1.48@sha256:311625121ba911746aa9a52b9fac7ae1a4730a89546636c86d6543214ea5dd07}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.7.0@sha256:2ceefbba80cf08924d60769ffeec07989e198445af998c3612c1b3e25708b144}
     networks:
       - core
       - agents
@@ -1614,8 +1614,9 @@ services:
       # state volume is the one place it can write, so it is named here.
       GENARYX_STATE_DIR: /var/lib/stack/genaryx
       # The Keyryx witness's findings, which are not on the bus (invariant 54):
-      # a stream the console tails read only beside its events directory. A
-      # console older than the one that reads GENARYX_EVENTS_EXTRA ignores it.
+      # a stream the console tails read only beside its events directory. The
+      # console pinned here (v1.7.0, built from genaryx #134) reads it; an older
+      # console ignores it.
       GENARYX_EVENTS_EXTRA: /var/lib/keyryx-alerts/keyryx.ndjson
       GENARYX_SCAN_TARGET: /srv/ui
       # Felyx, the console's copilot, talks to its model THROUGH this box's own
@@ -1961,7 +1962,7 @@ services:
 
   verdryx-drift:
     <<: *restart
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.1.48@sha256:311625121ba911746aa9a52b9fac7ae1a4730a89546636c86d6543214ea5dd07}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.7.0@sha256:2ceefbba80cf08924d60769ffeec07989e198445af998c3612c1b3e25708b144}
     networks:
       - core
     user: "10001:10001"

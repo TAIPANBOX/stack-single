@@ -605,7 +605,7 @@ run. Felyx authenticates with this key and never with your provider key.
 A console that carries genaryx invariant 24 can present a key of its own:
 `compose.yaml` already hands it `GENARYX_COPILOT_FUSE_KEY_REF`, which points at
 `GENARYX_COPILOT_FUSE_KEY` in `.env`, and such a console sends that key as
-`x-fuse-key`. The console pinned here (v1.1.48) carries it; an older one ignores
+`x-fuse-key`. The console pinned here (v1.7.0) carries it; an older one ignores
 the setting. Measured 2026-10-13 with two throwaway v1.1.44 consoles against a
 gateway holding client keys: with the key set, a question to Felyx was answered;
 with it empty, the gateway answered 401. To give Felyx a key:
@@ -960,9 +960,9 @@ What is wired now, and what is not:
 - **the witness's findings are mailed** by heraldyx (pin `v0.8.0`, the first release
   that renders the keyryx source), at `ALERT_MIN_SEVERITY`, `high` by default; the
   medium ones go in the digest. heraldyx reads them through a read-only mount.
-- **the console shows them** as incidents once its image reads `GENARYX_EVENTS_EXTRA`,
-  which compose.yaml already sets. The console pinned here is older than that release
-  and ignores the setting, so for now the findings reach the mail and not the console.
+- **the console shows them** as incidents: the console pinned here (v1.7.0) reads
+  `GENARYX_EVENTS_EXTRA`, which compose.yaml sets. An older console ignores it, and
+  then the findings reach the mail and not the console.
 - **a box installed before this release** keeps its old `alerts.ndjson` on the
   witness's state volume. Nothing reads it, and nothing deletes it.
 
@@ -1677,7 +1677,7 @@ re-run keeps it. To turn closing off again, remove `CLOSURE_SECRET` and
 `CLOSURE_SECRET_FILE` from `.env` and run `docker compose up -d`.
 
 It needs tokenfuse v1.9.0 or later and console v1.1.34 or later. The images pinned here are tokenfuse v1.19.0 and
-console v1.1.48; an older image ignores the setting.
+console v1.7.0; an older image ignores the setting.
 
 ## The console
 
