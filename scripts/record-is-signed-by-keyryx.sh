@@ -3,8 +3,9 @@
 # Enforces CLAUDE.md invariant 59: the record seal signs its sealed roots through the
 # box's keyryx custody, with a consumer credential the custody holds only as a digest;
 # the keyryx witness reads the records and attests to them; and the seal reads those
-# attestations. The trailryx root pin (TRAILRYX_KEYRYX_KID, trailryx#112) is not released
-# yet, so it stays a named TODO and is not set.
+# attestations through its own read-only subpath (keyryx 0.1.2 writes them 0640, the witness
+# runs gid 10001). The seal pins the kid of custody's trailryx-root key set, taken at install
+# (trailryx 1.5.0 refuses to start without it).
 #
 # WHAT IT CHECKS
 #   A. COMPOSE, RESOLVED (--profile record). The seal runs with TRAILRYX_SIGNER=keyryx, the
@@ -61,16 +62,21 @@ want = {
 for k, v in want.items():
     if env.get(k) != v:
         problems.append("A. record-seal resolves %s as %r, not %r" % (k, env.get(k), v))
-if "TRAILRYX_WITNESS_ATTESTATIONS" in env:
-    problems.append("A. record-seal sets TRAILRYX_WITNESS_ATTESTATIONS: keyryx v0.1.1 writes attestations 0600 under the witness uid, so the seal (uid 10001) cannot read them (invariant 59, TODO(keyryx-attest-mode))")
-if "TRAILRYX_KEYRYX_KID" in env:
-    problems.append("A. record-seal sets TRAILRYX_KEYRYX_KID: the root pin is not released (trailryx#112) and must stay a TODO")
+if env.get("TRAILRYX_WITNESS_ATTESTATIONS") != "/run/keyryx/attestations":
+    problems.append("A. record-seal resolves TRAILRYX_WITNESS_ATTESTATIONS as %r, not /run/keyryx/attestations" % env.get("TRAILRYX_WITNESS_ATTESTATIONS"))
+if "TRAILRYX_KEYRYX_KID" not in env:
+    problems.append("A. record-seal sets no TRAILRYX_KEYRYX_KID: trailryx 1.5.0 refuses to start with the keyryx signer and no pin")
 vols = [v for v in seal.get("volumes") or [] if isinstance(v, dict)]
 key_mounts = [v for v in vols if v.get("target") == "/run/keyryx/record-seal.key"]
 if not key_mounts or not key_mounts[0].get("read_only"):
     problems.append("A. the credential is not mounted read only at /run/keyryx/record-seal.key")
-if any(v.get("target") == "/var/lib/keyryx-witness" for v in vols):
-    problems.append("A. record-seal mounts the witness volume, which it cannot read yet (TODO(keyryx-attest-mode))")
+att = [v for v in vols if v.get("target") == "/run/keyryx/attestations"]
+if not att or not att[0].get("read_only") or not str(att[0].get("source", "")).endswith("keyryxwitness") \
+        or (att[0].get("volume") or {}).get("subpath") != "attestations":
+    problems.append("A. record-seal does not mount keyryxwitness's attestations subpath read only at /run/keyryx/attestations")
+for v in vols:
+    if str(v.get("source", "")).endswith("keyryxwitness") and (v.get("volume") or {}).get("subpath") != "attestations":
+        problems.append("A. record-seal mounts the witness volume whole, not only its attestations subpath")
 wenv = witness.get("environment") or {}
 if wenv.get("KEYRYX_WITNESS_RECORDS") != "acme|/var/lib/stack/records":
     problems.append("A. keyryx-witness resolves KEYRYX_WITNESS_RECORDS as %r, not acme|/var/lib/stack/records" % wenv.get("KEYRYX_WITNESS_RECORDS"))
@@ -149,13 +155,13 @@ if [ -n "$BLOCK" ] && printf '%s\n' "$BLOCK" | grep -q '^record_seal_key_prepare
 fi
 
 # ---- D. the root pin and the attestation mode stay TODOs -----------------------------
-grep -q 'TODO(keyryx-attest-mode)' compose.yaml || fail "D. compose.yaml names no TODO(keyryx-attest-mode), so the attestation hold is not recorded where it belongs"
-grep -qE '^[[:space:]]+TRAILRYX_KEYRYX_KID:' compose.yaml && fail "D. compose.yaml sets TRAILRYX_KEYRYX_KID as a variable: the pin is not released (trailryx#112)"
-grep -q 'TODO.*TRAILRYX_KEYRYX_KID' compose.yaml || fail "D. compose.yaml names no TODO for TRAILRYX_KEYRYX_KID, so the waiting pin is not recorded where it belongs"
+grep -q 'TODO(keyryx-attest-mode)' compose.yaml && fail "D. compose.yaml still names TODO(keyryx-attest-mode): the attestation read is wired"
+grep -q 'TODO(trailryx#112)' compose.yaml && fail "D. compose.yaml still names TODO(trailryx#112): the root pin is wired"
+grep -qE '^[[:space:]]+TRAILRYX_KEYRYX_KID:' compose.yaml || fail "D. compose.yaml does not set TRAILRYX_KEYRYX_KID from .env"
 
 if [ "$problems" -gt 0 ]; then
   echo
   echo "$problems problem(s). See CLAUDE.md invariant 59."
   exit 1
 fi
-echo "OK: the record seal signs through the box's keyryx with a credential the custody holds only as a digest, the witness attests to the records, the root pin and the attestation read are named TODOs (invariant 59)."
+echo "OK: the record seal signs through the box's keyryx with a credential the custody holds only as a digest, the witness attests to the records, the seal reads the attestations folder read only, and pins its root kid (invariants 59 and 60)."

@@ -986,17 +986,19 @@ old `signing.pem` are left in place and unused. Nothing is deleted.
 On by default, from the pinned trailryx-node image, with no build (CLAUDE.md invariant 51). The
 installer starts it with the rest of the stack. `WITH_RECORD=0` turns it off, and an install that
 had it running stops and removes it.
-**Signed through keyryx (CLAUDE.md invariant 59).** The seal signs each sealed root
+**Signed through keyryx (CLAUDE.md invariants 59 and 60).** The seal signs each sealed root
 through this box's keyryx. Its credential, `keyryx/record-seal.key`, is minted once, read
 only by the seal, and kept across re-runs; keyryx holds only its digest. The keyryx
-witness reads the records and attests to each root. The seal does not read those
-attestations yet: keyryx v0.1.1 writes them mode 0600 under the witness's uid, which the
-seal cannot read, so `TRAILRYX_WITNESS_ATTESTATIONS` stays unset until a keyryx release
-writes them group-readable (TODO(keyryx-attest-mode)). The seal does not pin keyryx's
-root yet: `TRAILRYX_KEYRYX_KID` waits for trailryx 1.5.0 (trailryx#112), and until it is
-released the signer is not pinned to a root.
+witness reads the records and attests to each root, and the seal reads those attestations
+through a read-only folder of its own: the `attestations` folder of the witness's volume,
+and nothing else of the witness's. At install the seal pins the kid of keyryx's
+`trailryx-root` key set, which must hold exactly one ES384 key, and keeps the pin on every
+later run.
 
-Off unless you ask for it, like the egress plane above.
+**Rotating the record root.** The pin is not refreshed on a re-run. When keyryx's
+`trailryx-root` set holds exactly one ES384 key again, remove the `TRAILRYX_KEYRYX_KID` line
+from `.env` and re-run the installer. A set with two ES384 keys, a rotation under way, stops
+the install with its reason, on purpose.
 
 ```bash
 ./install.sh                    # the record plane is on

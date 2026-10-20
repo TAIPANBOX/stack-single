@@ -136,6 +136,10 @@ jobs:
         run: ./scripts/approver-key-is-wired.sh
       - name: the record seal signs through keyryx and the witness attests (invariant 59)
         run: ./scripts/record-is-signed-by-keyryx.sh
+      - name: the record seal pins custody's trailryx-root kid at install (invariant 60)
+        run: ./scripts/trailryx-root-is-pinned.sh
+      - name: the 1.5.0 wave runs its released pins and names its origins (invariant 61)
+        run: ./scripts/wave3-pins-are-released.sh
 
       # Last, because it mutates tracked files and restores them. It needs a
       # clean tree and says so plainly, so it also reports any earlier step

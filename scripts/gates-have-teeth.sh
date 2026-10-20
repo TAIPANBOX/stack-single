@@ -1464,20 +1464,72 @@ run_case "record-is-signed-by-keyryx: the custody holds the socket, not the dige
 	"$(py 'edit("install.sh", "\"key_digest\": \"__RECORD_SEAL_DIGEST__\"", "\"socket\": \"record-seal\"")')" \
 	"digest is not the sha256"
 
-run_case "record-is-signed-by-keyryx: the root pin is set before it is released" fail \
+run_case "record-is-signed-by-keyryx: the seal starts with no root pin" fail \
 	'./scripts/record-is-signed-by-keyryx.sh' \
-	"$(py 'edit("compose.yaml", "      TRAILRYX_KEYRYX_CREDENTIAL_FILE: /run/keyryx/record-seal.key\n", "      TRAILRYX_KEYRYX_CREDENTIAL_FILE: /run/keyryx/record-seal.key\n      TRAILRYX_KEYRYX_KID: pinned-fake\n")')" \
-	"sets TRAILRYX_KEYRYX_KID"
+	"$(py 'edit("compose.yaml", "      TRAILRYX_KEYRYX_KID: ${TRAILRYX_KEYRYX_KID:-}\n", "")')" \
+	"sets no TRAILRYX_KEYRYX_KID"
+
+run_case "record-is-signed-by-keyryx: the seal reads the witness's whole volume" fail \
+	'./scripts/record-is-signed-by-keyryx.sh' \
+	"$(py 'edit("compose.yaml", "        volume:\n          subpath: attestations\n", "")')" \
+	"does not mount keyryxwitness"
 
 run_case "record-is-signed-by-keyryx: the credential is printed when it is minted" fail \
 	'./scripts/record-is-signed-by-keyryx.sh' \
 	"$(py 'edit("install.sh", "mv -f \"$tmp\" \"$key\" || die \"could not put the record seal", "mv -f \"$tmp\" \"$key\" && cat \"$key\" || die \"could not put the record seal")')" \
 	"prints the credential"
 
-run_case "record-is-signed-by-keyryx: the seal reads attestations that keyryx writes 0600" fail \
+run_case "record-is-signed-by-keyryx: the seal mounts the attestations folder read-write" fail \
 	'./scripts/record-is-signed-by-keyryx.sh' \
-	"$(py 'edit("compose.yaml", "      TRAILRYX_KEYRYX_CREDENTIAL_FILE: /run/keyryx/record-seal.key\n", "      TRAILRYX_KEYRYX_CREDENTIAL_FILE: /run/keyryx/record-seal.key\n      TRAILRYX_WITNESS_ATTESTATIONS: /var/lib/keyryx-witness/attestations\n")')" \
-	"sets TRAILRYX_WITNESS_ATTESTATIONS"
+	"$(py 'edit("compose.yaml", "        read_only: true\n        volume:\n          subpath: attestations\n", "        read_only: false\n        volume:\n          subpath: attestations\n")')" \
+	"read only at /run/keyryx/attestations"
+
+# ---- trailryx-root-is-pinned (CLAUDE.md invariant 60) --------------------
+run_case "trailryx-root-is-pinned: the install never pins the root" fail \
+	'./scripts/trailryx-root-is-pinned.sh' \
+	"$(py 'edit("install.sh", "\ntrailryx_pin_apply\n\"${COMPOSE[@]}\" \"${UP_PROFILES[@]}\" up -d --remove-orphans", "\n\"${COMPOSE[@]}\" \"${UP_PROFILES[@]}\" up -d --remove-orphans")')" \
+	"never calls trailryx_pin_apply"
+
+run_case "trailryx-root-is-pinned: two ES384 keys are accepted" fail \
+	'./scripts/trailryx-root-is-pinned.sh' \
+	"$(py 'edit("install.sh", "  if [ \"$n\" != 1 ]; then", "  if [ \"$n\" -lt 1 ]; then")')" \
+	"two ES384 keys was not refused"
+
+run_case "trailryx-root-is-pinned: a re-run fetches the pin again" fail \
+	'./scripts/trailryx-root-is-pinned.sh' \
+	"$(py 'edit("install.sh", "  if [ -n \"$kid\" ]; then\n    note \"record seal: keeps", "  if [ -n \"\" ]; then\n    note \"record seal: keeps")')" \
+	"still fetched the key set"
+
+run_case "trailryx-root-is-pinned: the key's body leaves the function" fail \
+	'./scripts/trailryx-root-is-pinned.sh' \
+	"$(py 'edit("install.sh", "  printf '"'"'%s\n'"'"' \"$k\"", "  printf '"'"'%s\n'"'"' \"$body\"")')" \
+	"is not printed alone"
+
+run_case "trailryx-root-is-pinned: compose stops reading the pin" fail \
+	'./scripts/trailryx-root-is-pinned.sh' \
+	"$(py 'edit("compose.yaml", "      TRAILRYX_KEYRYX_KID: ${TRAILRYX_KEYRYX_KID:-}\n", "")')" \
+	"does not read TRAILRYX_KEYRYX_KID from .env"
+
+# ---- wave3-pins-are-released (CLAUDE.md invariant 61) --------------------
+run_case "wave3-pins-are-released: keyryx is back on v0.1.1" fail \
+	'./scripts/wave3-pins-are-released.sh' \
+	"$(py 'edit_all("compose.yaml", "keyryx:v0.1.2@sha256:9b6d4e0e8988076e90843d9d1625e50a7f248f6be531e144a6950ff9233f7683", "keyryx:v0.1.1@sha256:a9f88c44b62545555baffa19e3ace4b9c699c69c3a4aadbae28089aa2b29eb51")')" \
+	"does not pin keyryx at its released reference"
+
+run_case "wave3-pins-are-released: components.json keeps the old console" fail \
+	'./scripts/wave3-pins-are-released.sh' \
+	"$(py 'edit("components.json", "genaryx-console:v1.6.0@sha256:b226b16fb3cd58c1ad083cea668e0367e911bc0320c3fe5fa87366251570152b", "genaryx-console:v1.1.48@sha256:311625121ba911746aa9a52b9fac7ae1a4730a89546636c86d6543214ea5dd07")')" \
+	"components.json does not record the genaryx-console pin"
+
+run_case "wave3-pins-are-released: the gateway loses its service-name origin" fail \
+	'./scripts/wave3-pins-are-released.sh' \
+	"$(py 'edit("compose.yaml", "TOKENFUSE_DELEGATION_ORIGINS: ${TOKENFUSE_DELEGATION_ORIGINS:-http://tokenfuse-gateway:4100,http://${GATEWAY_BIND:-127.0.0.1}:4100}", "TOKENFUSE_DELEGATION_ORIGINS: ${TOKENFUSE_DELEGATION_ORIGINS:-http://127.0.0.1:4100}")')" \
+	"resolves TOKENFUSE_DELEGATION_ORIGINS"
+
+run_case "wave3-pins-are-released: the broker's proof origins are dropped" fail \
+	'./scripts/wave3-pins-are-released.sh' \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_MCP_PROOF_ORIGINS: ${TOKENFUSE_MCP_PROOF_ORIGINS:-http://tokenfuse-mcp-broker:4200,http://${GATEWAY_BIND:-127.0.0.1}:4200}\n", "")')" \
+	"resolves TOKENFUSE_MCP_PROOF_ORIGINS"
 
 # ---- approver-key-is-wired (CLAUDE.md invariant 58) -----------------------
 run_case "approver-key-is-wired: the approver key is not PKCS#8" fail \

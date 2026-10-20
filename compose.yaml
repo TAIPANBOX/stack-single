@@ -170,7 +170,7 @@ services:
         mkdir -p /vol/events/wardryx-policy-archive && chown -R 20001:10001 /vol/events/wardryx-policy-archive && chmod 0750 /vol/events/wardryx-policy-archive
         # Keyryx's two state directories, each owned by the one process that uses it.
         chown -R 20101 /vol/keyryx && chmod 0700 /vol/keyryx
-        chown -R 20100 /vol/keyryxw && chmod 0700 /vol/keyryxw
+        chown -R 20100 /vol/keyryxw && chmod 0700 /vol/keyryxw && mkdir -p /vol/keyryxw/attestations && chown 20100:10001 /vol/keyryxw/attestations && chmod 0750 /vol/keyryxw/attestations
         # One checkpoint file per producer stream (agent-passport SPEC 6.5.1), each
         # written by its producer alone. Empty until a producer signs one.
         chown 0:10001 /vol/checkpoints && chmod 0750 /vol/checkpoints
@@ -259,7 +259,7 @@ services:
   # the uid of the process that reads them. They are never in .env.
   keyryx:
     <<: *restart
-    image: ${KEYRYX_IMAGE:-ghcr.io/taipanbox/keyryx:v0.1.1@sha256:a9f88c44b62545555baffa19e3ace4b9c699c69c3a4aadbae28089aa2b29eb51}
+    image: ${KEYRYX_IMAGE:-ghcr.io/taipanbox/keyryx:v0.1.2@sha256:9b6d4e0e8988076e90843d9d1625e50a7f248f6be531e144a6950ff9233f7683}
     # The image's own 65532 is replaced: custody runs under its own uid, and
     # no other container runs as it (invariant 41).
     user: "20101:20101"
@@ -291,7 +291,7 @@ services:
 
   keyryx-witness:
     <<: *restart
-    image: ${KEYRYX_IMAGE:-ghcr.io/taipanbox/keyryx:v0.1.1@sha256:a9f88c44b62545555baffa19e3ace4b9c699c69c3a4aadbae28089aa2b29eb51}
+    image: ${KEYRYX_IMAGE:-ghcr.io/taipanbox/keyryx:v0.1.2@sha256:9b6d4e0e8988076e90843d9d1625e50a7f248f6be531e144a6950ff9233f7683}
     user: "20100:10001"
     command:
       - witness
@@ -845,7 +845,7 @@ services:
   tokenfuse-mcp-broker:
     <<: *restart
     profiles: ["typed"]
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.19.0@sha256:32139654fc63ebc3026720413f1a9c16f07fb2507509714d946f50ffcf2a2434}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.20.0@sha256:84f6856dcfe609410429774c965bbc531d063b29c640871dd44b1c34b07ba628}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20012:10001"
@@ -937,6 +937,9 @@ services:
       TOKENFUSE_DELEGATION_REVOCATIONS: ${TOKENFUSE_DELEGATION_REVOCATIONS:-}
       TOKENFUSE_DELEGATION_REVOCATIONS_INTERVAL_MS: ${TOKENFUSE_DELEGATION_REVOCATIONS_INTERVAL_MS:-}
       TOKENFUSE_DELEGATION_REVOCATIONS_FAILMODE: closed
+      # Every address the broker is reached at, for the proof origin check (D13). An operator's list in .env
+      # replaces it. Without the bind's own origin a call on the bind is refused.
+      TOKENFUSE_MCP_PROOF_ORIGINS: ${TOKENFUSE_MCP_PROOF_ORIGINS:-http://tokenfuse-mcp-broker:4200,http://${GATEWAY_BIND:-127.0.0.1}:4200}
       # The relayed tool-call check goes to the gateway, with the broker's own
       # client key read from a file (its `broker` key, invariant 40). Both empty,
       # the default, and the broker asks no gateway, as it did before.
@@ -1160,7 +1163,7 @@ services:
   # ---- money: the control API ----------------------------------------------
   tokenfuse-cloud:
     <<: *restart
-    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v1.19.0@sha256:201f4dc7faf556f16038a5cc380f5945dc7b87b79a8ab7940402988844b17949}
+    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v1.20.0@sha256:ab2510b3687455341fcc207361b8ed4801c4c7460f3ddc8b243603b6a982ca88}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20013:10001"
@@ -1206,7 +1209,7 @@ services:
   # gets a hard refusal rather than a log line.
   tokenfuse-gateway:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.19.0@sha256:32139654fc63ebc3026720413f1a9c16f07fb2507509714d946f50ffcf2a2434}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.20.0@sha256:84f6856dcfe609410429774c965bbc531d063b29c640871dd44b1c34b07ba628}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20010:10001"
@@ -1358,6 +1361,9 @@ services:
       # the gateway refuses to start on a listed id it does not hold.
       TOKENFUSE_AGENT_TOKENS_STATIC_KEYS: ${TOKENFUSE_AGENT_TOKENS_STATIC_KEYS:-}
       TOKENFUSE_DELEGATION_REVOCATIONS_FAILMODE: closed
+      # Every address the gateway is reached at, for the delegation proof origin check (D13). An operator's
+      # list in .env replaces it. A call that reaches the gateway at another address is refused until it is listed.
+      TOKENFUSE_DELEGATION_ORIGINS: ${TOKENFUSE_DELEGATION_ORIGINS:-http://tokenfuse-gateway:4100,http://${GATEWAY_BIND:-127.0.0.1}:4100}
       # Client keys and the identity map (tokenfuse docs/20): who may call this
       # gateway (`x-fuse-key`), which agent ids each key may speak as, and which
       # unit pays. The keys are REQUIRED: with none, tokenfuse admits every
@@ -1442,7 +1448,7 @@ services:
   #     reading of the variables being absent.
   tokenfuse-gateway-openai:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.19.0@sha256:32139654fc63ebc3026720413f1a9c16f07fb2507509714d946f50ffcf2a2434}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.20.0@sha256:84f6856dcfe609410429774c965bbc531d063b29c640871dd44b1c34b07ba628}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20011:10001"
@@ -1583,7 +1589,7 @@ services:
 
   console:
     <<: *restart
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.1.48@sha256:311625121ba911746aa9a52b9fac7ae1a4730a89546636c86d6543214ea5dd07}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.6.0@sha256:b226b16fb3cd58c1ad083cea668e0367e911bc0320c3fe5fa87366251570152b}
     networks:
       - core
       - agents
@@ -1722,7 +1728,7 @@ services:
   # a promise.
   record-seal:
     <<: *restart
-    image: ${TRAILRYX_IMAGE:-ghcr.io/taipanbox/trailryx-node:v1.4.0@sha256:79da026eab19b2b8ade994cbb65850b39f644c4b632edf1de411f70bddd047d3}
+    image: ${TRAILRYX_IMAGE:-ghcr.io/taipanbox/trailryx-node:v1.5.0@sha256:f15215cd9708724e83fbd8493f2bf7d2a11980b37edf3b887081d8e17da18bab}
     networks:
       - core
     user: "10001:10001"
@@ -1750,13 +1756,13 @@ services:
       TRAILRYX_SIGNER: keyryx
       TRAILRYX_KEYRYX_URL: http://keyryx:4340
       TRAILRYX_KEYRYX_CREDENTIAL_FILE: /run/keyryx/record-seal.key
-      # TODO(keyryx-attest-mode): TRAILRYX_WITNESS_ATTESTATIONS is NOT set. keyryx v0.1.1 writes
-      # each attestation with os.CreateTemp, mode 0600, owned by the witness's uid (20100), and
-      # renames it without a chmod, so this seal (uid 10001) cannot read it, and read --pack
-      # fails when the variable is set. Set it when a keyryx release writes attestations
-      # group-readable (the tenant folder is acme, the seal's default tenant).
-      # TODO(trailryx#112): TRAILRYX_KEYRYX_KID, the pinned kid of keyryx's delegation root, is
-      # not released yet. Until it is, the seal does not pin the root it signs under.
+      # The witness's attestations, read only: keyryx 0.1.2 writes them mode 0640 under the witness's
+      # gid 10001, which this seal is in, so the seal reads them and nothing else of the witness's
+      # (its data and its key are not mounted). The folder is acme, the seal's default tenant.
+      TRAILRYX_WITNESS_ATTESTATIONS: /run/keyryx/attestations
+      # The kid of custody's trailryx-root key set, pinned once at install from keyryx on this box
+      # (CLAUDE.md invariant 60). Empty until the installer takes it, and trailryx 1.5.0 then refuses to start.
+      TRAILRYX_KEYRYX_KID: ${TRAILRYX_KEYRYX_KID:-}
     command:
       - /bin/sh
       - -c
@@ -1829,6 +1835,13 @@ services:
       - events:/var/lib/stack/events:ro
       - records:/var/lib/stack/records
       - ./keyryx/record-seal.key:/run/keyryx/record-seal.key:ro
+      # The witness's attestations folder and nothing else of the witness's volume, read only.
+      - type: volume
+        source: keyryxwitness
+        target: /run/keyryx/attestations
+        read_only: true
+        volume:
+          subpath: attestations
     depends_on:
       init-volumes:
         condition: service_completed_successfully
@@ -1864,7 +1877,7 @@ services:
   # The sixth, trailryx-seal, is the `record` profile above.
   focus-export:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.19.0@sha256:32139654fc63ebc3026720413f1a9c16f07fb2507509714d946f50ffcf2a2434}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.20.0@sha256:84f6856dcfe609410429774c965bbc531d063b29c640871dd44b1c34b07ba628}
     networks:
       - core
     user: "10001:10001"
@@ -1966,7 +1979,7 @@ services:
 
   verdryx-drift:
     <<: *restart
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.1.48@sha256:311625121ba911746aa9a52b9fac7ae1a4730a89546636c86d6543214ea5dd07}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.6.0@sha256:b226b16fb3cd58c1ad083cea668e0367e911bc0320c3fe5fa87366251570152b}
     networks:
       - core
     user: "10001:10001"

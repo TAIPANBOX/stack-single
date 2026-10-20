@@ -11,15 +11,16 @@ Feature: The record seal signs its roots through the box's keyryx, and the witne
     # -> gates-have-teeth.sh "record-is-signed-by-keyryx: the custody holds the socket, not the digest"
     # -> gates-have-teeth.sh "record-is-signed-by-keyryx: the credential is printed when it is minted"
 
-  Scenario: the witness attests to the records, and the seal does not read the attestations yet
+  Scenario: the witness attests to the records, and the seal reads the attestations through a read-only folder
     Given keyryx-witness is running beside the seal
     When it reads the records
-    Then it writes an attestation per root, and the seal reads none until a keyryx release writes them group-readable
+    Then it writes an attestation per root, and the seal reads them through its own read-only attestations folder and nothing else of the witness's
     # -> gates-have-teeth.sh "record-is-signed-by-keyryx: the witness reads no records"
-    # -> gates-have-teeth.sh "record-is-signed-by-keyryx: the seal reads attestations that keyryx writes 0600"
+    # -> gates-have-teeth.sh "record-is-signed-by-keyryx: the seal mounts the attestations folder read-write"
+    # -> gates-have-teeth.sh "record-is-signed-by-keyryx: the seal reads the witness's whole volume"
 
-  Scenario: the root pin is not set until trailryx releases it
-    Given trailryx has not released its root pin
+  Scenario: the seal starts with the root pin the installer took from custody
+    Given trailryx 1.5.0 refuses to start under the keyryx signer with no root pin
     When the seal starts
-    Then TRAILRYX_KEYRYX_KID is a named TODO and no pin is set
-    # -> gates-have-teeth.sh "record-is-signed-by-keyryx: the root pin is set before it is released"
+    Then TRAILRYX_KEYRYX_KID is read from .env, where the installer wrote it once
+    # -> gates-have-teeth.sh "record-is-signed-by-keyryx: the seal starts with no root pin"

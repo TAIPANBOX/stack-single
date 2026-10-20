@@ -3344,6 +3344,56 @@ keyryx_root_key() { # FILE UID: create FILE with 32 random bytes when absent
   note "keyryx root key written at $f (32 bytes, 0400, uid $uid; its contents are never shown)"
 }
 
+# trailryx-root-pin: begin
+# The record seal signs under custody's trailryx-root key set, and trailryx 1.5.0 refuses to start under
+# the keyryx signer with no pin of the kid it signs under (CLAUDE.md invariant 60). This block takes that
+# kid once, at install, from keyryx on this box. A set that does not hold exactly one ES384 key is refused
+# with its reason: a guess would pin the wrong root. A later run keeps the pin; a rotation is done on
+# purpose, by removing TRAILRYX_KEYRYX_KID from .env once keyryx holds exactly one ES384 key again.
+trailryx_root_kid() { # prints the one ES384 kid of keyryx's trailryx-root set; 2 = not served yet, 3 = refused
+  local body es n k
+  body="$(docker run --rm --network agent-stack_core busybox:1.36 wget -q -T5 -O - \
+    http://keyryx:4340/v1/jwks/trailryx-root 2>/dev/null)" || return 2
+  [ -n "$body" ] || return 2
+  es="$(printf '%s' "$body" | sed 's/[{}]/\n/g' | grep -E '"alg" *: *"ES384"' \
+    | sed -n 's/.*"kid" *: *"\([^"]*\)".*/\1/p' || true)"
+  n="$(printf '%s\n' "$es" | sed '/^$/d' | wc -l | tr -d ' ')"
+  if [ "$n" != 1 ]; then
+    echo "trailryx-root: keyryx serves $n ES384 key(s) in trailryx-root, and the record seal pins exactly one. Refusing: a rotation is done on purpose (see the README)." >&2
+    return 3
+  fi
+  k="$(printf '%s\n' "$es" | sed '/^$/d')"
+  if ! printf '%s' "$k" | grep -qE '^[A-Za-z0-9_-]{43}$'; then
+    echo "trailryx-root: the ES384 kid keyryx serves is not an RFC 7638 thumbprint (43 characters). Refusing." >&2
+    return 3
+  fi
+  printf '%s\n' "$k"
+}
+
+trailryx_pin_apply() { # writes TRAILRYX_KEYRYX_KID into .env once; a box with the record plane off changes nothing
+  local kid rc left
+  [ "${RECORD_ON:-0}" = 1 ] || return 0
+  kid="$(grep -E '^TRAILRYX_KEYRYX_KID=.' "$STACK_DIR/.env" 2>/dev/null | tail -1 | cut -d= -f2- || true)"
+  if [ -n "$kid" ]; then
+    note "record seal: keeps the pinned trailryx-root kid in .env (a rotation is done on purpose, see the README)"
+    return 0
+  fi
+  "${COMPOSE[@]}" up -d keyryx >/dev/null || die "could not start keyryx, which holds trailryx-root for the record seal. Nothing was started for the record seal."
+  left=15
+  while :; do
+    rc=0
+    kid="$(trailryx_root_kid)" || rc=$?
+    [ "$rc" = 0 ] && break
+    [ "$rc" = 3 ] && die "the record seal is not pinned: keyryx's trailryx-root set does not hold exactly one ES384 key (above). Nothing was started for the record seal; fix the key set and re-run."
+    left=$((left - 1))
+    [ "$left" -gt 0 ] || die "keyryx did not serve trailryx-root within 15s, and trailryx 1.5.0 refuses to start without its pin. Check: ${COMPOSE[*]} logs keyryx"
+    sleep 1
+  done
+  # A kid is base64url characters only, so one plain line is exact.
+  printf 'TRAILRYX_KEYRYX_KID=%s\n' "$kid" >>"$STACK_DIR/.env"
+  note "record seal: pinned the kid of keyryx's trailryx-root set (TRAILRYX_KEYRYX_KID in .env, kept on every run)"
+}
+# trailryx-root-pin: end
 # record-signer: begin
 # CLAUDE.md invariant 59. The record seal signs its sealed roots through this box's keyryx,
 # presenting a consumer credential. The custody holds only the credential's sha256 digest,
@@ -4128,6 +4178,7 @@ egress_override .
 # file as written. Read before `up`, because `up` starts it.
 WARDRYX_WAS_RUNNING=0
 [ -z "$("${COMPOSE[@]}" ps -q wardryx 2>/dev/null)" ] || WARDRYX_WAS_RUNNING=1
+trailryx_pin_apply
 "${COMPOSE[@]}" "${UP_PROFILES[@]}" up -d --remove-orphans
 # profile-table: begin
 # The compose profiles of this file, in the two kinds the installer treats differently (CLAUDE.md invariant 50).
@@ -4137,7 +4188,7 @@ WARDRYX_WAS_RUNNING=0
 # no stale image behind (forge's costcrew stayed on v0.6.0 after 1.1.35 to 1.3.1). One place: a profile of
 # compose.yaml that is in neither list, or in both, is refused by scripts/profiles-off-are-removed.sh.
 PROFILES_INSTALLED="record typed typed-risk-signal delegation openai-door"
-PROFILES_OPERATOR="egress egress-browser finops routines manual"
+PROFILES_OPERATOR="egress egress-browser finops routines manual crew"
 # profile-table: end
 
 # `up --remove-orphans` does not remove a container whose profile this run does not name (measured 2026-10-04).
