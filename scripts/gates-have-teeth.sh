@@ -327,7 +327,7 @@ run_case "bus-has-a-writer: a volume is owned by somebody else" fail \
 # A read-only mount is not a write, and must not be asked for an owner.
 run_case "bus-has-a-writer: a read-only mount is left alone" pass \
 	'./scripts/bus-has-a-writer.sh' \
-	"$(py 'edit("compose.yaml", "      - events:/var/lib/stack/events:ro\n      - heraldyxstate:/var/lib/stack/heraldyx", "      - events:/var/lib/stack/events:ro\n      - pgdata:/var/lib/stack/pgdata-peek:ro\n      - heraldyxstate:/var/lib/stack/heraldyx")')"
+	"$(py 'edit("compose.yaml", "      - keyryxalerts:/var/lib/keyryx-alerts:ro\n      - heraldyxstate:/var/lib/stack/heraldyx", "      - keyryxalerts:/var/lib/keyryx-alerts:ro\n      - pgdata:/var/lib/stack/pgdata-peek:ro\n      - heraldyxstate:/var/lib/stack/heraldyx")')"
 
 # The subject taken away: no gateway service left, and the gate must say it
 # measured nothing rather than report OK.
@@ -3209,6 +3209,62 @@ run_case "witness-is-separate: no keyryx service left to judge" fail \
 	'./scripts/witness-is-separate.sh' \
 	"$(py 'edit("compose.yaml", "  keyryx-witness:\n", "  keyryx-witness-moved:\n")')" \
 	"measured nothing"
+
+# invariant 54: the witness's findings reach heraldyx and the console, read only,
+# and the witness never writes the bus it witnesses.
+run_case "keyryx-alerts: the witness writes its findings onto the bus" fail \
+	'./scripts/keyryx-alerts-reach-readers.sh' \
+	"$(py 'edit("compose.yaml", "      KEYRYX_WITNESS_ALERTS: /var/lib/keyryx-alerts/keyryx.ndjson\n", "      KEYRYX_WITNESS_ALERTS: /var/lib/stack/events/keyryx.ndjson\n")')" \
+	"on the bus it witnesses"
+
+run_case "keyryx-alerts: the witness mounts the bus read-write" fail \
+	'./scripts/keyryx-alerts-reach-readers.sh' \
+	"$(py 'edit("compose.yaml", "      # (invariant 54). Its findings go to keyryxalerts above.\n      - events:/var/lib/stack/events:ro\n", "      # (invariant 54). Its findings go to keyryxalerts above.\n      - events:/var/lib/stack/events\n")')" \
+	"mounts the events volume read-write"
+
+run_case "keyryx-alerts: the findings go back to the witness's state volume" fail \
+	'./scripts/keyryx-alerts-reach-readers.sh' \
+	"$(py 'edit("compose.yaml", "      KEYRYX_WITNESS_ALERTS: /var/lib/keyryx-alerts/keyryx.ndjson\n", "      KEYRYX_WITNESS_ALERTS: /var/lib/keyryx-witness/keyryx.ndjson\n")')" \
+	"its state volume"
+
+run_case "keyryx-alerts: heraldyx mounts the findings read-write" fail \
+	'./scripts/keyryx-alerts-reach-readers.sh' \
+	"$(py 'edit("compose.yaml", "      - keyryxalerts:/var/lib/keyryx-alerts:ro\n      - heraldyxstate:", "      - keyryxalerts:/var/lib/keyryx-alerts\n      - heraldyxstate:")')" \
+	"heraldyx mounts the witness's findings volume keyryxalerts read-write"
+
+run_case "keyryx-alerts: heraldyx is not told to read the findings" fail \
+	'./scripts/keyryx-alerts-reach-readers.sh' \
+	"$(py 'edit("compose.yaml", "      HERALDYX_EVENTS: /var/lib/stack/events,/var/lib/keyryx-alerts/keyryx.ndjson\n", "      HERALDYX_EVENTS: /var/lib/stack/events\n")')" \
+	"heraldyx does not read the witness's findings"
+
+run_case "keyryx-alerts: the console is not told to read the findings" fail \
+	'./scripts/keyryx-alerts-reach-readers.sh' \
+	"$(py 'edit("compose.yaml", "      GENARYX_EVENTS_EXTRA: /var/lib/keyryx-alerts/keyryx.ndjson\n", "")')" \
+	"console does not read the witness's findings"
+
+run_case "keyryx-alerts: the findings file is writable by the readers' group" fail \
+	'./scripts/keyryx-alerts-reach-readers.sh' \
+	"$(py 'edit("compose.yaml", "chmod 0640 /vol/keyryxalerts/keyryx.ndjson", "chmod 0660 /vol/keyryxalerts/keyryx.ndjson")')" \
+	"want 0640"
+
+run_case "keyryx-alerts: a reworded comment beside the findings volume is not a fault" pass \
+	'./scripts/keyryx-alerts-reach-readers.sh' \
+	"$(py 'edit("compose.yaml", "# The one volume besides its state that the witness writes: its findings.", "# The one volume besides its state the witness writes, its findings.")')"
+
+run_case "keyryx-alerts: no witness service left to judge" fail \
+	'./scripts/keyryx-alerts-reach-readers.sh' \
+	"$(py 'edit("compose.yaml", "  keyryx-witness:\n", "  keyryx-witness-moved:\n")')" \
+	"measured nothing"
+
+run_case "bus-names: the witness's findings file loses its keyryx stem" fail \
+	'./scripts/bus-names-match-their-source.sh' \
+	"$(py 'edit("compose.yaml", "      KEYRYX_WITNESS_ALERTS: /var/lib/keyryx-alerts/keyryx.ndjson\n", "      KEYRYX_WITNESS_ALERTS: /var/lib/keyryx-alerts/alerts.ndjson\n")')" \
+	"\`alerts\` is not a stream name"
+
+run_case "bus-names: the heraldyx pin goes back before the keyryx source" fail \
+	'./scripts/bus-names-match-their-source.sh' \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/heraldyx:v0.8.0@", "ghcr.io/taipanbox/heraldyx:v0.7.0@")')" \
+	"keyryx.ndjson is on this bus and compose.yaml pins heraldyx v0.7.0"
 
 
 # ---- images-are-digest-pinned and images-are-verified (CLAUDE.md invariant 44) --

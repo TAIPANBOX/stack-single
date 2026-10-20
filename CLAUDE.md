@@ -81,6 +81,7 @@ change here is a change to something with root on somebody else's box.
 ./scripts/no-plane-writes-another-planes-stream.sh
 ./scripts/keyryx-root-is-not-in-env.sh
 ./scripts/witness-is-separate.sh
+./scripts/keyryx-alerts-reach-readers.sh
 ./scripts/images-are-digest-pinned.sh
 ./scripts/images-are-verified.sh
 ./scripts/no-secret-on-argv.sh
@@ -700,7 +701,10 @@ an absent invariant.
     (gateway), `tokenfuse-cloud.ndjson` (control plane) and `tokenfuse-mcp.ndjson`
     (broker) carry `tokenfuse`; `wardryx.ndjson`, `typryx.ndjson`,
     `vouchryx.ndjson` and `agent-conform.ndjson` carry their own name; idryx and
-    `idryx-detect` load `tokenfuse:` from `tokenfuse.ndjson`.
+    `idryx-detect` load `tokenfuse:` from `tokenfuse.ndjson`. `@claude 2026-10-20`: one
+    stream heraldyx reads is off the bus, the Keyryx witness's findings (invariant 54),
+    and it is held by the same rule: `keyryx.ndjson` carries `keyryx`, a row heraldyx has
+    from 0.8.0, so the gate requires that pin or later.
     *(gate: `scripts/bus-names-match-their-source.sh`, which prints the table it
     judged; scenarios in `features/stream-files-match-their-source.feature`;
     teeth in `scripts/gates-have-teeth.sh`. The allowed table and the source each
@@ -1468,8 +1472,8 @@ an absent invariant.
     refuses OK on no stream and no root one-shot; teeth in
     `scripts/gates-have-teeth.sh`, cases "no-plane-writes: ...". Not covered: a
     writer that gets a stream it does not own through a file descriptor passed in
-    by another process; the checkpoint writes, which no producer makes yet; and the
-    keyryx witness's alerts, which are not on the bus.)*
+    by another process; and the checkpoint writes, which no producer makes yet. The
+    keyryx witness's findings are not on the bus; invariant 54 judges who writes them.)*
 
 42. **Keyryx signs for a consumer only over that consumer's own socket, and a
     socket directory is entered only by that consumer's group.** `@decided
@@ -1653,6 +1657,39 @@ an absent invariant.
     (two runs on one `.env`, the second must write what the first wrote); 2 teeth cases plus the existing ones in
     `scripts/gates-have-teeth.sh`; `features/a-re-run-keeps-its-allow-list.feature`. Not covered: a live second install on a
     box, and a box whose static key was listed by hand.)*
+
+54. **The Keyryx witness's findings reach the console and the notifier, which read them
+    read only, and the witness never writes the bus it witnesses.** `@decided 2026-10-20`
+    (paraphrased): readers are given read-only access to the witness's own findings file,
+    and the witness is never given write access to the bus it witnesses, because a witness
+    that could write the record could add to what it vouches for. `@claude 2026-10-20`:
+    until this the findings went to `alerts.ndjson` on the witness's private state volume,
+    a temporary choice made while heraldyx could not render the keyryx source, so nothing
+    read them. heraldyx 0.8.0, pinned here, renders the seven `witness_*` types
+    (agent-passport SPEC 6.2, source `keyryx`). Now the witness writes
+    `KEYRYX_WITNESS_ALERTS=/var/lib/keyryx-alerts/keyryx.ndjson` on a volume of its own,
+    `keyryxalerts`. `init-volumes` makes the directory `20100:10001 0750` and pre-creates
+    the file `20100:10001 0640`: the witness writes, the bus group reads, nobody else
+    enters. heraldyx mounts the volume read only and lists the file in `HERALDYX_EVENTS`
+    beside the bus; the console mounts it read only and names it in
+    `GENARYX_EVENTS_EXTRA`, a setting of the console release that carries genaryx's
+    extra read-only streams (the console pinned here is older and ignores it, so until
+    that pin moves only heraldyx reads the findings). The witness still mounts the bus and
+    the checkpoints read only, and its state volume, with its log and keys, is mounted by
+    no reader. The file's stem is what heraldyx reads as source `keyryx` (invariant 23).
+    Mail goes out at `HERALDYX_MIN_SEVERITY`, `high` by default, so the medium findings
+    (`witness_chain_restarted` when a checkpoint explains it, `witness_checkpoint_unsigned`,
+    `witness_root_missing`) wait for the digest.
+    *(gate: `scripts/keyryx-alerts-reach-readers.sh`, on the resolved configuration and a
+    sandbox run of init-volumes with chown and chmod recorded; it refuses to report OK with
+    no witness, no reader or no init-volumes; `scripts/bus-names-match-their-source.sh` for
+    the stem and the heraldyx pin; scenarios in
+    `features/the-witness-findings-reach-their-readers.feature`; teeth in
+    `scripts/gates-have-teeth.sh`, cases "keyryx-alerts" and two "bus-names". Not covered:
+    a live box where a witness finding is mailed or shown, which needs a running stack and
+    was not run; the chain verifier and the record plane, which read the bus only and so
+    neither check the findings file's own chain nor seal it; and a box upgraded from the
+    earlier layout, whose old `alerts.ndjson` stays on the witness's state volume, unread.)*
 
 ## Decisions that have no gate yet
 

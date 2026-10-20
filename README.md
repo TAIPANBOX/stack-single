@@ -915,9 +915,11 @@ a volume or a root key:
   to prove later. Today that is the key that signs wardryx's approval tokens, which
   is what a human approval is checked against. It is never on a request path: it is
   called when an approval is granted, not for every call an agent makes.
-- **`keyryx-witness`** reads the event record and countersigns what it saw. Its
-  findings go to its own volume, `keyryxwitness`, as `alerts.ndjson`. It has no
-  network, so nothing can call it and it can call nothing.
+- **`keyryx-witness`** reads the event record and countersigns what it saw. It mounts
+  the bus read only and never writes it. Its findings go to `keyryx.ndjson` on a volume
+  of their own, `keyryxalerts`, which heraldyx and the console mount read only. Its log
+  and keys stay on `keyryxwitness`, which nothing else mounts. It has no network, so
+  nothing can call it and it can call nothing.
 
 The two root keys are files that `install.sh` writes once, 32 random bytes each, mode
 0400, owned by the one process that reads them: `keyryx/root.key` for custody and
@@ -953,9 +955,14 @@ What is wired now, and what is not:
 - **checkpoints** are not written yet: no producer signs one. The witness checks each
   stream against the bytes it saw before, and it reads the checkpoints once a producer
   has written some.
-- **the witness's findings are not mailed.** Heraldyx does not render the keyryx
-  source yet, so a finding on the bus would be reported as unknown on every pass. They
-  wait in the witness's own volume until heraldyx does.
+- **the witness's findings are mailed** by heraldyx (pin `v0.8.0`, the first release
+  that renders the keyryx source), at `ALERT_MIN_SEVERITY`, `high` by default; the
+  medium ones go in the digest. heraldyx reads them through a read-only mount.
+- **the console shows them** as incidents once its image reads `GENARYX_EVENTS_EXTRA`,
+  which compose.yaml already sets. The console pinned here is older than that release
+  and ignores the setting, so for now the findings reach the mail and not the console.
+- **a box installed before this release** keeps its old `alerts.ndjson` on the
+  witness's state volume. Nothing reads it, and nothing deletes it.
 
 Migration, for a box that already runs: the streams change owner and mode the first
 time `install.sh` runs, and the planes change uid when their containers are

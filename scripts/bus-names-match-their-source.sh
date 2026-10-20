@@ -22,6 +22,9 @@
 #   - every service's events path (`*_EVENTS`, `*_EVENTS_PATH` under the bus
 #     directory, wardryx's `-events`, the chain verifier's `-out`): the file's
 #     stem, with the source that service's image claims, is an allowed pair;
+#   - a stream a service writes OFF the bus for heraldyx to read (`*_ALERTS`,
+#     the Keyryx witness's findings, CLAUDE.md invariant 54): the same, since
+#     heraldyx judges a file it reads by its stem wherever the file lives;
 #   - every `--load <source>:<path>` (idryx at start and on demand): the same;
 #   - every file init-volumes pre-creates on the bus: its stem is allowed
 #     for some source, so no file sits there that a reader would call unknown;
@@ -69,7 +72,12 @@ ALLOWED["tokenfuse-mcp"] = {"tokenfuse"}
 # and idryx from 1.2.0 (each `internal/.../stream` exception table); an older
 # reader refuses every line of it, so a stem listed here needs those pins.
 ALLOWED["tokenfuse-openai"] = {"tokenfuse"}
-NEEDS = {"tokenfuse-openai": {"heraldyx": (0, 5, 0), "idryx": (1, 2, 0)}}
+# The Keyryx witness's findings (invariant 54), a stream off the bus that only
+# heraldyx reads. heraldyx 0.8.0 is the first whose table knows `keyryx`
+# (`internal/stream/stream.go`, knownSources) and renders the witness's types.
+ALLOWED["keyryx"] = {"keyryx"}
+NEEDS = {"tokenfuse-openai": {"heraldyx": (0, 5, 0), "idryx": (1, 2, 0)},
+         "keyryx": {"heraldyx": (0, 8, 0)}}
 
 # The source each image's lines claim.
 CLAIMS = {
@@ -82,6 +90,9 @@ CLAIMS = {
     # The optional FinOps console (profile finops). Its stream is named by a
     # command argument, `-stack-events`.
     "costcrew": "costcrew",
+    # Custody and the witness are one image. Only the witness writes a stream
+    # (its findings, KEYRYX_WITNESS_ALERTS), and its lines claim `keyryx`.
+    "keyryx": "keyryx",
 }
 
 blocks, section, current = {}, None, None
@@ -127,6 +138,10 @@ def bus_files(block):
         m = re.match(r"^\s*- (" + re.escape(BUS) + r"\S+\.ndjson)\s*$", l)
         if m:
             out.append((m.group(1), "a command argument"))
+        # A stream written off the bus for heraldyx (the witness's findings).
+        m = re.match(r"^\s*([A-Z_]*_ALERTS):\s*(\S+)\s*$", l)
+        if m:
+            out.append((m.group(2), m.group(1)))
     return out
 
 
