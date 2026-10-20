@@ -82,9 +82,11 @@
         },
         "optional_addons": {
           "costcrew": "The FinOps console (CostCrew), an optional add-on in the `finops` profile. Started only by hand, `docker compose --profile finops up -d costcrew`; install.sh never passes that profile and never names the service. As shipped it cannot spend: no gateway is wired to it.",
-          "costcrew-init": "The one-shot that prepares costcrew's own volume and its one stream on the bus, in the same `finops` profile. It exists so the add-on does not have to edit init-volumes, which every install runs."
+          "costcrew-init": "The one-shot that prepares costcrew's own volume and its one stream on the bus, in the same `finops` profile. It exists so the add-on does not have to edit init-volumes, which every install runs.",
+          "costcrew-run": "The CostCrew runner (costcrew-run), in profile `crew`. Started only by hand, `docker compose --profile finops --profile crew run --rm costcrew-run`, and only under the console's cadence switch and a COSTCREW_CEILING. Its model calls go through the gateway with the crew's own client key, and it holds no provider key. install.sh never starts it."
         },
         "profiles": [
+          "crew",
           "delegation",
           "egress",
           "egress-browser",
@@ -124,7 +126,7 @@
           "ghcr.io/taipanbox/trailryx-node:v1.4.0@sha256:79da026eab19b2b8ade994cbb65850b39f644c4b632edf1de411f70bddd047d3",
           "ghcr.io/taipanbox/typryx:v0.5.0@sha256:c9278289b3722d3e89fd90f4834666c295ee0c83b4b014c0df160500f2b57a20",
           "ghcr.io/taipanbox/vouchryx:v0.6.0@sha256:4a2b6b31be44b5391974785bdfca597a88bcc5ddd834d50830bd6b9537e9ab3d",
-          "ghcr.io/taipanbox/wardryx:v2.3.0@sha256:eaa8cff9fe3722f7040e9f9b3aac2f57c5e66afb7a012a0eda1a62e63b647543"
+          "ghcr.io/taipanbox/wardryx:v2.4.0@sha256:8a110dec235fd81c3907ed769d2c31a8e095767fbae4fa29316631eff5228e97"
         ]
       },
       "declared": {

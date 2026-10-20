@@ -258,9 +258,7 @@ run_case "record-is-not-on-the-bus: the seal gets the bus writable" fail \
 # an operator clearing space on the bus deletes the evidence about it.
 run_case "record-is-not-on-the-bus: the record is written to the bus volume" fail \
 	'./scripts/record-is-not-on-the-bus.sh' \
-	"$(py 'edit("compose.yaml",
-     "- records:/var/lib/stack/records",
-     "- events:/var/lib/stack/records")')" \
+	"$(py 'edit("compose.yaml", "      - records:/var/lib/stack/records\n      - ./keyryx/record-seal.key", "      - events:/var/lib/stack/records\n      - ./keyryx/record-seal.key")')" \
 	"FAIL"
 
 # Two writers of one store. It takes no cross-process lock, so this is not a
@@ -1440,6 +1438,185 @@ run_case "bus-has-a-writer: the verifier's stream is given to no one it runs as"
 	"$(py 'edit("compose.yaml", "chown 10002:10001 /vol/events/agent-conform.ndjson", "chown 10003:10003 /vol/events/agent-conform.ndjson")')" \
 	"no file under it is given to 10002"
 
+# ---- record-is-signed-by-keyryx (CLAUDE.md invariant 59) ------------------
+run_case "record-is-signed-by-keyryx: the seal does not sign through keyryx" fail \
+	'./scripts/record-is-signed-by-keyryx.sh' \
+	"$(py 'edit("compose.yaml", "      TRAILRYX_SIGNER: keyryx\n", "")')" \
+	"resolves TRAILRYX_SIGNER"
+
+run_case "record-is-signed-by-keyryx: the witness reads no records" fail \
+	'./scripts/record-is-signed-by-keyryx.sh' \
+	"$(py 'edit("compose.yaml", "      KEYRYX_WITNESS_RECORDS: acme|/var/lib/stack/records\n", "")')" \
+	"resolves KEYRYX_WITNESS_RECORDS"
+
+run_case "record-is-signed-by-keyryx: the credential is readable by every user" fail \
+	'./scripts/record-is-signed-by-keyryx.sh' \
+	"$(py 'edit("install.sh", "chmod 0400 \"$key\"; }", "chmod 0444 \"$key\"; }")')" \
+	"not set mode 0400"
+
+run_case "record-is-signed-by-keyryx: the credential is written with a newline" fail \
+	'./scripts/record-is-signed-by-keyryx.sh' \
+	"$(py 'edit("install.sh", "printf '"'"'%s'"'"' \"$(gen 48)\"", "printf '"'"'%s\n'"'"' \"$(gen 48)\"")')" \
+	"trailing newline"
+
+run_case "record-is-signed-by-keyryx: the custody holds the socket, not the digest" fail \
+	'./scripts/record-is-signed-by-keyryx.sh' \
+	"$(py 'edit("install.sh", "\"key_digest\": \"__RECORD_SEAL_DIGEST__\"", "\"socket\": \"record-seal\"")')" \
+	"digest is not the sha256"
+
+run_case "record-is-signed-by-keyryx: the root pin is set before it is released" fail \
+	'./scripts/record-is-signed-by-keyryx.sh' \
+	"$(py 'edit("compose.yaml", "      TRAILRYX_KEYRYX_CREDENTIAL_FILE: /run/keyryx/record-seal.key\n", "      TRAILRYX_KEYRYX_CREDENTIAL_FILE: /run/keyryx/record-seal.key\n      TRAILRYX_KEYRYX_KID: pinned-fake\n")')" \
+	"sets TRAILRYX_KEYRYX_KID"
+
+run_case "record-is-signed-by-keyryx: the credential is printed when it is minted" fail \
+	'./scripts/record-is-signed-by-keyryx.sh' \
+	"$(py 'edit("install.sh", "mv -f \"$tmp\" \"$key\" || die \"could not put the record seal", "mv -f \"$tmp\" \"$key\" && cat \"$key\" || die \"could not put the record seal")')" \
+	"prints the credential"
+
+run_case "record-is-signed-by-keyryx: the seal reads attestations that keyryx writes 0600" fail \
+	'./scripts/record-is-signed-by-keyryx.sh' \
+	"$(py 'edit("compose.yaml", "      TRAILRYX_KEYRYX_CREDENTIAL_FILE: /run/keyryx/record-seal.key\n", "      TRAILRYX_KEYRYX_CREDENTIAL_FILE: /run/keyryx/record-seal.key\n      TRAILRYX_WITNESS_ATTESTATIONS: /var/lib/keyryx-witness/attestations\n")')" \
+	"sets TRAILRYX_WITNESS_ATTESTATIONS"
+
+# ---- approver-key-is-wired (CLAUDE.md invariant 58) -----------------------
+run_case "approver-key-is-wired: the approver key is not PKCS#8" fail \
+	'./scripts/approver-key-is-wired.sh' \
+	"$(py 'edit("install.sh", "openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out \"$tmp\"", "openssl ecparam -name prime256v1 -genkey -noout -out \"$tmp\"")')" \
+	"not PKCS#8"
+
+run_case "approver-key-is-wired: the approver key is left world-readable" fail \
+	'./scripts/approver-key-is-wired.sh' \
+	"$(py 'edit("install.sh", "chmod 0600 \"$key\"; } || die", "chmod 0644 \"$key\"; } || die")')" \
+	"is mode 644, not 600"
+
+run_case "approver-key-is-wired: a re-run replaces the approver key" fail \
+	'./scripts/approver-key-is-wired.sh' \
+	"$(py 'edit("install.sh", "  if [ -s \"$key\" ]; then", "  if false; then")')" \
+	"replaced the approver key"
+
+run_case "approver-key-is-wired: the key set is switched on without a console that can print it" fail \
+	'./scripts/approver-key-is-wired.sh' \
+	"$(py 'edit("install.sh", "2>/dev/null)\" \\\n     && printf '"'"'%s'"'"' \"$json\" | grep -q '"'"'\"keys\"'"'"'; then", "2>/dev/null; true)\" \\\n     ; then")')" \
+	"turned the approver check on"
+
+run_case "approver-key-is-wired: the bare-key switch is set" fail \
+	'./scripts/approver-key-is-wired.sh' \
+	"$(py 'edit("compose.yaml", "      WARDRYX_APPROVER_JWKS: ${WARDRYX_APPROVER_JWKS:-}\n", "      WARDRYX_APPROVER_JWKS: ${WARDRYX_APPROVER_JWKS:-}\n      WARDRYX_ALLOW_KEY_APPROVALS: \"1\"\n")')" \
+	"WARDRYX_ALLOW_KEY_APPROVALS"
+
+run_case "approver-key-is-wired: wardryx is pinned back to 2.3.0" fail \
+	'./scripts/approver-key-is-wired.sh' \
+	"$(py 'edit("compose.yaml", "wardryx:v2.4.0@sha256:8a110dec", "wardryx:v2.3.0@sha256:8a110dec")')" \
+	"does not pin wardryx to v2.4.0"
+
+run_case "approver-key-is-wired: the console loses its key mount" fail \
+	'./scripts/approver-key-is-wired.sh' \
+	"$(py 'edit("compose.yaml", "      - ./approver:/run/approver:ro\n", "")')" \
+	"does not mount ./approver"
+
+run_case "approver-key-is-wired: the private key reaches wardryx" fail \
+	'./scripts/approver-key-is-wired.sh' \
+	"$(py 'edit("compose.yaml", "      - ./approver-public:/etc/wardryx/approver:ro\n", "      - ./approver-public:/etc/wardryx/approver:ro\n      - ./approver:/run/approver:ro\n")')" \
+	"private approver key reaches wardryx"
+
+# ---- costcrew-runner-spends-through-the-gateway (CLAUDE.md invariant 57) -----
+run_case "costcrew-runner-spends-through-the-gateway: the runner starts with the add-on's profile" fail \
+	'./scripts/costcrew-runner-spends-through-the-gateway.sh' \
+	"$(py 'edit("compose.yaml", "profiles: [\"crew\"]", "profiles: [\"finops\", \"crew\"]")')" \
+	"--profile finops renders the runner"
+
+run_case "costcrew-runner-spends-through-the-gateway: the runner joins the edge network" fail \
+	'./scripts/costcrew-runner-spends-through-the-gateway.sh' \
+	"$(py 'edit("compose.yaml", "    networks:\n      - agents\n    user: \"10003:10003\"\n    restart: \"no\"", "    networks:\n      - agents\n      - edge\n    user: \"10003:10003\"\n    restart: \"no\"")')" \
+	"the runner is on"
+
+run_case "costcrew-runner-spends-through-the-gateway: the runner holds a provider key" fail \
+	'./scripts/costcrew-runner-spends-through-the-gateway.sh' \
+	"$(py 'edit("compose.yaml", "      ANTHROPIC_API_KEY: ${GATEWAY_COSTCREW_KEY:-}\n", "      OPENROUTER_API_KEY: ${GATEWAY_COSTCREW_KEY:-}\n      ANTHROPIC_API_KEY: ${GATEWAY_COSTCREW_KEY:-}\n")')" \
+	"a credential it must not hold"
+
+run_case "costcrew-runner-spends-through-the-gateway: the runner loses its gateway" fail \
+	'./scripts/costcrew-runner-spends-through-the-gateway.sh' \
+	"$(py 'edit("compose.yaml", "      - -gateway\n      - http://tokenfuse-gateway:4100\n      - -stack-events", "      - -stack-events")')" \
+	"would leave the box"
+
+run_case "costcrew-runner-spends-through-the-gateway: the default ceiling spends" fail \
+	'./scripts/costcrew-runner-spends-through-the-gateway.sh' \
+	"$(py 'edit("compose.yaml", "${COSTCREW_CEILING:-0}", "${COSTCREW_CEILING:-25}")')" \
+	"must spend nothing"
+
+run_case "costcrew-runner-spends-through-the-gateway: the runner runs live" fail \
+	'./scripts/costcrew-runner-spends-through-the-gateway.sh' \
+	"$(py 'edit("compose.yaml", "      - -due\n      - -data\n      - /var/lib/costcrew\n      # The ceiling", "      - -due\n      - -live\n      - -data\n      - /var/lib/costcrew\n      # The ceiling")')" \
+	"passes -live"
+
+run_case "costcrew-runner-spends-through-the-gateway: the runner writes the console's stream" fail \
+	'./scripts/costcrew-runner-spends-through-the-gateway.sh' \
+	"$(py 'edit("compose.yaml", "      - http://tokenfuse-gateway:4100\n      # No -stack-events", "      - http://tokenfuse-gateway:4100\n      - -stack-events\n      - /var/lib/stack/events/costcrew.ndjson\n      # No -stack-events")')" \
+	"writes an events stream"
+
+run_case "costcrew-runner-spends-through-the-gateway: the crew's key is minted on a zero ceiling" fail \
+	'./scripts/costcrew-runner-spends-through-the-gateway.sh' \
+	"$(py 'edit("install.sh", "case \"${COSTCREW_CEILING_SET:-0}\" in *[1-9]*) costcrew_on=1 ;; esac", "costcrew_on=1")')" \
+	"only when the ceiling is above 0"
+
+run_case "costcrew-runner-spends-through-the-gateway: the crew's key is kept on a zero ceiling" fail \
+	'./scripts/costcrew-runner-spends-through-the-gateway.sh' \
+	"$(py 'edit("install.sh", "mint_env_forget GATEWAY_COSTCREW_KEY", ":")')" \
+	"drop GATEWAY_COSTCREW_KEY on a zero ceiling"
+
+run_case "costcrew-runner-spends-through-the-gateway: the ceiling test accepts zero" fail \
+	'./scripts/costcrew-runner-spends-through-the-gateway.sh' \
+	"$(py 'edit("install.sh", "*[1-9]*) costcrew_on=1", "*[0-9]*) costcrew_on=1")')" \
+	"only when the ceiling is above 0"
+
+run_case "costcrew-runner-spends-through-the-gateway: the ceiling accepts a sign" fail \
+	'./scripts/costcrew-runner-spends-through-the-gateway.sh' \
+	"$(py 'edit("install.sh", "costcrew_ceiling_valid() { # VALUE", "costcrew_ceiling_valid() { return 0; # VALUE")')" \
+	"is accepted"
+
+run_case "costcrew-runner-spends-through-the-gateway: the crew's key is not minted" fail \
+	'./scripts/costcrew-runner-spends-through-the-gateway.sh' \
+	"$(py 'edit("install.sh", "  mint_env_secret GATEWAY_COSTCREW_KEY\n", "")')" \
+	"does not mint GATEWAY_COSTCREW_KEY"
+
+run_case "costcrew-runner-spends-through-the-gateway: the crew's key is bound to every agent" fail \
+	'./scripts/costcrew-runner-spends-through-the-gateway.sh' \
+	"$(py 'edit("install.sh", "agents\": [\"agent://%s/costcrew/*\"]}", "agents\": [\"agent://%s/*\"]}")')" \
+	"does not bind the crew"
+
+run_case "costcrew-runner-spends-through-the-gateway: the console is given a gateway" fail \
+	'./scripts/costcrew-runner-spends-through-the-gateway.sh' \
+	"$(py 'edit("compose.yaml", "      - -insecure-http\n", "      - -gateway\n      - http://tokenfuse-gateway:4100\n      - -insecure-http\n")')" \
+	"the console carries -gateway"
+
+# ---- console-password-is-not-printed (CLAUDE.md invariant 56) ----------------
+run_case "console-password-is-not-printed: the password file is made without umask 077" fail \
+	'./scripts/console-password-is-not-printed.sh' \
+	"$(py 'edit("install.sh", "( umask 077; { gen 28", "( umask 022; { gen 28")')" \
+	"does not make its file under umask 077"
+
+run_case "console-password-is-not-printed: the password file is not set 0600" fail \
+	'./scripts/console-password-is-not-printed.sh' \
+	"$(py 'edit("install.sh", "{ chmod 0600 \"$tmp\"", "{ chmod 0644 \"$tmp\"")')" \
+	"does not set its file 0600"
+
+run_case "console-password-is-not-printed: the closing report names the value again" fail \
+	'./scripts/console-password-is-not-printed.sh' \
+	"$(py 'edit("install.sh", "      user      $CONSOLE_USER\n      file      $CONSOLE_SIGNIN_FILE", "      user      $CONSOLE_USER\n      password  $CONSOLE_PASSWORD\n      file      $CONSOLE_SIGNIN_FILE")')" \
+	"still names CONSOLE_PASSWORD"
+
+run_case "console-password-is-not-printed: set-password takes the password on an argument list" fail \
+	'./scripts/console-password-is-not-printed.sh' \
+	"$(py 'edit("install.sh", "set-password --username \"$CONSOLE_USER\" <\"$STACK_DIR/console-password\" >", "set-password --username \"$CONSOLE_USER\" \"$(cat \"$STACK_DIR/console-password\")\" >")')" \
+	"passes a command substitution"
+
+run_case "console-password-is-not-printed: the helper prints the password it writes" fail \
+	'./scripts/console-password-is-not-printed.sh' \
+	"$(py 'edit("install.sh", "{ chmod 0600 \"$tmp\" && mv -f \"$tmp\" \"$1\"; }", "{ chmod 0600 \"$tmp\" && mv -f \"$tmp\" \"$1\" && cat \"$1\"; }")')" \
+	"printed the password on its own output"
+
 # ---- typed-risk-signal (invariant 22).
 run_case "typed-risk-signal: the signal is on when nobody asked" fail \
 	'./scripts/typed-risk-signal.sh' \
@@ -1507,6 +1684,46 @@ run_case "typed-risk-signal: a hold_if_signal policy is seeded" fail \
 	'./scripts/typed-risk-signal.sh' \
 	"$(py 'edit("install.sh", "  deny_tool:\n    - shell_exec\nEOF", "  deny_tool:\n    - shell_exec\n- name: x\n  target: agent://*\n  hold_if_signal:\n    name: a\n    values: [b]\n    min_probability: 0.5\nEOF")')" \
 	"seeds a hold_if_signal policy"
+
+run_case "typed-risk-signal: the seeded hold is written with the flag off" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 'edit("install.sh", "  if [ \"$TYPED_RISK_ON\" = 1 ]; then\n    if [ -s", "  if true; then\n    if [ -s")')" \
+	"a rule was seeded without the flag"
+
+run_case "typed-risk-signal: the managed hold survives the flag going off" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 'edit("install.sh", "awk \x27/^# typed-risk-hold: begin/ { skip = 1; next }", "awk \x27/^# typed-risk-hold: begin/ { skip = 0; next }")')" \
+	"left the managed rule"
+
+run_case "typed-risk-signal: the seeded hold holds a class that carries no risk" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 'edit("install.sh", "    '"'"'    values: [destructive, external_send, financial]'"'"' \\", "    '"'"'    values: [read_only, destructive, external_send, financial]'"'"' \\")')" \
+	"must hold on destructive, external_send and financial"
+
+run_case "typed-risk-signal: the seeded hold drops a high-risk class" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 'edit("install.sh", "values: [destructive, external_send, financial]", "values: [destructive, external_send]")')" \
+	"must hold on destructive, external_send and financial"
+
+run_case "typed-risk-signal: the seeded hold's threshold is lowered" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 'edit("install.sh", "min_probability: 0.8", "min_probability: 0.5")')" \
+	"min_probability is not 0.8"
+
+run_case "typed-risk-signal: the seeded hold narrows its target" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 'edit("install.sh", "target: \"agent://*\"", "target: \"agent://local/*\"")')" \
+	"does not target every agent"
+
+run_case "typed-risk-signal: the seeded hold does not hold on absence" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 'edit("install.sh", "when_absent: hold", "when_absent: allow")')" \
+	"does not hold when the signal is absent"
+
+run_case "typed-risk-signal: the policy block is gone" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 'edit("install.sh", "# typed-risk-policy: begin", "# typed-risk-policy: began")')" \
+	"typed-risk-policy: begin"
 
 run_case "typed-risk-signal: the README loses its example policy" fail \
 	'./scripts/typed-risk-signal.sh' \
@@ -3031,6 +3248,47 @@ run_case "no-provider-key-outside-the-gateway: no gateway left to judge" fail \
 
 
 
+# ---- agent-tokens-are-wired: vouchryx signs with keyryx (CLAUDE.md invariant 55) ----
+run_case "agent-tokens-are-wired: vouchryx's default signer is the file key again" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("compose.yaml", "VOUCHRYX_SIGNER: ${VOUCHRYX_SIGNER:-keyryx}", "VOUCHRYX_SIGNER: ${VOUCHRYX_SIGNER:-file}")')" \
+	"the default must be keyryx"
+
+run_case "agent-tokens-are-wired: vouchryx does not wait for keyryx" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("compose.yaml", "      keyryx:\n        condition: service_started\n", "")')" \
+	"does not wait for keyryx"
+
+run_case "agent-tokens-are-wired: the file signer keeps a keyryx variable" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("compose.yaml", "VOUCHRYX_KEYRYX_URL: ${VOUCHRYX_KEYRYX_URL:-}", "VOUCHRYX_KEYRYX_URL: http://keyryx:4340")')" \
+	"the file signer resolves VOUCHRYX_KEYRYX_URL"
+
+run_case "agent-tokens-are-wired: vouchryx is started before its root pin is taken" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("install.sh", "  vouchryx_signer_apply\n  \"${COMPOSE[@]}\" --profile delegation up -d vouchryx\n", "  \"${COMPOSE[@]}\" --profile delegation up -d vouchryx\n  vouchryx_signer_apply\n")')" \
+	"does not call vouchryx_signer_apply before"
+
+run_case "agent-tokens-are-wired: the file signer leaves its keyryx lines in .env" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("install.sh", "typed_forget_env VOUCHRYX_KEYRYX_URL VOUCHRYX_KEYRYX_CONSUMER VOUCHRYX_KEYRYX_SOCKET VOUCHRYX_KEYRYX_CREDENTIAL_FILE VOUCHRYX_KEYRYX_ROOT_PIN", ":")')" \
+	"left keyryx lines in .env"
+
+run_case "agent-tokens-are-wired: a re-run replaces the root pin" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("install.sh", "      if [ -z \"$(typed_env_get VOUCHRYX_KEYRYX_ROOT_PIN)\" ]; then", "      if true; then")')" \
+	"replaced the root pin already in .env"
+
+run_case "agent-tokens-are-wired: the root pin accepts an ES384 kid of the wrong length" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("install.sh", "[[ \"$k\" =~ $re_es ]] || return 1", "[[ -n \"$k\" ]] || return 1")')" \
+	"was accepted"
+
+run_case "agent-tokens-are-wired: the root pin accepts an ML-DSA-65 kid without its prefix" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("install.sh", "[[ \"$k\" =~ $re_ml ]] || return 1", "[[ -n \"$k\" ]] || return 1")')" \
+	"was accepted"
+
 # ---- agent-tokens-are-wired (CLAUDE.md invariant 40, wave 1 S4) ----------------
 # The agent's own token is accepted only where it is verified: required by default (CLAUDE.md
 # invariant 47), and the two doors check it against vouchryx for their own audience, against a revocation list
@@ -3117,7 +3375,7 @@ run_case "agent-tokens-are-wired: the broker does not mount its key directory" f
 
 run_case "agent-tokens-are-wired: vouchryx publishes a port" fail \
 	'./scripts/agent-tokens-are-wired.sh' \
-	"$(py 'edit("compose.yaml", "    environment:\n      VOUCHRYX_SIGNER:", "    ports:\n      - \"127.0.0.1:4310:4310\"\n    environment:\n      VOUCHRYX_SIGNER:")')" \
+	"$(py 'edit("compose.yaml", "    environment:\n      # keyryx unless .env says file", "    ports:\n      - \"127.0.0.1:4310:4310\"\n    environment:\n      # keyryx unless .env says file")')" \
 	"publishes ports"
 
 run_case "agent-tokens-are-wired: the installer writes the enrolment secret to .env" fail \

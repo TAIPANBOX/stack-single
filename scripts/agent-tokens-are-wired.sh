@@ -423,6 +423,148 @@ printf '%s\n' "$BLOCK" | grep -q 'Removed from the static allow-lists on this ru
   || fail "J. the closing report does not say which keys this run removed from the static allow-lists"
 printf '%s\n' "$BLOCK" | grep -q 'To keep one, name it in STATIC_KEY_IDS' \
   || fail "J. the closing report does not say how to keep a removed key (STATIC_KEY_IDS)"
+# K. vouchryx signs with a working key that keyryx certifies, pinned to the delegation
+# root (CLAUDE.md invariant 55). The default is keyryx; the file signer is an explicit
+# choice that carries none of the keyryx lines. The installer takes the root pin before
+# vouchryx first starts, from keyryx on the box, and checks its shape.
+VX_KEYRYX_ON="$(printf '%s\n' \
+  "VOUCHRYX_SIGNER=keyryx" \
+  "VOUCHRYX_KEYRYX_URL=http://keyryx:4340" \
+  "VOUCHRYX_KEYRYX_CONSUMER=vouchryx" \
+  "VOUCHRYX_KEYRYX_SOCKET=/run/keyryx/sock/vouchryx/keyryx.sock" \
+  "VOUCHRYX_KEYRYX_ROOT_PIN=fake-kid,mldsa65:fake-kid")"
+resolve "$scratch/keyryx.json" "$VX_KEYRYX_ON" || problems=$((problems + 1))
+resolve "$scratch/file.json" "VOUCHRYX_SIGNER=file" || problems=$((problems + 1))
+python3 - "$scratch/default.json" "$scratch/keyryx.json" "$scratch/file.json" <<'EOPYVX' || problems=$((problems + 1))
+import json
+import sys
+
+default, keyryx, file_ = (json.load(open(p))["services"]["vouchryx"] for p in sys.argv[1:4])
+
+
+def env(svc, name):
+    return (svc.get("environment") or {}).get(name)
+
+
+problems = []
+if env(default, "VOUCHRYX_SIGNER") != "keyryx":
+    problems.append("K1. vouchryx resolves VOUCHRYX_SIGNER %r with nothing set; the default must be keyryx (invariant 55)" % env(default, "VOUCHRYX_SIGNER"))
+if "keyryx" not in (default.get("depends_on") or {}):
+    problems.append("K2. vouchryx does not wait for keyryx, so it can start before the custody that certifies its key")
+if env(keyryx, "VOUCHRYX_SIGNER") != "keyryx":
+    problems.append("K3. with the installer's keyryx lines vouchryx resolves VOUCHRYX_SIGNER %r" % env(keyryx, "VOUCHRYX_SIGNER"))
+for var, want in (("VOUCHRYX_KEYRYX_URL", "http://keyryx:4340"), ("VOUCHRYX_KEYRYX_CONSUMER", "vouchryx"),
+                  ("VOUCHRYX_KEYRYX_SOCKET", "/run/keyryx/sock/vouchryx/keyryx.sock")):
+    if env(keyryx, var) != want:
+        problems.append("K3. %s resolves %r, not %r" % (var, env(keyryx, var), want))
+if not env(keyryx, "VOUCHRYX_KEYRYX_ROOT_PIN"):
+    problems.append("K3. vouchryx has no VOUCHRYX_KEYRYX_ROOT_PIN in keyryx mode: it refuses to start without one")
+if env(keyryx, "VOUCHRYX_KEYRYX_CREDENTIAL_FILE"):
+    problems.append("K3. vouchryx has a VOUCHRYX_KEYRYX_CREDENTIAL_FILE next to a socket: exactly one of the two is allowed")
+if not any(isinstance(v, dict) and v.get("target") == "/run/keyryx/sock/vouchryx" and "keyryx/sock/vouchryx" in str(v.get("source"))
+           for v in keyryx.get("volumes") or []):
+    problems.append("K3. vouchryx does not mount its own keyryx socket directory (keyryx/sock/vouchryx)")
+if env(file_, "VOUCHRYX_SIGNER") != "file":
+    problems.append("K4. VOUCHRYX_SIGNER=file resolves %r" % env(file_, "VOUCHRYX_SIGNER"))
+for var in ("VOUCHRYX_KEYRYX_URL", "VOUCHRYX_KEYRYX_CONSUMER", "VOUCHRYX_KEYRYX_SOCKET", "VOUCHRYX_KEYRYX_ROOT_PIN"):
+    if env(file_, var):
+        problems.append("K4. the file signer resolves %s to %r, and vouchryx refuses a keyryx variable set under the file signer" % (var, env(file_, var)))
+for p in problems:
+    print("FAIL: " + p)
+sys.exit(1 if problems else 0)
+EOPYVX
+
+VX_BLOCK="$(sed -n '/^# vouchryx-signer: begin$/,/^# vouchryx-signer: end$/p' install.sh)"
+if [ -z "$VX_BLOCK" ]; then
+  fail "K. install.sh has no '# vouchryx-signer: begin' .. '# vouchryx-signer: end' block, so the vouchryx signer was not measured"
+else
+  for fn in vouchryx_signer_apply vouchryx_root_pin vouchryx_pin_fetch; do
+    printf '%s\n' "$VX_BLOCK" | grep -q "^$fn()" || fail "K. the vouchryx-signer block defines no $fn"
+  done
+  # The pin is taken before vouchryx starts, from the call the delegation block makes.
+  first_up="$(grep -n -- '--profile delegation up -d vouchryx' install.sh | head -1 | cut -d: -f1)"
+  apply_at="$(grep -n '^  vouchryx_signer_apply$' install.sh | head -1 | cut -d: -f1)"
+  if [ -z "$first_up" ]; then
+    fail "K. install.sh no longer starts vouchryx with --profile delegation, so this measured nothing about the pin"
+  elif [ -z "$apply_at" ] || [ "$apply_at" -ge "$first_up" ]; then
+    fail "K. install.sh does not call vouchryx_signer_apply before vouchryx first starts (line ${first_up:-?}): vouchryx would start with no root pin"
+  fi
+  # Behaviour: the pin is read by shape from keyryx's root key set, and nothing else passes.
+  K1="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+  K2="BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+  KM="mldsa65:CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
+  pin_case() { # label, JWKS body, want (ok|refuse), pin when ok
+    local label="$1" body="$2" want="$3" want_pin="${4:-}" jf out rc
+    jf="$scratch/jwks.$RANDOM.json"
+    printf '%s' "$body" >"$jf"
+    # A stub `docker` on PATH, not a shell function: the gate that refuses functions
+    # named after developer commands applies here too.
+    mkdir -p "$scratch/stubbin"
+    printf '#!/usr/bin/env bash\ncat "$JWKS"\n' >"$scratch/stubbin/docker"
+    chmod +x "$scratch/stubbin/docker"
+    rc=0
+    out="$(env -i PATH="$scratch/stubbin:$PATH" JWKS="$jf" VXB="$VX_BLOCK" bash -c '
+      set -uo pipefail
+      die() { printf "die: %s\n" "$*"; exit 1; }
+      note() { :; }
+      eval "$VXB"
+      vouchryx_root_pin' 2>/dev/null)" || rc=$?
+    if [ "$want" = ok ]; then
+      if [ "$rc" -ne 0 ] || [ "$out" != "$want_pin" ]; then
+        fail "K. pin $label: want '$want_pin', got rc=$rc '$out'"
+      fi
+    else
+      if [ "$rc" -eq 0 ] || [ -n "$out" ]; then
+        fail "K. pin $label: a key set that is not a delegation root's shape was accepted (rc=$rc '$out')"
+      fi
+    fi
+  }
+  pin_case "takes the ES384 and ML-DSA-65 kids" \
+    "{\"keys\":[{\"alg\":\"ES384\",\"kid\":\"$K1\"},{\"alg\":\"ML-DSA-65\",\"kid\":\"$KM\"}]}" ok "$K1,$KM"
+  pin_case "keeps both ES384 kids during a rotation" \
+    "{\"keys\":[{\"alg\":\"ES384\",\"kid\":\"$K1\"},{\"alg\":\"ES384\",\"kid\":\"$K2\"},{\"alg\":\"ML-DSA-65\",\"kid\":\"$KM\"}]}" ok "$K1,$K2,$KM"
+  pin_case "refuses a set with no ML-DSA-65 half" \
+    "{\"keys\":[{\"alg\":\"ES384\",\"kid\":\"$K1\"}]}" refuse
+  pin_case "refuses an ES384 kid of the wrong length" \
+    "{\"keys\":[{\"alg\":\"ES384\",\"kid\":\"AAAA\"},{\"alg\":\"ML-DSA-65\",\"kid\":\"$KM\"}]}" refuse
+  pin_case "refuses an ML-DSA-65 kid without its prefix" \
+    "{\"keys\":[{\"alg\":\"ES384\",\"kid\":\"$K1\"},{\"alg\":\"ML-DSA-65\",\"kid\":\"CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC\"}]}" refuse
+  pin_case "refuses an empty answer" "" refuse
+
+  # K5. the .env the signer writes: keyryx by default with its lines and one pin, a re-run
+  # that keeps a pin already there (and fetches none), and the file signer with no keyryx line.
+  TYPED_BLOCK="$(sed -n '/^# typed-mode: begin$/,/^# typed-mode: end$/p' install.sh)"
+  envrun() { # DIR, the line already in .env or "none": prints .env after the signer runs
+    local d="$1" pre="$2"
+    mkdir -p "$d"
+    printf 'SENTINEL=1\n' >"$d/.env"
+    [ "$pre" = none ] || printf '%s\n' "$pre" >>"$d/.env"
+    env -i PATH="$PATH" STACK_DIR="$d" BLOCK="$TYPED_BLOCK" VXB="$VX_BLOCK" bash -c '
+      set -uo pipefail
+      export STACK_DIR
+      note() { :; }
+      die() { printf "die: %s\n" "$*"; exit 1; }
+      eval "$BLOCK"
+      eval "$VXB"
+      COMPOSE=(true)
+      vouchryx_pin_fetch() { VOUCHRYX_ROOT_PIN="AAA,mldsa65:BBB"; }
+      vouchryx_signer_apply' 2>&1 && cat "$d/.env"
+  }
+  fresh="$(envrun "$scratch/vx-fresh" none)" || true
+  printf '%s\n' "$fresh" | grep -qx "VOUCHRYX_SIGNER='keyryx'" \
+    && printf '%s\n' "$fresh" | grep -qx "VOUCHRYX_KEYRYX_URL='http://keyryx:4340'" \
+    && printf '%s\n' "$fresh" | grep -qx "VOUCHRYX_KEYRYX_ROOT_PIN='AAA,mldsa65:BBB'" \
+    || fail "K5. a fresh box does not get VOUCHRYX_SIGNER=keyryx, its custody URL and one pin: $fresh"
+  again="$(envrun "$scratch/vx-again" "VOUCHRYX_KEYRYX_ROOT_PIN='OLDPIN'")" || true
+  printf '%s\n' "$again" | grep -qx "VOUCHRYX_KEYRYX_ROOT_PIN='OLDPIN'" \
+    || fail "K5. a re-run replaced the root pin already in .env: $again"
+  filed="$(envrun "$scratch/vx-file" "$(printf "VOUCHRYX_SIGNER='file'\nVOUCHRYX_KEYRYX_URL='http://keyryx:4340'\nVOUCHRYX_KEYRYX_ROOT_PIN='OLDPIN'")")" || true
+  printf '%s\n' "$filed" | grep -qx "VOUCHRYX_SIGNER='file'" \
+    || fail "K5. VOUCHRYX_SIGNER=file in .env was not kept: $filed"
+  if printf '%s\n' "$filed" | grep -q '^VOUCHRYX_KEYRYX_'; then
+    fail "K5. the file signer left keyryx lines in .env, and vouchryx refuses a keyryx variable under the file signer: $filed"
+  fi
+fi
 
 if [ "$problems" -ne 0 ]; then
   printf 'agent-tokens-are-wired: %d problem(s)\n' "$problems"

@@ -102,12 +102,15 @@ TABLE = {
     "verdryx-drift": {"core"},
     "costcrew-init": {"core"},
     "costcrew": {"agents", "core", "front"},
+    # the CostCrew runner (invariant 57): on agents alone, no route out, so its model calls
+    # can only reach a provider through the gateway
+    "costcrew-run": {"agents"},
 }
 # services that get edge only through compose.override.yaml, and the choice
 OVERRIDE_EDGE = {"typryx": "typed", "typryx-wardryx-proxy": "typed"}
 # the one list of who may be on each network, written out so a reader sees it
 AGENT_FACING = {"tokenfuse-gateway", "tokenfuse-gateway-openai", "tokenfuse-mcp-broker",
-                "scopyx", "scopyx-browser", "console", "costcrew"}
+                "scopyx", "scopyx-browser", "console", "costcrew", "costcrew-run"}
 FRONT = {"caddy", "console", "costcrew", "tokenfuse-mcp-broker"}
 RISK = {"wardryx", "typryx-wardryx-proxy", "tokenfuse-mcp-broker"}
 # the browser's one path to a decision: scopyx-browser and wardryx, nothing else

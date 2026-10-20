@@ -1127,7 +1127,7 @@ typed_apply() {
         stub) note "  the backend is the stub: its answer is a fixed pick, not a classification, so this only shows the wiring" ;;
         jev)  note "  the backend is Jev: every tool call through the broker is one metered ask at TypeSafe, capped per hour by typryx" ;;
       esac
-      note "  nothing seeds a hold_if_signal policy: until you write one, the signal changes no decision (README has an example)"
+      note "  a tool call with no signal, and one marked destructive, external_send or financial at 0.8 or more, is held for a person (policy.yaml, typed-risk-hold-when-absent); other classes or thresholds need your own hold_if_signal rule (README)"
       ;;
     0) typed_forget_env "${TYPED_RISK_OWNED[@]}" ;;
   esac
@@ -1191,6 +1191,49 @@ ceiling_apply() {
 }
 # run-budget-ceiling: end
 ceiling_resolve
+# costcrew-runner: begin
+# CostCrew's runner (costcrew-run) spends by calling a model, and COSTCREW_CEILING
+# bounds what one run may spend, in dollars: a decimal with at most two places, zero
+# or more. Unset, it is 0, which spends nothing (CLAUDE.md invariant 57). The runner
+# is not started here, and install.sh names it in this block alone, with the one
+# call below that writes the figure to .env.
+costcrew_ceiling_valid() { # VALUE: a decimal dollar figure, zero allowed, at most two places
+  local LC_ALL=C
+  [[ "$1" =~ ^[0-9]{1,9}(\.[0-9]{1,2})?$ ]]
+}
+
+costcrew_ceiling_resolve() { # before anything is installed: the value, given or saved, must be a figure
+  local saved=""
+  COSTCREW_CEILING_SET="${COSTCREW_CEILING:-}"
+  if [ -n "$COSTCREW_CEILING_SET" ] && ! costcrew_ceiling_valid "$COSTCREW_CEILING_SET"; then
+    die "COSTCREW_CEILING must be a decimal number of US dollars with at most two places, zero or more: 0, 25 or 25.00, never a sign, an exponent or a comma. Nothing was installed."
+  fi
+  if [ -f "$STACK_DIR/.env" ]; then
+    saved="$(sed -n "/^COSTCREW_CEILING=/{s///p;q;}" "$STACK_DIR/.env")"
+    saved="${saved#\'}"
+    saved="${saved%\'}"
+  fi
+  if [ -n "$saved" ] && ! costcrew_ceiling_valid "$saved"; then
+    die ".env holds a COSTCREW_CEILING that is not a decimal number of dollars, so the runner would refuse to start. Fix or remove that line. Nothing was changed."
+  fi
+  [ -n "$COSTCREW_CEILING_SET" ] || COSTCREW_CEILING_SET="${saved:-0}"
+}
+
+costcrew_ceiling_apply() { # once .env exists: writes the figure, replacing a line an earlier run wrote
+  local tmp
+  tmp="$(mktemp)" || die "could not make a temporary file to update .env"
+  { grep -v "^COSTCREW_CEILING=" "$STACK_DIR/.env" || true; } >"$tmp"
+  printf 'COSTCREW_CEILING=%s\n' "$COSTCREW_CEILING_SET" >>"$tmp"
+  cat "$tmp" >"$STACK_DIR/.env" || die "could not update $STACK_DIR/.env"
+  rm -f "$tmp"
+  if [ "$COSTCREW_CEILING_SET" = 0 ]; then
+    note "CostCrew runner: ceiling 0, so a run spends nothing. The runner is not started by this install."
+  else
+    note "CostCrew runner: ceiling $COSTCREW_CEILING_SET USD per run, the smaller of it and the console's cadence ceiling. The runner is not started by this install."
+  fi
+}
+# costcrew-runner: end
+costcrew_ceiling_resolve
 [ "$(uname -m)" = "x86_64" ] || note "architecture $(uname -m): the images build from source, so this should work, but it is untested off x86_64."
 
 # ---- 0d. the agent firewall's mode -----------------------------------------
@@ -1799,11 +1842,23 @@ mint_env_secret() {
 # Section 3, once .env exists: the secrets, the spec and the map, handed to section
 # 3e as if they were the operator's files.
 mint_prepare() {
-  local felyx agents drills broker why seen s
+  local felyx agents drills costcrew broker why seen s
   [ "$MINT_ON" = 1 ] || return 0
   mint_env_secret GENARYX_COPILOT_FUSE_KEY
   mint_env_secret GATEWAY_AGENT_KEY
   mint_env_secret GATEWAY_DRILLS_KEY
+  # The CostCrew runner's key exists only when a run may spend: a ceiling above 0
+  # (the costcrew-runner block). At 0 the key is dropped, so no unused credential is ever
+  # accepted by the gateway (CLAUDE.md invariant 57).
+  costcrew_on=0
+  case "${COSTCREW_CEILING_SET:-0}" in *[1-9]*) costcrew_on=1 ;; esac
+  costcrew=""
+  if [ "$costcrew_on" = 1 ]; then
+    mint_env_secret GATEWAY_COSTCREW_KEY
+    costcrew="$(identity_env_get GATEWAY_COSTCREW_KEY)"
+  else
+    mint_env_forget GATEWAY_COSTCREW_KEY
+  fi
   felyx="$(identity_env_get GENARYX_COPILOT_FUSE_KEY)"
   agents="$(identity_env_get GATEWAY_AGENT_KEY)"
   drills="$(identity_env_get GATEWAY_DRILLS_KEY)"
@@ -1813,13 +1868,17 @@ mint_prepare() {
   [ -z "$why" ] || die "GATEWAY_AGENT_KEY in .env, the agents' client key, $why. Empty that line and the installer mints one. Nothing was started."
   why="$(identity_entry_why "$drills:drills")"
   [ -z "$why" ] || die "GATEWAY_DRILLS_KEY in .env, the fire drills' key, $why. Empty that line and the installer mints one. Nothing was started."
+  if [ "$costcrew_on" = 1 ]; then
+    why="$(identity_entry_why "$costcrew:costcrew")"
+    [ -z "$why" ] || die "GATEWAY_COSTCREW_KEY in .env, the CostCrew runner's client key, $why. Empty that line and the installer mints one. Nothing was started."
+  fi
   # The broker's own key exists only with agent tokens on (agent_tokens_apply mints it).
   broker=""
   if [ "${AGENT_TOKENS_ON:-0}" = 1 ]; then broker="$(identity_env_get GATEWAY_BROKER_KEY)"; fi
   seen=""
-  for s in "$felyx" "$agents" "$drills" ${broker:+"$broker"}; do
+  for s in "$felyx" "$agents" "$drills" ${costcrew:+"$costcrew"} ${broker:+"$broker"}; do
     case " $seen " in
-      *" $s "*) die "two of GENARYX_COPILOT_FUSE_KEY, GATEWAY_AGENT_KEY and GATEWAY_DRILLS_KEY in .env hold the same secret, so one agent could speak as another. Empty one of those lines and the installer mints a new one. Nothing was started." ;;
+      *" $s "*) die "two of the client keys in .env (GENARYX_COPILOT_FUSE_KEY, GATEWAY_AGENT_KEY, GATEWAY_DRILLS_KEY, GATEWAY_COSTCREW_KEY) hold the same secret, so one agent could speak as another. Empty one of those lines and the installer mints a new one. Nothing was started." ;;
     esac
     seen="$seen $s"
   done
@@ -1827,11 +1886,17 @@ mint_prepare() {
   {
     printf '{\n  "units": [\n    {"id": "console", "name": "Felyx, the console copilot"},\n    {"id": "agents", "name": "The operator agents"},\n    {"id": "drills", "name": "The fire drills"}'
     [ -z "$broker" ] || printf ',\n    {"id": "broker", "name": "The MCP broker, relaying tool-call checks"}'
+    if [ "$costcrew_on" = 1 ]; then
+      printf ',\n    {"id": "costcrew", "name": "The CostCrew runner, through the gateway"}'
+    fi
     printf '\n  ],\n  "keys": [\n    {"key_id": "felyx", "unit": "console", "agents": ["agent://%s/genaryx/felyx"]},\n    {"key_id": "agents", "unit": "agents", "agents": ["agent://%s/agents/*"]},\n    {"key_id": "drills", "unit": "drills", "agents": ["agent://mockryx.local/*"]}' "$MINT_DOMAIN" "$MINT_DOMAIN"
     [ -z "$broker" ] || printf ',\n    {"key_id": "broker", "unit": "broker", "agents": ["agent://%s/agents/*"]}' "$MINT_DOMAIN"
+    if [ "$costcrew_on" = 1 ]; then
+      printf ',\n    {"key_id": "costcrew", "unit": "costcrew", "agents": ["agent://%s/costcrew/*"]}' "$MINT_DOMAIN"
+    fi
     printf '\n  ]\n}\n'
   } >"$MINT_MAP" || die "could not write the minted identity map"
-  IDENTITY_KEYS_NEW="$felyx:felyx,$agents:agents,$drills:drills${broker:+,$broker:broker}"
+  IDENTITY_KEYS_NEW="$felyx:felyx,$agents:agents,$drills:drills${costcrew:+,$costcrew:costcrew}${broker:+,$broker:broker}"
   IDENTITY_KEYS_GIVEN=1
   IDENTITY_MAP_SRC="$MINT_MAP"
 }
@@ -3153,6 +3218,7 @@ add_env_default TOKENFUSE_MCP_SECRET_SCOPES "$(sq_ 'typryx_key=tools:ask|ask_fre
 typed_apply
 # The ceiling on a run budget (section 0c): written only when this run set it.
 ceiling_apply
+costcrew_ceiling_apply
 # The agent firewall's mode (section 0d): written only when this run set it.
 firewall_apply
 # The PII switch (section 0e): written only when this run set it.
@@ -3278,6 +3344,29 @@ keyryx_root_key() { # FILE UID: create FILE with 32 random bytes when absent
   note "keyryx root key written at $f (32 bytes, 0400, uid $uid; its contents are never shown)"
 }
 
+# record-signer: begin
+# CLAUDE.md invariant 59. The record seal signs its sealed roots through this box's keyryx,
+# presenting a consumer credential. The custody holds only the credential's sha256 digest,
+# in keyryx's key_digest form, never the credential; the seal holds the credential, read
+# only. It is minted once, kept across re-runs, and never printed.
+record_seal_key_prepare() { # POLICY: fills the record-seal consumer's digest in keyryx's policy
+  local dir key digest tmp
+  dir="$(dirname "$1")"
+  key="$dir/record-seal.key"
+  if [ ! -s "$key" ]; then
+    tmp="$key.tmp.$$"
+    ( umask 077; printf '%s' "$(gen 48)" >"$tmp" ) || { rm -f "$tmp"; die "could not mint the record seal's credential"; }
+    mv -f "$tmp" "$key" || die "could not put the record seal's credential in place"
+  fi
+  { chown 10001:10001 "$key" && chmod 0400 "$key"; } || die "could not give the record seal's credential to its uid (10001), mode 0400"
+  digest="$(openssl dgst -sha256 -hex <"$key" | sed 's/^.*= //')"
+  [ "${#digest}" = 64 ] || die "could not compute the record seal credential's digest"
+  tmp="$1.tmp.$$"
+  { sed "s/__RECORD_SEAL_DIGEST__/sha256:$digest/" "$1" >"$tmp" && chmod 0444 "$tmp" && mv -f "$tmp" "$1"; } \
+    || die "could not write the record seal's digest into $1"
+}
+# record-signer: end
+
 keyryx_prepare() {
   local kdir="$STACK_DIR/keyryx"
   mkdir -p "$kdir/sock" || die "could not create $kdir/sock"
@@ -3301,13 +3390,15 @@ keyryx_prepare() {
      "grants": {"wardryx-approval": ["sign"]}},
     {"name": "vouchryx", "auth": {"socket": "vouchryx"},
      "grants": {"vouchryx": ["delegate"]}},
-    {"name": "record-seal", "auth": {"socket": "record-seal"},
+    {"name": "record-seal", "auth": {"key_digest": "__RECORD_SEAL_DIGEST__"},
      "grants": {"trailryx-root": ["sign"]}}
   ]
 }
 POLICY
   mv -f "$kdir/policy.json.tmp" "$kdir/policy.json" || die "could not put $kdir/policy.json in place"
   chmod 0444 "$kdir/policy.json" || die "could not set the mode of $kdir/policy.json"
+  # The seal's bearer credential, and the digest of it that the custody checks (invariant 59).
+  record_seal_key_prepare "$kdir/policy.json"
   # One directory per consumer socket. Keyryx refuses a directory open to
   # other users, so each is owned by custody and entered only through a group
   # that is the consumer's own: the wardryx and vouchryx containers join theirs
@@ -3326,7 +3417,51 @@ POLICY
   # nothing here touches the bus.
 }
 
+# approver-key: begin
+# CLAUDE.md invariant 58. The console signs each approval's statement with an approver
+# key after a passkey assertion, and wardryx 2.4.0 verifies the statement against the
+# console's public key set. install.sh mints the key once, PKCS#8 P-256, owned by the
+# console's uid (10001), mode 0600, kept across re-runs and never printed. The public key
+# set is written, and WARDRYX_APPROVER_JWKS set, only once the pinned console image can
+# print it (`genaryx-web approver-jwks`). Until then wardryx decides as 2.3.0 did.
+# WARDRYX_ALLOW_KEY_APPROVALS is never set here.
+approver_key_prepare() {
+  local key="$STACK_DIR/approver/approver.pem" tmp
+  mkdir -p "$STACK_DIR/approver" "$STACK_DIR/approver-public" || die "could not create the approver directories"
+  chmod 0755 "$STACK_DIR/approver-public" || die "could not set the mode of $STACK_DIR/approver-public"
+  if [ -s "$key" ]; then
+    note "approver key kept at $key (never printed)"
+  else
+    tmp="$key.tmp.$$"
+    ( umask 077; openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$tmp" ) >/dev/null 2>&1 \
+      || { rm -f "$tmp"; die "could not mint the approver key with openssl (PKCS#8, P-256)"; }
+    mv -f "$tmp" "$key" || die "could not put the approver key in place at $key"
+    note "approver key minted at $key (PKCS#8 P-256, never printed)"
+  fi
+  { chown 10001:10001 "$key" && chmod 0600 "$key"; } || die "could not give the approver key to the console's uid (10001), mode 0600"
+}
+
+approver_jwks_apply() { # before `up`: writes the console's public key set and turns the check on, once the image can print it
+  local img json out="$STACK_DIR/approver-public/approver-jwks.json"
+  img="$(GATEWAY_CLIENT_KEYS="${GATEWAY_CLIENT_KEYS:-not-written-before-section-3e:none}" "${COMPOSE[@]}" config --images 2>/dev/null | grep -m1 'genaryx-console' || true)"
+  if [ -z "$img" ]; then
+    note "approver statements: off, no console image is named, so wardryx decides as 2.3.0 did"
+    return 0
+  fi
+  if json="$(docker run --rm --network none -v "$STACK_DIR/approver/approver.pem:/run/approver.pem:ro" --entrypoint /usr/local/bin/genaryx-web "$img" approver-jwks --key-file /run/approver.pem 2>/dev/null)" \
+     && printf '%s' "$json" | grep -q '"keys"'; then
+    { printf '%s\n' "$json" >"$out.tmp.$$" && chmod 0644 "$out.tmp.$$" && mv -f "$out.tmp.$$" "$out"; } \
+      || die "could not write the console's public key set to $out"
+    typed_set_env WARDRYX_APPROVER_JWKS /etc/wardryx/approver/approver-jwks.json
+    note "approver statements: on. wardryx checks each approval's statement against the console's public key set. A console without a passkey enrolled cannot sign one, so its approvals are refused (CLAUDE.md invariant 58)."
+  else
+    note "approver statements: off. The pinned console image has no approver-jwks command yet, so wardryx decides as 2.3.0 did (CLAUDE.md invariant 58)."
+  fi
+}
+# approver-key: end
+
 keyryx_prepare
+approver_key_prepare
 
 # ---- 3b. delegation: vouchryx, opt-in -----------------------------------------
 # @decided 2026-09-27: the launchers offer vouchryx as an opt-in delegation
@@ -3649,6 +3784,55 @@ door_identity_apply
 mint_apply
 agent_static_keys_apply
 
+# typed-risk-policy: begin
+# With the typed risk signal on, a tool call that arrives with no risk signal is
+# held for a person (CLAUDE.md invariant 54). It is one rule in policy.yaml,
+# between two marker lines that this block alone writes: with the flag on it is
+# there, with the flag off it is removed, and every line outside the markers is
+# the operator's, byte for byte. wardryx reads policy.yaml at start, so a run that
+# changes it restarts wardryx after `up` (section 5).
+#
+# The rule is the one stack-up seeds (its PR 57): a call with no signal is held,
+# and so is one the classifier marks destructive, external_send or financial at
+# 0.8 or more. A call the classifier marks read_only or reversible_change is not
+# held by this rule, and neither is one under the threshold. Any other class or
+# threshold is the operator's own hold_if_signal rule (README).
+typed_risk_policy_block() {
+  printf '%s\n' \
+    '# typed-risk-hold: begin (managed by install.sh; TYPED_RISK_SIGNAL, invariant 54)' \
+    '- name: typed-risk-hold-when-absent' \
+    '  target: "agent://*"' \
+    '  hold_if_signal:' \
+    '    name: action.risk_class' \
+    '    values: [destructive, external_send, financial]' \
+    '    min_probability: 0.8' \
+    '    when_absent: hold' \
+    '# typed-risk-hold: end'
+}
+typed_risk_policy_apply() { # reads TYPED_RISK_ON; sets TYPED_RISK_POLICY_CHANGED
+  local tmp="policy.yaml.typed-risk.$$"
+  TYPED_RISK_POLICY_CHANGED=0
+  [ -f policy.yaml ] || die "policy.yaml is missing, so the typed risk hold has nowhere to go. Nothing was changed."
+  awk '/^# typed-risk-hold: begin/ { skip = 1; next } /^# typed-risk-hold: end/ { skip = 0; next } !skip' policy.yaml >"$tmp" \
+    || die "could not read policy.yaml to manage the typed risk hold"
+  if [ "$TYPED_RISK_ON" = 1 ]; then
+    if [ -s "$tmp" ] && [ "$(tail -c 1 "$tmp" | od -An -c | tr -d ' ')" != '\n' ]; then printf '\n' >>"$tmp"; fi
+    typed_risk_policy_block >>"$tmp"
+  fi
+  if cmp -s policy.yaml "$tmp"; then
+    rm -f "$tmp"
+  else
+    { chmod 0644 "$tmp" && mv -f "$tmp" policy.yaml; } || die "could not write policy.yaml with the typed risk hold"
+    TYPED_RISK_POLICY_CHANGED=1
+    if [ "$TYPED_RISK_ON" = 1 ]; then
+      note "typed risk signal: policy.yaml now holds a tool call with no signal for a person (typed-risk-hold-when-absent)"
+    else
+      note "typed risk signal: policy.yaml no longer carries the absence hold"
+    fi
+  fi
+}
+# typed-risk-policy: end
+
 # ---- 4. the files the services read -----------------------------------------
 if [ ! -f policy.yaml ]; then
   cat > policy.yaml <<'EOF'
@@ -3677,6 +3861,7 @@ if [ ! -f policy.yaml ]; then
 EOF
   note "wrote policy.yaml"
 fi
+typed_risk_policy_apply
 mkdir -p environments
 if [ ! -f environments/single.json ]; then
   cat > environments/single.json <<'EOF'
@@ -3817,6 +4002,74 @@ if [ "${DELEGATION_ON:-0}" = 1 ]; then UP_PROFILES+=(--profile delegation); fi
 # section 8 can ask it the questions it asks the gateway.
 [ "$DOOR_ON" != 1 ] || UP_PROFILES+=(--profile openai-door)
 
+# vouchryx-signer: begin
+# vouchryx signs its delegation tokens with a working key that keyryx certifies,
+# against a delegation root whose kids this box pins (CLAUDE.md invariant 55).
+# @decided 2026-10-19 (paraphrased): keyryx is the default signer, and a box keeps
+# the file signer only when its operator chooses it in .env. vouchryx 0.6.0 refuses
+# to start in keyryx mode without VOUCHRYX_KEYRYX_ROOT_PIN, the kids of keyryx's
+# delegation root. This block takes that pin once, from the keyryx on this box, on
+# the first start that needs it, checks its shape, and keeps it. Trusting the box's
+# own keyryx at that first start is the first-use trust keyryx's own witness takes
+# until an operator pins the root. The pin is never refreshed here: a rotated root
+# stops vouchryx at its start, and the start check names the variable.
+vouchryx_root_pin() { # prints the pin: every ES384 and ML-DSA-65 kid of keyryx's delegation root, or fails
+  local body pieces es ml k re_es re_ml
+  re_es='^[A-Za-z0-9_-]{43}$'
+  re_ml='^mldsa65:[A-Za-z0-9_-]{43}$'
+  body="$(docker run --rm --network agent-stack_core busybox:1.36 wget -q -T5 -O - \
+    http://keyryx:4340/v1/jwks/keyryx.delegation-root 2>/dev/null)" || return 1
+  # The braces are the only nesting in keyryx's key set, and no string holds one, so
+  # each object is one piece with its alg and its kid on the same line.
+  pieces="$(printf '%s' "$body" | sed 's/[{}]/\n/g')"
+  es="$(printf '%s\n' "$pieces" | grep -E '"alg" *: *"ES384"' | sed -n 's/.*"kid" *: *"\([^"]*\)".*/\1/p')"
+  ml="$(printf '%s\n' "$pieces" | grep -E '"alg" *: *"ML-DSA-65"' | sed -n 's/.*"kid" *: *"\([^"]*\)".*/\1/p')"
+  [ -n "$es" ] && [ -n "$ml" ] || return 1
+  while IFS= read -r k; do [[ "$k" =~ $re_es ]] || return 1; done <<<"$es"
+  while IFS= read -r k; do [[ "$k" =~ $re_ml ]] || return 1; done <<<"$ml"
+  { printf '%s\n' "$es"; printf '%s\n' "$ml"; } | sed '/^$/d' | tr '\n' ',' | sed 's/,$//'
+}
+
+vouchryx_pin_fetch() { # sets VOUCHRYX_ROOT_PIN from keyryx on this box; dies when it serves no usable root
+  local left=15
+  VOUCHRYX_ROOT_PIN=""
+  "${COMPOSE[@]}" up -d keyryx >/dev/null || die "could not start keyryx, which certifies vouchryx's working key. Nothing was started for vouchryx."
+  while [ "$left" -gt 0 ]; do
+    VOUCHRYX_ROOT_PIN="$(vouchryx_root_pin)" && [ -n "$VOUCHRYX_ROOT_PIN" ] && break
+    VOUCHRYX_ROOT_PIN=""
+    sleep 1
+    left=$((left - 1))
+  done
+  [ -n "$VOUCHRYX_ROOT_PIN" ] || die "keyryx did not serve its delegation root (an ES384 and an ML-DSA-65 kid) within 15s, and vouchryx 0.6.0 refuses to start without its pin. Check: ${COMPOSE[*]} logs keyryx"
+}
+
+vouchryx_signer_apply() { # makes .env match the signer it names (keyryx by default); runs before vouchryx starts
+  local signer
+  if [ -z "$(typed_env_get VOUCHRYX_SIGNER)" ]; then
+    typed_set_env VOUCHRYX_SIGNER keyryx
+    note "vouchryx: signs with the key keyryx certifies (VOUCHRYX_SIGNER=keyryx; file in .env keeps the file key)"
+  fi
+  signer="$(typed_env_get VOUCHRYX_SIGNER)"
+  case "$signer" in
+    keyryx)
+      [ -n "$(typed_env_get VOUCHRYX_KEYRYX_URL)" ] || typed_set_env VOUCHRYX_KEYRYX_URL http://keyryx:4340
+      [ -n "$(typed_env_get VOUCHRYX_KEYRYX_CONSUMER)" ] || typed_set_env VOUCHRYX_KEYRYX_CONSUMER vouchryx
+      [ -n "$(typed_env_get VOUCHRYX_KEYRYX_SOCKET)" ] || typed_set_env VOUCHRYX_KEYRYX_SOCKET /run/keyryx/sock/vouchryx/keyryx.sock
+      if [ -z "$(typed_env_get VOUCHRYX_KEYRYX_ROOT_PIN)" ]; then
+        vouchryx_pin_fetch
+        typed_set_env VOUCHRYX_KEYRYX_ROOT_PIN "$VOUCHRYX_ROOT_PIN"
+        note "vouchryx: pinned the kids of keyryx's delegation root from this box (VOUCHRYX_KEYRYX_ROOT_PIN in .env, kept on every run)"
+      fi
+      ;;
+    file)
+      typed_forget_env VOUCHRYX_KEYRYX_URL VOUCHRYX_KEYRYX_CONSUMER VOUCHRYX_KEYRYX_SOCKET VOUCHRYX_KEYRYX_CREDENTIAL_FILE VOUCHRYX_KEYRYX_ROOT_PIN
+      note "vouchryx: signs with the file key (VOUCHRYX_SIGNER=file in .env)"
+      ;;
+    *) die "VOUCHRYX_SIGNER in .env is neither file nor keyryx. Nothing was started." ;;
+  esac
+}
+# vouchryx-signer: end
+
 # Delegation needs a head start, the same reason `stack-up` starts vouchryx
 # before its own gateway (README, "Delegation: a proved chain"): the gateway
 # reads TOKENFUSE_DELEGATION_JWKS once, at startup, and that file has to hold
@@ -3827,6 +4080,7 @@ if [ "${DELEGATION_ON:-0}" = 1 ]; then UP_PROFILES+=(--profile delegation); fi
 # first time with that file already in place.
 if [ "${DELEGATION_ON:-0}" = 1 ]; then
   say "vouchryx"
+  vouchryx_signer_apply
   "${COMPOSE[@]}" --profile delegation up -d vouchryx
   # Not published to the host (compose.yaml's own comment on the vouchryx
   # service says why), so this is fetched from inside the compose network,
@@ -3867,7 +4121,13 @@ fi
 
 # The routes out this box's own choices need (invariant 38), written before `up`
 # reads the files. A refusal here is before any container starts.
+approver_jwks_apply
 egress_override .
+# wardryx reads policy.yaml at start. A run that changed it restarts wardryx
+# after `up`, but only when wardryx was already running: a fresh start reads the
+# file as written. Read before `up`, because `up` starts it.
+WARDRYX_WAS_RUNNING=0
+[ -z "$("${COMPOSE[@]}" ps -q wardryx 2>/dev/null)" ] || WARDRYX_WAS_RUNNING=1
 "${COMPOSE[@]}" "${UP_PROFILES[@]}" up -d --remove-orphans
 # profile-table: begin
 # The compose profiles of this file, in the two kinds the installer treats differently (CLAUDE.md invariant 50).
@@ -3954,6 +4214,10 @@ profile_reach_note() {
   fi
 }
 profiles_off_remove
+if [ "${TYPED_RISK_POLICY_CHANGED:-0}" = 1 ] && [ "$WARDRYX_WAS_RUNNING" = 1 ]; then
+  "${COMPOSE[@]}" restart wardryx >/dev/null || die "could not restart wardryx to read the changed policy.yaml"
+  note "wardryx restarted to read the changed policy.yaml"
+fi
 # The gateway reads its identity map once, at start, and a new map behind the same
 # GATEWAY_IDENTITY_MAP line changes nothing compose compares, so `up` above left
 # the old map in force. A map this run installed is read only after a restart.
@@ -3998,16 +4262,29 @@ if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: 
 fi
 
 # ---- 7. the console account --------------------------------------------------
-CONSOLE_PASSWORD=""
+# console-password: begin
+# CLAUDE.md invariant 56. The console's first sign-in password is never printed,
+# logged or put on an argument list. gen writes it straight into one file under
+# STACK_DIR, made under umask 077 and set 0600; set-password reads that file on its
+# standard input. No shell variable holds the value, and the closing report names
+# the file and the one command that reads it.
+console_password_file() { # FILE: writes a new console password to FILE; prints nothing
+  local tmp="$1.tmp.$$"
+  ( umask 077; { gen 28; printf '\n'; } >"$tmp" ) || { rm -f "$tmp"; die "could not write the console password file"; }
+  { chmod 0600 "$tmp" && mv -f "$tmp" "$1"; } || { rm -f "$tmp"; die "could not put the console password file in place"; }
+}
+# console-password: end
+
+CONSOLE_SIGNIN_FILE=""
 if compose_has console; then
   say "console account"
   if "${COMPOSE[@]}" exec -T console test -s /var/lib/stack/.taipan/genaryx-web/operator.json >/dev/null 2>&1; then
     note "an operator already exists, left as is"
   else
-    CONSOLE_PASSWORD="$(gen 28)"
-    if printf '%s\n' "$CONSOLE_PASSWORD" | "${COMPOSE[@]}" exec -T console \
-         /usr/local/bin/genaryx-web set-password --username "$CONSOLE_USER" >/dev/null 2>&1; then
-      note "created operator '$CONSOLE_USER'"
+    console_password_file "$STACK_DIR/console-password"
+    if "${COMPOSE[@]}" exec -T console /usr/local/bin/genaryx-web set-password --username "$CONSOLE_USER" <"$STACK_DIR/console-password" >/dev/null 2>&1; then
+      note "created operator '$CONSOLE_USER'; its password is in $STACK_DIR/console-password (mode 0600), not printed"
+      CONSOLE_SIGNIN_FILE="$STACK_DIR/console-password"
       # A console older than v1.1.36 reads whether it has an operator once, at
       # startup (stack-k8s GOTCHAS 50), and it is already running here, so
       # until it restarts it refuses the password printed below with 503. The
@@ -4017,8 +4294,8 @@ if compose_has console; then
       "${COMPOSE[@]}" restart console >/dev/null \
         || die "could not restart the console after creating its operator"
     else
-      CONSOLE_PASSWORD=""
-      note "could not set the password automatically; the command is printed below"
+      rm -f "$STACK_DIR/console-password"
+      note "could not set the console password automatically; no sign-in was created on this run"
     fi
   fi
 fi
@@ -4092,8 +4369,8 @@ if compose_has tokenfuse-mcp-broker; then
   note "  in tool arguments is refused, and so is a tool listing the broker's scanner flags"
   if [ "$TYPED_RISK_ON" = 1 ]; then
     note "the typed risk signal is ON: the broker asks wardryx through typryx's proxy, which adds the"
-    note "  call's risk class. Nothing holds a call for a person until you add a hold_if_signal rule"
-    note "  to policy.yaml (README)."
+    note "  call's risk class. A call the signal does not reach is held for a person (policy.yaml,"
+    note "  typed-risk-hold-when-absent); other risk classes or thresholds need your own hold_if_signal rule (README)."
   fi
   case "$TYPED_PLANE" in
     stub)      note "answers come from the stub backend: nothing leaves this box" ;;
@@ -4113,6 +4390,8 @@ if compose_has vouchryx; then
   note "  in compose.yaml). The gateway polls its revocations at"
   note "  http://vouchryx:4310/v1/revocations and verifies a chain against the JWKS"
   note "  this run fetched from it, at $STACK_DIR/delegation-public/vouchryx.jwks.json."
+  note "  vouchryx signs with the key keyryx certifies (VOUCHRYX_SIGNER); the root pin is"
+  note "  kept in .env as VOUCHRYX_KEYRYX_ROOT_PIN, named here, never its value."
   note "  POST /v1/revoke needs VOUCHRYX_REVOKE_KEYS from .env as a bearer key, and"
   note "  reaches vouchryx only from inside this compose network, the same way an"
   note "  operator revokes a policy plane key today: from a container on it, not the host."
@@ -4246,10 +4525,12 @@ $(printf '\033[1m')$([ "$fail" -eq 0 ] && echo "Up, and every check passed." || 
 
 $REACH$IDENTITY_REACH$DOOR_REACH
 
-${CONSOLE_PASSWORD:+  Console sign-in, shown once and stored nowhere:
+${CONSOLE_SIGNIN_FILE:+  Console sign-in, created on this run. The password is not printed here: it is in one
+  file, mode 0600, that holds nothing else:
 
       user      $CONSOLE_USER
-      password  $CONSOLE_PASSWORD
+      file      $CONSOLE_SIGNIN_FILE
+      read it   sudo cat $CONSOLE_SIGNIN_FILE    (delete the file once you have saved the password)
 
 }  The console is on loopback by design, so it is reached over a tunnel. This
   box runs the WireGuard side and issues your device its own peer config:
