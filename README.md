@@ -917,7 +917,9 @@ a volume or a root key:
   called when an approval is granted, not for every call an agent makes.
 - **`keyryx-witness`** reads the event record and countersigns what it saw. It mounts
   the bus read only and never writes it. Its findings go to `keyryx.ndjson` on a volume
-  of their own, `keyryxalerts`, which heraldyx and the console mount read only. Its log
+  of their own, `keyryxalerts`, which heraldyx and the console mount read only. The
+  directory is root's and only the file is the witness's, so the witness can append to
+  its findings but cannot put another file beside them. Its log
   and keys stay on `keyryxwitness`, which nothing else mounts. It has no network, so
   nothing can call it and it can call nothing.
 

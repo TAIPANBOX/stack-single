@@ -1668,10 +1668,14 @@ an absent invariant.
     read them. heraldyx 0.8.0, pinned here, renders the seven `witness_*` types
     (agent-passport SPEC 6.2, source `keyryx`). Now the witness writes
     `KEYRYX_WITNESS_ALERTS=/var/lib/keyryx-alerts/keyryx.ndjson` on a volume of its own,
-    `keyryxalerts`. `init-volumes` makes the directory `20100:10001 0750` and pre-creates
-    the file `20100:10001 0640`: the witness writes, the bus group reads, nobody else
-    enters. heraldyx mounts the volume read only and lists the file in `HERALDYX_EVENTS`
-    beside the bus; the console mounts it read only and names it in
+    `keyryxalerts`. `init-volumes` makes the directory `0:10001 0750` and pre-creates
+    the file `20100:10001 0640`: the witness writes its one file, the bus group reads,
+    and the witness cannot add, rename or swap an entry beside it, because the directory
+    is root's. A link or a non-file at the file's name, which a witness could have planted
+    while it owned the directory, is removed before root touches the name, and the chown
+    is `chown -h`, so root never follows a link the witness made. heraldyx mounts the
+    volume read only and lists the file itself (never its directory) in `HERALDYX_EVENTS`
+    beside the bus; the console mounts it read only and names the file in
     `GENARYX_EVENTS_EXTRA`, a setting of the console release that carries genaryx's
     extra read-only streams (the console pinned here is older and ignores it, so until
     that pin moves only heraldyx reads the findings). The witness still mounts the bus and
@@ -1681,7 +1685,9 @@ an absent invariant.
     (`witness_chain_restarted` when a checkpoint explains it, `witness_checkpoint_unsigned`,
     `witness_root_missing`) wait for the digest.
     *(gate: `scripts/keyryx-alerts-reach-readers.sh`, on the resolved configuration and a
-    sandbox run of init-volumes with chown and chmod recorded; it refuses to report OK with
+    sandbox run of init-volumes with chown and chmod recorded and a link planted at the
+    file's name first; it requires the directory to be root's and each reader's entry to
+    be the file, not its directory; it refuses to report OK with
     no witness, no reader or no init-volumes; `scripts/bus-names-match-their-source.sh` for
     the stem and the heraldyx pin; scenarios in
     `features/the-witness-findings-reach-their-readers.feature`; teeth in

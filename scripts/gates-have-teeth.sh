@@ -3247,6 +3247,31 @@ run_case "keyryx-alerts: the findings file is writable by the readers' group" fa
 	"$(py 'edit("compose.yaml", "chmod 0640 /vol/keyryxalerts/keyryx.ndjson", "chmod 0660 /vol/keyryxalerts/keyryx.ndjson")')" \
 	"want 0640"
 
+run_case "keyryx-alerts: the witness owns its findings directory" fail \
+	'./scripts/keyryx-alerts-reach-readers.sh' \
+	"$(py 'edit("compose.yaml", "chown 0:10001 /vol/keyryxalerts && chmod 0750", "chown 20100:10001 /vol/keyryxalerts && chmod 0750")')" \
+	"want root (0)"
+
+run_case "keyryx-alerts: a link planted at the findings file is not removed" fail \
+	'./scripts/keyryx-alerts-reach-readers.sh' \
+	"$(py 'edit("compose.yaml", "then rm -rf /vol/keyryxalerts/keyryx.ndjson; fi", "then :; fi")')" \
+	"leaves a symlink"
+
+run_case "keyryx-alerts: the findings file is given away with a chown that follows links" fail \
+	'./scripts/keyryx-alerts-reach-readers.sh' \
+	"$(py 'edit("compose.yaml", "chown -R -h 20100:10001 /vol/keyryxalerts/keyryx.ndjson", "chown -R 20100:10001 /vol/keyryxalerts/keyryx.ndjson")')" \
+	"without chown -h"
+
+run_case "keyryx-alerts: heraldyx is handed the findings directory, not the file" fail \
+	'./scripts/keyryx-alerts-reach-readers.sh' \
+	"$(py 'edit("compose.yaml", "      HERALDYX_EVENTS: /var/lib/stack/events,/var/lib/keyryx-alerts/keyryx.ndjson\n", "      HERALDYX_EVENTS: /var/lib/stack/events,/var/lib/keyryx-alerts\n")')" \
+	"heraldyx does not read the witness's findings"
+
+run_case "keyryx-alerts: the console is handed the findings directory, not the file" fail \
+	'./scripts/keyryx-alerts-reach-readers.sh' \
+	"$(py 'edit("compose.yaml", "      GENARYX_EVENTS_EXTRA: /var/lib/keyryx-alerts/keyryx.ndjson\n", "      GENARYX_EVENTS_EXTRA: /var/lib/keyryx-alerts\n")')" \
+	"console does not read the witness's findings"
+
 run_case "keyryx-alerts: a reworded comment beside the findings volume is not a fault" pass \
 	'./scripts/keyryx-alerts-reach-readers.sh' \
 	"$(py 'edit("compose.yaml", "# The one volume besides its state that the witness writes: its findings.", "# The one volume besides its state the witness writes, its findings.")')"

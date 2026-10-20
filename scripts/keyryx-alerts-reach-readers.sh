@@ -30,17 +30,21 @@
 #      findings volume mounts it read only;
 #   4. heraldyx and the console each mount it read only, and each is told to
 #      read the file there: heraldyx by an entry of HERALDYX_EVENTS, the console
-#      by an entry of GENARYX_EVENTS_EXTRA (the file, or its directory);
+#      by an entry of GENARYX_EVENTS_EXTRA. The entry must be the file itself:
+#      a reader handed the directory would read any *.ndjson in it;
 #   5. a reader with a `user:` line runs in the group that owns the findings
 #      directory.
 #
 # Then it RUNS init-volumes's script in a sandbox with chown and chmod recorded,
 # as no-plane-writes-another-planes-stream.sh does, and requires:
 #
-#   6. the findings file is pre-created, owned by the witness's uid, mode 0640;
-#   7. its directory is owned by the witness's uid, its group is the bus group
-#      (10001, the readers' group), and it has no group or other write bit and
-#      nothing for other.
+#   6. the findings file is pre-created, owned by the witness's uid, mode 0640,
+#      and given to the witness with `chown -h`; a symlink planted at its name
+#      before the run is gone after it (the sandbox plants one);
+#   7. its directory is owned by root (uid 0), never by the witness, so the
+#      witness cannot add or swap an entry beside its file; its group is the
+#      bus group (10001, the readers' group), and it has no group or other
+#      write bit and nothing for other.
 #
 # It refuses to report OK when its subjects are gone: "measured nothing".
 #
@@ -174,7 +178,7 @@ for svc, var in sorted(READERS.items()):
         continue  # named in 3
     there = posixpath.join(v.get("target"), rel) if rel else None
     entries = [e.strip() for e in str((d.get("environment") or {}).get(var) or "").split(",") if e.strip()]
-    if not there or not any(e == there or under(there, e) for e in entries):
+    if not there or there not in entries:
         problems.append("%s does not read the witness's findings: %s names %s, not %s"
                         % (svc, var, ", ".join(entries) or "nothing", there))
 
@@ -195,6 +199,15 @@ elif avol:
     log = os.path.join(work, "calls.log")
     os.makedirs(sandbox, exist_ok=True)
     os.makedirs(shims, exist_ok=True)
+    # Plant a link at the findings file's name, to a file outside the volume,
+    # as a witness could have while it owned the directory.
+    sdir = itarget.replace("/vol", sandbox, 1)
+    sfile = posixpath.join(sdir, rel) if rel else None
+    decoy = os.path.join(work, "decoy")
+    open(decoy, "w").close()
+    if sfile:
+        os.makedirs(posixpath.dirname(sfile), exist_ok=True)
+        os.symlink(decoy, sfile)
     for tool in ("chown", "chmod"):
         p = os.path.join(shims, tool)
         with open(p, "w") as f:
@@ -209,7 +222,7 @@ elif avol:
     rr = subprocess.run(["sh"] + cmd[1:-1] + [script], env=env, capture_output=True, text=True)
     if rr.returncode != 0:
         bad("init-volumes did not run in the sandbox: %s" % (rr.stderr or rr.stdout).strip()[-200:])
-    final = {}
+    final, hflag = {}, {}
     if os.path.exists(log):
         for line in open(log):
             parts = line.split()
@@ -219,17 +232,21 @@ elif avol:
                 continue
             cur = final.get(args[1], (None, None))
             final[args[1]] = (args[0], cur[1]) if parts[0] == "chown" else (cur[0], args[0])
-    sdir = itarget.replace("/vol", sandbox, 1)
-    sfile = posixpath.join(sdir, rel) if rel else None
+            if parts[0] == "chown":
+                hflag[args[1]] = any("h" in x for x in flags)
     wuid = ids(wit)[0]
 
     def uid_gid(owner):
         m = re.match(r"^(\d+)(?::(\d+))?$", owner or "")
         return (int(m.group(1)), int(m.group(2)) if m.group(2) else None) if m else (None, None)
 
-    if not sfile or not os.path.isfile(sfile):
+    if sfile and os.path.islink(sfile):
+        problems.append("init-volumes leaves a symlink at the findings file %s and works through it: root then follows a link the witness planted" % rel)
+    elif not sfile or not os.path.isfile(sfile):
         problems.append("init-volumes does not pre-create the findings file %s" % (rel or "?"))
     else:
+        if not hflag.get(sfile):
+            problems.append("init-volumes gives the findings file to the witness without chown -h, which follows a link")
         fo, fm = final.get(sfile, (None, None))
         if uid_gid(fo)[0] != wuid:
             problems.append("the findings file is owned by %s, want the witness's uid %s" % (fo, wuid))
@@ -237,8 +254,8 @@ elif avol:
             problems.append("the findings file is mode %s, want 0640 (the witness writes, the readers' group reads)" % fm)
     do, dm = final.get(sdir, (None, None))
     du, dg = uid_gid(do)
-    if du != wuid:
-        problems.append("the findings directory is owned by %s, want the witness's uid %s" % (do, wuid))
+    if du != 0:
+        problems.append("the findings directory is owned by %s, want root (0): a witness that owns it can add or swap an entry beside its file" % do)
     if dg != BUS_GROUP:
         problems.append("the findings directory's group is %s, want the bus group %d that the readers run in" % (dg, BUS_GROUP))
     if dm is None or int(dm, 8) & 0o027:

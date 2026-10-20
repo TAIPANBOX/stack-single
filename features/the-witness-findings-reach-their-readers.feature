@@ -51,6 +51,31 @@ Feature: the Keyryx witness's findings reach the console and the notifier, read 
     Then the gate fails, because a reader in the bus group could then write a finding
     # -> gates-have-teeth.sh "keyryx-alerts: the findings file is writable by the readers' group"
 
+  Scenario: the witness owns its findings directory
+    Given init-volumes makes the findings directory root's, group 10001, mode 0750
+    When it gives the directory to the witness instead
+    Then the gate fails, because the witness could then put a file beside its findings that a reader takes up
+    # -> gates-have-teeth.sh "keyryx-alerts: the witness owns its findings directory"
+
+  Scenario: a link planted at the findings file is followed by root
+    Given a link sits at keyryx.ndjson, pointing outside the volume, before init-volumes runs
+    When init-volumes no longer removes it
+    Then the gate fails, because root would then change the owner and mode of whatever the link names
+    # -> gates-have-teeth.sh "keyryx-alerts: a link planted at the findings file is not removed"
+
+  Scenario: the findings file is given away with a chown that follows links
+    Given init-volumes gives keyryx.ndjson to the witness with chown -h
+    When the -h is dropped
+    Then the gate fails, because that chown follows a link
+    # -> gates-have-teeth.sh "keyryx-alerts: the findings file is given away with a chown that follows links"
+
+  Scenario: a reader is handed the findings directory instead of the file
+    Given heraldyx and the console each name keyryx.ndjson itself
+    When either is handed the directory that holds it
+    Then the gate fails, because a reader handed a directory reads any stream file in it
+    # -> gates-have-teeth.sh "keyryx-alerts: heraldyx is handed the findings directory, not the file"
+    # -> gates-have-teeth.sh "keyryx-alerts: the console is handed the findings directory, not the file"
+
   Scenario: the findings file loses the stem heraldyx reads as keyryx
     Given heraldyx 0.8.0 reads source keyryx from a file named keyryx.ndjson
     When the witness writes alerts.ndjson instead

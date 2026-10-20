@@ -174,14 +174,20 @@ services:
         # The witness's findings (CLAUDE.md invariant 54). Not on the bus: the
         # witness reads the bus and never writes it, so a compromised witness
         # cannot add a line to the record it checks. Its one stream lives on a
-        # volume of its own, owned by the witness (20100) and readable by the
-        # bus group (10001), which heraldyx and the console mount READ ONLY.
+        # volume of its own, which heraldyx and the console mount READ ONLY.
+        # The directory is root's (0:10001 0750), so the witness can write its
+        # one file and cannot add, rename or swap an entry beside it; the file
+        # is the witness's (20100:10001 0640), readable by the bus group.
         # Named keyryx.ndjson because that stem is the one heraldyx 0.8.0
         # reads as source keyryx. Pre-created here, so the file exists before
         # either reader starts; the witness appends to it and creates nothing.
-        chown -R 20100:10001 /vol/keyryxalerts && chmod 0750 /vol/keyryxalerts
+        # A link or anything but a regular file at that name (planted while
+        # the directory was writable) is removed before root touches it, and
+        # chown -h never follows one.
+        chown 0:10001 /vol/keyryxalerts && chmod 0750 /vol/keyryxalerts
+        if [ -L /vol/keyryxalerts/keyryx.ndjson ] || { [ -e /vol/keyryxalerts/keyryx.ndjson ] && [ ! -f /vol/keyryxalerts/keyryx.ndjson ]; }; then rm -rf /vol/keyryxalerts/keyryx.ndjson; fi
         [ -e /vol/keyryxalerts/keyryx.ndjson ] || : > /vol/keyryxalerts/keyryx.ndjson
-        chown 20100:10001 /vol/keyryxalerts/keyryx.ndjson && chmod 0640 /vol/keyryxalerts/keyryx.ndjson
+        chown -R -h 20100:10001 /vol/keyryxalerts/keyryx.ndjson && chmod 0640 /vol/keyryxalerts/keyryx.ndjson
         # One checkpoint file per producer stream (agent-passport SPEC 6.5.1), each
         # written by its producer alone. Empty until a producer signs one.
         chown 0:10001 /vol/checkpoints && chmod 0750 /vol/checkpoints
