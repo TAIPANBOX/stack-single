@@ -24,3 +24,9 @@ Feature: a box with its own keys file takes the broker's line, or adds it on req
     When the operator asks for ADD_BROKER_KEY=1
     Then the installer refuses before it writes the keys file
     # -> gates-have-teeth.sh "broker-key: ADD_BROKER_KEY=1 appends without checking the identity map"
+
+  Scenario: a re-run whose keys are kept in .env is refused by name, not by a shell error
+    Given a box whose keys an earlier run took from its keys file and keeps in .env
+    When it re-runs with agent tokens on and no keys file named
+    Then the installer refuses before it writes anything, saying the keys are kept in .env and naming the keys file and WITH_AGENT_TOKENS=0 as the ways out
+    # -> gates-have-teeth.sh "broker-key: a re-run whose keys are kept in .env reads an unset CLIENT_KEYS_FILE"
