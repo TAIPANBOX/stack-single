@@ -268,6 +268,14 @@ an absent invariant.
     pass like the "NOT on the host" ones: a gateway that answers on an address
     the operator did not name is published wider than they decided.
 
+    `@claude 2026-10-25` (1.4.1, D16): the agent-tokens block writes the doors' DPoP origins
+    (`TOKENFUSE_DELEGATION_URL`, `MCP_BROKER_DELEGATION_URL`, `WARDRYX_AGENT_TOKEN_DOOR_ORIGINS`) from the
+    bind, and it runs before section 3 sources `.env`. Measured on forge 2026-10-25, `GATEWAY_BIND=192.168.1.10`
+    in `.env` and nothing in the environment: the origins named `127.0.0.1`, where the gateway is not
+    published, so every valid agent token was refused at both doors. The block now takes the bind from
+    `.env` first, as the later `. ./.env` would. *(test: `scripts/agent-tokens-are-wired.sh` section K, one
+    teeth case.)*
+
     The same bind has to survive a reboot, and on that box it did not (#56):
     docker.service became active two seconds after tailscaled, before
     tailscale0 carried the address, the gateway's bind failed, the container
@@ -1599,8 +1607,15 @@ an absent invariant.
     printed the refusal for a keys file it was never given (and with `ADD_BROKER_KEY=1` wrote `.env` before
     stopping). Such a box is now refused by name before anything is written: the keys are kept in `.env`, so name
     the file and the map again, with `ADD_BROKER_KEY=1` if needed, or `WITH_AGENT_TOKENS=0`.
+    `@claude 2026-10-25`, two more measured on forge the same day turning agent tokens on for its own files
+    (1.4.1). `ADD_BROKER_KEY=1` appended the line and then refused the map's own broker binding, because the
+    keys section 3e checks were read from the file before the line was added; the appended line now joins
+    them, as the minted broker key does (D15). And a map that binds `agent://<td>/agents/*` only to the
+    broker's unit was accepted, though vouchryx enrols the operator agent in unit `agents` and the gateway
+    answered its valid token `403 unit_contradicts_map`; such a map is now refused before anything is
+    written, naming unit `agents` (D17).
     *(gate: `scripts/broker-key-is-the-keys-file-line.sh`, which
-    runs the installer's `# agent-tokens:` block against scratch files; 4 teeth cases plus a comment case in
+    runs the installer's `# agent-tokens:` block against scratch files; 6 teeth cases plus a comment case in
     `scripts/gates-have-teeth.sh`; `features/the-broker-line-is-the-keys-file-line.feature`. Not covered: the map's
     binding being right (identity_check decides that at install), a live broker taking its key from the file.)*
 

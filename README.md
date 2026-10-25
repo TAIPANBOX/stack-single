@@ -695,6 +695,13 @@ way to take it off the list.
   gave `CLIENT_KEYS_FILE` and re-runs without it is refused: name the file and the map again
   (`CLIENT_KEYS_FILE=... IDENTITY_MAP_FILE=... ./install.sh`, with `ADD_BROKER_KEY=1` if the file has no
   broker line yet), or run with `WITH_AGENT_TOKENS=0`.
+- A box given its own identity map must also bind the enrolled agent in unit `agents`, the unit vouchryx
+  enrols it in: a unit with id `agents`, a `keys[]` entry with key id `agents`, unit `agents` and agents
+  `agent://<RECORD_TRUST_DOMAIN>/agents/*`, and a matching `<secret>:agents` line in the keys file. The
+  installer keeps that key off the static allow-list, so it admits nothing on its own; it is there so the
+  map attributes the agent's token to the unit the token names. Without it the gateway refuses the
+  agent's own token (`403 unit_contradicts_map`), so the installer refuses the map before it writes
+  anything.
 - To move an agent to a token, it must be the one agent this box enrols at present
   (`agent://<RECORD_TRUST_DOMAIN>/agents/operator`, its secret in `$STACK_DIR/agent-token.key`). vouchryx
   reads its registry from one variable, so more agents need a change to vouchryx. Until then, name a key

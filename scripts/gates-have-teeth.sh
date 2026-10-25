@@ -3545,6 +3545,21 @@ run_case "broker-key: a re-run whose keys are kept in .env reads an unset CLIENT
 	"$(py 'edit("install.sh", "    [ -n \"${CLIENT_KEYS_FILE:-}\" ] \\\n      || die \"agent tokens are on (the default), and this box", "    true \\\n      || die \"agent tokens are on (the default), and this box")')" \
 	"the installer read an unset CLIENT_KEYS_FILE"
 
+run_case "broker-key: ADD_BROKER_KEY=1 appends the line but the keys checked against the map lack it" fail \
+	'./scripts/broker-key-is-the-keys-file-line.sh' \
+	"$(py 'edit("install.sh", "        IDENTITY_KEYS_NEW=\"${IDENTITY_KEYS_NEW:+$IDENTITY_KEYS_NEW,}$broker:broker\"\n", "")')" \
+	"lack the appended broker line"
+
+run_case "broker-key: a map with no binding in unit agents is accepted" fail \
+	'./scripts/broker-key-is-the-keys-file-line.sh' \
+	"$(py 'edit("install.sh", "  grep -q -E \x27\"unit\"[[:space:]]*:[[:space:]]*\"agents\"\x27 \"$1\"", "  true")')" \
+	"a map with no binding in unit agents was accepted"
+
+run_case "agent-tokens-are-wired: the door origins keep the bind this run started with, not the box's" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("install.sh", "  if [ -n \"$bind_kept\" ]; then\n    GATEWAY_BIND=\"$bind_kept\"", "  if false; then\n    GATEWAY_BIND=\"$bind_kept\"")')" \
+	"the block took the bind this run started with"
+
 run_case "broker-key: a comment beside the broker refusal is not a fault" pass \
 	'./scripts/broker-key-is-the-keys-file-line.sh' \
 	"$(py 'edit("install.sh", "  BROKER_SOURCE=\"mint\"\n", "  # a comment that names the broker line is not a fault\n  BROKER_SOURCE=\"mint\"\n")')" \

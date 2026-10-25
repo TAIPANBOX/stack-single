@@ -424,6 +424,68 @@ printf '%s\n' "$BLOCK" | grep -q 'Removed from the static allow-lists on this ru
 printf '%s\n' "$BLOCK" | grep -q 'To keep one, name it in STATIC_KEY_IDS' \
   || fail "J. the closing report does not say how to keep a removed key (STATIC_KEY_IDS)"
 
+# K. THE DOOR ORIGINS FOLLOW THE BIND THE BOX HAS (CLAUDE.md invariants 11 and 40, 1.4.0, D16). A re-run takes
+# GATEWAY_BIND from .env only when section 3 sources .env, and the agent-tokens block runs before that, writing
+# the doors' DPoP origins from the bind. Measured on forge 2026-10-25, GATEWAY_BIND=192.168.1.10 in .env and
+# nothing in the environment: the origins named 127.0.0.1, where the gateway is not published, so an agent's
+# valid token was refused at both doors, and a proof addressed to 127.0.0.1 passed. 0.0.0.0 maps to loopback,
+# so that bind is the case that must stay green.
+PROBE_BLOCK="$(sed -n '/^# gateway-probe: begin$/,/^# gateway-probe: end$/p' install.sh)"
+if [ -z "$PROBE_BLOCK" ] || [ -z "$BLOCK" ]; then
+  fail "K. install.sh has no '# gateway-probe:' or '# agent-tokens:' block, so the door origins were not measured against the bind"
+else
+  printf '%s\n' "$PROBE_BLOCK" >"$scratch/k-probe.sh"
+  printf '%s\n' "$BLOCK" >"$scratch/k-block.sh"
+  cat >"$scratch/k-stubs.sh" <<'STUBS'
+die()  { echo "DIE: $*"; exit 3; }
+note() { :; }
+gen() { head -c 4096 /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9' | head -c "$1"; }
+identity_entry_why() { :; }
+identity_env_get() {
+  local v=""
+  [ -f "$STACK_DIR/.env" ] && v="$(sed -n "s/^$1='\(.*\)'\$/\1/p" "$STACK_DIR/.env" | tail -1)"
+  printf '%s' "$v"
+}
+identity_env_set() {
+  local f="$STACK_DIR/.env"
+  touch "$f"
+  grep -v "^$1=" "$f" >"$f.tmp" || true
+  printf "%s='%s'\n" "$1" "$2" >>"$f.tmp"
+  mv -f "$f.tmp" "$f"
+}
+mint_env_forget() { local f="$STACK_DIR/.env"; [ -f "$f" ] && { grep -v "^$1=" "$f" >"$f.tmp" || true; mv -f "$f.tmp" "$f"; }; return 0; }
+mint_env_secret() { [ -n "$(identity_env_get "$1")" ] || identity_env_set "$1" "$(gen 40)"; }
+upstream_put() { mkdir -p "$2"; printf '%s' "$1" >"$2/key"; }
+STUBS
+  for bind in 192.168.1.10 0.0.0.0; do
+    d="$(mktemp -d "$scratch/k.XXXXXX")"
+    printf "GATEWAY_BIND='%s'\nRECORD_TRUST_DOMAIN='home.example'\n" "$bind" >"$d/.env"
+    if out="$(env -u GATEWAY_BIND bash -c '
+      set -euo pipefail
+      STACK_DIR="$1"; MINT_ON=1; WITH_AGENT_TOKENS=""; WITH_DELEGATION=""; STATIC_KEY_IDS=""
+      GATEWAY_BIND="${GATEWAY_BIND:-127.0.0.1}"
+      . "$2/k-stubs.sh"
+      . "$2/k-probe.sh"
+      gateway_probe_resolve
+      . "$2/k-block.sh"
+      agent_tokens_resolve
+      agent_tokens_apply
+      printf "URL=%s\nBROKER_URL=%s\nORIGINS=%s\n" "$(identity_env_get TOKENFUSE_DELEGATION_URL)" \
+        "$(identity_env_get MCP_BROKER_DELEGATION_URL)" "$(identity_env_get WARDRYX_AGENT_TOKEN_DOOR_ORIGINS)"
+    ' _ "$d" "$scratch" 2>&1)"; then
+      case "$bind" in 0.0.0.0) host=127.0.0.1 ;; *) host="$bind" ;; esac
+      printf '%s\n' "$out" | grep -qx "URL=http://$host:4100" \
+        || fail "K. with GATEWAY_BIND=$bind in .env, the gateway's delegation origin is $(printf '%s' "$out" | grep '^URL=') and should be http://$host:4100: the block took the bind this run started with, not the one the box has"
+      printf '%s\n' "$out" | grep -qx "BROKER_URL=http://$host:4200" \
+        || fail "K. with GATEWAY_BIND=$bind in .env, the broker's delegation origin is $(printf '%s' "$out" | grep '^BROKER_URL=') and should be http://$host:4200"
+      printf '%s\n' "$out" | grep '^ORIGINS=' | grep -q "http://$host:4100" \
+        || fail "K. with GATEWAY_BIND=$bind in .env, wardryx's door origins do not name http://$host:4100"
+    else
+      fail "K. with GATEWAY_BIND=$bind in .env, the agent-tokens block did not run: $out"
+    fi
+  done
+fi
+
 if [ "$problems" -ne 0 ]; then
   printf 'agent-tokens-are-wired: %d problem(s)\n' "$problems"
   exit 1
