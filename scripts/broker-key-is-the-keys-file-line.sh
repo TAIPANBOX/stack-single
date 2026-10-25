@@ -22,6 +22,11 @@
 #      is touched.
 #   E. the README states `<secret>:broker` and not `broker:<secret>`, and the refusal text of the
 #      installer does not print `'broker:<secret>'`.
+#   F. a re-run of a box whose keys an earlier run took from its keys file and keeps in .env, with
+#      no CLIENT_KEYS_FILE this run (the variable unset, as on forge 2026-10-25), with and without
+#      ADD_BROKER_KEY=1: refused by the installer's own refusal, not a shell error on the unset
+#      variable, saying the keys are kept in .env and naming CLIENT_KEYS_FILE and
+#      WITH_AGENT_TOKENS=0 as the ways out, and .env is unchanged.
 #
 # IT REFUSES TO REPORT OK ON NOTHING: no install.sh, no `# agent-tokens:` block, or no
 # agent_tokens_resolve in it is reported and fails.
@@ -161,6 +166,45 @@ if [ "$RC" -eq 0 ]; then
 else
   [ "$(cat "$d/keys.txt")" = "$before" ] || fail "D. the keys file was appended although the map does not bind broker"
 fi
+
+# F. keys kept in .env by an earlier run, no CLIENT_KEYS_FILE this run. The variable is UNSET, as on a
+# real re-run, so `set -u` meets it if the block reads it. The stubbed die exits 3; a shell error exits 1.
+run_kept_case() {
+  local d="$1" add="$2" out
+  out="$(bash -c '
+    set -euo pipefail
+    STACK_DIR="$1"; MINT_ON=0; ADD_BROKER_KEY="$2"; unset CLIENT_KEYS_FILE IDENTITY_MAP_FILE
+    GATEWAY_PROBE=127.0.0.1; WITH_AGENT_TOKENS=""; WITH_DELEGATION=""; STATIC_KEY_IDS=""
+    . "$3/stubs.sh"
+    . "$3/block.sh"
+    agent_tokens_resolve
+    agent_tokens_apply
+    echo "APPLIED"
+  ' _ "$d" "$add" "$scratch" 2>&1)" && RC=0 || RC=$?
+  OUT="$out"
+}
+for add in "" 1; do
+  label="F${add:+ (ADD_BROKER_KEY=1)}"
+  d="$(mktemp -d "$scratch/f.XXXXXX")"
+  printf "GATEWAY_CLIENT_KEYS='%s:felyx'\n" "$SECRET_A" >"$d/.env"
+  before="$(cat "$d/.env")"
+  run_kept_case "$d" "$add"
+  if [ "$RC" -eq 0 ]; then
+    fail "$label. a box whose keys are kept in .env, with no CLIENT_KEYS_FILE this run, was accepted with no broker key"
+  else
+    if printf '%s' "$OUT" | grep -q 'unbound variable'; then
+      fail "$label. the installer read an unset CLIENT_KEYS_FILE: $(printf '%s' "$OUT" | grep 'unbound variable' | head -1)"
+    fi
+    [ "$RC" -eq 3 ] || fail "$label. it stopped with exit $RC, not the installer's refusal"
+    printf '%s' "$OUT" | grep -q 'kept in .env' || fail "$label. the refusal does not say the keys are kept in .env"
+    printf '%s' "$OUT" | grep -q 'CLIENT_KEYS_FILE=' || fail "$label. the refusal does not name CLIENT_KEYS_FILE as the way to add the broker's line"
+    printf '%s' "$OUT" | grep -q 'WITH_AGENT_TOKENS=0' || fail "$label. the refusal does not name WITH_AGENT_TOKENS=0"
+    if printf '%s' "$OUT" | grep -q 'gave its own CLIENT_KEYS_FILE'; then
+      fail "$label. the refusal says this run gave a CLIENT_KEYS_FILE, which it did not"
+    fi
+  fi
+  [ "$(cat "$d/.env")" = "$before" ] || fail "$label. .env changed on a refusal"
+done
 
 # E. the docs and the refusal text name the same form the installer reads
 if grep -q 'broker:<secret>' README.md; then

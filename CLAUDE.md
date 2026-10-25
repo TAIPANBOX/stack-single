@@ -1593,8 +1593,14 @@ an absent invariant.
     the installer read `<secret>:broker`, and the refusal printed the README's form, so the README's own steps were
     refused. With the line the box is accepted and the broker's key is that secret. Without it the installer refuses
     before it writes anything, and names `ADD_BROKER_KEY=1`, which mints the secret, appends the line and keeps the
-    file's mode, only when the identity map binds `broker`. *(gate: `scripts/broker-key-is-the-keys-file-line.sh`, which
-    runs the installer's `# agent-tokens:` block against scratch files; 3 teeth cases plus a comment case in
+    file's mode, only when the identity map binds `broker`. `@claude 2026-10-25`: measured on forge 2026-10-25, the
+    first live run of 1.4.0 from main: a box whose keys an earlier run took from its keys file keeps them in `.env`
+    and re-runs with no `CLIENT_KEYS_FILE`, and the check read that unset variable, stopped on a shell error and
+    printed the refusal for a keys file it was never given (and with `ADD_BROKER_KEY=1` wrote `.env` before
+    stopping). Such a box is now refused by name before anything is written: the keys are kept in `.env`, so name
+    the file and the map again, with `ADD_BROKER_KEY=1` if needed, or `WITH_AGENT_TOKENS=0`.
+    *(gate: `scripts/broker-key-is-the-keys-file-line.sh`, which
+    runs the installer's `# agent-tokens:` block against scratch files; 4 teeth cases plus a comment case in
     `scripts/gates-have-teeth.sh`; `features/the-broker-line-is-the-keys-file-line.feature`. Not covered: the map's
     binding being right (identity_check decides that at install), a live broker taking its key from the file.)*
 

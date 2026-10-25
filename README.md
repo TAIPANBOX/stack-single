@@ -690,6 +690,11 @@ way to take it off the list.
   the word broker), bound in its identity map. Or set `ADD_BROKER_KEY=1`, and the installer mints the
   secret and appends that line, keeping the file's mode. Or run with `WITH_AGENT_TOKENS=0`. Without one
   of those, the installer refuses before it installs anything.
+- A re-run need not name the keys file again, because the keys an earlier run took from it are kept in
+  `.env`. With agent tokens on, though, the broker's line has to come from that file, so a box that once
+  gave `CLIENT_KEYS_FILE` and re-runs without it is refused: name the file and the map again
+  (`CLIENT_KEYS_FILE=... IDENTITY_MAP_FILE=... ./install.sh`, with `ADD_BROKER_KEY=1` if the file has no
+  broker line yet), or run with `WITH_AGENT_TOKENS=0`.
 - To move an agent to a token, it must be the one agent this box enrols at present
   (`agent://<RECORD_TRUST_DOMAIN>/agents/operator`, its secret in `$STACK_DIR/agent-token.key`). vouchryx
   reads its registry from one variable, so more agents need a change to vouchryx. Until then, name a key

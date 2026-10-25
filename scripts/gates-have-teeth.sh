@@ -3540,6 +3540,11 @@ run_case "broker-key: ADD_BROKER_KEY=1 appends without checking the identity map
 	"$(py 'edit("install.sh", "    if [ -n \"${IDENTITY_MAP_FILE:-}\" ] && ! identity_map_binds_broker", "    if false && ! identity_map_binds_broker")')" \
 	"was accepted with an identity map that does not bind broker"
 
+run_case "broker-key: a re-run whose keys are kept in .env reads an unset CLIENT_KEYS_FILE" fail \
+	'./scripts/broker-key-is-the-keys-file-line.sh' \
+	"$(py 'edit("install.sh", "    [ -n \"${CLIENT_KEYS_FILE:-}\" ] \\\n      || die \"agent tokens are on (the default), and this box", "    true \\\n      || die \"agent tokens are on (the default), and this box")')" \
+	"the installer read an unset CLIENT_KEYS_FILE"
+
 run_case "broker-key: a comment beside the broker refusal is not a fault" pass \
 	'./scripts/broker-key-is-the-keys-file-line.sh' \
 	"$(py 'edit("install.sh", "  BROKER_SOURCE=\"mint\"\n", "  # a comment that names the broker line is not a fault\n  BROKER_SOURCE=\"mint\"\n")')" \

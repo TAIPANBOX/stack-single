@@ -2128,11 +2128,17 @@ agent_tokens_resolve() {
   BROKER_SOURCE="mint"
   if [ "$MINT_ON" != 1 ]; then
     local nbl
-    nbl="$(keys_file_broker_lines "$CLIENT_KEYS_FILE" | grep -c . || true)"
     case "${ADD_BROKER_KEY:-}" in
       ""|0|1) ;;
       *) die "ADD_BROKER_KEY is 1 (mint the broker's key and append it to your keys file) or unset, not what it was given. Nothing was installed." ;;
     esac
+    # A re-run need not name the keys file again: the keys an earlier run took from it are kept in .env.
+    # The broker's line belongs in that file, so with no file this run can neither read the line nor add
+    # it, and says so. Measured on forge 2026-10-25: reading the unset variable stopped the run on a shell
+    # error and printed the refusal for a keys file it was never given.
+    [ -n "${CLIENT_KEYS_FILE:-}" ] \
+      || die "agent tokens are on (the default), and this box's client keys are the ones an earlier run took from your keys file, kept in .env, so this run has no keys file to read the MCP broker's key from. Run again with CLIENT_KEYS_FILE=<your keys file> IDENTITY_MAP_FILE=<your identity map>, the file holding a line '<secret>:broker' (the secret, a colon, then the word broker) bound in the map to agent://$td/agents/*, or add ADD_BROKER_KEY=1 to that run and the installer mints the secret and appends the line. Or WITH_AGENT_TOKENS=0 keeps static keys only (the weaker way out). Nothing was installed."
+    nbl="$(keys_file_broker_lines "$CLIENT_KEYS_FILE" | grep -c . || true)"
     if [ "$nbl" -gt 1 ]; then
       die "your keys file holds more than one '<secret>:broker' line, so the broker's key is not clear. Keep one. Nothing was installed."
     fi
