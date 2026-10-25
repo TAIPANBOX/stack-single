@@ -556,6 +556,28 @@ gx_9b21d4...:research-bots
 CLIENT_KEYS_FILE=/path/keys.txt IDENTITY_MAP_FILE=/path/identity.json ./install.sh
 ```
 
+With agent tokens on, the default, the two files need two more entries each: the MCP broker needs a key
+of its own, and the agent the installer enrols at vouchryx is attributed to unit `agents`. In this example
+`bank.example` is the box's `RECORD_TRUST_DOMAIN`:
+
+```text
+# keys.txt, two more lines
+gx_51e7aa...:broker
+gx_8c03f2...:agents
+```
+
+```json
+{"id": "agents"}, {"id": "broker"}
+
+{"key_id": "agents", "unit": "agents", "agents": ["agent://bank.example/agents/*"]},
+{"key_id": "broker", "unit": "broker", "agents": ["agent://bank.example/agents/*"]}
+```
+
+The first line goes into `units`, the other two into `keys`. `ADD_BROKER_KEY=1` mints and appends the
+broker's line for you. The installer keeps both keys off the static allow-list, so neither admits a call on
+its own. Without these entries the installer refuses before it writes anything and says which one is
+missing. `WITH_AGENT_TOKENS=0` keeps static keys only, which is the weaker way out.
+
 What an agent then sends, besides its provider key, on every call:
 
 | Header | Value |
