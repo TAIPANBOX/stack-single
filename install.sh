@@ -2072,6 +2072,12 @@ identity_map_binds_broker() {
   grep -q -E '"key_id"[[:space:]]*:[[:space:]]*"broker"' "$1"
 }
 
+# FILE: the identity map binds a key in unit `agents` (a keys[] entry with that unit), the unit vouchryx
+# enrols the operator agent in (VOUCHRYX_AGENTS below).
+identity_map_has_agents_unit() {
+  grep -q -E '"unit"[[:space:]]*:[[:space:]]*"agents"' "$1"
+}
+
 # Section 0, before anything is installed: refuses a value it does not read, and a pair
 # it cannot honour. Writes nothing. Runs after mint_resolve, which decides MINT_ON.
 agent_tokens_resolve() {
@@ -2152,6 +2158,12 @@ agent_tokens_resolve() {
     if [ -n "${IDENTITY_MAP_FILE:-}" ] && ! identity_map_binds_broker "$IDENTITY_MAP_FILE"; then
       die "your identity map does not bind key_id broker. Add a keys[] entry with key_id broker and agents agent://$td/agents/* to $IDENTITY_MAP_FILE, then run again. Nothing was installed."
     fi
+    # The operator agent is enrolled at vouchryx in unit agents, and the gateway refuses its token as
+    # unit_contradicts_map unless the map binds that agent in the same unit. Measured on forge 2026-10-25: a map
+    # binding agent://<td>/agents/* only to the broker's unit answered 403 to a valid token.
+    if [ -n "${IDENTITY_MAP_FILE:-}" ] && ! identity_map_has_agents_unit "$IDENTITY_MAP_FILE"; then
+      die "your identity map binds no key in unit agents, the unit this installer enrols agent://$td/agents/operator in at vouchryx, so the gateway would refuse that agent's token (unit_contradicts_map). Add a unit with id agents, a keys[] entry with key_id agents, unit agents and agents agent://$td/agents/*, and a matching '<secret>:agents' line in your keys file (the installer keeps that key off the static allow-list), then run again. Nothing was installed."
+    fi
   fi
 }
 
@@ -2195,6 +2207,17 @@ agent_tokens_apply() {
   identity_env_set TOKENFUSE_AGENT_TOKENS require
   identity_env_set TOKENFUSE_DELEGATION_ISSUER http://vouchryx:4310
   identity_env_set TOKENFUSE_DELEGATION_AUDIENCE "$AGENT_AUDIENCE"
+  # The origins below follow the bind this box HAS. This block runs before section 3 sources .env, so on a
+  # re-run GATEWAY_BIND is still the one this run started with (loopback when the environment names none).
+  # Once .env is sourced its bind wins over the environment's, so it wins here too (gateway_probe_resolve,
+  # CLAUDE.md invariant 11). Measured on forge 2026-10-25, GATEWAY_BIND=192.168.1.10 in .env: the origins
+  # named 127.0.0.1, where the gateway is not published, and every agent token was refused.
+  local bind_kept
+  bind_kept="$(identity_env_get GATEWAY_BIND)"
+  if [ -n "$bind_kept" ]; then
+    GATEWAY_BIND="$bind_kept"
+    gateway_probe_resolve
+  fi
   # TODO(1.4.0, D13, not waiting on it): the gateway accepts a DPoP proof for ONE door origin, so a proof
   # addressed to http://tokenfuse-gateway:4100 and one addressed to http://127.0.0.1:4100 cannot both
   # verify. When the tokenfuse release that lists DPoP door origins lands, set its list to both gateway
@@ -2236,6 +2259,11 @@ agent_tokens_apply() {
         printf '%s:broker\n' "$broker" >>"$CLIENT_KEYS_FILE" \
           || die "could not append the broker's line to $CLIENT_KEYS_FILE. Nothing was started."
         note "ADD_BROKER_KEY=1: appended the broker's line to $CLIENT_KEYS_FILE (its mode is kept, the secret is never printed)"
+        # identity_resolve read the keys file before this line was in it, and section 3e checks the map
+        # against what it read, so the line joins those keys too, as the minted broker key does. Measured on
+        # forge 2026-10-25: without it the run appended the line, then refused its own map's broker binding.
+        [ "$IDENTITY_DOOR" = main ] || die "internal: the broker's line was added while the ${IDENTITY_DOOR:-no} door was selected"
+        IDENTITY_KEYS_NEW="${IDENTITY_KEYS_NEW:+$IDENTITY_KEYS_NEW,}$broker:broker"
         ;;
       *) die "internal: the broker's key has no source. Nothing was started." ;;
     esac

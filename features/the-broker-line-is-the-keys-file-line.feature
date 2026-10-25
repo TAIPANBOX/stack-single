@@ -25,6 +25,18 @@ Feature: a box with its own keys file takes the broker's line, or adds it on req
     Then the installer refuses before it writes the keys file
     # -> gates-have-teeth.sh "broker-key: ADD_BROKER_KEY=1 appends without checking the identity map"
 
+  Scenario: ADD_BROKER_KEY=1 on a box with its own map installs, it does not refuse its own line
+    Given a keys file with no broker line and an identity map that binds broker
+    When the operator runs with ADD_BROKER_KEY=1 and agent tokens on
+    Then the appended line is among the keys the map is checked against, so the map's broker binding is accepted
+    # -> gates-have-teeth.sh "broker-key: ADD_BROKER_KEY=1 appends the line but the keys checked against the map lack it"
+
+  Scenario: a map that cannot admit the enrolled operator agent is refused before anything is written
+    Given a box with its own keys file and an identity map that binds broker but nothing in unit agents
+    When it runs with agent tokens on
+    Then the installer refuses, naming unit agents, because the gateway would refuse the operator agent's own token
+    # -> gates-have-teeth.sh "broker-key: a map with no binding in unit agents is accepted"
+
   Scenario: a re-run whose keys are kept in .env is refused by name, not by a shell error
     Given a box whose keys an earlier run took from its keys file and keeps in .env
     When it re-runs with agent tokens on and no keys file named

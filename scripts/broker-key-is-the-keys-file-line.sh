@@ -86,11 +86,18 @@ run_case() {
     set -euo pipefail
     STACK_DIR="$1"; MINT_ON=0; CLIENT_KEYS_FILE="$2"; IDENTITY_MAP_FILE="$3"; ADD_BROKER_KEY="$4"
     GATEWAY_PROBE=127.0.0.1; WITH_AGENT_TOKENS=""; WITH_DELEGATION=""; STATIC_KEY_IDS=""
+    # What identity_resolve read from the keys file, before this block runs: section 3e checks the map
+    # against exactly this, so a line the block adds to the file must reach it too.
+    IDENTITY_DOOR=main; IDENTITY_KEYS_GIVEN=1
+    IDENTITY_KEYS_NEW="$(grep -v -E "^[[:space:]]*(#|$)" "$2" | paste -s -d, -)"
     . "$5/stubs.sh"
     . "$5/block.sh"
     agent_tokens_resolve
     agent_tokens_apply
     echo "APPLIED"
+    printf "SPEC_IDS=%s\n" "$(printf "%s" "$IDENTITY_KEYS_NEW" | tr "," "\n" | sed -e "s/.*://" | paste -s -d, -)"
+    want="$(grep -v -E "^[[:space:]]*(#|$)" "$2" | paste -s -d, -)"
+    [ "$IDENTITY_KEYS_NEW" = "$want" ] && echo "SPEC_IS_THE_FILE=yes" || echo "SPEC_IS_THE_FILE=no"
   ' _ "$d" "$keys" "$map" "$add" "$scratch" 2>&1)" && RC=0 || RC=$?
   OUT="$out"
   : "$name"
@@ -107,7 +114,11 @@ fixture_secret() {
 }
 SECRET_A="$(fixture_secret)"
 SECRET_BROKER="$(fixture_secret)"
-MAP_BINDS='{"units":[{"id":"console"}],"keys":[{"key_id":"broker","unit":"console","agents":["agent://local/agents/*"]}]}'
+MAP_BINDS='{"units":[{"id":"console"},{"id":"agents"}],"keys":[{"key_id":"agents","unit":"agents","agents":["agent://local/agents/*"]},{"key_id":"broker","unit":"console","agents":["agent://local/agents/*"]}]}'
+# Binds unit agents, but no broker.
+MAP_AGENTS_NO_BROKER='{"units":[{"id":"console"},{"id":"agents"}],"keys":[{"key_id":"agents","unit":"agents","agents":["agent://local/agents/*"]}]}'
+# Binds broker, but nothing in unit agents, the unit the installer enrols the operator agent in at vouchryx.
+MAP_NO_AGENTS_UNIT='{"units":[{"id":"console"}],"keys":[{"key_id":"broker","unit":"console","agents":["agent://local/agents/*"]}]}'
 MAP_NO_BROKER='{"units":[{"id":"console"}],"keys":[{"key_id":"felyx","unit":"console","agents":["agent://local/genaryx/felyx"]}]}'
 
 # A. the keys file has the broker line
@@ -122,6 +133,8 @@ else
   got="$(cat "$d/broker/key" 2>/dev/null || true)"
   [ "$got" = "$SECRET_BROKER" ] || fail "A. the broker key file does not hold the secret of the keys file's broker line"
   [ "$(cat "$d/keys.txt")" = "$before" ] || fail "A. the keys file was changed although it had the broker line"
+  printf '%s' "$OUT" | grep -qx 'SPEC_IS_THE_FILE=yes' \
+    || fail "A. the keys section 3e checks are not the keys file's own lines ($(printf '%s' "$OUT" | grep '^SPEC_IDS='))"
 fi
 
 # B. no broker line and no ADD_BROKER_KEY: refused before anything is written
@@ -153,18 +166,41 @@ else
   appended="${last%:broker}"
   got="$(cat "$d/broker/key" 2>/dev/null || true)"
   [ -n "$got" ] && [ "$got" = "$appended" ] || fail "C. the broker key file does not hold the secret the line appended"
+  # Section 3e checks the map against the keys this run read; the line appended here must be among them, or
+  # a map that binds broker (which ADD_BROKER_KEY=1 requires) is refused for a key no client carries.
+  # Measured on forge 2026-10-25: the run appended the line, then refused its own map.
+  printf '%s' "$OUT" | grep -qx 'SPEC_IS_THE_FILE=yes' \
+    || fail "C. the keys section 3e checks against the map lack the appended broker line ($(printf '%s' "$OUT" | grep '^SPEC_IDS=')), so the map's broker binding is refused"
 fi
 
 # D. ADD_BROKER_KEY=1 but the map does not bind broker: refused, and the keys file is untouched
 d="$(mktemp -d "$scratch/d.XXXXXX")"
 printf '%s:felyx\n' "$SECRET_A" >"$d/keys.txt"; chmod 0640 "$d/keys.txt"
-printf '%s\n' "$MAP_NO_BROKER" >"$d/map.json"
+# The map binds unit agents (case G's check passes), so only the broker check can refuse it.
+printf '%s\n' "$MAP_AGENTS_NO_BROKER" >"$d/map.json"
 before="$(cat "$d/keys.txt")"
 run_case "D" "$d" "$d/keys.txt" "$d/map.json" "1"
 if [ "$RC" -eq 0 ]; then
   fail "D. ADD_BROKER_KEY=1 was accepted with an identity map that does not bind broker"
 else
+  printf '%s' "$OUT" | grep -q 'does not bind key_id broker' || fail "D. the refusal does not say the map does not bind broker: $OUT"
   [ "$(cat "$d/keys.txt")" = "$before" ] || fail "D. the keys file was appended although the map does not bind broker"
+fi
+
+# G. the map binds broker but nothing in unit agents. vouchryx enrols the operator agent in unit agents, so the
+# gateway would refuse that agent's token as unit_contradicts_map (measured on forge 2026-10-25: 403 for a valid
+# token). Refused before anything is written, naming unit agents, and the keys file is untouched.
+d="$(mktemp -d "$scratch/g.XXXXXX")"
+printf '%s:felyx\n%s:broker\n' "$SECRET_A" "$SECRET_BROKER" >"$d/keys.txt"; chmod 0640 "$d/keys.txt"
+printf '%s\n' "$MAP_NO_AGENTS_UNIT" >"$d/map.json"
+before="$(cat "$d/keys.txt")"
+run_case "G" "$d" "$d/keys.txt" "$d/map.json" ""
+if [ "$RC" -eq 0 ]; then
+  fail "G. a map with no binding in unit agents was accepted, so the enrolled operator agent's token would be refused"
+else
+  printf '%s' "$OUT" | grep -q 'unit agents' || fail "G. the refusal does not name unit agents: $OUT"
+  [ "$(cat "$d/keys.txt")" = "$before" ] || fail "G. the keys file changed on a refusal"
+  [ ! -e "$d/.env" ] || ! grep -q '^TOKENFUSE_AGENT_TOKENS=' "$d/.env" || fail "G. .env was written before the refusal"
 fi
 
 # F. keys kept in .env by an earlier run, no CLIENT_KEYS_FILE this run. The variable is UNSET, as on a

@@ -125,3 +125,9 @@ Feature: an agent presents its own token, and the doors check it where it is jud
     When the service is renamed away
     Then agent-tokens-are-wired.sh fails and says it measured nothing
     # -> gates-have-teeth.sh "agent-tokens-are-wired: no vouchryx service left to judge"
+
+  Scenario: the doors' proof origins follow the bind the box has
+    Given a box whose gateway is published on one LAN address, named as GATEWAY_BIND in its .env
+    When the installer runs again with nothing in the environment, and agent tokens on
+    Then the gateway's, the broker's and wardryx's door origins name that address, not loopback, so an agent calling that address with its own token is admitted
+    # -> gates-have-teeth.sh "agent-tokens-are-wired: the door origins keep the bind this run started with, not the box's"
