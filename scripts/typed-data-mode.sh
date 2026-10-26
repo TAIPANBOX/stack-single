@@ -308,7 +308,7 @@ pin="$(sed -n 's/.*ghcr\.io\/taipanbox\/typryx:\(v[0-9][0-9.]*\).*/\1/p' compose
 if [ -z "$pin" ]; then
   fail "compose.yaml names no ghcr.io/taipanbox/typryx:vX.Y.Z image, so this measured nothing about the pin"
 else
-  [ "$pin" = v0.5.0 ] || fail "compose.yaml pins typryx $pin; the training log needs v0.3.0 or later, the risk-signal proxy v0.4.0, and this gate names v0.5.0"
+  [ "$pin" = v0.5.1 ] || fail "compose.yaml pins typryx $pin; the training log needs v0.3.0 or later, the risk-signal proxy v0.4.0, and this gate names v0.5.1"
   for f in compose.yaml components.json README.md install.sh; do
     while IFS= read -r t; do
       [ "$t" = "$pin" ] || fail "$f names typryx:$t, but compose.yaml pins typryx:$pin"
@@ -363,7 +363,7 @@ e = svc['typryx']['environment']
 assert e['TYPRYX_BACKEND'] == 'stub', 'backend is ' + e['TYPRYX_BACKEND']
 assert not e.get('TYPRYX_JEV_KEY_FILE'), 'a jev key file is named on the stub'
 assert not e.get('TYPRYX_TRAINING_DIR'), 'a training log is on by default: TYPRYX_TRAINING_DIR is ' + repr(e.get('TYPRYX_TRAINING_DIR'))
-assert svc['typryx']['image'].split('@')[0].endswith('/typryx:v0.5.0'), 'the typryx pin is ' + svc['typryx']['image']
+assert svc['typryx']['image'].split('@')[0].endswith('/typryx:v0.5.1'), 'the typryx pin is ' + svc['typryx']['image']
 " --profile typed </dev/null
 
   check_cfg "training on names a directory inside a writable volume, beside the ledger" "

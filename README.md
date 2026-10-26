@@ -979,9 +979,9 @@ What is wired now, and what is not:
   the switch. On a box with no token in flight that is correct.
 - **vouchryx** has the wiring, and its working key is still the file key. The switch
   is `VOUCHRYX_SIGNER`, empty by default, and this launcher keeps it empty. The pin is
-  v0.6.0, which reads `keyryx` and refuses to start with it unless
-  `VOUCHRYX_KEYRYX_ROOT_PIN` names the kids of keyryx's delegation root. vouchryx 0.6.0
-  refuses any keyryx variable while the signer is not keyryx, so the keyryx variables pass
+  v0.6.1, which reads `keyryx` and refuses to start with it unless
+  `VOUCHRYX_KEYRYX_ROOT_PIN` names the kids of keyryx's delegation root. vouchryx 0.6.0 and later
+  refuse any keyryx variable while the signer is not keyryx, so the keyryx variables pass
   through from `.env` and are empty by default. Turning the switch on by hand takes
   `VOUCHRYX_SIGNER=keyryx`, the keyryx variables and the root pin in `.env`. The installer
   does not turn it on, and this launcher has not run that mode.
@@ -991,7 +991,7 @@ What is wired now, and what is not:
 - **checkpoints** are not written yet: no producer signs one. The witness checks each
   stream against the bytes it saw before, and it reads the checkpoints once a producer
   has written some.
-- **the witness's findings are mailed** by heraldyx (pin `v0.8.0`, the first release
+- **the witness's findings are mailed** by heraldyx (pin `v0.8.2`; v0.8.0 is the first release
   that renders the keyryx source), at `ALERT_MIN_SEVERITY`, `high` by default; the
   medium ones go in the digest. heraldyx reads them through a read-only mount.
 - **the console shows them** as incidents: the console pinned here (v1.7.0) reads
@@ -1319,7 +1319,7 @@ post, never what Jev said.
 
 **The opt-in training log.** `@decided 2026-09-30`: typryx can keep a local
 training log, off by default. typryx v0.3.0 is the first release that has it and
-this launcher pins typryx v0.5.0, so it is there. Switch it on with `TYPED_TRAINING=1` next to any typed mode
+this launcher pins typryx v0.5.1, so it is there. Switch it on with `TYPED_TRAINING=1` next to any typed mode
 (`WITH_TYPED=1`, `TYPED_MODE=jev` or `TYPED_MODE=own-model`):
 
 ```bash
@@ -1460,7 +1460,7 @@ A profile in `compose.yaml` that is in neither list, or in both, is refused by t
 
 Every image the stack runs is pinned to the digest of the bytes it names. The
 tag stays beside it for reading. A tag can be moved by whoever controls the
-registry; a digest cannot, so a box running `wardryx:v2.3.0@sha256:eaa8...` runs
+registry; a digest cannot, so a box running `wardryx:v2.4.1@sha256:a7ef...` runs
 that build and nothing else.
 
 The images this project publishes (`ghcr.io/taipanbox/...`) are also signed,
