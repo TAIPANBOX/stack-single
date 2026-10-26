@@ -581,7 +581,7 @@ run_case "manifest-is-true: a routine arrives and the manifest does not claim it
 # is one character in one tag, which is exactly how it would arrive.
 run_case "manifest-is-true: a pulled tag moves in compose and not in the manifest" fail \
 	'./scripts/manifest-is-true.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.3.0", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.4.1", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
 	"an image it pulls"
 
 # invariant 15: the delegation plane's default is byte-for-byte what it was
@@ -816,17 +816,17 @@ run_case "typed-data-mode: no volume is mounted where the training log lives" fa
 
 run_case "typed-data-mode: compose still pins a typryx older than the pin" fail \
 	'./scripts/typed-data-mode.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/typryx:v0.5.0@sha256:c9278289b3722d3e89fd90f4834666c295ee0c83b4b014c0df160500f2b57a20}", "ghcr.io/taipanbox/typryx:v0.2.0}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/typryx:v0.5.1@sha256:4b29e110e91945c6324a1f16030d7fe9300f46a1f811fe14ecf7a4ce09a882fa}", "ghcr.io/taipanbox/typryx:v0.2.0}")')" \
 	"compose.yaml pins typryx v0.2.0"
 
 run_case "typed-data-mode: components.json keeps the old typryx pin" fail \
 	'./scripts/typed-data-mode.sh' \
-	"$(py 'edit("components.json", "ghcr.io/taipanbox/typryx:v0.5.0", "ghcr.io/taipanbox/typryx:v0.2.0")')" \
+	"$(py 'edit("components.json", "ghcr.io/taipanbox/typryx:v0.5.1", "ghcr.io/taipanbox/typryx:v0.2.0")')" \
 	"components.json names typryx:v0.2.0"
 
 run_case "typed-data-mode: the README names a typryx tag compose does not pin" fail \
 	'./scripts/typed-data-mode.sh' \
-	"$(py 'edit("README.md", "this launcher pins typryx v0.5.0, so it is there", "this launcher pins ghcr.io/taipanbox/typryx:v0.2.0, so it is there")')" \
+	"$(py 'edit("README.md", "this launcher pins typryx v0.5.1, so it is there", "this launcher pins ghcr.io/taipanbox/typryx:v0.2.0, so it is there")')" \
 	"README.md names typryx:v0.2.0"
 
 # ---- run-budget-ceiling (invariant 20): tokenfuse 1.5.0's ceiling is OFF unless
@@ -1524,17 +1524,17 @@ open("README.md", "w").write(s.replace("when_absent: hold", "when_absent_gone: h
 
 run_case "typed-risk-signal: typryx is pinned before the proxy existed" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/typryx:v0.5.0@sha256:c9278289b3722d3e89fd90f4834666c295ee0c83b4b014c0df160500f2b57a20}", "ghcr.io/taipanbox/typryx:v0.3.0}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/typryx:v0.5.1@sha256:4b29e110e91945c6324a1f16030d7fe9300f46a1f811fe14ecf7a4ce09a882fa}", "ghcr.io/taipanbox/typryx:v0.3.0}")')" \
 	"the proxy (wardryx-proxy) does not exist before it"
 
 run_case "typed-risk-signal: wardryx is pinned before it read signals" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.3.0@sha256:eaa8cff9fe3722f7040e9f9b3aac2f57c5e66afb7a012a0eda1a62e63b647543}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.4.1@sha256:a7ef8e2df49c96eee39094451094f825aa46abb519955c8f0f2a0ffc33dde4dc}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
 	"hold_if_signal and signals on /v1/decide do not exist before it"
 
 run_case "typed-risk-signal: wardryx is pinned before when_absent" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.3.0@sha256:eaa8cff9fe3722f7040e9f9b3aac2f57c5e66afb7a012a0eda1a62e63b647543}", "ghcr.io/taipanbox/wardryx:v1.3.2}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.4.1@sha256:a7ef8e2df49c96eee39094451094f825aa46abb519955c8f0f2a0ffc33dde4dc}", "ghcr.io/taipanbox/wardryx:v1.3.2}")')" \
 	"needs v1.4.0 or later"
 
 run_case "typed-risk-signal: tokenfuse is pinned before it sent the tool call" fail \
@@ -1835,12 +1835,12 @@ run_case "bus-has-a-writer: the OpenAI door's file is not pre-created" fail \
 
 run_case "bus-names: the idryx pin goes back before the OpenAI door's row" fail \
 	'./scripts/bus-names-match-their-source.sh' \
-	"$(py 'edit_all("compose.yaml", "ghcr.io/taipanbox/idryx:v1.3.0", "ghcr.io/taipanbox/idryx:v1.1.0")')" \
+	"$(py 'edit_all("compose.yaml", "ghcr.io/taipanbox/idryx:v1.3.1", "ghcr.io/taipanbox/idryx:v1.1.0")')" \
 	"older than v1.2.0"
 
 run_case "bus-names: the heraldyx pin goes back before the OpenAI door's row" fail \
 	'./scripts/bus-names-match-their-source.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/heraldyx:v0.8.0", "ghcr.io/taipanbox/heraldyx:v0.4.0")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/heraldyx:v0.8.2", "ghcr.io/taipanbox/heraldyx:v0.4.0")')" \
 	"older than v0.5.0"
 
 echo "=== and what they must NOT catch ==="
@@ -2180,7 +2180,7 @@ edit("compose.yaml", "      typryx:\n        condition: service_started", "     
 run_case "typed-data-mode: compose names no typryx image to read a pin from" fail \
 	'./scripts/typed-data-mode.sh' \
 	"$(py 's = open("compose.yaml").read()
-a = "image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.5.0@sha256:c9278289b3722d3e89fd90f4834666c295ee0c83b4b014c0df160500f2b57a20}"
+a = "image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.5.1@sha256:4b29e110e91945c6324a1f16030d7fe9300f46a1f811fe14ecf7a4ce09a882fa}"
 assert s.count(a) == 2, "expected the typryx service and the risk-signal proxy to name the image"
 open("compose.yaml", "w").write(s.replace(a, "image: ${TYPRYX_IMAGE:-registry.invalid/typryx}"))')" \
 	"names no ghcr.io/taipanbox/typryx"
@@ -3288,7 +3288,7 @@ run_case "bus-names: the witness's findings file loses its keyryx stem" fail \
 
 run_case "bus-names: the heraldyx pin goes back before the keyryx source" fail \
 	'./scripts/bus-names-match-their-source.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/heraldyx:v0.8.0@", "ghcr.io/taipanbox/heraldyx:v0.7.0@")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/heraldyx:v0.8.2@", "ghcr.io/taipanbox/heraldyx:v0.7.0@")')" \
 	"keyryx.ndjson is on this bus and compose.yaml pins heraldyx v0.7.0"
 
 
@@ -3310,7 +3310,7 @@ run_case "images-are-digest-pinned: the third-party postgres loses its digest" f
 
 run_case "images-are-digest-pinned: the installer names a digest compose does not run" fail \
 	'./scripts/images-are-digest-pinned.sh' \
-	"$(py 'edit_all("install.sh", "4a2b6b31be44b5391974785bdfca597a88bcc5ddd834d50830bd6b9537e9ab3d", "1111111111111111111111111111111111111111111111111111111111111111")')" \
+	"$(py 'edit_all("install.sh", "be093cd2c03d1c890f3efa387a453fc702b23c80cebbe5f44fae303c51688159", "1111111111111111111111111111111111111111111111111111111111111111")')" \
 	"pinned to a digest compose.yaml does not run"
 
 run_case "images-are-digest-pinned: no image line left to judge" fail \

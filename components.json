@@ -112,19 +112,19 @@
           "ghcr.io/taipanbox/agent-conform:v2.0.1@sha256:445608e976247b94f4c3877541fdd4ae3f2aa623b18365ee7215a99f75b85e4c",
           "ghcr.io/taipanbox/costcrew:v0.10.0@sha256:26316b1c99706529a4589a328b2ddd3fc5f4db4cf0b5a46466e8be1ddd8f0de9",
           "ghcr.io/taipanbox/genaryx-console:v1.7.0@sha256:2ceefbba80cf08924d60769ffeec07989e198445af998c3612c1b3e25708b144",
-          "ghcr.io/taipanbox/heraldyx:v0.8.0@sha256:8b4b60f61d0778e473d3a88df1bd63ea5eeb67428754fa341cf23051766b40b5",
-          "ghcr.io/taipanbox/idryx:v1.3.0@sha256:aa1ee80aeafcb35beaf9fc115081570fcbd13507e1299541148527f4600dc96d",
-          "ghcr.io/taipanbox/keyryx:v0.1.1@sha256:a9f88c44b62545555baffa19e3ace4b9c699c69c3a4aadbae28089aa2b29eb51",
-          "ghcr.io/taipanbox/scopyx:v1.1.0@sha256:f39bfa548e43d461667fc371f5738f9f34f6e58bd297702c8f49d4f667c7789d",
-          "ghcr.io/taipanbox/scopyx:v1.1.0-chromium@sha256:b9aa4ba69f57cb079bdebe2add99f14ebca3cdd7499e223a50e7abed88ac4bce",
+          "ghcr.io/taipanbox/heraldyx:v0.8.2@sha256:0866768529c5115b829bbf52c34e6d9a7ec442babbd222fe54a081533506da61",
+          "ghcr.io/taipanbox/idryx:v1.3.1@sha256:7333f5e9bef5dc924cfc05b5b24a9307db83e96dfdcc6fbfe32267f057f6efb9",
+          "ghcr.io/taipanbox/keyryx:v0.1.3@sha256:26d5d49cd4a67eb463f35895de96e628e2304183775bf031170e190c579c0147",
+          "ghcr.io/taipanbox/scopyx:v1.1.1@sha256:fdd9a90ba054c27a0dae6c3893a676d2048a64133588fa04bc786bff3ffd58de",
+          "ghcr.io/taipanbox/scopyx:v1.1.1-chromium@sha256:b7da6b6d5418978735b23f4a00ef44f924e516630fe9caa585256889d050663a",
           "ghcr.io/taipanbox/stack-caddy:v1.1.48@sha256:9d34959511379ca45c37e93fe320d1e0fa2fe4412e7954e6e7b4a333e448d0b4",
           "ghcr.io/taipanbox/stack-wg:v1.1.48@sha256:b4a8d7716abc16d0be0dd4499e1e6d19ce9c558c67158a157d6b7829a52e3d2a",
           "ghcr.io/taipanbox/tokenfuse-control-plane:v1.19.0@sha256:201f4dc7faf556f16038a5cc380f5945dc7b87b79a8ab7940402988844b17949",
           "ghcr.io/taipanbox/tokenfuse:v1.19.0@sha256:32139654fc63ebc3026720413f1a9c16f07fb2507509714d946f50ffcf2a2434",
           "ghcr.io/taipanbox/trailryx-node:v1.4.0@sha256:79da026eab19b2b8ade994cbb65850b39f644c4b632edf1de411f70bddd047d3",
-          "ghcr.io/taipanbox/typryx:v0.5.0@sha256:c9278289b3722d3e89fd90f4834666c295ee0c83b4b014c0df160500f2b57a20",
-          "ghcr.io/taipanbox/vouchryx:v0.6.0@sha256:4a2b6b31be44b5391974785bdfca597a88bcc5ddd834d50830bd6b9537e9ab3d",
-          "ghcr.io/taipanbox/wardryx:v2.3.0@sha256:eaa8cff9fe3722f7040e9f9b3aac2f57c5e66afb7a012a0eda1a62e63b647543"
+          "ghcr.io/taipanbox/typryx:v0.5.1@sha256:4b29e110e91945c6324a1f16030d7fe9300f46a1f811fe14ecf7a4ce09a882fa",
+          "ghcr.io/taipanbox/vouchryx:v0.6.1@sha256:be093cd2c03d1c890f3efa387a453fc702b23c80cebbe5f44fae303c51688159",
+          "ghcr.io/taipanbox/wardryx:v2.4.1@sha256:a7ef8e2df49c96eee39094451094f825aa46abb519955c8f0f2a0ffc33dde4dc"
         ]
       },
       "declared": {
