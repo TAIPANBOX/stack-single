@@ -136,5 +136,8 @@ jobs:
       # that starts writing into the checkout. Two of its cases mutate a copy
       # of the stack-k8s tree, which it fetches the same way the gate above
       # does when there is no sibling checkout.
+      - name: no installer message prints a key or secret value
+        run: ./scripts/no-key-in-a-message.sh
+
       - name: the gates above can still fail
         run: ./scripts/gates-have-teeth.sh

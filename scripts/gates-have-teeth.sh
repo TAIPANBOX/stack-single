@@ -681,6 +681,11 @@ run_case "typed-data-mode: a refusal echoes the key it was given" fail \
 	"$(py 'edit("install.sh", "die \"TYPED_MODE=jev: TYPED_JEV_KEY_FILE does not name", "die \"TYPED_MODE=jev: TYPED_JEV_KEY_FILE=$TYPED_JEV_KEY_FILE does not name")')" \
 	"echoed the key it was given"
 
+run_case "no-key-in-a-message: a note names the client keys file by its contents" fail \
+	'./scripts/no-key-in-a-message.sh' \
+	"$(py 'edit("install.sh", "to the file named by CLIENT_KEYS_FILE (its mode is kept", "to $CLIENT_KEYS_FILE (its mode is kept")')" \
+	"expands"
+
 run_case "typed-data-mode: installing the key prints it" fail \
 	'./scripts/typed-data-mode.sh' \
 	"$(py 'edit("install.sh", "note \"key file installed at $dir/$2 (read only; its contents are never shown)\"", "note \"key file installed at $dir/$2: $(cat \"$1\")\"")')" \
@@ -1420,7 +1425,7 @@ run_case "chain-verifier: its root filesystem becomes writable" fail \
 
 run_case "chain-verifier: its image is unpinned" fail \
 	'./scripts/chain-verifier-is-contained.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/agent-conform:v2.0.1@sha256:445608e976247b94f4c3877541fdd4ae3f2aa623b18365ee7215a99f75b85e4c}", "ghcr.io/taipanbox/agent-conform:latest}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/agent-conform:v2.0.2@sha256:65c0c1ef78effe96f09c5684a203616fed396375e182bedb142a5beaa178b713}", "ghcr.io/taipanbox/agent-conform:latest}")')" \
 	"is not pinned to a released"
 
 run_case "chain-verifier: its loop is removed" fail \
@@ -1430,7 +1435,7 @@ run_case "chain-verifier: its loop is removed" fail \
 
 run_case "chain-verifier: no verifier service left to judge" fail \
 	'./scripts/chain-verifier-is-contained.sh' \
-	"$(py 'edit("compose.yaml", "${AGENT_CONFORM_IMAGE:-ghcr.io/taipanbox/agent-conform:v2.0.1@sha256:445608e976247b94f4c3877541fdd4ae3f2aa623b18365ee7215a99f75b85e4c}", "${AGENT_CONFORM_IMAGE:-registry.invalid/agent-conform}")')" \
+	"$(py 'edit("compose.yaml", "${AGENT_CONFORM_IMAGE:-ghcr.io/taipanbox/agent-conform:v2.0.2@sha256:65c0c1ef78effe96f09c5684a203616fed396375e182bedb142a5beaa178b713}", "${AGENT_CONFORM_IMAGE:-registry.invalid/agent-conform}")')" \
 	"measured NOTHING about the chain verifier"
 
 # The bus gate's own half: a shared volume is written through ONE FILE a service
@@ -1539,7 +1544,7 @@ run_case "typed-risk-signal: wardryx is pinned before when_absent" fail \
 
 run_case "typed-risk-signal: tokenfuse is pinned before it sent the tool call" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/tokenfuse:v1.20.1@sha256:8de459eca2a10ae36a01d0249b91c3b0c62b50b47ad2c4a309e2ea02e0a460dd}", "ghcr.io/taipanbox/tokenfuse:v1.4.1}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/tokenfuse:v1.20.3@sha256:2b82c87733a8165922f8f6c737a1d19bc0e0156335e88db6c190b17cc2a4a484}", "ghcr.io/taipanbox/tokenfuse:v1.4.1}")')" \
 	"the broker sends no tool_call to the policy plane before it"
 
 run_case "typed-risk-signal: install.sh starts the proxy profile unconditionally" fail \
@@ -3295,12 +3300,12 @@ run_case "bus-names: the heraldyx pin goes back before the keyryx source" fail \
 # ---- images-are-digest-pinned and images-are-verified (CLAUDE.md invariant 44) --
 run_case "images-are-digest-pinned: a published image loses its digest" fail \
 	'./scripts/images-are-digest-pinned.sh' \
-	"$(py 'edit("compose.yaml", "trailryx-node:v1.4.0@sha256:79da026eab19b2b8ade994cbb65850b39f644c4b632edf1de411f70bddd047d3}", "trailryx-node:v1.4.0}")')" \
-	"trailryx-node:v1.4.0 is not pinned"
+	"$(py 'edit("compose.yaml", "trailryx-node:v1.5.0@sha256:f15215cd9708724e83fbd8493f2bf7d2a11980b37edf3b887081d8e17da18bab}", "trailryx-node:v1.5.0}")')" \
+	"trailryx-node:v1.5.0 is not pinned"
 
 run_case "images-are-digest-pinned: a digest is cut short" fail \
 	'./scripts/images-are-digest-pinned.sh' \
-	"$(py 'edit("compose.yaml", "trailryx-node:v1.4.0@sha256:79da026eab19b2b8ade994cbb65850b39f644c4b632edf1de411f70bddd047d3}", "trailryx-node:v1.4.0@sha256:ab305ac6a65444e08090b56d6f666498b56d560f7351c96a8a84137ece9e6d3}")')" \
+	"$(py 'edit("compose.yaml", "trailryx-node:v1.5.0@sha256:f15215cd9708724e83fbd8493f2bf7d2a11980b37edf3b887081d8e17da18bab}", "trailryx-node:v1.5.0@sha256:ab305ac6a65444e08090b56d6f666498b56d560f7351c96a8a84137ece9e6d3}")')" \
 	"is not pinned by a full sha256 digest"
 
 run_case "images-are-digest-pinned: the third-party postgres loses its digest" fail \

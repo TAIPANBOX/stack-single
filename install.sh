@@ -1932,7 +1932,7 @@ upstream_resolve() {
   case "${GATEWAY_HOLDS_COPILOT_KEY:-0}" in
     1) UP_ADOPT_COPILOT=1 ;;
     0|"") ;;
-    *) die "GATEWAY_HOLDS_COPILOT_KEY is 1 or unset, not '${GATEWAY_HOLDS_COPILOT_KEY}'. Nothing was installed." ;;
+    *) die "GATEWAY_HOLDS_COPILOT_KEY must be 1 or unset, and the value it holds is not printed. Nothing was installed." ;;
   esac
   # Who pays is never changed in silence: Felyx's old key alone, with no key file and no
   # word from the operator, stops the run here, before anything is written.
@@ -2156,7 +2156,7 @@ agent_tokens_resolve() {
       die "this box gave its own CLIENT_KEYS_FILE, and the MCP broker needs its own key in it, as a line '<secret>:broker' (the secret, a colon, then the word broker), bound in your identity map to agent://$td/agents/*. Add that line yourself, or set ADD_BROKER_KEY=1 and the installer mints the secret and appends the line, keeping the file's mode. Or WITH_AGENT_TOKENS=0 keeps static keys only (the weaker way out). Nothing was installed."
     fi
     if [ -n "${IDENTITY_MAP_FILE:-}" ] && ! identity_map_binds_broker "$IDENTITY_MAP_FILE"; then
-      die "your identity map does not bind key_id broker. Add a keys[] entry with key_id broker and agents agent://$td/agents/* to $IDENTITY_MAP_FILE, then run again. Nothing was installed."
+      die "your identity map does not bind key_id broker. Add a keys[] entry with key_id broker and agents agent://$td/agents/* to the file named by IDENTITY_MAP_FILE, then run again. Nothing was installed."
     fi
     # The operator agent is enrolled at vouchryx in unit agents, and the gateway refuses its token as
     # unit_contradicts_map unless the map binds that agent in the same unit. Measured on forge 2026-10-25: a map
@@ -2254,11 +2254,11 @@ agent_tokens_apply() {
       add)
         broker="$(gen 40)"
         if [ -s "$CLIENT_KEYS_FILE" ] && [ -n "$(tail -c1 "$CLIENT_KEYS_FILE")" ]; then
-          printf '\n' >>"$CLIENT_KEYS_FILE" || die "could not add to $CLIENT_KEYS_FILE. Nothing was started."
+          printf '\n' >>"$CLIENT_KEYS_FILE" || die "could not add to the file named by CLIENT_KEYS_FILE. Nothing was started."
         fi
         printf '%s:broker\n' "$broker" >>"$CLIENT_KEYS_FILE" \
-          || die "could not append the broker's line to $CLIENT_KEYS_FILE. Nothing was started."
-        note "ADD_BROKER_KEY=1: appended the broker's line to $CLIENT_KEYS_FILE (its mode is kept, the secret is never printed)"
+          || die "could not append the broker's line to the file named by CLIENT_KEYS_FILE. Nothing was started."
+        note "ADD_BROKER_KEY=1: appended the broker's line to the file named by CLIENT_KEYS_FILE (its mode is kept, the secret is never printed)"
         # identity_resolve read the keys file before this line was in it, and section 3e checks the map
         # against what it read, so the line joins those keys too, as the minted broker key does. Measured on
         # forge 2026-10-25: without it the run appended the line, then refused its own map's broker binding.
