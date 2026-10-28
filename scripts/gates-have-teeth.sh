@@ -1420,7 +1420,7 @@ run_case "chain-verifier: its root filesystem becomes writable" fail \
 
 run_case "chain-verifier: its image is unpinned" fail \
 	'./scripts/chain-verifier-is-contained.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/agent-conform:v2.0.1@sha256:445608e976247b94f4c3877541fdd4ae3f2aa623b18365ee7215a99f75b85e4c}", "ghcr.io/taipanbox/agent-conform:latest}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/agent-conform:v2.0.2@sha256:65c0c1ef78effe96f09c5684a203616fed396375e182bedb142a5beaa178b713}", "ghcr.io/taipanbox/agent-conform:latest}")')" \
 	"is not pinned to a released"
 
 run_case "chain-verifier: its loop is removed" fail \
@@ -1430,7 +1430,7 @@ run_case "chain-verifier: its loop is removed" fail \
 
 run_case "chain-verifier: no verifier service left to judge" fail \
 	'./scripts/chain-verifier-is-contained.sh' \
-	"$(py 'edit("compose.yaml", "${AGENT_CONFORM_IMAGE:-ghcr.io/taipanbox/agent-conform:v2.0.1@sha256:445608e976247b94f4c3877541fdd4ae3f2aa623b18365ee7215a99f75b85e4c}", "${AGENT_CONFORM_IMAGE:-registry.invalid/agent-conform}")')" \
+	"$(py 'edit("compose.yaml", "${AGENT_CONFORM_IMAGE:-ghcr.io/taipanbox/agent-conform:v2.0.2@sha256:65c0c1ef78effe96f09c5684a203616fed396375e182bedb142a5beaa178b713}", "${AGENT_CONFORM_IMAGE:-registry.invalid/agent-conform}")')" \
 	"measured NOTHING about the chain verifier"
 
 # The bus gate's own half: a shared volume is written through ONE FILE a service

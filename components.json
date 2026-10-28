@@ -109,7 +109,7 @@
           "stack/wg:dev"
         ],
         "pulls_images": [
-          "ghcr.io/taipanbox/agent-conform:v2.0.1@sha256:445608e976247b94f4c3877541fdd4ae3f2aa623b18365ee7215a99f75b85e4c",
+          "ghcr.io/taipanbox/agent-conform:v2.0.2@sha256:65c0c1ef78effe96f09c5684a203616fed396375e182bedb142a5beaa178b713",
           "ghcr.io/taipanbox/costcrew:v0.10.0@sha256:26316b1c99706529a4589a328b2ddd3fc5f4db4cf0b5a46466e8be1ddd8f0de9",
           "ghcr.io/taipanbox/genaryx-console:v1.7.3@sha256:0db4758c9f3dd2231184063af4f80bce491480f6d7238c02bcbac83abb8d708a",
           "ghcr.io/taipanbox/heraldyx:v0.8.2@sha256:0866768529c5115b829bbf52c34e6d9a7ec442babbd222fe54a081533506da61",
