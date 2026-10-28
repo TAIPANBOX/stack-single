@@ -861,7 +861,7 @@ services:
   tokenfuse-mcp-broker:
     <<: *restart
     profiles: ["typed"]
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.20.2@sha256:a7462174b4d5e312dc3f177700d140c92090bf7bd4af8c3185f09fbfafb556af}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.20.3@sha256:2b82c87733a8165922f8f6c737a1d19bc0e0156335e88db6c190b17cc2a4a484}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20012:10001"
@@ -1168,7 +1168,7 @@ services:
   # ---- money: the control API ----------------------------------------------
   tokenfuse-cloud:
     <<: *restart
-    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v1.20.2@sha256:4eb1723763796ee8df19dd427296c6fe84fbda539b47c71c83ff6f56f9fad5c4}
+    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v1.20.3@sha256:64b9476edeced2c4436d4a5f5bfcbb78b0217f1d85c75af4ec045e21475fe07e}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20013:10001"
@@ -1214,7 +1214,7 @@ services:
   # gets a hard refusal rather than a log line.
   tokenfuse-gateway:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.20.2@sha256:a7462174b4d5e312dc3f177700d140c92090bf7bd4af8c3185f09fbfafb556af}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.20.3@sha256:2b82c87733a8165922f8f6c737a1d19bc0e0156335e88db6c190b17cc2a4a484}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20010:10001"
@@ -1450,7 +1450,7 @@ services:
   #     reading of the variables being absent.
   tokenfuse-gateway-openai:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.20.2@sha256:a7462174b4d5e312dc3f177700d140c92090bf7bd4af8c3185f09fbfafb556af}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.20.3@sha256:2b82c87733a8165922f8f6c737a1d19bc0e0156335e88db6c190b17cc2a4a484}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20011:10001"
@@ -1860,7 +1860,7 @@ services:
   # The sixth, trailryx-seal, is the `record` profile above.
   focus-export:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.20.2@sha256:a7462174b4d5e312dc3f177700d140c92090bf7bd4af8c3185f09fbfafb556af}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.20.3@sha256:2b82c87733a8165922f8f6c737a1d19bc0e0156335e88db6c190b17cc2a4a484}
     networks:
       - core
     user: "10001:10001"

@@ -1710,7 +1710,7 @@ into `./closure/secret`, readable only by the console. Nothing prints it, and a
 re-run keeps it. To turn closing off again, remove `CLOSURE_SECRET` and
 `CLOSURE_SECRET_FILE` from `.env` and run `docker compose up -d`.
 
-It needs tokenfuse v1.9.0 or later and console v1.1.34 or later. The images pinned here are tokenfuse v1.20.2 and
+It needs tokenfuse v1.9.0 or later and console v1.1.34 or later. The images pinned here are tokenfuse v1.20.3 and
 console v1.7.3; an older image ignores the setting.
 
 ## The console
