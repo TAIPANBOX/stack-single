@@ -681,6 +681,11 @@ run_case "typed-data-mode: a refusal echoes the key it was given" fail \
 	"$(py 'edit("install.sh", "die \"TYPED_MODE=jev: TYPED_JEV_KEY_FILE does not name", "die \"TYPED_MODE=jev: TYPED_JEV_KEY_FILE=$TYPED_JEV_KEY_FILE does not name")')" \
 	"echoed the key it was given"
 
+run_case "no-key-in-a-message: a note names the client keys file by its contents" fail \
+	'./scripts/no-key-in-a-message.sh' \
+	"$(py 'edit("install.sh", "to the file named by CLIENT_KEYS_FILE (its mode is kept", "to $CLIENT_KEYS_FILE (its mode is kept")')" \
+	"expands"
+
 run_case "typed-data-mode: installing the key prints it" fail \
 	'./scripts/typed-data-mode.sh' \
 	"$(py 'edit("install.sh", "note \"key file installed at $dir/$2 (read only; its contents are never shown)\"", "note \"key file installed at $dir/$2: $(cat \"$1\")\"")')" \

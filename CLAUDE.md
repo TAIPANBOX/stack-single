@@ -90,6 +90,7 @@ change here is a change to something with root on somebody else's box.
 ./scripts/profiles-off-are-removed.sh
 ./scripts/record-plane-is-on-by-default.sh
 ./scripts/costcrew-can-reach-its-stream.sh
+./scripts/no-key-in-a-message.sh
 ./scripts/gates-have-teeth.sh   # invariant 8; needs a clean tree
 ```
 

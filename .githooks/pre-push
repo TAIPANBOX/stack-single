@@ -76,6 +76,7 @@ step "the Keyryx witness is a process apart from custody" "./scripts/witness-is-
 step "the witness's findings reach heraldyx and the console read only, and the witness never writes the bus (invariant 54)" "./scripts/keyryx-alerts-reach-readers.sh"
 step "every image this launcher runs is pinned by digest (invariant 44)" "./scripts/images-are-digest-pinned.sh"
 step "every TAIPANBOX image is signature-checked before it is pulled (invariant 44)" "./scripts/images-are-verified.sh"
+step "no installer message prints a key or secret value" "./scripts/no-key-in-a-message.sh"
 step "no credential reaches an argument list (invariant 46)" "./scripts/no-secret-on-argv.sh"
 step "the broker's line is in the keys file the box was given (invariant 48)" "./scripts/broker-key-is-the-keys-file-line.sh"
 step "every read-write volume is re-owned to its uid on every up (invariant 49)" "./scripts/volumes-are-reowned.sh"
