@@ -90,6 +90,7 @@ change here is a change to something with root on somebody else's box.
 ./scripts/profiles-off-are-removed.sh
 ./scripts/record-plane-is-on-by-default.sh
 ./scripts/costcrew-can-reach-its-stream.sh
+./scripts/scopyx-reads-go-through-the-broker.sh
 ./scripts/no-key-in-a-message.sh
 ./scripts/gates-have-teeth.sh   # invariant 8; needs a clean tree
 ```
@@ -1360,13 +1361,14 @@ an absent invariant.
     `@claude 2026-10-18`: the networks are declared in compose.yaml. `edge` is
     the one network with a route out, and its members are the services that need
     the internet, listed in `scripts/network-membership.sh`. `agents` is internal
-    and holds only the doors (the two gateways and the MCP broker), scopyx, the
-    browser, the console and costcrew. `core` is internal and holds the planes.
+    and holds only the doors (the two gateways and the MCP broker), the console
+    and costcrew; since invariant 55 neither scopyx nor the browser is on it. `core` is internal and holds the planes.
     `risk-signal` is internal, as it was in use, now declared so. `front` is not
     internal and has masquerade off, so a published port reaches the host without
-    a route out. The browser is on `agents`, `edge` and `browser-policy`, not on
+    a route out. The browser is on `browser-broker`, `edge` and `browser-policy`, not on
     `core`; `browser-policy` is internal and holds exactly scopyx-browser and
-    wardryx, the browser's one path to a decision. typryx and
+    wardryx, the browser's one path to a decision, and `browser-broker` is
+    internal and holds exactly scopyx-browser and the MCP broker. typryx and
     its risk-signal proxy also get `edge`, through `compose.override.yaml`, only
     when `TYPED_MODE` is `jev` or `own-model`; install.sh writes that file and no
     other. The host firewall is not touched (design decision D6 a).
@@ -1718,6 +1720,38 @@ an absent invariant.
     was not run; the chain verifier and the record plane, which read the bus only and so
     neither check the findings file's own chain nor seal it; and a box upgraded from the
     earlier layout, whose old `alerts.ndjson` stays on the witness's state volume, unread.)*
+
+55. **A read of the web by an agent passes the MCP broker in front of scopyx, which labels the run from the act, and no agent holds the key that opens scopyx.**
+    `@claude 2026-11-04`, from the G2.1 entry of the estate gap list and the task that asked for the wiring: until
+    tokenfuse 1.21.0 the `web` label of a run came from a tool name the agent reported, so a fetch under a name the
+    policy trusted carried no label. From 1.21.0 the broker reports the act (`POST /v1/fuse/observed-act`, tokenfuse
+    invariant 143) after a classified upstream answered, which only holds if the read cannot go round the broker.
+    So the broker runs under `typed` and both egress profiles, names scopyx as an upstream
+    (`TOKENFUSE_MCP_UPSTREAMS`, `scopyx=http://scopyx:4300`) and classifies it `scopyx=web`. The classification is
+    `TOKENFUSE_MCP_UPSTREAM_LABELS: ${BROKER_UPSTREAM_LABELS:-}` and not a literal: the broker exits 2 on a
+    classification with no taint gateway, and a box with agent tokens off has none (`BROKER_TAINT_GATEWAY` and
+    `BROKER_GATEWAY_KEY_FILE` are written, and forgotten, with the agent tokens), so install.sh writes
+    `BROKER_UPSTREAM_LABELS` in the same function and forgets it in the same list, and a box with the typed plane and
+    agent tokens off keeps its broker. Scopyx and the browser take the key in `params._meta`
+    (`SCOPYX_ACCEPT_KEY_IN_META`, scopyx 1.2.0), are on no network an agent is on, and the browser answers to the
+    name `scopyx` on `browser-broker`, an internal network of the browser and the broker. One scopyx key per agent
+    is in the broker's vault as `scopyx_key_<agent>`, scoped to `agents:<that agent>;tools:browse|fetch_url`, and in
+    scopyx's list as `<key>=<agent>`; this installer enrols one agent, so it writes one, keeps it on a re-run and
+    moves the agent and the scope with the trust domain. An agent calls the broker with
+    `X-Fuse-Mcp-Upstream: scopyx`, `x-fuse-run-id` and `"_meta": {"scopyx/key": "{{secret:scopyx_key_<agent>}}"}`
+    (README, "How an agent reads the web"). `WITH_EGRESS` or `WITH_BROWSER` with `WITH_AGENT_TOKENS=0` is refused
+    before anything is installed: the broker's gateway key exists only with agent tokens. The broker is in `typed`
+    and in two operator-started profiles, so `profiles_off_remove` leaves it when an operator profile with a
+    service of its own running owns it, and starts it with that profile.
+    *(partly gated: `scripts/scopyx-reads-go-through-the-broker.sh` holds the broker's profiles, upstream,
+    classification, scopes and soft typryx dependency; the key in `params._meta` on both scopyx services and neither
+    on `agents`; the installer's labels written and forgotten with the taint gateway; the real `agent_tokens_resolve`
+    refusing egress with agent tokens off; and the lifted `# scopyx-broker-keys:` block run on scratch `.env` files
+    (fresh, second run byte for byte, changed trust domain, tokens off, a key already held, a bad key). The networks
+    are held by `scripts/network-membership.sh` and the profile rule by `scripts/profiles-off-are-removed.sh`;
+    scenarios in `features/a-read-of-the-web-passes-the-broker.feature`; teeth in `scripts/gates-have-teeth.sh`,
+    the cases named "scopyx-broker" and four of "network-membership" and three of "profiles-off-are-removed". The
+    label a fetch earns on a running stack is held by tokenfuse's own suite (its invariant 143).)*
 
 ## Decisions that have no gate yet
 

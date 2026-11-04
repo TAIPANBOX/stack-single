@@ -11,8 +11,9 @@
 # budget and the policy were all bypassable by one connection (findings F-014,
 # the 2026-10-17 review). The fix is topology, not a rule inside a service:
 # agent-facing services sit on an internal network whose only doors are the
-# gateways and scopyx, and the few services that need the internet sit on the
-# one network with a route out. That is only true if nothing drifts, so this
+# gateways and the MCP broker (scopyx is behind the broker since G2.1, so a read
+# of the web is labelled from the act), and the few services that need the
+# internet sit on the one network with a route out. That is only true if nothing drifts, so this
 # gate reads the resolved configuration and compares it with the table below.
 #
 # THE TABLE IS THE SPEC
@@ -82,11 +83,11 @@ TABLE = {
     "idryx": {"core"},
     "heraldyx": {"edge", "core"},
     "agent-conform": {"core"},
-    "scopyx": {"agents", "core", "edge"},
-    "scopyx-browser": {"agents", "edge", "browser-policy"},
+    "scopyx": {"core", "edge"},
+    "scopyx-browser": {"edge", "browser-policy", "browser-broker"},
     "typryx": {"core"},
     "typryx-wardryx-proxy": {"risk-signal"},
-    "tokenfuse-mcp-broker": {"agents", "core", "risk-signal", "front"},
+    "tokenfuse-mcp-broker": {"agents", "core", "risk-signal", "browser-broker", "front"},
     "vouchryx": {"core"},
     "keyryx": {"core"},
     "keyryx-witness": set(),
@@ -107,12 +108,15 @@ TABLE = {
 OVERRIDE_EDGE = {"typryx": "typed", "typryx-wardryx-proxy": "typed"}
 # the one list of who may be on each network, written out so a reader sees it
 AGENT_FACING = {"tokenfuse-gateway", "tokenfuse-gateway-openai", "tokenfuse-mcp-broker",
-                "scopyx", "scopyx-browser", "console", "costcrew"}
+                "console", "costcrew"}
 FRONT = {"caddy", "console", "costcrew", "tokenfuse-mcp-broker"}
 RISK = {"wardryx", "typryx-wardryx-proxy", "tokenfuse-mcp-broker"}
 # the browser's one path to a decision: scopyx-browser and wardryx, nothing else
 BROWSER_POLICY = {"scopyx-browser", "wardryx"}
-INTERNAL = {"core", "agents", "risk-signal", "browser-policy"}
+# the broker's one path to the browser (G2.1): the browser is not agent-facing, so the
+# broker is the only way a read of the web reaches it
+BROWSER_BROKER = {"scopyx-browser", "tokenfuse-mcp-broker"}
+INTERNAL = {"core", "agents", "risk-signal", "browser-policy", "browser-broker"}
 NETWORKS = INTERNAL | {"edge", "front"}
 
 # ---- the install.sh block that writes the override --------------------------
@@ -236,6 +240,12 @@ if cfg is not None:
         if members("browser-policy") != BROWSER_POLICY:
             bad("browser-policy members are %s, the table lists %s: the browser's only path is wardryx, and nothing else may join it"
                 % (sorted(members("browser-policy")), sorted(BROWSER_POLICY)))
+        if members("browser-broker") != BROWSER_BROKER:
+            bad("browser-broker members are %s, the table lists %s: the broker's only path to the browser, and nothing else may join it"
+                % (sorted(members("browser-broker")), sorted(BROWSER_BROKER)))
+        for n in ("scopyx", "scopyx-browser"):
+            if n in members("agents"):
+                bad("%s is on the agents network: an agent would fetch without the broker, and the run would carry no label from the act" % n)
         plane_on_agents = members("agents") - AGENT_FACING
         for n in sorted(plane_on_agents):
             bad("the agents network holds %s, which is not an agent-facing service" % n)
@@ -245,11 +255,9 @@ if cfg is not None:
             bad("front members are %s, the table lists %s" % (sorted(members("front")), sorted(FRONT)))
         if members("risk-signal") != RISK:
             bad("risk-signal members are %s, the table lists %s" % (sorted(members("risk-signal")), sorted(RISK)))
-        alias = ((svcs.get("scopyx-browser") or {}).get("networks") or {}).get("agents") or {}
+        alias = ((svcs.get("scopyx-browser") or {}).get("networks") or {}).get("browser-broker") or {}
         if "scopyx" not in (alias.get("aliases") or []):
-            bad("scopyx-browser lost the alias scopyx on the agents network, so agents cannot reach it")
-        if "agents" not in ((svcs.get("scopyx-browser") or {}).get("networks") or {}):
-            bad("scopyx-browser is not on the agents network")
+            bad("scopyx-browser lost the alias scopyx on the browser-broker network, so the broker cannot reach it")
 
 # ---- the probes that prove it on a live engine --------------------------------
 sf = os.path.join(root, "install.sh")
@@ -293,5 +301,5 @@ if problems:
 
 print("OK: %d services classified in the table; %d egress cases resolved; networks %s"
       % (len(TABLE), counted, ", ".join(sorted(NETWORKS))))
-print("    the agents network holds only the doors and scopyx (%s)" % ", ".join(sorted(AGENT_FACING)))
+print("    the agents network holds only the doors (%s); scopyx is reached through the broker" % ", ".join(sorted(AGENT_FACING)))
 PY

@@ -2921,7 +2921,7 @@ run_case "network-membership: the egress block is not there" fail \
 
 run_case "network-membership: a reworded comment is not a fault" pass \
 	'./scripts/network-membership.sh' \
-	"$(py 'edit("compose.yaml", "    # Agent-facing, so an agent reaches it under the name `scopyx`; edge,", "    # Agent-facing: an agent reaches it under the name `scopyx`; edge,")')"
+	"$(py 'edit("compose.yaml", "    # Since G2.1 it is NOT agent-facing: the MCP broker reaches it under the name", "    # Since G2.1 it is not agent-facing: the MCP broker reaches it under the name")')"
 
 run_case "network-membership: no services resolve, so nothing was measured" fail \
 	'./scripts/network-membership.sh' \
@@ -3603,13 +3603,13 @@ run_case "agent-tokens-are-wired: a comment in the allow-list block is not a fau
 
 run_case "profiles-off-are-removed: the cleanup names the off profiles by hand and misses finops" fail \
 	'./scripts/profiles-off-are-removed.sh' \
-	"$(py 'edit("install.sh", "  for p in $(\"${COMPOSE[@]}\" config --profiles 2>/dev/null || true); do\n    profile_is_named \"$p\" && continue\n", "  for p in typed-risk-signal openai-door; do\n    profile_is_named \"$p\" && continue\n")')" \
+	"$(py 'edit("install.sh", "  for p in $(\"${COMPOSE[@]}\" config --profiles 2>/dev/null || true); do\n    profile_is_named \"$p\" && continue\n    case \"$(profile_kind \"$p\")\" in", "  for p in typed-risk-signal openai-door; do\n    profile_is_named \"$p\" && continue\n    case \"$(profile_kind \"$p\")\" in")')" \
 	"the stale typryx of profile typed is not removed"
 
 run_case "profiles-off-are-removed: the cleanup removes the containers of a profile this run names, with no shared-service guard" fail \
 	'./scripts/profiles-off-are-removed.sh' \
 	"$(py 'edit("install.sh", "    profile_is_named \"$p\" && continue\n    case \"$(profile_kind \"$p\")\" in", "    case \"$(profile_kind \"$p\")\" in")
-edit("install.sh", "      case \" $named_svcs \" in *\" $s \"*) ;; *) off_list=\"$off_list $s\" ;; esac", "      off_list=\"$off_list $s\"")')" \
+edit("install.sh", "      case \" $named_svcs $live_svcs \" in *\" $s \"*) ;; *) off_list=\"$off_list $s\" ;; esac", "      off_list=\"$off_list $s\"")')" \
 	"C. record-seal belongs to a profile this run names"
 
 run_case "profiles-off-are-removed: a comment in the profile cleanup is not a fault" pass \
@@ -3706,6 +3706,183 @@ run_case "costcrew-can-reach-its-stream: a comment beside the bus directory is n
 	'./scripts/costcrew-can-reach-its-stream.sh' \
 	"$(py 'edit("compose.yaml", "        chown 0:10001 /vol/events && chmod 0751 /vol/events\n", "        # a comment about the bus directory is not a fault\n        chown 0:10001 /vol/events && chmod 0751 /vol/events\n")')" \
 	""
+
+# ---- scopyx-reads-go-through-the-broker (CLAUDE.md invariant 55, G2.1) ----
+# A read of the web by an agent passes the MCP broker, which labels the run from the act, and no
+# agent holds the key that opens scopyx. The wiring in compose.yaml, the labels and the egress
+# refusal in install.sh, and the key of each agent, run for real on scratch .env files.
+G21='./scripts/scopyx-reads-go-through-the-broker.sh'
+
+run_case "scopyx-broker: the broker leaves the egress profile" fail \
+	"$G21" \
+	"$(py 'edit("compose.yaml", "    profiles: [\"typed\", \"egress\", \"egress-browser\"]\n", "    profiles: [\"typed\", \"egress-browser\"]\n")')" \
+	"is not in the egress profile"
+
+run_case "scopyx-broker: the broker's upstream list loses scopyx" fail \
+	"$G21" \
+	"$(py 'edit("compose.yaml", "typryx=http://typryx:4320/mcp,scopyx=http://scopyx:4300\n", "typryx=http://typryx:4320/mcp\n")')" \
+	"does not name scopyx at http://scopyx:4300"
+
+run_case "scopyx-broker: the label is a literal, with or without a taint gateway" fail \
+	"$G21" \
+	"$(py 'edit("compose.yaml", "TOKENFUSE_MCP_UPSTREAM_LABELS: ${BROKER_UPSTREAM_LABELS:-}", "TOKENFUSE_MCP_UPSTREAM_LABELS: scopyx=web")')" \
+	"exits 2"
+
+run_case "scopyx-broker: the secret scopes are a literal again" fail \
+	"$G21" \
+	"$(py 'edit("compose.yaml", "${TOKENFUSE_MCP_SECRET_SCOPES:-typryx_key=tools:ask|ask_freeform|list_questions}", "typryx_key=tools:ask|ask_freeform|list_questions")')" \
+	"secret scopes are not read from .env"
+
+run_case "scopyx-broker: typryx becomes a hard dependency of the broker" fail \
+	"$G21" \
+	"$(py 'edit("compose.yaml", "        condition: service_started\n        required: false\n", "        condition: service_started\n")')" \
+	"without 'required: false'"
+
+run_case "scopyx-broker: scopyx stops taking the key in the call" fail \
+	"$G21" \
+	"$(py 'edit("compose.yaml", "      SCOPYX_ACCEPT_KEY_IN_META: \"1\"\n    volumes:\n      - scopyxevents:/var/lib/scopyx\n    depends_on:\n      init-volumes:\n        condition: service_completed_successfully\n\n  # ---- egress, with a browser", "    volumes:\n      - scopyxevents:/var/lib/scopyx\n    depends_on:\n      init-volumes:\n        condition: service_completed_successfully\n\n  # ---- egress, with a browser")')" \
+	"scopyx does not take the key in params._meta"
+
+run_case "scopyx-broker: the browser stops taking the key in the call" fail \
+	"$G21" \
+	"$(py 'edit("compose.yaml", "      SCOPYX_BACKEND: chromium\n      SCOPYX_MAX_FETCHES_PER_HOUR: ${SCOPYX_MAX_FETCHES_PER_HOUR:-200}\n      # As on scopyx above: the broker hands the key over in params._meta.\n      SCOPYX_ACCEPT_KEY_IN_META: \"1\"\n", "      SCOPYX_BACKEND: chromium\n      SCOPYX_MAX_FETCHES_PER_HOUR: ${SCOPYX_MAX_FETCHES_PER_HOUR:-200}\n")')" \
+	"scopyx-browser does not take the key in params._meta"
+
+run_case "scopyx-broker: scopyx joins the agents network" fail \
+	"$G21" \
+	"$(py 'edit("compose.yaml", "    networks:\n      - core\n      - edge\n    user: \"65532:65532\"\n", "    networks:\n      - agents\n      - core\n      - edge\n    user: \"65532:65532\"\n")')" \
+	"scopyx is on the agents network"
+
+run_case "scopyx-broker: the browser answers to another name" fail \
+	"$G21" \
+	"$(py 'edit("compose.yaml", "        aliases: [\"scopyx\"]\n", "        aliases: [\"browser\"]\n")')" \
+	"does not answer to the name scopyx"
+
+run_case "scopyx-broker: the labels are not forgotten with the taint gateway" fail \
+	"$G21" \
+	"$(py 'edit("install.sh", "BROKER_GATEWAY_KEY_FILE BROKER_UPSTREAM_LABELS \\\n", "BROKER_GATEWAY_KEY_FILE \\\n")')" \
+	"does not forget BROKER_UPSTREAM_LABELS"
+
+run_case "scopyx-broker: the installer labels scopyx as something else" fail \
+	"$G21" \
+	"$(py 'edit("install.sh", "identity_env_set BROKER_UPSTREAM_LABELS scopyx=web", "identity_env_set BROKER_UPSTREAM_LABELS scopyx=search")')" \
+	"does not write BROKER_UPSTREAM_LABELS as scopyx=web"
+
+run_case "scopyx-broker: egress with agent tokens off is allowed" fail \
+	"$G21" \
+	"$(py 'edit("install.sh", "if [ -n \"${WITH_EGRESS:-}\" ] || [ -n \"${WITH_BROWSER:-}\" ]; then", "if false; then")')" \
+	"with agent tokens off is not refused"
+
+run_case "scopyx-broker: the key is written to scopyx and never to the vault" fail \
+	"$G21" \
+	"$(py 'edit("install.sh", "  env_set_if_changed TOKENFUSE_MCP_SECRETS \"$vault\"\n", "")')" \
+	"the vault holds no scopyx_key_operator"
+
+run_case "scopyx-broker: the scope of the key loses the agent" fail \
+	"$G21" \
+	"$(py 'edit("install.sh", "$name=agents:$agent;tools:browse|fetch_url", "$name=tools:browse|fetch_url")')" \
+	"the scope of the scopyx key"
+
+run_case "scopyx-broker: the scope of the key loses the tools" fail \
+	"$G21" \
+	"$(py 'edit("install.sh", "$name=agents:$agent;tools:browse|fetch_url", "$name=agents:$agent")')" \
+	"the scope of the scopyx key"
+
+run_case "scopyx-broker: scopyx's list does not name the agent of the key" fail \
+	"$G21" \
+	"$(py 'edit("install.sh", "keys=\"${keys:+$keys,}$secret=$agent\"", "keys=\"${keys:+$keys,}$secret=agent://local.invalid/default-agent\"")')" \
+	"does not pair the vault's key with the agent"
+
+run_case "scopyx-broker: a second run mints a new key" fail \
+	"$G21" \
+	"$(py 'edit("install.sh", "  [ -n \"$secret\" ] || secret=\"$(gen 40)\"\n", "  secret=\"$(gen 40)\"\n")')" \
+	"a second run changed .env"
+
+run_case "scopyx-broker: a second run writes the vault entry again" fail \
+	"$G21" \
+	"$(py 'edit("install.sh", "  vault=\"$(csv_without \"$vault\" \"$name=\")\"\n", "")')" \
+	"a second run changed .env"
+
+run_case "scopyx-broker: a changed trust domain leaves the old scope entry" fail \
+	"$G21" \
+	"$(py 'edit("install.sh", "  scopes=\"$(csv_without \"$(identity_env_get TOKENFUSE_MCP_SECRET_SCOPES)\" \"$name=\")\"\n", "  scopes=\"$(csv_without \"$(identity_env_get TOKENFUSE_MCP_SECRET_SCOPES)\" \"$name=agents:$agent;\")\"\n")')" \
+	"a changed trust domain left two scope entries"
+
+run_case "scopyx-broker: a key already in the vault is replaced" fail \
+	"$G21" \
+	"$(py 'edit("install.sh", "  [ -n \"$secret\" ] || secret=\"$(gen 40)\"\n  [[ ", "  [ \"${#secret}\" = 40 ] || secret=\"$(gen 40)\"\n  [[ ")')" \
+	"replaced a key the box already had"
+
+run_case "scopyx-broker: a short vault key is accepted" fail \
+	"$G21" \
+	"$(py 'edit("install.sh", "[[ \"$secret\" =~ ^[A-Za-z0-9]{24,128}$ ]] \\\n", "true \\\n")')" \
+	"was accepted"
+
+run_case "scopyx-broker: the block prints the key" fail \
+	"$G21" \
+	"$(py 'edit("install.sh", "note \"scopyx: the key of $agent is in the broker", "note \"scopyx: the key $secret of $agent is in the broker")')" \
+	"printed the scopyx key"
+
+run_case "scopyx-broker: agent tokens off, and the block still writes keys" fail \
+	"$G21" \
+	"$(py 'edit("install.sh", "  [ \"${AGENT_TOKENS_ON:-0}\" = 1 ] || return 0\n  agent=\"$AGENT_TOKEN_AGENT\"\n", "  agent=\"${AGENT_TOKEN_AGENT:-agent://local/agents/operator}\"\n")')" \
+	"agent tokens off, and the block still wrote"
+
+run_case "scopyx-broker: the key block is gone, so nothing was measured" fail \
+	"$G21" \
+	"$(py 'edit("install.sh", "# scopyx-broker-keys: begin\n", "")')" \
+	"measured nothing"
+
+run_case "scopyx-broker: the broker is gone, so nothing was measured" fail \
+	"$G21" \
+	"$(py 'edit("compose.yaml", "\n  tokenfuse-mcp-broker:\n", "\n  tokenfuse-mcp-gone:\n")')" \
+	"measured nothing"
+
+run_case "scopyx-broker: a reworded comment is not a fault" pass \
+	"$G21" \
+	"$(py 'edit("compose.yaml", "    # NOT on `agents` since G2.1: an agent reaches this service only through the\n", "    # Off `agents` since G2.1: an agent reaches this service only through the\n")')" \
+	""
+
+run_case "network-membership: scopyx joins the agents network" fail \
+	'./scripts/network-membership.sh' \
+	"$(py 'edit("compose.yaml", "    networks:\n      - core\n      - edge\n    user: \"65532:65532\"\n", "    networks:\n      - agents\n      - core\n      - edge\n    user: \"65532:65532\"\n")')" \
+	"scopyx is on the agents network"
+
+run_case "network-membership: scopyx-browser goes back to the agents network" fail \
+	'./scripts/network-membership.sh' \
+	"$(py 'edit("compose.yaml", "      browser-broker:\n        aliases: [\"scopyx\"]\n      edge:\n", "      browser-broker:\n        aliases: [\"scopyx\"]\n      agents:\n      edge:\n")')" \
+	"scopyx-browser is on the agents network"
+
+run_case "network-membership: a third member joins the broker's network to the browser" fail \
+	'./scripts/network-membership.sh' \
+	"$(py 'import re
+s = open("compose.yaml").read()
+i = re.search(r"\n  idryx:\n", s).end()
+j = i + re.search(r"\n  [a-z]", s[i:]).start()
+b = s[i:j]
+assert "      - core\n" in b, "idryx has no core line"
+open("compose.yaml", "w").write(s[:i] + b.replace("      - core\n", "      - core\n      - browser-broker\n", 1) + s[j:])')" \
+	"browser-broker members are"
+
+run_case "network-membership: browser-broker is not internal" fail \
+	'./scripts/network-membership.sh' \
+	"$(py 'edit("compose.yaml", "  browser-broker:\n    internal: true\n", "  browser-broker:\n")')" \
+	"network browser-broker must be internal"
+
+run_case "profiles-off-are-removed: typed off removes the broker a running scopyx needs" fail \
+	'./scripts/profiles-off-are-removed.sh' \
+	"$(py 'edit("install.sh", "case \" $named_svcs $live_svcs \" in *\" $s \"*) ;; *) off_list=", "case \" $named_svcs \" in *\" $s \"*) ;; *) off_list=")')" \
+	"H. the broker is shared with the running egress profile"
+
+run_case "profiles-off-are-removed: a running scopyx does not bring the broker up" fail \
+	'./scripts/profiles-off-are-removed.sh' \
+	"$(py 'edit("install.sh", "        if [ -n \"$live_here\" ]; then\n", "        if false; then\n")')" \
+	"H. scopyx runs under egress and the broker"
+
+run_case "profiles-off-are-removed: the typed plane's broker makes egress live" fail \
+	'./scripts/profiles-off-are-removed.sh' \
+	"$(py 'edit("install.sh", "      case \" $installer_svcs \" in *\" $svc \"*) continue ;; esac\n      [ \"$state\" = running ] || continue\n      live_svcs=", "      [ \"$state\" = running ] || continue\n      live_svcs=")')" \
+	"H. with typed off and no egress service running"
 
 echo
 if [ -n "$(git status --porcelain)" ]; then

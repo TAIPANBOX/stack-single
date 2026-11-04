@@ -2086,7 +2086,13 @@ agent_tokens_resolve() {
   [ -z "${WITH_DELEGATION:-}" ] || DELEGATION_ON=1
   case "${WITH_AGENT_TOKENS:-}" in
     ""|1) ;;
-    0) return 0 ;;
+    0)
+      # An agent reads the web through the MCP broker (G2.1), and the broker labels the run through the gateway with
+      # its own client key, which exists only with agent tokens. Scopyx is on no network an agent is on.
+      if [ -n "${WITH_EGRESS:-}" ] || [ -n "${WITH_BROWSER:-}" ]; then
+        die "WITH_EGRESS and WITH_BROWSER need agent tokens: an agent reads the web through the MCP broker, which labels the run with the broker's own gateway key, and that key exists only with agent tokens on. Unset WITH_AGENT_TOKENS, or unset WITH_EGRESS and WITH_BROWSER. Nothing was installed."
+      fi
+      return 0 ;;
     *) die "WITH_AGENT_TOKENS must be unset or 1 (agent tokens on, the default) or 0 (off: static keys only, the weaker way out), not what it was given. Nothing was installed." ;;
   esac
   AGENT_TOKENS_ON=1
@@ -2180,7 +2186,7 @@ agent_tokens_apply() {
     if [ "${WITH_AGENT_TOKENS:-}" = 0 ]; then
       identity_env_set TOKENFUSE_AGENT_TOKENS off
       # tokenfuse 1.19.0 refuses a static-key list under any mode but require, so the lists go too.
-      for v in VOUCHRYX_AGENTS VOUCHRYX_ALLOWED_AUDIENCES BROKER_TAINT_GATEWAY BROKER_GATEWAY_KEY_FILE \
+      for v in VOUCHRYX_AGENTS VOUCHRYX_ALLOWED_AUDIENCES BROKER_TAINT_GATEWAY BROKER_GATEWAY_KEY_FILE BROKER_UPSTREAM_LABELS \
           MCP_BROKER_DELEGATION_AUDIENCE MCP_BROKER_DELEGATION_URL \
           WARDRYX_AGENT_TOKEN_ISSUER WARDRYX_AGENT_TOKEN_AUDIENCES WARDRYX_AGENT_TOKEN_JWKS_URL \
           WARDRYX_AGENT_TOKEN_REVOCATION_URL WARDRYX_AGENT_TOKEN_DOOR_ORIGINS \
@@ -2230,6 +2236,10 @@ agent_tokens_apply() {
   identity_env_set MCP_BROKER_DELEGATION_URL "http://$GATEWAY_PROBE:4200"
   identity_env_set BROKER_TAINT_GATEWAY http://tokenfuse-gateway:4100
   identity_env_set BROKER_GATEWAY_KEY_FILE /run/broker/key
+  # What scopyx's answers carry (tokenfuse 1.21.0, invariant 143, G2.1): the web, labelled from the act by the broker.
+  # Set only here, beside the taint gateway it needs and is forgotten with it above: a classification with no taint
+  # gateway makes the broker exit 2, and a box with agent tokens off has none.
+  identity_env_set BROKER_UPSTREAM_LABELS scopyx=web
   # wardryx verifies the agent's token itself (wardryx 2.3.0, CLAUDE.md invariant 47): the same issuer,
   # audience and key set the doors use, vouchryx's revocation list, and the origin each door is
   # addressed by, because a DPoP proof names the URL it was sent to.
@@ -2277,6 +2287,56 @@ agent_tokens_apply() {
   upstream_put "$broker" "$STACK_DIR/broker" 20012
   note "the broker's key: in $STACK_DIR/broker/key (0400, uid 20012, never printed)"
 }
+
+# ---- the scopyx key of each agent (G2.1) ---------------------------------------------------------------------------
+# scopyx-broker-keys: begin
+# An agent reads the web through the MCP broker and holds a handle, never the key: `{{secret:scopyx_key_<agent>}}` in
+# params._meta["scopyx/key"], filled in from the broker's vault on the last hop (scopyx 1.2.0, SCOPYX_ACCEPT_KEY_IN_META).
+# One key per agent, because scopyx derives the agent from the key it is shown. The key is in three lines of .env that
+# must agree: the broker's vault (TOKENFUSE_MCP_SECRETS), the rule that lets only that agent resolve it, and only for
+# scopyx's two tools (TOKENFUSE_MCP_SECRET_SCOPES), and scopyx's own key list (SCOPYX_KEYS, `<key>=<agent>`). This
+# installer enrols one agent per box, so it writes one key; a re-run keeps the key and rewrites the other two entries
+# from the agent it has now. Nothing here prints a key.
+csv_without() { # LIST PREFIX: the comma-separated LIST without the items that begin with PREFIX
+  local item out="" items
+  IFS=',' read -r -a items <<<"$1"
+  for item in ${items[@]+"${items[@]}"}; do
+    [ -n "$item" ] || continue
+    case "$item" in "$2"*) continue ;; esac
+    out="${out:+$out,}$item"
+  done
+  printf '%s' "$out"
+}
+env_set_if_changed() { # NAME VALUE: identity_env_set, unless .env already holds exactly that
+  [ "$(identity_env_get "$1")" = "$2" ] || identity_env_set "$1" "$2"
+}
+scopyx_broker_keys_apply() {
+  local agent name secret item vault scopes keys items
+  [ "${AGENT_TOKENS_ON:-0}" = 1 ] || return 0
+  agent="$AGENT_TOKEN_AGENT"
+  [ -n "$agent" ] || die "internal: agent tokens are on and no agent is enrolled. Nothing was started."
+  name="scopyx_key_${agent##*/}"
+  vault="$(identity_env_get TOKENFUSE_MCP_SECRETS)"
+  secret=""
+  IFS=',' read -r -a items <<<"$vault"
+  for item in ${items[@]+"${items[@]}"}; do
+    case "$item" in "$name="*) secret="${item#"$name="}" ;; esac
+  done
+  [ -n "$secret" ] || secret="$(gen 40)"
+  [[ "$secret" =~ ^[A-Za-z0-9]{24,128}$ ]] \
+    || die "the scopyx key of $agent in TOKENFUSE_MCP_SECRETS (.env) is not 24 to 128 letters and digits. Remove that entry and the installer mints one. Nothing was started."
+  vault="$(csv_without "$vault" "$name=")"
+  vault="${vault:+$vault,}$name=$secret"
+  scopes="$(csv_without "$(identity_env_get TOKENFUSE_MCP_SECRET_SCOPES)" "$name=")"
+  scopes="${scopes:+$scopes,}$name=agents:$agent;tools:browse|fetch_url"
+  keys="$(csv_without "$(identity_env_get SCOPYX_KEYS)" "$secret=")"
+  keys="${keys:+$keys,}$secret=$agent"
+  env_set_if_changed TOKENFUSE_MCP_SECRETS "$vault"
+  env_set_if_changed TOKENFUSE_MCP_SECRET_SCOPES "$scopes"
+  env_set_if_changed SCOPYX_KEYS "$keys"
+  note "scopyx: the key of $agent is in the broker's vault as $name, scoped to that agent and to browse and fetch_url (never printed)"
+}
+# scopyx-broker-keys: end
 
 # Section 3e, after mint_apply, when every client key is in .env: the static allow-lists the two doors
 # read under require (CLAUDE.md invariant 47). A key id is a static key only when it is NAMED here: felyx
@@ -3197,6 +3257,7 @@ door_apply
 # Felyx's and the agents' secrets minted into .env if absent, and the spec and map
 # built from them for section 3e to check and install.
 agent_tokens_apply
+scopyx_broker_keys_apply
 mint_prepare
 # The provider keys the gateway and the OpenAI door hold (section 0h, invariant 39): the
 # directories compose mounts, the files written from what the operator gave, and the
@@ -3934,12 +3995,33 @@ profile_kind() { # NAME: installer, operator, or unknown when the table does not
 # "PROFILE SERVICE IMAGE" lines of operator-started services kept on this run, for the closing report.
 PROFILE_KEPT=""
 profiles_off_remove() {
-  local p s base named_svcs="" list off_list="" svc img state now
+  local p s base named_svcs="" live_svcs="" installer_svcs="" live_here own_svcs list off_list="" svc img state now
   base="$("${COMPOSE[@]}" config --services 2>/dev/null | sort -u || true)"
   # The services of the profiles this run names: a service that also belongs to one is never removed.
   for p in $("${COMPOSE[@]}" config --profiles 2>/dev/null || true); do
     profile_is_named "$p" || continue
     named_svcs="$named_svcs $("${COMPOSE[@]}" --profile "$p" config --services 2>/dev/null | sort -u | comm -23 - <(printf '%s\n' "$base") | tr '\n' ' ' || true)"
+  done
+  # The services of the installer-managed profiles, for the shared ones below.
+  for p in $PROFILES_INSTALLED; do
+    installer_svcs="$installer_svcs $("${COMPOSE[@]}" --profile "$p" config --services 2>/dev/null | sort -u | comm -23 - <(printf '%s\n' "$base") | tr '\n' ' ' || true)"
+  done
+  # The services of an operator-started profile with something running in it. The MCP broker is in `typed` and in both
+  # egress profiles (G2.1), so a box that runs scopyx and no typed plane would lose its only way to read the web if the
+  # typed profile being off removed the broker. Such a service is neither removed here nor left stopped below. A service
+  # an installer-managed profile also owns is not evidence that the operator's profile is running: the typed plane's
+  # broker running does not make egress live.
+  for p in $("${COMPOSE[@]}" config --profiles 2>/dev/null || true); do
+    profile_is_named "$p" && continue
+    [ "$(profile_kind "$p")" = operator ] || continue
+    own_svcs=" $("${COMPOSE[@]}" --profile "$p" config --services 2>/dev/null | sort -u | comm -23 - <(printf '%s\n' "$base") | tr '\n' ' ' || true) "
+    while IFS=' ' read -r svc img state; do
+      case "$own_svcs" in *" $svc "*) ;; *) continue ;; esac
+      case " $installer_svcs " in *" $svc "*) continue ;; esac
+      [ "$state" = running ] || continue
+      live_svcs="$live_svcs$own_svcs"
+      break
+    done < <("${COMPOSE[@]}" --profile "$p" ps --format '{{.Service}} {{.Image}} {{.State}}' 2>/dev/null || true)
   done
   for p in $("${COMPOSE[@]}" config --profiles 2>/dev/null || true); do
     profile_is_named "$p" && continue
@@ -3948,8 +4030,11 @@ profiles_off_remove() {
         # The profile's OWN services only. `compose --profile P ps` also lists the core's services (the gateway,
         # the console, wardryx), so each operator profile would otherwise re-up the core once per profile.
         own_svcs=" $("${COMPOSE[@]}" --profile "$p" config --services 2>/dev/null | sort -u | comm -23 - <(printf '%s\n' "$base") | tr '\n' ' ' || true) "
+        live_here=""
         while IFS=' ' read -r svc img state; do
           case "$own_svcs" in *" $svc "*) ;; *) continue ;; esac
+          # A service an installer-managed profile shares is started below, once, when this profile is live.
+          case " $installer_svcs " in *" $svc "*) continue ;; esac
           [ "$state" = running ] || continue
           "${COMPOSE[@]}" --profile "$p" up -d "$svc" >/dev/null 2>&1 \
             || die "could not re-up $svc, the running $p service, at this run's pinned image. Nothing else was removed by this step."
@@ -3957,13 +4042,29 @@ profiles_off_remove() {
           now="${now%%$'\n'*}"
           PROFILE_KEPT="$PROFILE_KEPT$p $svc ${now:-$img}
 "
+          live_here=1
         done < <("${COMPOSE[@]}" --profile "$p" ps --format '{{.Service}} {{.Image}} {{.State}}' 2>/dev/null || true)
+        # A service this profile shares with an installer-managed one (the MCP broker, G2.1) is part of it, so a profile
+        # with something running is brought up whole: a box that ran scopyx before G2.1 has no broker yet, and its agents
+        # reach scopyx only through the broker. A profile with nothing running is left alone, as before.
+        if [ -n "$live_here" ]; then
+          for svc in $own_svcs; do
+            case " $installer_svcs " in *" $svc "*) ;; *) continue ;; esac
+            case " $named_svcs " in *" $svc "*) continue ;; esac
+            "${COMPOSE[@]}" --profile "$p" up -d "$svc" >/dev/null 2>&1 \
+              || die "could not start $svc, which the running $p profile shares with an installer-managed profile. Nothing else was removed by this step."
+            now="$("${COMPOSE[@]}" --profile "$p" ps --format '{{.Image}}' "$svc" 2>/dev/null || true)"
+            now="${now%%$'\n'*}"
+            PROFILE_KEPT="$PROFILE_KEPT$p $svc ${now:-started}
+"
+          done
+        fi
         ;;
       installer)
         list="$("${COMPOSE[@]}" --profile "$p" config --services 2>/dev/null | sort -u | comm -23 - <(printf '%s\n' "$base") || true)"
         off_list=""
         for s in $list; do
-          case " $named_svcs " in *" $s "*) ;; *) off_list="$off_list $s" ;; esac
+          case " $named_svcs $live_svcs " in *" $s "*) ;; *) off_list="$off_list $s" ;; esac
         done
         for s in $off_list; do
           "${COMPOSE[@]}" --profile "$p" rm -sf "$s" >/dev/null 2>&1 || true

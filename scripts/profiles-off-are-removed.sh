@@ -87,8 +87,8 @@ while [ $# -gt 0 ]; do
 done
 svc_of() {
   case "$1" in
-    egress) echo scopyx ;;
-    egress-browser) echo scopyx-browser ;;
+    egress) echo "scopyx tokenfuse-mcp-broker" ;;
+    egress-browser) echo "scopyx-browser tokenfuse-mcp-broker" ;;
     typed) echo "typryx tokenfuse-mcp-broker" ;;
     typed-risk-signal) echo typryx-wardryx-proxy ;;
     delegation) echo vouchryx ;;
@@ -151,9 +151,12 @@ run_slice() {
 
 LOG_A="$scratch/calls-a.log"
 LOG_B="$scratch/calls-b.log"
+LOG_C="$scratch/calls-c.log"
 REPORT_A="$scratch/report-a.txt"
 run_slice "$LOG_A" "costcrew scopyx typryx record-seal vouchryx" "--profile record --profile delegation" "$REPORT_A"
 run_slice "$LOG_B" "record-seal vouchryx" "--profile delegation" "$scratch/report-b.txt"
+# C-run: the broker running, typed off, and nothing of an egress profile running: nothing keeps the broker, so it goes.
+run_slice "$LOG_C" "typryx tokenfuse-mcp-broker" "--profile delegation" "$scratch/report-c.txt"
 
 removed_a="$(grep -E ' rm ' "$LOG_A" | grep -- '-sf' || true)"
 up_a="$(grep -E ' up -d' "$LOG_A" || true)"
@@ -164,7 +167,6 @@ expect_removed() { # PROFILE SERVICE: removed under that profile
     || fail "A. the stale $2 of profile $1 is not removed by this run, and that profile is installer-managed and off"
 }
 expect_removed typed typryx
-expect_removed typed tokenfuse-mcp-broker
 expect_removed typed-risk-signal typryx-wardryx-proxy
 expect_removed openai-door tokenfuse-gateway-openai
 
@@ -181,6 +183,17 @@ for s in focus-export verdryx-drift idryx-detect; do
   printf '%s\n' "$removed_a $up_a" | grep -q -E -- " $s( |\$)" \
     && fail "B. $s is an operator-started service that is not running, and the installer removed or started it"
 done
+
+# H. the MCP broker is in `typed` and in both egress profiles (G2.1). Run A has scopyx running under egress and typed
+# off: the broker is the only way an agent reads the web, so it is not removed, and, having never run on a box from
+# before G2.1, it is started with the profile that needs it. Run C has no egress service running: nothing needs the
+# broker, and typed is off, so it is removed as before.
+printf '%s\n' "$removed_a" | grep -q -E -- ' tokenfuse-mcp-broker( |$)' \
+  && fail "H. the broker is shared with the running egress profile, and the cleanup removed it because typed is off: an agent could no longer read the web"
+printf '%s\n' "$up_a" | grep -q -E -- '--profile egress up -d( .*)? tokenfuse-mcp-broker( |$)' \
+  || fail "H. scopyx runs under egress and the broker, which the profile shares with typed, is not started: an agent has no way to reach scopyx"
+grep -E ' rm ' "$LOG_C" | grep -q -E -- '--profile typed rm -sf( .*)? tokenfuse-mcp-broker( |$)' \
+  || fail "H. with typed off and no egress service running, the broker is not removed: the typed plane's broker would outlive the operator turning it off"
 
 # C. a profile this run names keeps its services.
 for s in record-seal vouchryx; do
