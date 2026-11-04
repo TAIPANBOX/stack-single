@@ -581,7 +581,7 @@ run_case "manifest-is-true: a routine arrives and the manifest does not claim it
 # is one character in one tag, which is exactly how it would arrive.
 run_case "manifest-is-true: a pulled tag moves in compose and not in the manifest" fail \
 	'./scripts/manifest-is-true.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.4.1", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.5.0", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
 	"an image it pulls"
 
 # invariant 15: the delegation plane's default is byte-for-byte what it was
@@ -1534,17 +1534,17 @@ run_case "typed-risk-signal: typryx is pinned before the proxy existed" fail \
 
 run_case "typed-risk-signal: wardryx is pinned before it read signals" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.4.1@sha256:a7ef8e2df49c96eee39094451094f825aa46abb519955c8f0f2a0ffc33dde4dc}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.5.0@sha256:67470f6568cbbcec5c4b7c3bc4d52f7d86e98d6b166cd2ee6979d91f6e0c4779}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
 	"hold_if_signal and signals on /v1/decide do not exist before it"
 
 run_case "typed-risk-signal: wardryx is pinned before when_absent" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.4.1@sha256:a7ef8e2df49c96eee39094451094f825aa46abb519955c8f0f2a0ffc33dde4dc}", "ghcr.io/taipanbox/wardryx:v1.3.2}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.5.0@sha256:67470f6568cbbcec5c4b7c3bc4d52f7d86e98d6b166cd2ee6979d91f6e0c4779}", "ghcr.io/taipanbox/wardryx:v1.3.2}")')" \
 	"needs v1.4.0 or later"
 
 run_case "typed-risk-signal: tokenfuse is pinned before it sent the tool call" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/tokenfuse:v1.20.3@sha256:2b82c87733a8165922f8f6c737a1d19bc0e0156335e88db6c190b17cc2a4a484}", "ghcr.io/taipanbox/tokenfuse:v1.4.1}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/tokenfuse:v1.21.0@sha256:5cc6484d20249df3e57db34d19eea5b75c54c64bd9b9dab968136e988374ab2c}", "ghcr.io/taipanbox/tokenfuse:v1.4.1}")')" \
 	"the broker sends no tool_call to the policy plane before it"
 
 run_case "typed-risk-signal: install.sh starts the proxy profile unconditionally" fail \
@@ -1840,12 +1840,12 @@ run_case "bus-has-a-writer: the OpenAI door's file is not pre-created" fail \
 
 run_case "bus-names: the idryx pin goes back before the OpenAI door's row" fail \
 	'./scripts/bus-names-match-their-source.sh' \
-	"$(py 'edit_all("compose.yaml", "ghcr.io/taipanbox/idryx:v1.3.1", "ghcr.io/taipanbox/idryx:v1.1.0")')" \
+	"$(py 'edit_all("compose.yaml", "ghcr.io/taipanbox/idryx:v1.4.0", "ghcr.io/taipanbox/idryx:v1.1.0")')" \
 	"older than v1.2.0"
 
 run_case "bus-names: the heraldyx pin goes back before the OpenAI door's row" fail \
 	'./scripts/bus-names-match-their-source.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/heraldyx:v0.8.2", "ghcr.io/taipanbox/heraldyx:v0.4.0")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/heraldyx:v0.9.0", "ghcr.io/taipanbox/heraldyx:v0.4.0")')" \
 	"older than v0.5.0"
 
 echo "=== and what they must NOT catch ==="
@@ -3293,7 +3293,7 @@ run_case "bus-names: the witness's findings file loses its keyryx stem" fail \
 
 run_case "bus-names: the heraldyx pin goes back before the keyryx source" fail \
 	'./scripts/bus-names-match-their-source.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/heraldyx:v0.8.2@", "ghcr.io/taipanbox/heraldyx:v0.7.0@")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/heraldyx:v0.9.0@", "ghcr.io/taipanbox/heraldyx:v0.7.0@")')" \
 	"keyryx.ndjson is on this bus and compose.yaml pins heraldyx v0.7.0"
 
 
