@@ -349,7 +349,7 @@ services:
 
   wardryx:
     <<: *restart
-    image: ${WARDRYX_IMAGE:-ghcr.io/taipanbox/wardryx:v2.5.0@sha256:67470f6568cbbcec5c4b7c3bc4d52f7d86e98d6b166cd2ee6979d91f6e0c4779}
+    image: ${WARDRYX_IMAGE:-ghcr.io/taipanbox/wardryx:v2.5.1@sha256:2d3c0c9c0798156d3f05b82d0e63cf5b38ee4b9875d6bdbac1829f219c26abf7}
     # Its own uid (CLAUDE.md invariant 41): wardryx.ndjson is its stream, and
     # no other plane's uid can write it. The GID stays the bus group, so it
     # reads the other streams. group_add 20001 is for the Keyryx socket
