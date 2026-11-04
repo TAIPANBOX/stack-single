@@ -2921,7 +2921,7 @@ run_case "network-membership: the egress block is not there" fail \
 
 run_case "network-membership: a reworded comment is not a fault" pass \
 	'./scripts/network-membership.sh' \
-	"$(py 'edit("compose.yaml", "    # Agent-facing, so an agent reaches it under the name `scopyx`; edge,", "    # Agent-facing: an agent reaches it under the name `scopyx`; edge,")')"
+	"$(py 'edit("compose.yaml", "    # Since G2.1 it is NOT agent-facing: the MCP broker reaches it under the name", "    # Since G2.1 it is not agent-facing: the MCP broker reaches it under the name")')"
 
 run_case "network-membership: no services resolve, so nothing was measured" fail \
 	'./scripts/network-membership.sh' \
@@ -3603,13 +3603,13 @@ run_case "agent-tokens-are-wired: a comment in the allow-list block is not a fau
 
 run_case "profiles-off-are-removed: the cleanup names the off profiles by hand and misses finops" fail \
 	'./scripts/profiles-off-are-removed.sh' \
-	"$(py 'edit("install.sh", "  for p in $(\"${COMPOSE[@]}\" config --profiles 2>/dev/null || true); do\n    profile_is_named \"$p\" && continue\n", "  for p in typed-risk-signal openai-door; do\n    profile_is_named \"$p\" && continue\n")')" \
+	"$(py 'edit("install.sh", "  for p in $(\"${COMPOSE[@]}\" config --profiles 2>/dev/null || true); do\n    profile_is_named \"$p\" && continue\n    case \"$(profile_kind \"$p\")\" in", "  for p in typed-risk-signal openai-door; do\n    profile_is_named \"$p\" && continue\n    case \"$(profile_kind \"$p\")\" in")')" \
 	"the stale typryx of profile typed is not removed"
 
 run_case "profiles-off-are-removed: the cleanup removes the containers of a profile this run names, with no shared-service guard" fail \
 	'./scripts/profiles-off-are-removed.sh' \
 	"$(py 'edit("install.sh", "    profile_is_named \"$p\" && continue\n    case \"$(profile_kind \"$p\")\" in", "    case \"$(profile_kind \"$p\")\" in")
-edit("install.sh", "      case \" $named_svcs \" in *\" $s \"*) ;; *) off_list=\"$off_list $s\" ;; esac", "      off_list=\"$off_list $s\"")')" \
+edit("install.sh", "      case \" $named_svcs $live_svcs \" in *\" $s \"*) ;; *) off_list=\"$off_list $s\" ;; esac", "      off_list=\"$off_list $s\"")')" \
 	"C. record-seal belongs to a profile this run names"
 
 run_case "profiles-off-are-removed: a comment in the profile cleanup is not a fault" pass \
