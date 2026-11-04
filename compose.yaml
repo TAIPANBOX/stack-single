@@ -619,15 +619,20 @@ services:
     <<: *restart
     profiles: ["egress"]
     image: ${SCOPYX_IMAGE:-ghcr.io/taipanbox/scopyx:v1.2.0@sha256:312bd4fa140fcdff846ed2e7395203395c1a082b99b5b195f074acea56e7541f}
+    # NOT on `agents` since G2.1: an agent reaches this service only through the
+    # MCP broker, which shares `core` with it. An agent that could reach it
+    # directly would fetch with the key and without the broker, and then the run
+    # would carry no `web` label from the act (tokenfuse invariant 143). The
+    # broker is the only reader of a scopyx key; scripts/network-membership.sh
+    # and scripts/scopyx-reads-go-through-the-broker.sh hold both halves.
     networks:
-      - agents
       - core
       - edge
     user: "65532:65532"
     environment:
       # Inside the compose network, not on the host. Nothing publishes a port
-      # for this: the gateway and the console reach it by service name, and an
-      # operator who wants to drive it by hand does so through them or with
+      # for this: the MCP broker reaches it by service name, and an operator who
+      # wants to drive it by hand does so through the broker or with
       # `docker compose exec`.
       SCOPYX_ADDR: 0.0.0.0:4300
       SCOPYX_WARDRYX: http://wardryx:8090
@@ -660,6 +665,12 @@ services:
       SCOPYX_EXTERNAL_ENDPOINT: ${SCOPYX_EXTERNAL_ENDPOINT:-}
       SCOPYX_EXTERNAL_KEY: ${SCOPYX_EXTERNAL_KEY:-}
       SCOPYX_MAX_FETCHES_PER_HOUR: ${SCOPYX_MAX_FETCHES_PER_HOUR:-200}
+      # The broker forwards a call with nothing of the caller's, so the key
+      # arrives at params._meta["scopyx/key"] (written by the agent as
+      # `{{secret:scopyx_key_<agent>}}`, filled in from the broker's vault on the
+      # last hop). The door reads up to 1 MiB of the body to find it, which is
+      # why the network above holds only the broker's side (scopyx v1.2.0).
+      SCOPYX_ACCEPT_KEY_IN_META: "1"
     volumes:
       - scopyxevents:/var/lib/scopyx
     depends_on:
@@ -684,12 +695,14 @@ services:
     user: "65532:65532"
     # The name the rest of the box reaches it by. Same as the profile above, so
     # nothing else in this file changes when an operator switches profiles.
-    # Agent-facing, so an agent reaches it under the name `scopyx`; edge,
-    # because the browser fetches the web; and browser-policy, the one network
-    # it shares with wardryx, which decides every fetch it makes. Not core: no
-    # plane is reachable from here. Scripts/network-membership.sh holds the list.
+    # Since G2.1 it is NOT agent-facing: the MCP broker reaches it under the name
+    # `scopyx` on `browser-broker`, an internal network of the two of them. Then
+    # edge, because the browser fetches the web; and browser-policy, the one
+    # network it shares with wardryx, which decides every fetch it makes. Not
+    # core: no plane is reachable from here. scripts/network-membership.sh holds
+    # the list.
     networks:
-      agents:
+      browser-broker:
         aliases: ["scopyx"]
       edge:
       browser-policy:
@@ -701,6 +714,8 @@ services:
       SCOPYX_EVENTS: /var/lib/scopyx/events.ndjson
       SCOPYX_BACKEND: chromium
       SCOPYX_MAX_FETCHES_PER_HOUR: ${SCOPYX_MAX_FETCHES_PER_HOUR:-200}
+      # As on scopyx above: the broker hands the key over in params._meta.
+      SCOPYX_ACCEPT_KEY_IN_META: "1"
       # NOT set here, and the omission is the decision.
       #
       # Chromium ships with its renderer sandbox on. In a container that cannot
@@ -842,10 +857,15 @@ services:
       init-volumes:
         condition: service_completed_successfully
 
-  # ---- tokenfuse's MCP broker, fronting typryx ------------------------------
+  # ---- tokenfuse's MCP broker, fronting typryx and scopyx -------------------
   #
-  # OPT-IN, behind the same `typed` profile as typryx itself, never in the
-  # default set. @decided 2026-09-26: tokenfuse's MCP broker fronts typryx by
+  # OPT-IN, behind the `typed` profile like typryx itself and behind both egress
+  # profiles like scopyx (G2.1), never in the default set. It fronts scopyx so
+  # that a read of the web passes an enforcement point that LABELS the run from
+  # the act (tokenfuse invariant 143), not from a tool name the agent chose:
+  # an agent reaches scopyx only through here, holds a handle and never the key,
+  # and the broker reports the answered fetch to the gateway before the answer
+  # leaves. @decided 2026-09-26: tokenfuse's MCP broker fronts typryx by
   # configuration alone; tokenfuse's own code is not touched for this, same
   # image and same pinned tag as the gateway above, one subcommand:
   # `mcp-broker`.
@@ -860,7 +880,7 @@ services:
   # outside that gate for.
   tokenfuse-mcp-broker:
     <<: *restart
-    profiles: ["typed"]
+    profiles: ["typed", "egress", "egress-browser"]
     image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.21.0@sha256:5cc6484d20249df3e57db34d19eea5b75c54c64bd9b9dab968136e988374ab2c}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
@@ -881,7 +901,20 @@ services:
     command: ["mcp-broker"]
     environment:
       TOKENFUSE_MCP_ADDR: 0.0.0.0:4200
-      TOKENFUSE_MCP_UPSTREAMS: typryx=http://typryx:4320/mcp
+      # The default upstream is not used; a request names one with
+      # `X-Fuse-Mcp-Upstream`. `scopyx` is whichever of scopyx and scopyx-browser
+      # the box runs (they bind the same name; never both). On a box with only
+      # one of the planes, the other upstream is simply never called.
+      TOKENFUSE_MCP_UPSTREAMS: typryx=http://typryx:4320/mcp,scopyx=http://scopyx:4300
+      # What the output of an upstream carries (tokenfuse v1.21.0, invariant 143):
+      # scopyx's answers are the web. Set together with BROKER_TAINT_GATEWAY by
+      # install.sh when agent tokens are on, and empty with it when they are off:
+      # the broker refuses to start (exit 2) on a classification with no taint
+      # gateway, and a box with agent tokens off would lose its typed plane over
+      # a label it cannot use. With the label set, a tools/call to scopyx must
+      # name its run in `x-fuse-run-id`, and an answer whose label the gateway did
+      # not take is withheld.
+      TOKENFUSE_MCP_UPSTREAM_LABELS: ${BROKER_UPSTREAM_LABELS:-}
       # `:-` and NOT `:?`: the same interpolate-every-service reason scopyx's
       # and typryx's own keys carry above. Empty is safe because the broker
       # itself refuses a non-loopback bind with no client keys configured
@@ -894,7 +927,12 @@ services:
       # three tools, so a secret meant for this plane cannot be pulled for
       # any other named upstream this broker might gain later.
       TOKENFUSE_MCP_SECRETS: ${TOKENFUSE_MCP_SECRETS:-}
-      TOKENFUSE_MCP_SECRET_SCOPES: typryx_key=tools:ask|ask_freeform|list_questions
+      # One scopyx key per agent joins the vault as `scopyx_key_<agent>`, each
+      # scoped to that agent and to scopyx's two tools (install.sh writes the
+      # entries into .env: `<name>=agents:<id>;tools:browse|fetch_url`). A key the
+      # agent could resolve for another agent would let it fetch as that agent.
+      # The default is the one entry a box had before G2.1.
+      TOKENFUSE_MCP_SECRET_SCOPES: ${TOKENFUSE_MCP_SECRET_SCOPES:-typryx_key=tools:ask|ask_freeform|list_questions}
       # The broker's PII scanner reads the same one switch as the gateway's, so
       # the two move together (CLAUDE.md invariant 28, shadow by default).
       TOKENFUSE_MCP_DLP_PII: ${TOKENFUSE_DLP_PII:-shadow}
@@ -966,20 +1004,26 @@ services:
       # the broker's own taint-gateway key (its directory, read only, this door alone).
       - ./delegation-public:/etc/tokenfuse/delegation:ro
       - ./broker:/run/broker:ro
-    # Agents reach the broker here; core reaches typryx and the planes; the
-    # risk-signal network reaches the proxy and wardryx; front publishes port
-    # 4200 (a published port needs a network with a route to the host; see the
-    # networks block at the end of this file).
+    # Agents reach the broker here; core reaches typryx, scopyx and the planes;
+    # the risk-signal network reaches the proxy and wardryx; browser-broker
+    # reaches scopyx-browser, which shares no other network with the broker;
+    # front publishes port 4200 (a published port needs a network with a route to
+    # the host; see the networks block at the end of this file).
     networks:
       - agents
       - core
       - risk-signal
+      - browser-broker
       - front
     depends_on:
       init-volumes:
         condition: service_completed_successfully
+      # `required: false`: under an egress profile alone typryx is not part of the
+      # project, and compose refuses a broker that depends on a service it does not
+      # have. Present (the `typed` profile), it still starts first.
       typryx:
         condition: service_started
+        required: false
 
   # ---- the typed risk signal: typryx in front of wardryx, MCP path only ----
   #
@@ -2225,12 +2269,19 @@ networks:
   core:
     internal: true
   # Agent-facing. An agent container on this network reaches only the doors
-  # (gateways, the MCP broker) and scopyx, and no plane. Internal.
+  # (gateways, the MCP broker), and no plane and no scopyx: since G2.1 the web is
+  # read through the broker. Internal.
   agents:
     internal: true
   # The browser's one path to a decision: wardryx, which decides every fetch
   # scopyx-browser makes. Nothing else is on it, and it has no route out.
   browser-policy:
+    internal: true
+  # The MCP broker's one path to scopyx-browser (G2.1). The browser shares no
+  # other network with the broker, and an agent is not on this one, so a read
+  # through the browser passes the broker's label or does not happen.
+  # Nothing else is on it, and it has no route out.
+  browser-broker:
     internal: true
   # The typed risk signal's one door, and the reason the proxy can run open.
   # `typryx wardryx-proxy` asks the typed backend about every tool call it

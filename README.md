@@ -302,9 +302,9 @@ on which, and why an agent's container has no route to the internet:
 | `wg` | 51820/udp | **yes**, and it is the one port here that has to be |
 | `heraldyx` | none | it has none. It reads the event volume read-only and dials your mail server, so nothing ever calls it |
 | `agent-conform` | none | it has none. It re-checks the hash chain of every event stream every five minutes and writes one file of its own on the bus. See "The chain verifier" below |
-| `scopyx` | none | **opt-in, off unless you ask for it.** Inside the compose network only. See below |
+| `scopyx` | none | **opt-in, off unless you ask for it.** Inside the compose network only, and an agent reaches it through the MCP broker. See below |
 | `typryx` | none | **opt-in, off unless you ask for it.** Inside the compose network only. See below |
-| `tokenfuse-mcp-broker` | 4200 | **opt-in, off unless you ask for it.** `GATEWAY_BIND` decides where, same as the gateway. See below |
+| `tokenfuse-mcp-broker` | 4200 | **opt-in, off unless you ask for it** (typed answers, or an egress profile). `GATEWAY_BIND` decides where, same as the gateway. See below |
 | `tokenfuse-gateway-openai` | 4110 | **opt-in, off unless you ask for it** (`OPENAI_DOOR=1`). A second gateway for agents that speak the OpenAI wire; `GATEWAY_BIND` decides where, same as the gateway. See "A second door on the OpenAI wire" below |
 | `typryx-wardryx-proxy` | none | **opt-in twice, off unless you ask for it** (typed answers on, and `TYPED_RISK_SIGNAL=1`). Reachable only from the broker and wardryx. See "A risk signal on tool calls" below |
 | `vouchryx` | none | **opt-in, off unless you ask for it.** Inside the compose network only. See "Delegation" below |
@@ -316,18 +316,19 @@ on which, and why an agent's container has no route to the internet:
 
 Before this release every container shared one Docker network and every one of
 them had a route to the internet, so an agent that could reach a model provider
-directly never needed the gateway. Now there are five networks:
+directly never needed the gateway. Now there are these networks:
 
 | Network | Internal | Who is on it |
 |---|---|---|
 | `edge` | no | the one route out: heraldyx (mail), the gateways (provider calls), scopyx and the browser (the web), wg and caddy. typryx and its risk-signal proxy join it only when `TYPED_MODE` is `jev` or `own-model`, because only then do they call a provider |
-| `agents` | yes | where an agent's container joins (`agent-stack_agents`). Its only peers are the two gateways, the MCP broker, scopyx, the browser, the console and costcrew |
+| `agents` | yes | where an agent's container joins (`agent-stack_agents`). Its only peers are the two gateways, the MCP broker, the console and costcrew. Neither scopyx nor the browser is here: the web is read through the broker |
 | `core` | yes | the planes, which reach each other and the doors. No agent container is on it |
 | `risk-signal` | yes | the typed risk signal's proxy, the MCP broker and wardryx, and nothing else |
 | `browser-policy` | yes | the browser's one path to a decision: scopyx-browser and wardryx, which decides every fetch the browser makes, and nothing else |
+| `browser-broker` | yes | the MCP broker's one path to the browser: scopyx-browser and the broker, and nothing else (scopyx without a browser is reached over `core`) |
 | `front` | no, with NAT off | the published ports: caddy, console, costcrew and the MCP broker. Nothing outbound is translated, so a container here cannot use the host as a route out |
 
-An agent's container on `agents` reaches the gateways, the broker and scopyx.
+An agent's container on `agents` reaches the gateways and the broker.
 It cannot resolve a name on the internet, cannot connect to an address on it,
 and cannot reach a plane by name. `install.yml` checks those three things on a
 fresh runner, on every install leg, after a positive control on `edge` so a
@@ -878,7 +879,55 @@ docker compose --profile egress up -d scopyx
 ```
 
 `WITH_EGRESS=1 ./install.sh` pulls the scopyx image during the install; starting it is
-still the command above.
+still the command above. The same command starts the MCP broker, which is in both egress
+profiles as well as the typed one.
+
+#### How an agent reads the web: through the broker
+
+An agent does not call scopyx. It calls tokenfuse's MCP broker, which holds scopyx's key, and
+that is what lets the broker label the run from the fetch it saw (tokenfuse 1.21.0, invariant
+143) instead of from a tool name the agent reported. A run that has read the web carries the
+`web` label, and the firewall judges what it does next with it.
+
+`install.sh` writes one scopyx key per agent: this box enrols one, `agent://<trust domain>/agents/operator`,
+so its key is `scopyx_key_operator` in the broker's vault (`TOKENFUSE_MCP_SECRETS` in `.env`), usable
+only by that agent and only for `browse` and `fetch_url` (`TOKENFUSE_MCP_SECRET_SCOPES`), and the same
+key is in scopyx's list as `<key>=<agent>` (`SCOPYX_KEYS`). The agent never holds the key, only the
+handle. A re-run keeps the key.
+
+A call, from a container on `agent-stack_agents` (the broker is `http://tokenfuse-mcp-broker:4200/mcp`
+there, and on `GATEWAY_BIND` port 4200 from the host):
+
+```
+POST /mcp
+Authorization: DPoP <the agent's token>        (and the DPoP proof, as for any call to the broker)
+X-Fuse-Mcp-Upstream: scopyx
+X-Fuse-Agent-Id: agent://<trust domain>/agents/operator
+x-fuse-run-id: <the run this fetch belongs to>
+
+{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+  "name": "fetch_url",
+  "arguments": {"url": "https://example.com"},
+  "_meta": {"scopyx/key": "{{secret:scopyx_key_operator}}"}
+}}
+```
+
+- `X-Fuse-Mcp-Upstream: scopyx` picks the upstream; without it the broker would use its default.
+- `x-fuse-run-id` is required for scopyx: taint belongs to a run, and the broker refuses a call to a
+  classified upstream that names none, before anything is forwarded. Use the id of the run whose
+  model calls go through the gateway, so the label lands on the run that is judged.
+- `params._meta["scopyx/key"]` holds the handle; the broker replaces it with the key on the last hop and
+  scopyx removes it at its door.
+- An answer whose label the gateway did not take is withheld.
+
+**Needs agent tokens.** The broker reports the fetch to the gateway with its own client key, which
+exists only while agent tokens are on, the default. `WITH_EGRESS` or `WITH_BROWSER` with
+`WITH_AGENT_TOKENS=0` is refused before anything is installed.
+
+**Upgrading a box that ran scopyx before.** scopyx and the browser are no longer on `agents`, so an agent
+that called `http://scopyx:4300` directly can no longer reach it, on purpose. The next `./install.sh` run
+adds the key and starts the broker beside the running scopyx; an agent changes its address to the broker's
+and sends the call above.
 
 Everything else here governs what your agents do to your own planes. This one
 governs what they do to the **outside**, which means that once it runs, agents
