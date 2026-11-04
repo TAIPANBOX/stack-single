@@ -91,6 +91,7 @@ change here is a change to something with root on somebody else's box.
 ./scripts/record-plane-is-on-by-default.sh
 ./scripts/costcrew-can-reach-its-stream.sh
 ./scripts/scopyx-reads-go-through-the-broker.sh
+./scripts/console-proofs-have-their-inputs.sh
 ./scripts/no-key-in-a-message.sh
 ./scripts/gates-have-teeth.sh   # invariant 8; needs a clean tree
 ```
@@ -1752,6 +1753,44 @@ an absent invariant.
     scenarios in `features/a-read-of-the-web-passes-the-broker.feature`; teeth in `scripts/gates-have-teeth.sh`,
     the cases named "scopyx-broker" and four of "network-membership" and three of "profiles-off-are-removed". The
     label a fetch earns on a running stack is held by tokenfuse's own suite (its invariant 143).)*
+
+56. **The console reaches what its policy and budget proofs run on, and can only read it.**
+    `@claude 2026-11-04`, from the task that wired genaryx's proofs into this launcher (it records no
+    decision of the owner): the console proves a candidate policy by running `wardryx replay` over the
+    decisions already on the bus against wardryx's policy archive, and a candidate budget by running
+    `tokenfuse backtest` over the calls the gateway recorded (genaryx invariants 40 and 41). Both need a
+    path in the console's environment and the right to read what is there. Measured on forge
+    2026-11-04 with wardryx v2.4.1: the archive was 0600 and owned by wardryx, the console (uid 10001)
+    could not open a file, and `wardryx replay` answered "not archived" for all 490 decisions, wardryx's
+    word for a version it never kept, said of versions the console could not read; run as the owner it
+    reproduced 490. wardryx v2.5.1 (pinned here) writes its directory 0750 and a new version 0640, in the
+    group it runs in, which is 10001 here (`user: "20001:10001"`), the console's own group.
+
+    So the console is given `WARDRYX_POLICY_ARCHIVE`, the directory wardryx writes in the events volume
+    it already mounts, and `TOKENFUSE_DATA_DIR`, the Anthropic gateway's own data directory in the
+    `traces` volume, which it mounts read only at the gateway's path (focus-export reads the same
+    directory the same way, as 10001:10001). A version an earlier wardryx wrote is 0600 and stays so, so
+    `init-volumes` makes every file in the archive 0640 on every up, after its recursive chown to wardryx's
+    uid and the bus group; the directory stays 0750. Read-only is what the modes give: the group has read
+    and search on the directory and read on a version, no write bit, and nothing for other; the bus
+    directory above it is `root:10001 0751`, so the console cannot rename or remove the archive directory
+    either. The console needs no `group_add`: its group is already wardryx's. A console image older than
+    the proofs ignores both variables. This change does not move the console pin; the console that
+    carries the proofs and its engine binaries is a release of its own.
+    @measured `./scripts/console-proofs-have-their-inputs.sh` on this branch, 2026-11-04: OK; the same
+    gate over origin/main's `compose.yaml` printed three FAIL lines (no archive path, no trace path, no
+    repair of a version an earlier wardryx wrote).
+    *(gate: `scripts/console-proofs-have-their-inputs.sh`, on the resolved configuration and a sandbox run
+    of init-volumes with chown and chmod recorded and a version planted in the archive; it requires the
+    console's archive to be the directory wardryx writes, on the same volume, the console's trace
+    directory to be the gateway's and mounted read only, wardryx's group to be one the console runs in,
+    the archive directory to be wardryx's uid and that group with no group write and nothing for other,
+    and a planted version to be covered by the recursive chown and made 0640; it refuses to report OK on
+    no console, wardryx, gateway or init-volumes, or no archive or trace path to compare; scenarios in
+    `features/the-console-reaches-what-its-proofs-run-on.feature`; 18 teeth cases in
+    `scripts/gates-have-teeth.sh`. It reads compose.yaml, not a running box: whether the console reads a
+    version on a live volume is the console's own proof output, and the console backtests the Anthropic
+    gateway's traces only, never the OpenAI door's.)*
 
 ## Decisions that have no gate yet
 

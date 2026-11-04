@@ -3884,6 +3884,101 @@ run_case "profiles-off-are-removed: the typed plane's broker makes egress live" 
 	"$(py 'edit("install.sh", "      case \" $installer_svcs \" in *\" $svc \"*) continue ;; esac\n      [ \"$state\" = running ] || continue\n      live_svcs=", "      [ \"$state\" = running ] || continue\n      live_svcs=")')" \
 	"H. with typed off and no egress service running"
 
+# ---- console-proofs-have-their-inputs (CLAUDE.md invariant 56): the console reaches what its
+# policy and budget proofs run on, and can only read it.
+CP='./scripts/console-proofs-have-their-inputs.sh'
+
+run_case "console-proofs: the console is not told where the archive is" fail \
+	"$CP" \
+	"$(py 'edit("compose.yaml", "      WARDRYX_POLICY_ARCHIVE: /var/lib/stack/events/wardryx-policy-archive\n      TOKENFUSE_DATA_DIR: /var/lib/stack/traces/gateway\n      GENARYX_WG_IFACE:", "      TOKENFUSE_DATA_DIR: /var/lib/stack/traces/gateway\n      GENARYX_WG_IFACE:")')" \
+	"the console names no WARDRYX_POLICY_ARCHIVE"
+
+run_case "console-proofs: the console reads another directory than the archive wardryx writes" fail \
+	"$CP" \
+	"$(py 'edit("compose.yaml", "      WARDRYX_POLICY_ARCHIVE: /var/lib/stack/events/wardryx-policy-archive\n      TOKENFUSE_DATA_DIR: /var/lib/stack/traces/gateway\n      GENARYX_WG_IFACE:", "      WARDRYX_POLICY_ARCHIVE: /var/lib/stack/events/wardryx-policy-archive-copy\n      TOKENFUSE_DATA_DIR: /var/lib/stack/traces/gateway\n      GENARYX_WG_IFACE:")')" \
+	"not the archive wardryx writes"
+
+run_case "console-proofs: the console is not told where the traces are" fail \
+	"$CP" \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_DATA_DIR: /var/lib/stack/traces/gateway\n      GENARYX_WG_IFACE:", "      GENARYX_WG_IFACE:")')" \
+	"the console names no TOKENFUSE_DATA_DIR"
+
+run_case "console-proofs: the console reads the OpenAI door's traces, not the gateway's" fail \
+	"$CP" \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_DATA_DIR: /var/lib/stack/traces/gateway\n      GENARYX_WG_IFACE:", "      TOKENFUSE_DATA_DIR: /var/lib/stack/traces/gateway-openai\n      GENARYX_WG_IFACE:")')" \
+	"not the gateway's"
+
+run_case "console-proofs: the console mounts the traces read-write" fail \
+	"$CP" \
+	"$(py 'edit("compose.yaml", "      - traces:/var/lib/stack/traces:ro\n      - keyryxalerts:/var/lib/keyryx-alerts:ro\n", "      - traces:/var/lib/stack/traces\n      - keyryxalerts:/var/lib/keyryx-alerts:ro\n")')" \
+	"mounts the trace volume traces read-write"
+
+run_case "console-proofs: the console mounts a different volume where the traces are" fail \
+	"$CP" \
+	"$(py 'edit("compose.yaml", "      - traces:/var/lib/stack/traces:ro\n      - keyryxalerts:/var/lib/keyryx-alerts:ro\n", "      - focus:/var/lib/stack/traces:ro\n      - keyryxalerts:/var/lib/keyryx-alerts:ro\n")')" \
+	"does not mount the gateway's volume traces"
+
+run_case "console-proofs: wardryx runs in a group the console is not in" fail \
+	"$CP" \
+	"$(py 'edit("compose.yaml", "    user: \"20001:10001\"\n", "    user: \"20001:20001\"\n")')" \
+	"not wardryx's group"
+
+run_case "console-proofs: the archive directory is group-writable" fail \
+	"$CP" \
+	"$(py 'edit("compose.yaml", "&& chmod 0750 /vol/events/wardryx-policy-archive\n", "&& chmod 0770 /vol/events/wardryx-policy-archive\n")')" \
+	"a group write bit"
+
+run_case "console-proofs: the archive directory is open to other" fail \
+	"$CP" \
+	"$(py 'edit("compose.yaml", "&& chmod 0750 /vol/events/wardryx-policy-archive\n", "&& chmod 0755 /vol/events/wardryx-policy-archive\n")')" \
+	"anything for other"
+
+run_case "console-proofs: the archive directory is owned by another plane" fail \
+	"$CP" \
+	"$(py 'edit("compose.yaml", "chown -R 20001:10001 /vol/events/wardryx-policy-archive &&", "chown -R 10002:10001 /vol/events/wardryx-policy-archive &&")')" \
+	"want wardryx's uid"
+
+run_case "console-proofs: the archive directory is in a group the console is not in" fail \
+	"$CP" \
+	"$(py 'edit("compose.yaml", "chown -R 20001:10001 /vol/events/wardryx-policy-archive &&", "chown -R 20001:20001 /vol/events/wardryx-policy-archive &&")')" \
+	"not a group the console runs in"
+
+run_case "console-proofs: the archive is given away without a recursive chown" fail \
+	"$CP" \
+	"$(py 'edit("compose.yaml", "chown -R 20001:10001 /vol/events/wardryx-policy-archive &&", "chown 20001:10001 /vol/events/wardryx-policy-archive &&")')" \
+	"a version in the archive is owned by"
+
+run_case "console-proofs: versions an earlier wardryx wrote stay 0600" fail \
+	"$CP" \
+	"$(py 'edit("compose.yaml", "        find /vol/events/wardryx-policy-archive -type f -exec chmod 0640 {} +\n", "")')" \
+	"does not make a version an earlier wardryx wrote readable"
+
+run_case "console-proofs: versions are made readable by everyone" fail \
+	"$CP" \
+	"$(py 'edit("compose.yaml", "-type f -exec chmod 0640 {} +", "-type f -exec chmod 0644 {} +")')" \
+	"want 0640"
+
+run_case "console-proofs: versions are made writable by the group" fail \
+	"$CP" \
+	"$(py 'edit("compose.yaml", "-type f -exec chmod 0640 {} +", "-type f -exec chmod 0660 {} +")')" \
+	"want 0640"
+
+run_case "console-proofs: wardryx names no archive, so there is nothing to read" fail \
+	"$CP" \
+	"$(py 'edit("compose.yaml", "      WARDRYX_POLICY_ARCHIVE: /var/lib/stack/events/wardryx-policy-archive\n      # Agent tokens, verified here", "      # Agent tokens, verified here")')" \
+	"measured nothing"
+
+run_case "console-proofs: a reworded comment above the repair is not a fault" pass \
+	"$CP" \
+	"$(py 'edit("compose.yaml", "# The console\x27s proofs replay decisions against this archive", "# The console\x27s proofs replay recorded decisions against this archive")')"
+
+run_case "console-proofs: naming the console own account is not a fault" pass \
+	"$CP" \
+	"$(py 's = open("compose.yaml").read()
+i = s.index("  console:\n    <<: *restart\n")
+j = i + len("  console:\n    <<: *restart\n")
+open("compose.yaml", "w").write(s[:j] + "    user: \"10001:10001\"\n" + s[j:])')"
+
 echo
 if [ -n "$(git status --porcelain)" ]; then
 	printf 'FAIL: this script left the tree dirty, so it cannot be trusted about anything above\n'

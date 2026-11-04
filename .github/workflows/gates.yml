@@ -132,6 +132,8 @@ jobs:
         run: ./scripts/costcrew-can-reach-its-stream.sh
       - name: a read of the web passes the MCP broker, which labels the run from the act (invariant 55)
         run: ./scripts/scopyx-reads-go-through-the-broker.sh
+      - name: the console reaches what its proofs run on, and can only read it (invariant 56)
+        run: ./scripts/console-proofs-have-their-inputs.sh
 
       # Last, because it mutates tracked files and restores them. It needs a
       # clean tree and says so plainly, so it also reports any earlier step
