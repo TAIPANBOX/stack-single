@@ -168,6 +168,13 @@ services:
         # wardryx's policy archive is a directory in the bus (WARDRYX_POLICY_ARCHIVE),
         # made here so that wardryx, which cannot create in the bus, owns it.
         mkdir -p /vol/events/wardryx-policy-archive && chown -R 20001:10001 /vol/events/wardryx-policy-archive && chmod 0750 /vol/events/wardryx-policy-archive
+        # The console's proofs replay decisions against this archive (CLAUDE.md invariant 56), so the
+        # console, which runs in the bus group, has to be able to READ it. From v2.5.1 wardryx writes
+        # a new version 0640, its directory 0750, and gives a file the group wardryx runs in (10001
+        # here); a version an earlier wardryx wrote is 0600 and stays so, and the console would read
+        # it as "not archived". Made readable to the group on every up and to nobody else, with no
+        # group write bit: the console reads it and cannot change it.
+        find /vol/events/wardryx-policy-archive -type f -exec chmod 0640 {} +
         # Keyryx's two state directories, each owned by the one process that uses it.
         chown -R 20101 /vol/keyryx && chmod 0700 /vol/keyryx
         chown -R 20100 /vol/keyryxw && chmod 0700 /vol/keyryxw
@@ -1710,6 +1717,14 @@ services:
       TOKENFUSE_GATEWAY_ADMIN_KEY: ${GATEWAY_ADMIN:?set by install.sh}
       WARDRYX_URL: http://wardryx:8090
       WARDRYX_ADMIN_KEY: ${WARDRYX_ADMIN:?set by install.sh}
+      # What the console's two proofs run on (CLAUDE.md invariant 56; genaryx invariants 40 and 41).
+      # A candidate policy is replayed with `wardryx replay` over the decisions on the bus against
+      # wardryx's policy archive; a candidate budget is backtested with `tokenfuse backtest` over the
+      # gateway's recorded calls. Both are the same paths the writers use: the archive is a directory
+      # of the events volume the console already mounts, and the traces are the gateway's own data
+      # directory, mounted below read only. Unset, the console says the proof is not configured.
+      WARDRYX_POLICY_ARCHIVE: /var/lib/stack/events/wardryx-policy-archive
+      TOKENFUSE_DATA_DIR: /var/lib/stack/traces/gateway
       GENARYX_WG_IFACE: ${WG_IFACE:-wg-op}
       # The RELAY socket, not the daemon's own: wireguard-go requires its socket
       # to stay 0700 and stops answering if that changes, so the wg container
@@ -1740,6 +1755,10 @@ services:
     volumes:
       - consolestate:/var/lib/stack
       - events:/var/lib/stack/events
+      # Read only: the console backtests over what the gateway wrote and must not be able to edit it,
+      # the split focus-export makes below. focus-export reads this same directory as 10001:10001,
+      # the console's own account, so the console needs no group for it.
+      - traces:/var/lib/stack/traces:ro
       - keyryxalerts:/var/lib/keyryx-alerts:ro
       - ./environments:/etc/genaryx/taipan/environments:ro
       - ./closure:/run/closure:ro

@@ -1782,6 +1782,17 @@ gateway, as a file, and never to the console (see "The provider key: the gateway
 holds it, never an agent"). With no keys file given and no gateway key for Felyx,
 Felyx says it is not configured and the rest of the console works as before.
 
+The console proves a change before anything applies it. A candidate policy is replayed with
+`wardryx replay` over the decisions this box already took, against wardryx's policy archive,
+and a candidate budget is backtested with `tokenfuse backtest` over the calls the gateway
+recorded. The console is told where both are (`WARDRYX_POLICY_ARCHIVE`, `TOKENFUSE_DATA_DIR`):
+the archive is a directory of the event volume the console already mounts, and the gateway's
+traces are mounted read only. The console runs in the group wardryx writes its archive in, the
+archive directory is 0750 and every version in it 0640, and each start makes the versions an
+earlier wardryx wrote readable the same way, so the console can read the archive and cannot change
+it. A console image older than these proofs ignores both settings. The proofs run on the Anthropic
+gateway's traces; the OpenAI door's are not read.
+
 ## Traps, already fixed here
 
 The Kubernetes sibling of this repo,
