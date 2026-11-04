@@ -3805,12 +3805,12 @@ run_case "scopyx-broker: a second run writes the vault entry again" fail \
 
 run_case "scopyx-broker: a changed trust domain leaves the old scope entry" fail \
 	"$G21" \
-	"$(py 'edit("install.sh", "  scopes=\"$(csv_without \"$(identity_env_get TOKENFUSE_MCP_SECRET_SCOPES)\" \"$name=\")\"\n", "  scopes=\"$(identity_env_get TOKENFUSE_MCP_SECRET_SCOPES)\"\n")')" \
+	"$(py 'edit("install.sh", "  scopes=\"$(csv_without \"$(identity_env_get TOKENFUSE_MCP_SECRET_SCOPES)\" \"$name=\")\"\n", "  scopes=\"$(csv_without \"$(identity_env_get TOKENFUSE_MCP_SECRET_SCOPES)\" \"$name=agents:$agent;\")\"\n")')" \
 	"a changed trust domain left two scope entries"
 
 run_case "scopyx-broker: a key already in the vault is replaced" fail \
 	"$G21" \
-	"$(py 'edit("install.sh", "    case \"$item\" in \"$name=\"*) secret=\"${item#\"$name=\"}\" ;; esac\n", "    :\n")')" \
+	"$(py 'edit("install.sh", "  [ -n \"$secret\" ] || secret=\"$(gen 40)\"\n  [[ ", "  [ \"${#secret}\" = 40 ] || secret=\"$(gen 40)\"\n  [[ ")')" \
 	"replaced a key the box already had"
 
 run_case "scopyx-broker: a short vault key is accepted" fail \
