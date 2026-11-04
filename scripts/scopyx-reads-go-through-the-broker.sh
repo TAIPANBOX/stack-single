@@ -128,6 +128,9 @@ out="$(run_resolve WITH_AGENT_TOKENS=0)"
 
 # ---- D. the key of each agent, lifted out of install.sh and run on scratch .env files ---------------
 BLOCK="$(sed -n '/^# scopyx-broker-keys: begin$/,/^# scopyx-broker-keys: end$/p' install.sh)"
+# The installer's own generator, lifted: this gate keeps no copy of it (scripts/gen-is-bounded.sh holds it).
+GEN="$(sed -n '/^# gen: begin$/,/^# gen: end$/p' install.sh)"
+[ -n "$GEN" ] || fail "install.sh has no '# gen: begin' .. 'end' block, so the key of each agent could not be minted by the installer's generator"
 [ -n "$BLOCK" ] || fail "install.sh has no '# scopyx-broker-keys: begin' .. 'end' block, so the key of each agent measured nothing"
 grep -q '^scopyx_broker_keys_apply() {' <<<"$BLOCK" \
   || fail "the scopyx-broker-keys block defines no scopyx_broker_keys_apply, so the key of each agent measured nothing"
@@ -147,11 +150,11 @@ HELPERS
 # run_keys DIR TOKENS_ON AGENT: runs the block in DIR with the .env it holds; prints what it said
 run_keys() {
   local d="$1" on="$2" agent="$3"
-  ( cd "$d" && env -i PATH="$PATH" HOME="$d" STACK_DIR="$d" BLOCK="$BLOCK" ON="$on" AGENT="$agent" HELPERS="$scratch/helpers.sh" bash -c '
+  ( cd "$d" && env -i PATH="$PATH" HOME="$d" STACK_DIR="$d" BLOCK="$BLOCK" ON="$on" AGENT="$agent" HELPERS="$scratch/helpers.sh" GEN="$GEN" bash -c '
       set -euo pipefail
       note() { printf "note: %s\n" "$*"; }
       die() { printf "die: %s\n" "$*"; exit 1; }
-      gen() { head -c 200 /dev/urandom | LC_ALL=C tr -dc "A-Za-z0-9" | head -c "$1"; }
+      eval "$GEN"
       . "$HELPERS"
       AGENT_TOKENS_ON="$ON"; AGENT_TOKEN_AGENT="$AGENT"
       eval "$BLOCK"
