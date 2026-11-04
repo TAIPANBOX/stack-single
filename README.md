@@ -979,7 +979,7 @@ What is wired now, and what is not:
   the switch. On a box with no token in flight that is correct.
 - **vouchryx** has the wiring, and its working key is still the file key. The switch
   is `VOUCHRYX_SIGNER`, empty by default, and this launcher keeps it empty. The pin is
-  v0.6.1, which reads `keyryx` and refuses to start with it unless
+  v0.7.0, which reads `keyryx` and refuses to start with it unless
   `VOUCHRYX_KEYRYX_ROOT_PIN` names the kids of keyryx's delegation root. vouchryx 0.6.0 and later
   refuse any keyryx variable while the signer is not keyryx, so the keyryx variables pass
   through from `.env` and are empty by default. Turning the switch on by hand takes
@@ -1460,7 +1460,7 @@ A profile in `compose.yaml` that is in neither list, or in both, is refused by t
 
 Every image the stack runs is pinned to the digest of the bytes it names. The
 tag stays beside it for reading. A tag can be moved by whoever controls the
-registry; a digest cannot, so a box running `wardryx:v2.4.1@sha256:a7ef...` runs
+registry; a digest cannot, so a box running `wardryx:v2.5.1@sha256:2d3c...` runs
 that build and nothing else.
 
 The images this project publishes (`ghcr.io/taipanbox/...`) are also signed,
@@ -1710,7 +1710,7 @@ into `./closure/secret`, readable only by the console. Nothing prints it, and a
 re-run keeps it. To turn closing off again, remove `CLOSURE_SECRET` and
 `CLOSURE_SECRET_FILE` from `.env` and run `docker compose up -d`.
 
-It needs tokenfuse v1.9.0 or later and console v1.1.34 or later. The images pinned here are tokenfuse v1.20.3 and
+It needs tokenfuse v1.9.0 or later and console v1.1.34 or later. The images pinned here are tokenfuse v1.21.0 and
 console v1.7.3; an older image ignores the setting.
 
 ## The console
