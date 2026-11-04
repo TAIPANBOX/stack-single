@@ -1787,7 +1787,7 @@ an absent invariant.
     the archive directory to be wardryx's uid and that group with no group write and nothing for other,
     and a planted version to be covered by the recursive chown and made 0640; it refuses to report OK on
     no console, wardryx, gateway or init-volumes, or no archive or trace path to compare; scenarios in
-    `features/the-console-reaches-what-its-proofs-run-on.feature`; 17 teeth cases in
+    `features/the-console-reaches-what-its-proofs-run-on.feature`; 18 teeth cases in
     `scripts/gates-have-teeth.sh`. It reads compose.yaml, not a running box: whether the console reads a
     version on a live volume is the console's own proof output, and the console backtests the Anthropic
     gateway's traces only, never the OpenAI door's.)*
