@@ -251,6 +251,17 @@ check_log() { # name, command
 
 # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
 probe() { docker run --rm --network "$NET" busybox:1.36 wget -q -T5 -O /dev/null "$1"; }
+# /healthz is 503 while vouchryx holds no certified key, which is a box that issues no token at all. A vouchryx
+# this run recreated waits out keyryx's publish-ahead first (compose.yaml, KEYRYX_PUBLISH_AHEAD), so this waits too.
+# shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
+vouchryx_can_sign() {
+  local left=30
+  while [ "$left" -gt 0 ]; do
+    probe http://vouchryx:4310/healthz && return 0
+    sleep 5; left=$((left - 1))
+  done
+  return 1
+}
 # argv-free-http: begin
 # A request that carries a credential goes to a throwaway busybox's STDIN and is sent
 # with nc. It is never a --header on a command line: docker run, the container's own
@@ -712,6 +723,7 @@ if compose_has vouchryx; then
   check "vouchryx is NOT on the host" \
         "! curl -fsS -m3 -o /dev/null http://127.0.0.1:4310/.well-known/jwks.json"
   check "vouchryx answers inside" "probe http://vouchryx:4310/.well-known/jwks.json"
+  check "vouchryx holds a certified key, so it can issue a token" "vouchryx_can_sign"
   # Reachability is not the same as the gateway actually trusting it: this
   # reads the environment variable this run wrote, the same shape "console
   # resolves the money plane" checks a wired value rather than a live call.
@@ -3520,19 +3532,6 @@ POLICY
   # nothing here touches the bus.
 }
 
-# keyryx-up: begin
-keyryx_up() { # starts custody, and restarts it once when this run changed its policy
-  local running
-  running="$("${COMPOSE[@]}" ps -q keyryx 2>/dev/null || true)"
-  "${COMPOSE[@]}" up -d keyryx >/dev/null || return 1
-  if [ "${KEYRYX_POLICY_CHANGED:-0}" = 1 ] && [ -n "$running" ]; then
-    "${COMPOSE[@]}" restart keyryx >/dev/null || return 1
-    note "keyryx restarted to read the changed policy.json"
-  fi
-  KEYRYX_POLICY_CHANGED=0
-}
-# keyryx-up: end
-
 # approver-key: begin
 # CLAUDE.md invariant 61. The console signs each approval's statement with an approver
 # key after a passkey assertion, and wardryx 2.4.0 and later verify the statement against the
@@ -4118,6 +4117,19 @@ if [ "${DELEGATION_ON:-0}" = 1 ]; then UP_PROFILES+=(--profile delegation); fi
 # The OpenAI door (OPENAI_DOOR=1, section 0g) is started like the typed plane, so
 # section 8 can ask it the questions it asks the gateway.
 [ "$DOOR_ON" != 1 ] || UP_PROFILES+=(--profile openai-door)
+
+# keyryx-up: begin
+keyryx_up() { # starts custody, and restarts it once when this run changed its policy
+  local running
+  running="$("${COMPOSE[@]}" ps -q keyryx 2>/dev/null || true)"
+  "${COMPOSE[@]}" up -d keyryx >/dev/null || return 1
+  if [ "${KEYRYX_POLICY_CHANGED:-0}" = 1 ] && [ -n "$running" ]; then
+    "${COMPOSE[@]}" restart keyryx >/dev/null || return 1
+    note "keyryx restarted to read the changed policy.json"
+  fi
+  KEYRYX_POLICY_CHANGED=0
+}
+# keyryx-up: end
 
 # vouchryx-signer: begin
 # vouchryx signs its delegation tokens with a working key that keyryx certifies,

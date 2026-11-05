@@ -24,8 +24,8 @@
 #      volume the witness mounts read-write that is neither the bus, the
 #      checkpoints, nor the witness's own state volume;
 #   2. every mount of the bus and of the checkpoints in the witness is read only,
-#      and the witness mounts nothing else read-write but its state and that
-#      findings volume;
+#      and the witness mounts nothing else read-write but its state, that
+#      findings volume and keyryxattest, its attestations (invariant 62);
 #   3. every service but the witness and the root one-shots that mounts the
 #      findings volume mounts it read only;
 #   4. heraldyx and the console each mount it read only, and each is told to
@@ -153,7 +153,7 @@ for v in mounts(wit):
     src, ro = v.get("source"), bool(v.get("read_only"))
     if src in ("events", "checkpoints") and not ro:
         problems.append("the witness mounts the %s volume read-write: it writes the bus it witnesses" % src)
-    elif v.get("type") == "volume" and not ro and src not in (avol, dvol):
+    elif v.get("type") == "volume" and not ro and src not in (avol, dvol, "keyryxattest"):
         problems.append("the witness mounts %s read-write, beside its state and its findings" % src)
 
 # 3. nobody else writes the findings

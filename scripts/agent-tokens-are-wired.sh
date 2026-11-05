@@ -570,6 +570,19 @@ TOKENFUSE_DELEGATION_JWKS_URL='http://vouchryx:4310/.well-known/jwks.json'")" ||
   if printf '%s\n' "$backfile" | grep -q '^TOKENFUSE_DELEGATION_JWKS_URL='; then
     fail "K6. the file signer keeps the URL line: $backfile"
   fi
+  # K7. a restarted vouchryx asks for a new key while its old one is valid, and custody starts the new one
+  # KEYRYX_PUBLISH_AHEAD later, so no token is issued for that long. The setting must clear the slowest path
+  # to a verifier (vouchryx's 10s poll plus a door's 60s), and the install must ask whether vouchryx can sign:
+  # measured on forge 2026-11-05, install.sh reported every check passed while every token was refused.
+  ahead="$(grep -E '^[[:space:]]+KEYRYX_PUBLISH_AHEAD:' compose.yaml | sed -E 's/.*: *//')"
+  case "$ahead" in
+    2m|3m|4m|5m) ;;
+    *) fail "K7. KEYRYX_PUBLISH_AHEAD is '$ahead': under 2m a verifier can see a token before its key, and over 5m a restart costs that long in new tokens" ;;
+  esac
+  grep -q 'check "vouchryx holds a certified key, so it can issue a token" "vouchryx_can_sign"' install.sh \
+    || fail "K7. install.sh never asks whether vouchryx can sign, so it reports a box that issues no token as passing"
+  grep -qE 'probe http://vouchryx:4310/healthz' install.sh \
+    || fail "K7. vouchryx_can_sign does not read /healthz, the answer that says a certified key is held"
   grep -qE 'typed_env_get VOUCHRYX_SIGNER\)" = keyryx \] \|\| add_env_default TOKENFUSE_DELEGATION_JWKS ' install.sh \
     || fail "K6. install.sh writes the file line under keyryx too, beside the URL the signer wrote"
   again="$(envrun "$scratch/vx-again" "VOUCHRYX_KEYRYX_ROOT_PIN='OLDPIN'")" || true

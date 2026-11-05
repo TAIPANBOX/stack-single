@@ -200,6 +200,7 @@ fi
 
 if [ "$problems" -gt 0 ]; then
   echo
-  echo "$problems problem(s). See CLAUDE.md invariant 62."  exit 1
+  echo "$problems problem(s). See CLAUDE.md invariant 62."
+  exit 1
 fi
-echo "OK: the record seal signs through the box's keyryx with a credential the custody holds only as a digest, the witness attests to the records, the seal reads the attestations folder read only, and pins its root kid (invariants 62 and 60)."
+echo "OK: the record seal signs through the box's keyryx with a credential the custody holds only as a digest, the witness attests to the records, the seal reads the attestations volume read only, and pins its root kid (invariants 62 and 63)."

@@ -25,6 +25,14 @@ Feature: vouchryx signs with a key keyryx certifies, against a root this box pin
     # -> gates-have-teeth.sh "agent-tokens-are-wired: the installer writes the file line under keyryx"
     # -> gates-have-teeth.sh "agent-tokens-are-wired: the file signer keeps polling"
 
+  Scenario: a restarted vouchryx is back within two minutes, and the install says whether it can issue a token
+    Given vouchryx keeps its working key in memory, so a restart asks custody for a new one
+    When the new key waits out the publish-ahead, and the installer reads vouchryx's health
+    Then the wait clears the slowest verifier and no more, and a box that holds no certified key is reported as failing
+    # -> gates-have-teeth.sh "agent-tokens-are-wired: a token can arrive before its key"
+    # -> gates-have-teeth.sh "agent-tokens-are-wired: the install never asks whether vouchryx can sign"
+    # -> gates-have-teeth.sh "agent-tokens-are-wired: the readiness check asks the wrong question"
+
   Scenario: the file signer keeps the file key and gives vouchryx no keyryx variable
     Given .env says VOUCHRYX_SIGNER=file
     When the resolved configuration is read

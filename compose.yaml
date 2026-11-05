@@ -304,6 +304,12 @@ services:
       KEYRYX_POLICY: /etc/keyryx/policy.json
       KEYRYX_ADDR: 0.0.0.0:4340
       KEYRYX_SOCKET_DIR: /run/keyryx/sock
+      # How long a renewed key waits before it signs, so every verifier holds it first. vouchryx
+      # keeps its working key in memory, so a restart asks for a new key while the old one is still
+      # valid, and no token is issued for this long. The default is 15m, for verifiers that are far
+      # away. Here the slowest path is vouchryx's 10s poll plus a door's 60s: 2m clears it, and a
+      # restart costs 2 minutes of new tokens, not 15 (CLAUDE.md invariant 58).
+      KEYRYX_PUBLISH_AHEAD: 2m
     volumes:
       - keyryxstate:/var/lib/keyryx
       - ./keyryx/root.key:/run/keyryx/root.key:ro

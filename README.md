@@ -323,7 +323,7 @@ directly never needed the gateway. Now there are these networks:
 | Network | Internal | Who is on it |
 |---|---|---|
 | `edge` | no | the one route out: heraldyx (mail), the gateways (provider calls), scopyx and the browser (the web), wg and caddy. typryx and its risk-signal proxy join it only when `TYPED_MODE` is `jev` or `own-model`, because only then do they call a provider |
-| `agents` | yes | where an agent's container joins (`agent-stack_agents`). Its only peers are the two gateways, the MCP broker, the console and costcrew. Neither scopyx nor the browser is here: the web is read through the broker |
+| `agents` | yes | where an agent's container joins (`agent-stack_agents`). Its only peers are the two gateways, the MCP broker, the console, costcrew and its runner costcrew-run. Neither scopyx nor the browser is here: the web is read through the broker |
 | `core` | yes | the planes, which reach each other and the doors. No agent container is on it |
 | `risk-signal` | yes | the typed risk signal's proxy, the MCP broker and wardryx, and nothing else |
 | `browser-policy` | yes | the browser's one path to a decision: scopyx-browser and wardryx, which decides every fetch the browser makes, and nothing else |
@@ -1037,7 +1037,6 @@ What is wired now, and what is not:
   stops vouchryx at its start, and the variable's name is in the log. Trusting this box's
   keyryx at that first start is the first-use trust keyryx's witness also takes. Pinning
   the root from a copy the operator fetched is the stricter way, and it is not built here.
-  Not measured here: a live keyryx certifying vouchryx's key. CI's install legs run it.
   The pin is read from keyryx's key set for its delegation root, `/v1/jwks/keyryx.delegation-root`,
   over the compose network's `core` network. No host port publishes keyryx. The consumer socket is
   vouchryx's own way in for signing, and the pin read does not use it.
@@ -1051,10 +1050,18 @@ What is wired now, and what is not:
   2. `sudo ./install.sh` as before. The run takes the pin from the keyryx that is serving now,
      checks its shape, writes it back, and recreates vouchryx with it. A run that finds a pin
      already there leaves it alone.
-  Not measured here: that keyryx's own rotation, and the re-pin on a live box.
-- **the tokenfuse gateway and the MCP broker** have `TOKENFUSE_DELEGATION_JWKS_URL`
-  set to empty, which is off. It takes effect with tokenfuse v1.17.0.
-- **trailryx's seal** is not wired. Its signer needs the next trailryx release.
+- **the tokenfuse gateway and the MCP broker** poll vouchryx's key set
+  (`TOKENFUSE_DELEGATION_JWKS_URL`). vouchryx's working key under keyryx is renewed at half
+  its 72 hours, and a door that read a file once would refuse every token signed after the
+  first renewal. `VOUCHRYX_SIGNER=file` goes back to the file, and tokenfuse takes one or the
+  other, never both.
+- **Restarting vouchryx costs two minutes of new tokens.** Its working key lives in memory, so a
+  restart asks keyryx for a new one while the old one is still valid, and keyryx starts the new
+  key `KEYRYX_PUBLISH_AHEAD` later, so every verifier holds it first. Compose sets 2 minutes: the
+  default of 15 is for verifiers far away. Tokens already issued keep working; a new one is
+  refused with 503 `no_certified_signing_key` until then, and the installer's checks wait for it.
+- **trailryx's seal** signs each sealed root through keyryx, with a credential keyryx holds
+  only as a digest. See "The record plane" below.
 - **checkpoints** are not written yet: no producer signs one. The witness checks each
   stream against the bytes it saw before, and it reads the checkpoints once a producer
   has written some.
@@ -1078,12 +1085,12 @@ old `signing.pem` are left in place and unused. Nothing is deleted.
 On by default, from the pinned trailryx-node image, with no build (CLAUDE.md invariant 51). The
 installer starts it with the rest of the stack. `WITH_RECORD=0` turns it off, and an install that
 had it running stops and removes it.
-**Signed through keyryx (CLAUDE.md invariants 62 and 60).** The seal signs each sealed root
+**Signed through keyryx (CLAUDE.md invariants 62 and 63).** The seal signs each sealed root
 through this box's keyryx. Its credential, `keyryx/record-seal.key`, is minted once, read
 only by the seal, and kept across re-runs; keyryx holds only its digest. The keyryx
-witness reads the records and attests to each root, and the seal reads those attestations
-through a read-only folder of its own: the `attestations` folder of the witness's volume,
-and nothing else of the witness's. At install the seal pins the kid of keyryx's
+witness reads the records and attests to each root, on a volume of their own,
+`keyryxattest`. The seal mounts that volume read only and nothing else of the witness's, so
+the witness's data and its key stay out of its reach. At install the seal pins the kid of keyryx's
 `trailryx-root` key set, which must hold exactly one ES384 key, and keeps the pin on every
 later run.
 
@@ -1767,8 +1774,9 @@ anything is installed, and an unset value is `0`, which spends nothing. The runn
 also refuses above the console's own cadence ceiling, and the smaller of the two
 applies. To allow spending: set `COSTCREW_CEILING`, run `./install.sh` again so the
 client key is minted and the gateway reads it, set the cadence ceiling at `/cadence`,
-then turn cadence on there. Each step is yours. Not measured here: a live run against a
-model provider.
+then turn cadence on there. Each step is yours. A box given its own client keys file
+carries the crew's key there as a `<secret>:costcrew` line, and the installer puts that id on
+the gateway's static list.
 
 **Moving to a newer console.** The pin is `ghcr.io/taipanbox/costcrew:v0.10.1`.
 On a box that already ran an earlier pin, the same `up -d costcrew` picks it
@@ -1827,7 +1835,7 @@ re-run keeps it. To turn closing off again, remove `CLOSURE_SECRET` and
 It needs tokenfuse v1.9.0 or later and console v1.1.34 or later. The images pinned here are tokenfuse v1.21.0 and
 console v1.7.5; an older image ignores the setting.
 
-## Approvals and the console's approver key (wardryx 2.4.0)
+## Approvals and the console's approver key
 
 An approval is decided by a person in the console, after a passkey assertion. From
 wardryx 2.4.0 the decision can also carry a statement, signed by the console with
@@ -1837,14 +1845,13 @@ owned by the console's uid, mounted into the console alone. It is kept across
 re-runs and never printed. Losing it means minting a new one and publishing a new
 key set.
 
-The key set is switched on only when the pinned console image can print it
-(`genaryx-web approver-jwks`). The console image pinned in this release (v1.1.48)
-cannot, so approver statements are off, and wardryx decides as 2.3.0 did. When a
-console image that can print it is pinned, the installer writes the key set and
-turns the check on. From then on an approval needs a statement, so a console without
-an enrolled passkey cannot sign one, and its approvals are refused with
-`approver_statement_required`. `WARDRYX_ALLOW_KEY_APPROVALS` is never set by this
-installer. Set by hand, it would let a bare key approve.
+The installer writes the key set from the pinned console image
+(`genaryx-web approver-jwks`) and turns the check on. An approval then needs a statement, so
+a console without an enrolled passkey cannot sign one, and its approvals are refused with
+`approver_statement_required`. A pinned image that cannot print the key set stops the install:
+off would decide every hold on a bearer key, with no person named. Only a `CONSOLE_IMAGE` you
+named yourself can turn the check off, and the run says so. `WARDRYX_ALLOW_KEY_APPROVALS` is
+never set by this installer. Set by hand, it would let a bare key approve.
 
 ## The console
 

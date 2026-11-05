@@ -3392,6 +3392,21 @@ run_case "agent-tokens-are-wired: the file signer keeps polling" fail \
 	"$(py 'edit("install.sh", " VOUCHRYX_KEYRYX_ROOT_PIN TOKENFUSE_DELEGATION_JWKS_URL\n", " VOUCHRYX_KEYRYX_ROOT_PIN\n")')" \
 	"the file signer keeps the URL line"
 
+run_case "agent-tokens-are-wired: a token can arrive before its key" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("compose.yaml", "      KEYRYX_PUBLISH_AHEAD: 2m\n", "      KEYRYX_PUBLISH_AHEAD: 1m\n")')" \
+	"KEYRYX_PUBLISH_AHEAD is"
+
+run_case "agent-tokens-are-wired: the install never asks whether vouchryx can sign" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("install.sh", "  check \"vouchryx holds a certified key, so it can issue a token\" \"vouchryx_can_sign\"\n", "")')" \
+	"never asks whether vouchryx can sign"
+
+run_case "agent-tokens-are-wired: the readiness check asks the wrong question" fail \
+	'./scripts/agent-tokens-are-wired.sh' \
+	"$(py 'edit("install.sh", "    probe http://vouchryx:4310/healthz && return 0\n", "    probe http://vouchryx:4310/.well-known/jwks.json && return 0\n")')" \
+	"does not read /healthz"
+
 run_case "agent-tokens-are-wired: vouchryx is started before its root pin is taken" fail \
 	'./scripts/agent-tokens-are-wired.sh' \
 	"$(py 'edit("install.sh", "  vouchryx_signer_apply\n  \"${COMPOSE[@]}\" --profile delegation up -d vouchryx\n", "  \"${COMPOSE[@]}\" --profile delegation up -d vouchryx\n  vouchryx_signer_apply\n")')" \
@@ -3463,7 +3478,7 @@ run_case "agent-tokens-are-wired: the off path keeps its static-key list" fail \
 
 run_case "agent-tokens-are-wired: the allow-list drops felyx" fail \
 	'./scripts/agent-tokens-are-wired.sh' \
-	"$(py 'edit("install.sh", "named=\"felyx broker\"", "named=\"broker\"")')" \
+	"$(py 'edit("install.sh", "named=\"felyx broker costcrew\"", "named=\"broker costcrew\"")')" \
 	"H. a fresh box names felyx"
 
 run_case "agent-tokens-are-wired: the allow-list lists a key the box does not hold" fail \
@@ -3959,7 +3974,7 @@ edit("install.sh", "grep -v -x -E '\''felyx|broker|agents|drills'\'' | tr", "tr"
 
 run_case "agent-tokens-are-wired: the agents key joins the list on the first run" fail \
 	'./scripts/agent-tokens-are-wired.sh' \
-	"$(py 'edit("install.sh", "named=\"felyx broker\"", "named=\"felyx broker\"\n  STATIC_KEY_IDS_LIST=\"$STATIC_KEY_IDS_LIST agents\"")')" \
+	"$(py 'edit("install.sh", "named=\"felyx broker costcrew\"", "named=\"felyx broker costcrew\"\n  STATIC_KEY_IDS_LIST=\"$STATIC_KEY_IDS_LIST agents\"")')" \
 	"a fresh box names felyx and broker"
 
 run_case "agent-tokens-are-wired: a re-run keeps the agents key the upgrade dropped" fail \
@@ -3979,7 +3994,7 @@ run_case "agent-tokens-are-wired: a comment about the own agents key is not a fa
 
 run_case "agent-tokens-are-wired: a comment in the allow-list block is not a fault" pass \
 	'./scripts/agent-tokens-are-wired.sh' \
-	"$(py 'edit("install.sh", "  named=\"felyx broker\"\n", "  # a comment in the allow-list block is not a fault\n  named=\"felyx broker\"\n")')" \
+	"$(py 'edit("install.sh", "  named=\"felyx broker costcrew\"\n", "  # a comment in the allow-list block is not a fault\n  named=\"felyx broker costcrew\"\n")')" \
 	""
 
 run_case "profiles-off-are-removed: the cleanup names the off profiles by hand and misses finops" fail \
