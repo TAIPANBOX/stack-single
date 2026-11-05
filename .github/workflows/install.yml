@@ -188,9 +188,12 @@ jobs:
           want=no; [ "${{ matrix.profile }}" = typed-risk ] && want=yes
           echo "typryx-wardryx-proxy running: $running (want $want)"
           [ "$running" = "$want" ]
-          # nothing seeds a rule that reads the signal. An explicit if: a bare
-          # `! grep` is exempt from errexit and could never fail this step.
-          if grep -q hold_if_signal policy.yaml; then echo "::error::policy.yaml carries a hold_if_signal rule nobody wrote"; exit 1; fi
+          # The installer seeds one rule that reads the signal, and only with the flag (invariant 57).
+          # An explicit if: a bare `! grep` is exempt from errexit and could never fail this step.
+          rules="$(grep -c hold_if_signal policy.yaml || true)"
+          want_rules=0; [ "${{ matrix.profile }}" = typed-risk ] && want_rules=1
+          if [ "$rules" != "$want_rules" ]; then echo "::error::policy.yaml carries $rules hold_if_signal rule(s), want $want_rules"; exit 1; fi
+          if [ "$want_rules" = 1 ] && ! grep -q '^- name: typed-risk-hold-when-absent$' policy.yaml; then echo "::error::the one hold_if_signal rule is not the managed one"; exit 1; fi
 
       - name: the OpenAI door is up only when asked for, and 4110 answers only then
         run: |
@@ -487,6 +490,7 @@ jobs:
           cd /opt/agent-stack
           if sudo docker compose ps --services | grep -qx typryx-wardryx-proxy; then echo "::error::the proxy is still running after TYPED_RISK_SIGNAL=0"; exit 1; fi
           if sudo grep -q '^TYPED_RISK_' .env; then echo "::error::TYPED_RISK_ lines are still in .env after TYPED_RISK_SIGNAL=0"; exit 1; fi
+          if grep -q hold_if_signal policy.yaml; then echo "::error::the managed hold is still in policy.yaml after TYPED_RISK_SIGNAL=0"; exit 1; fi
 
       # CLAUDE.md invariant 36, on the broker as a box without the risk signal runs it:
       # it asks wardryx directly, refuses an unattributed call, refuses a raw secret in

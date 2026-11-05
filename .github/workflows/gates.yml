@@ -134,6 +134,18 @@ jobs:
         run: ./scripts/scopyx-reads-go-through-the-broker.sh
       - name: the console reaches what its proofs run on, and can only read it (invariant 56)
         run: ./scripts/console-proofs-have-their-inputs.sh
+      - name: console password is not printed (invariant 59)
+        run: ./scripts/console-password-is-not-printed.sh
+      - name: the CostCrew runner spends only through the gateway (invariant 60)
+        run: ./scripts/costcrew-runner-spends-through-the-gateway.sh
+      - name: the approver key is minted and wardryx checks statements (invariant 61)
+        run: ./scripts/approver-key-is-wired.sh
+      - name: the record seal signs through keyryx and the witness attests (invariant 62)
+        run: ./scripts/record-is-signed-by-keyryx.sh
+      - name: the record seal pins custody's trailryx-root kid at install (invariant 63)
+        run: ./scripts/trailryx-root-is-pinned.sh
+      - name: each door names its own addresses and wardryx the union (invariant 64)
+        run: ./scripts/door-origins-are-named.sh
 
       # Last, because it mutates tracked files and restores them. It needs a
       # clean tree and says so plainly, so it also reports any earlier step
