@@ -628,7 +628,7 @@ run. Felyx authenticates with this key and never with your provider key.
 A console that carries genaryx invariant 24 can present a key of its own:
 `compose.yaml` already hands it `GENARYX_COPILOT_FUSE_KEY_REF`, which points at
 `GENARYX_COPILOT_FUSE_KEY` in `.env`, and such a console sends that key as
-`x-fuse-key`. The console pinned here (v1.7.3) carries it; an older one ignores
+`x-fuse-key`. The console pinned here (v1.7.5) carries it; an older one ignores
 the setting. Measured 2026-10-13 with two throwaway v1.1.44 consoles against a
 gateway holding client keys: with the key set, a question to Felyx was answered;
 with it empty, the gateway answered 401. To give Felyx a key:
@@ -1043,7 +1043,7 @@ What is wired now, and what is not:
 - **the witness's findings are mailed** by heraldyx (pin `v0.8.2`; v0.8.0 is the first release
   that renders the keyryx source), at `ALERT_MIN_SEVERITY`, `high` by default; the
   medium ones go in the digest. heraldyx reads them through a read-only mount.
-- **the console shows them** as incidents: the console pinned here (v1.7.3) reads
+- **the console shows them** as incidents: the console pinned here (v1.7.5) reads
   `GENARYX_EVENTS_EXTRA`, which compose.yaml sets. An older console ignores it, and
   then the findings reach the mail and not the console.
 - **a box installed before this release** keeps its old `alerts.ndjson` on the
@@ -1655,7 +1655,7 @@ cd /opt/agent-stack
 docker compose --profile finops up -d costcrew
 ```
 
-That pulls one image, `ghcr.io/taipanbox/costcrew:v0.10.0`, and starts it beside
+That pulls one image, `ghcr.io/taipanbox/costcrew:v0.10.1`, and starts it beside
 a small one-shot that prepares its volume. It is the FinOps console: cloud and
 AI spend, a crew of agents that triages it, and a person who reviews what the
 crew wrote.
@@ -1705,7 +1705,7 @@ decision about money and is yours to take, separately. The notifier does not
 read its passports, so an alert about one of its agents names the agent and not
 the person who answers for it.
 
-**Moving to a newer console.** The pin is `ghcr.io/taipanbox/costcrew:v0.10.0`.
+**Moving to a newer console.** The pin is `ghcr.io/taipanbox/costcrew:v0.10.1`.
 On a box that already ran an earlier pin, the same `up -d costcrew` picks it
 up. From v0.8.0 every analyst's id is `agent://<host>/costcrew/<name>`. This launcher
 binds no analyst id to a gateway key, an identity map or a policy, so nothing here
@@ -1760,7 +1760,7 @@ re-run keeps it. To turn closing off again, remove `CLOSURE_SECRET` and
 `CLOSURE_SECRET_FILE` from `.env` and run `docker compose up -d`.
 
 It needs tokenfuse v1.9.0 or later and console v1.1.34 or later. The images pinned here are tokenfuse v1.21.0 and
-console v1.7.3; an older image ignores the setting.
+console v1.7.5; an older image ignores the setting.
 
 ## The console
 

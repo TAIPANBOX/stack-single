@@ -1642,7 +1642,7 @@ services:
 
   console:
     <<: *restart
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.7.3@sha256:0db4758c9f3dd2231184063af4f80bce491480f6d7238c02bcbac83abb8d708a}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.7.5@sha256:d68952a3523e517b25bdec39e8515d107e72c009a3dfc89712d09a923f323da5}
     networks:
       - core
       - agents
@@ -1666,7 +1666,7 @@ services:
       GENARYX_STATE_DIR: /var/lib/stack/genaryx
       # The Keyryx witness's findings, which are not on the bus (invariant 54):
       # a stream the console tails read only beside its events directory. The
-      # console pinned here (v1.7.3; v1.7.0, built from genaryx #134, reads it too) reads it; an older
+      # console pinned here (v1.7.5; v1.7.0, built from genaryx #134, reads it too) reads it; an older
       # console ignores it.
       GENARYX_EVENTS_EXTRA: /var/lib/keyryx-alerts/keyryx.ndjson
       GENARYX_SCAN_TARGET: /srv/ui
@@ -2025,7 +2025,7 @@ services:
 
   verdryx-drift:
     <<: *restart
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.7.3@sha256:0db4758c9f3dd2231184063af4f80bce491480f6d7238c02bcbac83abb8d708a}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.7.5@sha256:d68952a3523e517b25bdec39e8515d107e72c009a3dfc89712d09a923f323da5}
     networks:
       - core
     user: "10001:10001"
@@ -2152,7 +2152,7 @@ services:
   costcrew:
     <<: *restart
     profiles: ["finops"]
-    image: ${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.10.0@sha256:26316b1c99706529a4589a328b2ddd3fc5f4db4cf0b5a46466e8be1ddd8f0de9}
+    image: ${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.10.1@sha256:2fb72d878eb11702141ce0822049a95a28feae8fec9001bc8d568d144ae43036}
     networks:
       - agents
       - core

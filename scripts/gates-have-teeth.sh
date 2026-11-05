@@ -2305,7 +2305,7 @@ run_case "finops: its root filesystem becomes writable" fail \
 
 run_case "finops: its image is unpinned" fail \
 	'./scripts/finops-is-opt-in.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.10.0@sha256:26316b1c99706529a4589a328b2ddd3fc5f4db4cf0b5a46466e8be1ddd8f0de9}", "ghcr.io/taipanbox/costcrew:latest}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.10.1@sha256:2fb72d878eb11702141ce0822049a95a28feae8fec9001bc8d568d144ae43036}", "ghcr.io/taipanbox/costcrew:latest}")')" \
 	"is not the pinned"
 
 run_case "finops: it is published on every address" fail \
@@ -2356,7 +2356,7 @@ run_case "finops: the console stops waiting for its one-shot" fail \
 
 run_case "finops: no console left to judge" fail \
 	'./scripts/finops-is-opt-in.sh' \
-	"$(py 'edit("compose.yaml", "${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.10.0@sha256:26316b1c99706529a4589a328b2ddd3fc5f4db4cf0b5a46466e8be1ddd8f0de9}", "${COSTCREW_IMAGE:-registry.invalid/costcrew}")')" \
+	"$(py 'edit("compose.yaml", "${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.10.1@sha256:2fb72d878eb11702141ce0822049a95a28feae8fec9001bc8d568d144ae43036}", "${COSTCREW_IMAGE:-registry.invalid/costcrew}")')" \
 	"measured NOTHING about the FinOps console"
 
 # The rendering half: text a parser accepts and compose does not.
@@ -2434,7 +2434,7 @@ run_case "finops: the owner default changes" pass \
 
 run_case "finops: the pinned tag moves" pass \
 	'./scripts/finops-is-opt-in.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.10.0@sha256:26316b1c99706529a4589a328b2ddd3fc5f4db4cf0b5a46466e8be1ddd8f0de9}", "ghcr.io/taipanbox/costcrew:v0.6.1}")')"
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.10.1@sha256:2fb72d878eb11702141ce0822049a95a28feae8fec9001bc8d568d144ae43036}", "ghcr.io/taipanbox/costcrew:v0.6.1}")')"
 
 run_case "finops: the loopback port moves" pass \
 	'./scripts/finops-is-opt-in.sh' \
