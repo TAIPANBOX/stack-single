@@ -52,7 +52,7 @@ services:
       - sh
       - -euc
       - |
-        mkdir -p /vol/events /vol/traces /vol/cloud /vol/heraldyx /vol/records /vol/scopyx /vol/focus /vol/typryx /vol/vouchryx /vol/conform /vol/keyryx /vol/keyryxw /vol/keyryxalerts /vol/checkpoints
+        mkdir -p /vol/events /vol/traces /vol/cloud /vol/heraldyx /vol/records /vol/scopyx /vol/focus /vol/typryx /vol/vouchryx /vol/conform /vol/keyryx /vol/keyryxw /vol/keyryxattest /vol/keyryxalerts /vol/checkpoints
         # Invariant 41. The bus directory is root:10001 0750: nothing but this
         # script creates a file in it, so no plane can create one, let alone
         # write another plane's. Every stream below is created here, owned by
@@ -178,6 +178,11 @@ services:
         # Keyryx's two state directories, each owned by the one process that uses it.
         chown -R 20101 /vol/keyryx && chmod 0700 /vol/keyryx
         chown -R 20100 /vol/keyryxw && chmod 0700 /vol/keyryxw
+        # The witness's attestations (CLAUDE.md invariant 62), on a volume of their own, the shape
+        # of keyryxalerts below: the record seal mounts this one read only, so nothing of the
+        # witness's own state, its key included, is ever in the seal's reach. keyryx 0.1.2 and
+        # later write them 0640 in 0750 directories, and the group here is the seal's.
+        chown -R 20100:10001 /vol/keyryxattest && chmod 0750 /vol/keyryxattest
         # The witness's findings (CLAUDE.md invariant 54). Not on the bus: the
         # witness reads the bus and never writes it, so a compromised witness
         # cannot add a line to the record it checks. Its one stream lives on a
@@ -242,6 +247,7 @@ services:
       - conformstate:/vol/conform
       - keyryxstate:/vol/keyryx
       - keyryxwitness:/vol/keyryxw
+      - keyryxattest:/vol/keyryxattest
       - keyryxalerts:/vol/keyryxalerts
       - checkpoints:/vol/checkpoints
     restart: "no"
@@ -326,6 +332,9 @@ services:
       KEYRYX_WITNESS_DATA: /var/lib/keyryx-witness
       KEYRYX_WITNESS_ROOT_KEY_FILE: /run/keyryx/witness-root.key
       KEYRYX_WITNESS_EVENTS: /var/lib/stack/events
+      # The trailryx data directory the witness attests to, as tenant|directory (acme is the
+      # seal's default tenant). Read only, below.
+      KEYRYX_WITNESS_RECORDS: acme|/var/lib/stack/records
       # Its findings, off the bus (invariant 54): the witness never writes the
       # bus it witnesses. heraldyx and the console read this file read only.
       KEYRYX_WITNESS_ALERTS: /var/lib/keyryx-alerts/keyryx.ndjson
@@ -342,6 +351,9 @@ services:
       # (invariant 54). Its findings go to keyryxalerts above.
       - events:/var/lib/stack/events:ro
       - checkpoints:/var/lib/stack/checkpoints:ro
+      - records:/var/lib/stack/records:ro
+      # Its attestations, on a volume the record seal reads (invariant 62).
+      - keyryxattest:/var/lib/keyryx-witness/attestations
     read_only: true
     cap_drop:
       - ALL
@@ -382,6 +394,11 @@ services:
       WARDRYX_APPROVAL_SIGNER: keyryx
       WARDRYX_KEYRYX_URL: unix:///run/keyryx/sock/wardryx/keyryx.sock
       WARDRYX_APPROVAL_V2_UNTIL: ${WARDRYX_APPROVAL_V2_UNTIL:-}
+      # Approver statements (wardryx 2.4.0 and later, CLAUDE.md invariant 61): the console's public
+      # key set, written by install.sh from the pinned console image. With it set, wardryx accepts
+      # a decision only with a statement the console signed. Never set
+      # WARDRYX_ALLOW_KEY_APPROVALS in this file.
+      WARDRYX_APPROVER_JWKS: ${WARDRYX_APPROVER_JWKS:-}
       # WARDRYX_DB, not WARDRYX_DSN. wardryx reads WARDRYX_DB
       # (internal/config/config.go) and has never read WARDRYX_DSN, so this
       # compose generated a correct DSN, waited for policy-db to be healthy,
@@ -421,6 +438,9 @@ services:
     volumes:
       - events:/var/lib/stack/events
       - ./policy.yaml:/etc/wardryx/policy.yaml:ro
+      # The console's PUBLIC key set and nothing else. The private key is ./approver, mounted
+      # into the console alone (invariant 61).
+      - ./approver-public:/etc/wardryx/approver:ro
       # Its own Keyryx socket directory and no other (invariant 42).
       - ./keyryx/sock/wardryx:/run/keyryx/sock/wardryx
     # Core for the planes it calls, and the risk-signal network the typed
@@ -989,15 +1009,22 @@ services:
       TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS: ${TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS:-}
       TOKENFUSE_DELEGATION_ISSUER: ${TOKENFUSE_DELEGATION_ISSUER:-}
       TOKENFUSE_DELEGATION_JWKS: ${TOKENFUSE_DELEGATION_JWKS:-}
-      # The Keyryx key set for delegated tokens (CLAUDE.md invariant 42, TF5a). Empty is
-      # off, which tokenfuse reads as off; the file variable above stays until the
-      # JWKS URL is the pin (tokenfuse v1.17.0 is the first release that reads it).
+      # The key set this door polls (CLAUDE.md invariant 58). vouchryx's working key under keyryx
+      # is renewed at half its 72 hours, and the file above is read once at start, so a door on
+      # the file would refuse every token the first renewal signs. install.sh names one or the
+      # other, never both: tokenfuse refuses to start with both set.
       TOKENFUSE_DELEGATION_JWKS_URL: ${TOKENFUSE_DELEGATION_JWKS_URL:-}
       TOKENFUSE_DELEGATION_AUDIENCE: ${MCP_BROKER_DELEGATION_AUDIENCE:-}
       TOKENFUSE_DELEGATION_URL: ${MCP_BROKER_DELEGATION_URL:-}
       TOKENFUSE_DELEGATION_REVOCATIONS: ${TOKENFUSE_DELEGATION_REVOCATIONS:-}
       TOKENFUSE_DELEGATION_REVOCATIONS_INTERVAL_MS: ${TOKENFUSE_DELEGATION_REVOCATIONS_INTERVAL_MS:-}
       TOKENFUSE_DELEGATION_REVOCATIONS_FAILMODE: closed
+      # Every address the broker is reached at (CLAUDE.md invariant 64): a proof is checked against
+      # this list, so a call that reaches the broker at an address not on it is refused. install.sh
+      # writes it on every run from the bind this box HAS (GATEWAY_PROBE, invariant 11). Agent tokens
+      # and the proof door are the same door here, so they read one list.
+      TOKENFUSE_DELEGATION_ORIGINS: ${MCP_BROKER_DELEGATION_ORIGINS:-}
+      TOKENFUSE_MCP_PROOF_ORIGINS: ${MCP_BROKER_DELEGATION_ORIGINS:-}
       # The relayed tool-call check goes to the gateway, with the broker's own
       # client key read from a file (its `broker` key, invariant 40). Both empty,
       # the default, and the broker asks no gateway, as it did before.
@@ -1149,16 +1176,20 @@ services:
     # journal (VOUCHRYX_EVENTS_PATH) lands on the shared `events` volume,
     # root:10001 2775, and this is how it can append there.
     user: "20002:10001"
-    # Keyryx certifies vouchryx's working signing key (invariant 42). Empty, the
-    # default, keeps the file key. v0.6.0 (the pin here) refuses to start with
-    # VOUCHRYX_SIGNER=keyryx unless VOUCHRYX_KEYRYX_ROOT_PIN names the kids of
-    # keyryx's delegation root. The keyryx variables are passed through from .env
-    # and empty by default; this launcher keeps the file key. group_add 20002 is
-    # for the socket directory below, which only this uid's group may enter.
+    # Keyryx certifies vouchryx's working signing key (invariant 42, and the
+    # default since invariant 58). v0.6.0 and later refuse to start in keyryx
+    # mode unless VOUCHRYX_KEYRYX_ROOT_PIN names the kids of keyryx's delegation
+    # root. install.sh writes the three keyryx lines and the pin into .env for this
+    # signer, takes the pin from keyryx on this box before vouchryx first starts,
+    # and removes the lines for `file`. group_add 20002 is for the socket directory
+    # below, which only this uid's group may enter.
     group_add:
       - "20002"
     environment:
-      VOUCHRYX_SIGNER: ${VOUCHRYX_SIGNER:-}
+      # keyryx unless .env says file (CLAUDE.md invariant 58). Empty in .env, the
+      # keyryx variables below stay empty and vouchryx refuses to start, which is the
+      # closed default, not an open one.
+      VOUCHRYX_SIGNER: ${VOUCHRYX_SIGNER:-keyryx}
       VOUCHRYX_KEYRYX_ROOT_PIN: ${VOUCHRYX_KEYRYX_ROOT_PIN:-}
       # vouchryx 0.6.0 refuses ANY keyryx variable that is set while VOUCHRYX_SIGNER
       # is not keyryx (measured: a literal socket URL here stops the start with
@@ -1215,6 +1246,10 @@ services:
     depends_on:
       init-volumes:
         condition: service_completed_successfully
+      # The custody that certifies vouchryx's working key (keyryx mode). It must be
+      # running before vouchryx starts, or vouchryx has no key to sign with.
+      keyryx:
+        condition: service_started
 
   # ---- money: the control API ----------------------------------------------
   tokenfuse-cloud:
@@ -1387,9 +1422,10 @@ services:
       # not fetch FROM the running vouchryx would carry the wrong `kid` and
       # every token would be refused `BadToken`. Measured 2026-09-27.
       TOKENFUSE_DELEGATION_JWKS: ${TOKENFUSE_DELEGATION_JWKS:-}
-      # The Keyryx key set for delegated tokens (CLAUDE.md invariant 42, TF5a). Empty is
-      # off, which tokenfuse reads as off; the file variable above stays until the
-      # JWKS URL is the pin (tokenfuse v1.17.0 is the first release that reads it).
+      # The key set this door polls (CLAUDE.md invariant 58). vouchryx's working key under keyryx
+      # is renewed at half its 72 hours, and the file above is read once at start, so a door on
+      # the file would refuse every token the first renewal signs. install.sh names one or the
+      # other, never both: tokenfuse refuses to start with both set.
       TOKENFUSE_DELEGATION_JWKS_URL: ${TOKENFUSE_DELEGATION_JWKS_URL:-}
       TOKENFUSE_DELEGATION_AUDIENCE: ${TOKENFUSE_DELEGATION_AUDIENCE:-}
       # The absolute origin agents actually reach this gateway at, for the
@@ -1417,6 +1453,9 @@ services:
       # the gateway refuses to start on a listed id it does not hold.
       TOKENFUSE_AGENT_TOKENS_STATIC_KEYS: ${TOKENFUSE_AGENT_TOKENS_STATIC_KEYS:-}
       TOKENFUSE_DELEGATION_REVOCATIONS_FAILMODE: closed
+      # Every address the gateway is reached at (CLAUDE.md invariant 64), written by install.sh on
+      # every run from the bind this box has. A call that reaches the gateway at another address is refused.
+      TOKENFUSE_DELEGATION_ORIGINS: ${TOKENFUSE_DELEGATION_ORIGINS:-}
       # Client keys and the identity map (tokenfuse docs/20): who may call this
       # gateway (`x-fuse-key`), which agent ids each key may speak as, and which
       # unit pays. The keys are REQUIRED: with none, tokenfuse admits every
@@ -1746,6 +1785,10 @@ services:
       # the browser, because the browser cannot reach that domain before a
       # tunnel exists.
       GENARYX_WEB_REQUIRE_PASSKEY: "1"
+      # The approver key the console signs each approval's statement with, after a passkey
+      # assertion (CLAUDE.md invariant 61). Minted by install.sh, PKCS#8 P-256, owned by this
+      # uid, mounted read only. A console image that does not sign statements ignores it.
+      GENARYX_APPROVER_KEY_FILE: /run/approver/approver.pem
       # D8: the file holding the same secret, which the console mints closure
       # tokens with after a passkey assertion. Empty, the default, leaves its
       # close command off. Invariant 26.
@@ -1754,6 +1797,7 @@ services:
       - "127.0.0.1:7420:7420"
     volumes:
       - consolestate:/var/lib/stack
+      - ./approver:/run/approver:ro
       - events:/var/lib/stack/events
       # Read only: the console backtests over what the gateway wrote and must not be able to edit it,
       # the split focus-export makes below. focus-export reads this same directory as 10001:10001,
@@ -1817,6 +1861,18 @@ services:
       # Daily, like the cluster's 05:27 and stack-up's 06:57. Settable so a
       # box under test does not wait a day to show it works.
       RECORD_SEAL_INTERVAL: ${RECORD_SEAL_INTERVAL:-86400}
+      # The seal signs each sealed root through this box's keyryx custody (CLAUDE.md invariant
+      # 62). The credential is mounted read only; the custody holds only its digest.
+      TRAILRYX_SIGNER: keyryx
+      TRAILRYX_KEYRYX_URL: http://keyryx:4340
+      TRAILRYX_KEYRYX_CREDENTIAL_FILE: /run/keyryx/record-seal.key
+      # The witness's attestations, read only: keyryx 0.1.2 and later write them mode 0640 under the
+      # witness's gid 10001, which this seal is in, on a volume of their own, so the witness's data
+      # and its key are not mounted here. The folder is acme, the seal's default tenant.
+      TRAILRYX_WITNESS_ATTESTATIONS: /run/keyryx/attestations
+      # The kid of custody's trailryx-root key set, pinned once at install from keyryx on this box
+      # (CLAUDE.md invariant 63). Empty until the installer takes it, and trailryx 1.5.0 then refuses to start.
+      TRAILRYX_KEYRYX_KID: ${TRAILRYX_KEYRYX_KID:-}
     command:
       - /bin/sh
       - -c
@@ -1888,6 +1944,9 @@ services:
       # the mount says so rather than the code being trusted to.
       - events:/var/lib/stack/events:ro
       - records:/var/lib/stack/records
+      - ./keyryx/record-seal.key:/run/keyryx/record-seal.key:ro
+      # The witness's attestations and nothing else of the witness's, read only.
+      - keyryxattest:/run/keyryx/attestations:ro
     depends_on:
       init-volumes:
         condition: service_completed_successfully
@@ -2079,12 +2138,12 @@ services:
   #
   # WHAT IT IS. The FinOps console: cloud and AI spend, a crew of agents that
   # triages it, and a person who reviews what they wrote. It enforces nothing
-  # (no gateway, no refusal path) and, started as it is here, CANNOT SPEND:
-  # no -gateway flag is passed, and the console's own words for that are
-  # "empty means the console cannot spend at all". Letting its planning calls
-  # go through this box's gateway is a spending decision, taken separately and
-  # by the operator, and the crew runner (costcrew-run, the other binary in
-  # the image) is not started here at all.
+  # (no gateway, no refusal path) and CANNOT SPEND: no -gateway flag is passed to
+  # the console, and its own words for that are "empty means the console cannot
+  # spend at all". The console's planning calls stay off the gateway. The crew's
+  # model calls are the runner's, costcrew-run, below: it is a separate service
+  # in profile crew, started by a person, and it spends only under the console's
+  # cadence switch and a ceiling (CLAUDE.md invariant 60).
   #
   # TWO WIRINGS THAT FAIL SILENTLY WHEN WRONG, lifted from stack-k8s's
   # 49-costcrew.yaml, which learned them first:
@@ -2207,6 +2266,73 @@ services:
       costcrew-init:
         condition: service_completed_successfully
 
+  # ---- finops: the CostCrew runner, the only half that spends ---------------
+  #
+  # costcrew-run (tools/run in the same image) runs the crew's cadence-due work and
+  # calls a model. It is OFF unless a person starts it, once:
+  #
+  #   docker compose --profile finops --profile crew run --rm costcrew-run
+  #
+  # With the console's cadence switch off (/cadence) it exits 2 and touches nothing.
+  # Nothing here schedules it: a box that wants the crew on a timer puts that command
+  # in its own cron, after it has turned cadence on. A run is refused above its
+  # ceiling, the smaller of COSTCREW_CEILING (dollars, default 0) and the console's
+  # own cadence ceiling. 0 means no spend: every priced call is above it.
+  #
+  # ITS MODEL CALLS GO THROUGH THE GATEWAY, WITH ITS OWN CLIENT KEY, AND HOLD NO
+  # PROVIDER KEY (CLAUDE.md invariant 60). -gateway sends the Anthropic route to
+  # tokenfuse-gateway. ANTHROPIC_API_KEY holds the crew's client key, minted by
+  # install.sh (GATEWAY_COSTCREW_KEY, bound to agent://<domain>/costcrew/* in unit
+  # costcrew): the gateway accepts it, and it is not a provider key. The runner joins
+  # `agents` and nothing else, so it has no route out (invariant 38): a provider is
+  # reachable only through the gateway.
+  costcrew-run:
+    profiles: ["crew"]
+    image: ${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.10.1@sha256:2fb72d878eb11702141ce0822049a95a28feae8fec9001bc8d568d144ae43036}
+    entrypoint: ["/usr/local/bin/costcrew-run"]
+    command:
+      # -due first: only cadence-due work, and exit 2 with nothing touched while the console's
+      # cadence switch is off. -live is what makes the calls: without it the runner only prices
+      # the work, so the crew could not spend at all, the defect this service closes.
+      - -due
+      - -data
+      - /var/lib/costcrew
+      - -live
+      # The ceiling is a decimal dollar figure, validated by install.sh. An unset
+      # COSTCREW_CEILING is 0, which spends nothing.
+      - -ceiling
+      - ${COSTCREW_CEILING:-0}
+      - -gateway
+      - http://tokenfuse-gateway:4100
+      # No -stack-events: the console is the one writer of costcrew.ndjson (invariant 41),
+      # and a chained file cannot take a second writer without forking its chain. The
+      # runner's runs are recorded in the costcrew store the console reads, the same
+      # database on the same volume.
+      - -stack-host
+      - ${RECORD_TRUST_DOMAIN:-set-me.invalid}
+    environment:
+      # The crew's client key, never a provider key. Empty, the runner refuses at its
+      # first call and names the variable.
+      ANTHROPIC_API_KEY: ${GATEWAY_COSTCREW_KEY:-}
+    networks:
+      - agents
+    user: "10003:10003"
+    restart: "no"
+    tmpfs:
+      - /tmp:size=128m
+    volumes:
+      - costcrewdata:/var/lib/costcrew
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      costcrew-init:
+        condition: service_completed_successfully
+      tokenfuse-gateway:
+        condition: service_started
+
 volumes:
   # The shared event log the planes couple through. One machine, so this is
   # simply a volume: the cluster needed a ReadWriteMany class and a storage
@@ -2216,6 +2342,8 @@ volumes:
   keyryxstate:
   # Keyryx witness state, its own volume and uid (invariant 43).
   keyryxwitness:
+  # The witness's attestations: the witness writes, the record seal reads (invariant 62).
+  keyryxattest:
   # The witness's findings, keyryx.ndjson: written by the witness alone, read
   # only by heraldyx and the console (invariant 54). Not the bus.
   keyryxalerts:

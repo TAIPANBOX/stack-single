@@ -82,9 +82,11 @@
         },
         "optional_addons": {
           "costcrew": "The FinOps console (CostCrew), an optional add-on in the `finops` profile. Started only by hand, `docker compose --profile finops up -d costcrew`; install.sh never passes that profile and never names the service. As shipped it cannot spend: no gateway is wired to it.",
-          "costcrew-init": "The one-shot that prepares costcrew's own volume and its one stream on the bus, in the same `finops` profile. It exists so the add-on does not have to edit init-volumes, which every install runs."
+          "costcrew-init": "The one-shot that prepares costcrew's own volume and its one stream on the bus, in the same `finops` profile. It exists so the add-on does not have to edit init-volumes, which every install runs.",
+          "costcrew-run": "The CostCrew runner (costcrew-run), in profile `crew`. Started only by hand, `docker compose --profile finops --profile crew run --rm costcrew-run`, and only under the console's cadence switch and a COSTCREW_CEILING. Its model calls go through the gateway with the crew's own client key, and it holds no provider key. install.sh never starts it."
         },
         "profiles": [
+          "crew",
           "delegation",
           "egress",
           "egress-browser",
