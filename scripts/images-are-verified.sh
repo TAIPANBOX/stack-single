@@ -250,7 +250,7 @@ chmod +x "$scratch/bin"/* "$scratch/cosign-stub"
 
 cat > "$scratch/refs.sh" <<'SH'
 refs=(
-  "ghcr.io/taipanbox/tokenfuse:v1.21.0@sha256:5cc6484d20249df3e57db34d19eea5b75c54c64bd9b9dab968136e988374ab2c"
+  "ghcr.io/taipanbox/tokenfuse:v1.22.0@sha256:48bc2eff2d00e76036b6b4f3eb6bd09e29081a41468c7faf2093f8f46bc6c2ac"
   "ghcr.io/taipanbox/wardryx:v2.5.1@sha256:2d3c0c9c0798156d3f05b82d0e63cf5b38ee4b9875d6bdbac1829f219c26abf7"
   "ghcr.io/taipanbox/vouchryx:v0.7.0@sha256:c2b684746b854af9cc0a0cef7e5ebcaa8ee5070806ddf3912d5603af45360912"
 )
@@ -310,7 +310,7 @@ else
   if [ "$n_verify" -ne 3 ] || [ "$n_pull" -ne 3 ]; then
     fail "the run verified $n_verify and pulled $n_pull of the 3 TAIPANBOX images"
   fi
-  for ref in "tokenfuse:v1.21.0" "wardryx:v2.5.1" "vouchryx:v0.7.0"; do
+  for ref in "tokenfuse:v1.22.0" "wardryx:v2.5.1" "vouchryx:v0.7.0"; do
     v=$(grep -n "^verify .*taipanbox/$ref" "$scratch/log" | head -1 | cut -d: -f1)
     p=$(grep -n "^pull .*taipanbox/$ref" "$scratch/log" | head -1 | cut -d: -f1)
     if [ -z "$v" ] || [ -z "$p" ] || [ "$v" -ge "$p" ]; then
