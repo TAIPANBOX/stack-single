@@ -241,32 +241,32 @@ BLOCK="$(sed -n '/^# agent-tokens: begin$/,/^# agent-tokens: end$/p' install.sh)
 if [ -z "$BLOCK" ]; then
   fail "install.sh has no '# agent-tokens: begin' .. 'end' block, so nothing enrols an agent for a token"
 else
-  printf '%s\n' "$BLOCK" | grep -q 'chmod 0600' || fail "the agent-tokens block does not set mode 0600 on the enrolment secret"
-  printf '%s\n' "$BLOCK" | grep -q 'sha256' || fail "the agent-tokens block writes no SHA-256 digest of the enrolment secret"
-  printf '%s\n' "$BLOCK" | grep -q 'VOUCHRYX_ALLOWED_AUDIENCES "\$AGENT_AUDIENCE"' \
+  grep -q 'chmod 0600' <<<"$BLOCK" || fail "the agent-tokens block does not set mode 0600 on the enrolment secret"
+  grep -q 'sha256' <<<"$BLOCK" || fail "the agent-tokens block writes no SHA-256 digest of the enrolment secret"
+  grep -q 'VOUCHRYX_ALLOWED_AUDIENCES "\$AGENT_AUDIENCE"' <<<"$BLOCK" \
     || fail "the agent-tokens block does not write the allowed audience from AGENT_AUDIENCE; vouchryx refuses a plain name at startup"
-  printf '%s\n' "$BLOCK" | grep -q 'AGENT_AUDIENCE="https://' \
+  grep -q 'AGENT_AUDIENCE="https://' <<<"$BLOCK" \
     || fail "the agent-tokens block names no https audience: tokenfuse 1.17.0 refuses an agent audience that is not an https URL"
-  printf '%s\n' "$BLOCK" | grep -q 'identity_env_set TOKENFUSE_AGENT_TOKENS require' \
+  grep -q 'identity_env_set TOKENFUSE_AGENT_TOKENS require' <<<"$BLOCK" \
     || fail "the agent-tokens block does not write TOKENFUSE_AGENT_TOKENS=require: the default is require (invariant 47)"
-  printf '%s\n' "$BLOCK" | grep -q 'TOKENFUSE_AGENT_TOKENS accept' \
+  grep -q 'TOKENFUSE_AGENT_TOKENS accept' <<<"$BLOCK" \
     && fail "the agent-tokens block still writes accept: a static key would be admitted without a named list"
-  printf '%s\n' "$BLOCK" | grep -q 'WARDRYX_AGENT_TOKEN_ISSUER' \
+  grep -q 'WARDRYX_AGENT_TOKEN_ISSUER' <<<"$BLOCK" \
     || fail "the agent-tokens block writes no WARDRYX_AGENT_TOKEN_ISSUER: wardryx would not verify the token (invariant 47)"
   for want in \
       'identity_env_set WARDRYX_AGENT_TOKEN_ISSUER http://vouchryx:4310' \
       'identity_env_set WARDRYX_AGENT_TOKEN_AUDIENCES "$AGENT_AUDIENCE"' \
       'identity_env_set WARDRYX_AGENT_TOKEN_JWKS_URL http://vouchryx:4310/.well-known/jwks.json' \
       'identity_env_set WARDRYX_AGENT_TOKEN_REVOCATION_URL http://vouchryx:4310/v1/revocations'; do
-    printf '%s\n' "$BLOCK" | grep -qF "$want" \
+    grep -qF "$want" <<<"$BLOCK" \
       || fail "the agent-tokens block does not write '$want': wardryx would verify a token against the wrong key set, audience or revocation list (invariant 47)"
   done
-  printf '%s\n' "$BLOCK" | grep -qF 'http://tokenfuse-gateway:4100,http://tokenfuse-mcp-broker:4200' \
+  grep -qF 'http://tokenfuse-gateway:4100,http://tokenfuse-mcp-broker:4200' <<<"$BLOCK" \
     || fail "wardryx's door origins do not name the gateway and the broker: a proof addressed to either is refused (invariant 47)"
   # 1.3.1: upstream_put takes the owner, so the broker's key is written for its uid in one step.
-  printf '%s\n' "$BLOCK" | grep -qF 'upstream_put "$broker" "$STACK_DIR/broker" 20012' \
+  grep -qF 'upstream_put "$broker" "$STACK_DIR/broker" 20012' <<<"$BLOCK" \
     || fail "the broker's key is not owned by uid 20012, the uid the broker runs as: it cannot read its taint-gateway key and refuses to start (invariant 47)"
-  printf '%s\n' "$BLOCK" | grep -qF 'TOKENFUSE_AGENT_TOKENS_STATIC_KEYS TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS; do' \
+  grep -qF 'TOKENFUSE_AGENT_TOKENS_STATIC_KEYS TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS; do' <<<"$BLOCK" \
     || fail "the off path does not clear the static-key lists: tokenfuse 1.19.0 refuses a list under any mode but require (invariant 47)"
   # Any write of a name that carries a secret into .env, in either spelling: the
   # NAME=value form printf writes, and the identity_env_set / add_env_default call.
@@ -303,14 +303,14 @@ else
       printf "GW=%s\nMCP=%s\n" "$(identity_env_get TOKENFUSE_AGENT_TOKENS_STATIC_KEYS)" "$(identity_env_get TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS)"
     ' _ "$d" "$3" "$4" "$6" "$lib" "${9:-0}" 2>&1)" && rc=0 || rc=$?
     if [ "$8" = DIE ]; then
-      [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q 'DIE: STATIC_KEY_IDS names' \
+      [ "$rc" -ne 0 ] && grep -q 'DIE: STATIC_KEY_IDS names' <<<"$out" \
         || fail "H. $name: a STATIC_KEY_IDS entry the box does not hold was not refused ($out)"
       return 0
     fi
     [ "$rc" -eq 0 ] || { fail "H. $name: agent_static_keys_apply failed: $out"; return 0; }
-    printf '%s\n' "$out" | grep -qx "GW=$7" \
+    grep -qx "GW=$7" <<<"$out" \
       || fail "H. $name: the gateway's allow-list is $(printf '%s' "$out" | grep '^GW=') and should be GW=$7; a listed id the box does not hold, or a held id it dropped, is wrong"
-    printf '%s\n' "$out" | grep -qx "MCP=$8" \
+    grep -qx "MCP=$8" <<<"$out" \
       || fail "H. $name: the broker's allow-list is $(printf '%s' "$out" | grep '^MCP=') and should be MCP=$8"
   }
   # (name, held keys, STATIC_KEY_IDS, existing gateway ids, broker keys, existing broker ids, want gw, want mcp, prior list present)
@@ -372,9 +372,9 @@ else
   }
   first="$(two_run 1)" || first="DIE on run one: $first"
   second="$(two_run 0)" || second="DIE on run two: $second"
-  printf '%s\n' "$first" | grep -qx 'GW=felyx,broker' \
+  grep -qx 'GW=felyx,broker' <<<"$first" \
     || fail "I. the first run's allow-list is $(printf '%s' "$first" | grep -E '^(GW=|DIE)' | head -1), and should be GW=felyx,broker"
-  printf '%s\n' "$second" | grep -qx 'GW=felyx,broker' \
+  grep -qx 'GW=felyx,broker' <<<"$second" \
     || fail "I. the second run widened the allow-list to $(printf '%s' "$second" | grep -E '^(GW=|DIE)' | head -1); a re-run must keep exactly the list the first run wrote"
 fi
 
@@ -404,24 +404,24 @@ if [ -f "${lib2:-}" ]; then
     ' _ "$wide" "$lib2" "$1" 2>&1
   }
   out="$(wide_run "")" || out="DIE: $out"
-  printf '%s\n' "$out" | grep -qx 'GW=felyx,broker' \
+  grep -qx 'GW=felyx,broker' <<<"$out" \
     || fail "J. a .env widened by a 1.3.1 re-run keeps agents and drills on the gateway list: $(printf '%s' "$out" | grep -E '^(GW=|DIE)' | head -1); the upgrade must drop them unless STATIC_KEY_IDS names them"
-  printf '%s\n' "$out" | grep -qx 'MCP=stack-single' \
+  grep -qx 'MCP=stack-single' <<<"$out" \
     || fail "J. a .env widened by a 1.3.1 re-run keeps agents and drills on the broker's list: $(printf '%s' "$out" | grep -E '^MCP=' | head -1)"
-  printf '%s\n' "$out" | grep -q '^REMOVED=.*agents' \
+  grep -q '^REMOVED=.*agents' <<<"$out" \
     || fail "J. the run does not report that it removed agents from the static lists, so the closing report cannot say so"
   out="$(wide_run "agents")" || out="DIE: $out"
-  printf '%s\n' "$out" | grep -qx 'GW=felyx,broker,agents' \
+  grep -qx 'GW=felyx,broker,agents' <<<"$out" \
     || fail "J. STATIC_KEY_IDS=agents does not keep agents on the gateway list: $(printf '%s' "$out" | grep -E '^(GW=|DIE)' | head -1)"
-  printf '%s\n' "$out" | grep -qx 'MCP=stack-single,agents' \
+  grep -qx 'MCP=stack-single,agents' <<<"$out" \
     || fail "J. STATIC_KEY_IDS=agents does not keep agents on the broker's list: $(printf '%s' "$out" | grep -E '^MCP=' | head -1)"
 else
   fail "J. the two-run section did not lift the installer's functions, so the widened .env was not measured"
 fi
 # J, the report: the closing report says what the run removed, and how to keep one.
-printf '%s\n' "$BLOCK" | grep -q 'Removed from the static allow-lists on this run' \
+grep -q 'Removed from the static allow-lists on this run' <<<"$BLOCK" \
   || fail "J. the closing report does not say which keys this run removed from the static allow-lists"
-printf '%s\n' "$BLOCK" | grep -q 'To keep one, name it in STATIC_KEY_IDS' \
+grep -q 'To keep one, name it in STATIC_KEY_IDS' <<<"$BLOCK" \
   || fail "J. the closing report does not say how to keep a removed key (STATIC_KEY_IDS)"
 # K. vouchryx signs with a working key that keyryx certifies, pinned to the delegation
 # root (CLAUDE.md invariant 58). The default is keyryx; the file signer is an explicit
@@ -479,7 +479,7 @@ if [ -z "$VX_BLOCK" ]; then
   fail "K. install.sh has no '# vouchryx-signer: begin' .. '# vouchryx-signer: end' block, so the vouchryx signer was not measured"
 else
   for fn in vouchryx_signer_apply vouchryx_root_pin vouchryx_pin_fetch; do
-    printf '%s\n' "$VX_BLOCK" | grep -q "^$fn()" || fail "K. the vouchryx-signer block defines no $fn"
+    grep -q "^$fn()" <<<"$VX_BLOCK" || fail "K. the vouchryx-signer block defines no $fn"
   done
   # The pin is taken before vouchryx starts, from the call the delegation block makes.
   first_up="$(grep -n -- '--profile delegation up -d vouchryx' install.sh | head -1 | cut -d: -f1)"
@@ -551,23 +551,23 @@ else
       vouchryx_signer_apply' 2>&1 && cat "$d/.env"
   }
   fresh="$(envrun "$scratch/vx-fresh" none)" || true
-  printf '%s\n' "$fresh" | grep -qx "VOUCHRYX_SIGNER='keyryx'" \
-    && printf '%s\n' "$fresh" | grep -qx "VOUCHRYX_KEYRYX_URL='http://keyryx:4340'" \
-    && printf '%s\n' "$fresh" | grep -qx "VOUCHRYX_KEYRYX_ROOT_PIN='AAA,mldsa65:BBB'" \
+  grep -qx "VOUCHRYX_SIGNER='keyryx'" <<<"$fresh" \
+    && grep -qx "VOUCHRYX_KEYRYX_URL='http://keyryx:4340'" <<<"$fresh" \
+    && grep -qx "VOUCHRYX_KEYRYX_ROOT_PIN='AAA,mldsa65:BBB'" <<<"$fresh" \
     || fail "K5. a fresh box does not get VOUCHRYX_SIGNER=keyryx, its custody URL and one pin: $fresh"
   # K6. a door on the file reads the key set once, and the working key under keyryx is renewed at half
   # its 72 hours, so such a door refuses every token signed after the first renewal. Under keyryx the
   # doors poll the URL and the file line is gone (tokenfuse refuses to start with both); under the file
   # signer the URL line is gone.
   polled="$(envrun "$scratch/vx-polled" "TOKENFUSE_DELEGATION_JWKS='/etc/tokenfuse/delegation/vouchryx.jwks.json'")" || true
-  printf '%s\n' "$polled" | grep -qx "TOKENFUSE_DELEGATION_JWKS_URL='http://vouchryx:4310/.well-known/jwks.json'" \
+  grep -qx "TOKENFUSE_DELEGATION_JWKS_URL='http://vouchryx:4310/.well-known/jwks.json'" <<<"$polled" \
     || fail "K6. under keyryx the doors do not poll vouchryx's key set: a door on the file refuses every token after the first renewal: $polled"
-  if printf '%s\n' "$polled" | grep -q '^TOKENFUSE_DELEGATION_JWKS='; then
+  if grep -q '^TOKENFUSE_DELEGATION_JWKS=' <<<"$polled"; then
     fail "K6. under keyryx the file line stays beside the URL, and tokenfuse refuses to start with both: $polled"
   fi
   backfile="$(envrun "$scratch/vx-backfile" "VOUCHRYX_SIGNER='file'
 TOKENFUSE_DELEGATION_JWKS_URL='http://vouchryx:4310/.well-known/jwks.json'")" || true
-  if printf '%s\n' "$backfile" | grep -q '^TOKENFUSE_DELEGATION_JWKS_URL='; then
+  if grep -q '^TOKENFUSE_DELEGATION_JWKS_URL=' <<<"$backfile"; then
     fail "K6. the file signer keeps the URL line: $backfile"
   fi
   # K7. a restarted vouchryx asks for a new key while its old one is valid, and custody starts the new one
@@ -586,12 +586,12 @@ TOKENFUSE_DELEGATION_JWKS_URL='http://vouchryx:4310/.well-known/jwks.json'")" ||
   grep -qE 'typed_env_get VOUCHRYX_SIGNER\)" = keyryx \] \|\| add_env_default TOKENFUSE_DELEGATION_JWKS ' install.sh \
     || fail "K6. install.sh writes the file line under keyryx too, beside the URL the signer wrote"
   again="$(envrun "$scratch/vx-again" "VOUCHRYX_KEYRYX_ROOT_PIN='OLDPIN'")" || true
-  printf '%s\n' "$again" | grep -qx "VOUCHRYX_KEYRYX_ROOT_PIN='OLDPIN'" \
+  grep -qx "VOUCHRYX_KEYRYX_ROOT_PIN='OLDPIN'" <<<"$again" \
     || fail "K5. a re-run replaced the root pin already in .env: $again"
   filed="$(envrun "$scratch/vx-file" "$(printf "VOUCHRYX_SIGNER='file'\nVOUCHRYX_KEYRYX_URL='http://keyryx:4340'\nVOUCHRYX_KEYRYX_ROOT_PIN='OLDPIN'")")" || true
-  printf '%s\n' "$filed" | grep -qx "VOUCHRYX_SIGNER='file'" \
+  grep -qx "VOUCHRYX_SIGNER='file'" <<<"$filed" \
     || fail "K5. VOUCHRYX_SIGNER=file in .env was not kept: $filed"
-  if printf '%s\n' "$filed" | grep -q '^VOUCHRYX_KEYRYX_'; then
+  if grep -q '^VOUCHRYX_KEYRYX_' <<<"$filed"; then
     fail "K5. the file signer left keyryx lines in .env, and vouchryx refuses a keyryx variable under the file signer: $filed"
   fi
 fi
@@ -646,11 +646,11 @@ STUBS
         "$(identity_env_get MCP_BROKER_DELEGATION_URL)" "$(identity_env_get WARDRYX_AGENT_TOKEN_DOOR_ORIGINS)"
     ' _ "$d" "$scratch" 2>&1)"; then
       case "$bind" in 0.0.0.0) host=127.0.0.1 ;; *) host="$bind" ;; esac
-      printf '%s\n' "$out" | grep -qx "URL=http://$host:4100" \
+      grep -qx "URL=http://$host:4100" <<<"$out" \
         || fail "K. with GATEWAY_BIND=$bind in .env, the gateway's delegation origin is $(printf '%s' "$out" | grep '^URL=') and should be http://$host:4100: the block took the bind this run started with, not the one the box has"
-      printf '%s\n' "$out" | grep -qx "BROKER_URL=http://$host:4200" \
+      grep -qx "BROKER_URL=http://$host:4200" <<<"$out" \
         || fail "K. with GATEWAY_BIND=$bind in .env, the broker's delegation origin is $(printf '%s' "$out" | grep '^BROKER_URL=') and should be http://$host:4200"
-      printf '%s\n' "$out" | grep '^ORIGINS=' | grep -q "http://$host:4100" \
+      grep -q "http://$host:4100" <<<"$(printf '%s\n' "$out" | grep '^ORIGINS=')" \
         || fail "K. with GATEWAY_BIND=$bind in .env, wardryx's door origins do not name http://$host:4100"
     else
       fail "K. with GATEWAY_BIND=$bind in .env, the agent-tokens block did not run: $out"

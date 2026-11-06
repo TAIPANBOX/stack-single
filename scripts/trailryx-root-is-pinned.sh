@@ -33,9 +33,9 @@ BLOCK="$(sed -n '/^# trailryx-root-pin: begin$/,/^# trailryx-root-pin: end$/p' i
 if [ -z "$BLOCK" ]; then
   fail "A. install.sh has no '# trailryx-root-pin: begin' .. '# trailryx-root-pin: end' block, so the root pin was not measured"
 else
-  printf '%s\n' "$BLOCK" | grep -q '^trailryx_root_kid()' || fail "A. the block defines no trailryx_root_kid"
-  printf '%s\n' "$BLOCK" | grep -q '^trailryx_pin_apply()' || fail "A. the block defines no trailryx_pin_apply"
-  printf '%s\n' "$BLOCK" | grep -q '/v1/jwks/trailryx-root' || fail "A. the block does not read keyryx's trailryx-root key set (/v1/jwks/trailryx-root)"
+  grep -q '^trailryx_root_kid()' <<<"$BLOCK" || fail "A. the block defines no trailryx_root_kid"
+  grep -q '^trailryx_pin_apply()' <<<"$BLOCK" || fail "A. the block defines no trailryx_pin_apply"
+  grep -q '/v1/jwks/trailryx-root' <<<"$BLOCK" || fail "A. the block does not read keyryx's trailryx-root key set (/v1/jwks/trailryx-root)"
   first_record_up="$(grep -n 'UP_PROFILES\[@\]}" up -d --remove-orphans' install.sh | head -1 | cut -d: -f1)"
   pin_call="$(grep -n '^trailryx_pin_apply$' install.sh | head -1 | cut -d: -f1)"
   if [ -z "$pin_call" ]; then
@@ -51,7 +51,7 @@ grep -qE '^      TRAILRYX_KEYRYX_KID: \$\{TRAILRYX_KEYRYX_KID:-\}$' compose.yaml
 grep -q 'TODO(trailryx#112)' compose.yaml && fail "B. compose.yaml still names TODO(trailryx#112): the pin is wired now"
 
 # ---- C. install.sh, behaviour ----------------------------------------------------------------
-if [ -n "$BLOCK" ] && printf '%s\n' "$BLOCK" | grep -q '^trailryx_root_kid()'; then
+if [ -n "$BLOCK" ] && grep -q '^trailryx_root_kid()' <<<"$BLOCK"; then
   scratch="$(mktemp -d)"
   trap 'rm -rf "$scratch"' EXIT
   mkdir -p "$scratch/bin" "$scratch/stack"
@@ -94,18 +94,18 @@ STUB
   }
   export BLOCK
   one="$(run_kid "$ONE_ES")"
-  printf '%s' "$one" | grep -qx -- "$K1" || fail "C. one ES384 key: the kid is not printed alone (got: $(printf '%s' "$one" | head -1))"
-  printf '%s' "$one" | grep -q 'XCOORD-ONE\|YCOORD' && fail "C. the key's coordinates were printed: only the kid may leave the function"
-  printf '%s' "$one" | grep -q -- '--rc=0' || fail "C. one ES384 key was not accepted (exit is not 0)"
+  grep -qx -- "$K1" <<<"$one" || fail "C. one ES384 key: the kid is not printed alone (got: $(printf '%s' "$one" | head -1))"
+  grep -q 'XCOORD-ONE\|YCOORD' <<<"$one" && fail "C. the key's coordinates were printed: only the kid may leave the function"
+  grep -q -- '--rc=0' <<<"$one" || fail "C. one ES384 key was not accepted (exit is not 0)"
   none="$(run_kid "$NO_ES")"
-  printf '%s' "$none" | grep -q -- '--rc=3' || fail "C. a set with no ES384 key was not refused with exit 3"
-  printf '%s' "$none" | grep -q 'ES384' || fail "C. the refusal for no ES384 key gives no reason naming ES384"
+  grep -q -- '--rc=3' <<<"$none" || fail "C. a set with no ES384 key was not refused with exit 3"
+  grep -q 'ES384' <<<"$none" || fail "C. the refusal for no ES384 key gives no reason naming ES384"
   two="$(run_kid "$TWO_ES")"
-  printf '%s' "$two" | grep -q -- '--rc=3' || fail "C. a set with two ES384 keys was not refused (a rotation must be done on purpose, by deleting the pin)"
+  grep -q -- '--rc=3' <<<"$two" || fail "C. a set with two ES384 keys was not refused (a rotation must be done on purpose, by deleting the pin)"
   shape="$(run_kid "$BAD_SHAPE")"
-  printf '%s' "$shape" | grep -q -- '--rc=3' || fail "C. an ES384 kid of the wrong shape was not refused"
+  grep -q -- '--rc=3' <<<"$shape" || fail "C. an ES384 kid of the wrong shape was not refused"
   unreach="$(run_kid "")"
-  printf '%s' "$unreach" | grep -q -- '--rc=2' || fail "C. an unreachable keyryx was not reported as retryable (exit 2)"
+  grep -q -- '--rc=2' <<<"$unreach" || fail "C. an unreachable keyryx was not reported as retryable (exit 2)"
 
   # The pin: kept when present, written once when absent, and refused sets write nothing.
   pin_run() { # ENV_CONTENT BODY: runs trailryx_pin_apply in a fresh STACK_DIR; prints rc and the .env
@@ -131,19 +131,19 @@ STUB
     printf 'fetches=%s\n' "$(grep -c wget "$calls")"
   }
   kept="$(pin_run 'TRAILRYX_KEYRYX_KID=KEPTPIN' "$ONE_ES")"
-  printf '%s' "$kept" | grep -q 'rc=0' || fail "C. a pin already in .env stopped the install"
-  printf '%s' "$kept" | grep -qx 'TRAILRYX_KEYRYX_KID=KEPTPIN' || fail "C. a pin already in .env was not kept"
-  printf '%s' "$kept" | grep -q 'fetches=0' || fail "C. a kept pin still fetched the key set (the pin is kept without asking keyryx again)"
+  grep -q 'rc=0' <<<"$kept" || fail "C. a pin already in .env stopped the install"
+  grep -qx 'TRAILRYX_KEYRYX_KID=KEPTPIN' <<<"$kept" || fail "C. a pin already in .env was not kept"
+  grep -q 'fetches=0' <<<"$kept" || fail "C. a kept pin still fetched the key set (the pin is kept without asking keyryx again)"
   fresh="$(pin_run 'OTHER=1' "$ONE_ES")"
-  printf '%s' "$fresh" | grep -qx "TRAILRYX_KEYRYX_KID=$K1" || fail "C. a fresh install did not write TRAILRYX_KEYRYX_KID from the one ES384 key"
-  printf '%s' "$fresh" | grep -q 'mode=600' || fail "C. writing the pin changed .env's mode"
-  printf '%s' "$fresh" | grep -q 'XCOORD' && fail "C. the key's coordinates were written to .env"
+  grep -qx "TRAILRYX_KEYRYX_KID=$K1" <<<"$fresh" || fail "C. a fresh install did not write TRAILRYX_KEYRYX_KID from the one ES384 key"
+  grep -q 'mode=600' <<<"$fresh" || fail "C. writing the pin changed .env's mode"
+  grep -q 'XCOORD' <<<"$fresh" && fail "C. the key's coordinates were written to .env"
   off="$(RECORD=0 pin_run 'OTHER=1' "$ONE_ES")"
-  printf '%s' "$off" | grep -q 'fetches=0' || fail "C. with the record plane off the installer still asked keyryx for the root"
-  printf '%s' "$off" | grep -q 'TRAILRYX_KEYRYX_KID=' && fail "C. with the record plane off a pin was written"
+  grep -q 'fetches=0' <<<"$off" || fail "C. with the record plane off the installer still asked keyryx for the root"
+  grep -q 'TRAILRYX_KEYRYX_KID=' <<<"$off" && fail "C. with the record plane off a pin was written"
   refused="$(pin_run 'OTHER=1' "$TWO_ES")"
-  printf '%s' "$refused" | grep -q 'rc=3' || fail "C. two ES384 keys did not stop the install at the pin"
-  printf '%s' "$refused" | grep -q 'TRAILRYX_KEYRYX_KID=' && fail "C. a refused key set left a pin in .env"
+  grep -q 'rc=3' <<<"$refused" || fail "C. two ES384 keys did not stop the install at the pin"
+  grep -q 'TRAILRYX_KEYRYX_KID=' <<<"$refused" && fail "C. a refused key set left a pin in .env"
 fi
 
 if [ "$problems" -gt 0 ]; then

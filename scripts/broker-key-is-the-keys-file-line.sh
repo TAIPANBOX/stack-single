@@ -49,7 +49,7 @@ if [ -z "$BLOCK" ]; then
   fail "install.sh has no '# agent-tokens:' block, so the broker line was not measured"
   exit 1
 fi
-printf '%s\n' "$BLOCK" | grep -q '^agent_tokens_resolve() {' \
+grep -q '^agent_tokens_resolve() {' <<<"$BLOCK" \
   || { fail "the agent-tokens block has no agent_tokens_resolve, so the broker line was not measured"; exit 1; }
 printf '%s\n' "$BLOCK" >"$scratch/block.sh"
 
@@ -127,13 +127,13 @@ printf '%s:felyx\n%s:broker\n' "$SECRET_A" "$SECRET_BROKER" >"$d/keys.txt"; chmo
 printf '%s\n' "$MAP_BINDS" >"$d/map.json"
 before="$(cat "$d/keys.txt")"
 run_case "A" "$d" "$d/keys.txt" "$d/map.json" ""
-if [ "$RC" -ne 0 ] || ! printf '%s' "$OUT" | grep -qx APPLIED; then
+if [ "$RC" -ne 0 ] || ! grep -qx APPLIED <<<"$OUT"; then
   fail "A. a keys file with a '<secret>:broker' line was refused: $OUT"
 else
   got="$(cat "$d/broker/key" 2>/dev/null || true)"
   [ "$got" = "$SECRET_BROKER" ] || fail "A. the broker key file does not hold the secret of the keys file's broker line"
   [ "$(cat "$d/keys.txt")" = "$before" ] || fail "A. the keys file was changed although it had the broker line"
-  printf '%s' "$OUT" | grep -qx 'SPEC_IS_THE_FILE=yes' \
+  grep -qx 'SPEC_IS_THE_FILE=yes' <<<"$OUT" \
     || fail "A. the keys section 3e checks are not the keys file's own lines ($(printf '%s' "$OUT" | grep '^SPEC_IDS='))"
 fi
 
@@ -146,8 +146,8 @@ run_case "B" "$d" "$d/keys.txt" "$d/map.json" ""
 if [ "$RC" -eq 0 ]; then
   fail "B. a keys file with no broker line was accepted with no ADD_BROKER_KEY"
 else
-  printf '%s' "$OUT" | grep -q 'ADD_BROKER_KEY=1' || fail "B. the refusal does not name ADD_BROKER_KEY=1: $OUT"
-  printf '%s' "$OUT" | grep -q '<secret>:broker' || fail "B. the refusal does not name the '<secret>:broker' form: $OUT"
+  grep -q 'ADD_BROKER_KEY=1' <<<"$OUT" || fail "B. the refusal does not name ADD_BROKER_KEY=1: $OUT"
+  grep -q '<secret>:broker' <<<"$OUT" || fail "B. the refusal does not name the '<secret>:broker' form: $OUT"
   [ "$(cat "$d/keys.txt")" = "$before" ] || fail "B. the keys file changed on a refusal"
 fi
 
@@ -156,7 +156,7 @@ d="$(mktemp -d "$scratch/c.XXXXXX")"
 printf '%s:felyx\n' "$SECRET_A" >"$d/keys.txt"; chmod 0640 "$d/keys.txt"
 printf '%s\n' "$MAP_BINDS" >"$d/map.json"
 run_case "C" "$d" "$d/keys.txt" "$d/map.json" "1"
-if [ "$RC" -ne 0 ] || ! printf '%s' "$OUT" | grep -qx APPLIED; then
+if [ "$RC" -ne 0 ] || ! grep -qx APPLIED <<<"$OUT"; then
   fail "C. ADD_BROKER_KEY=1 with a binding map was refused: $OUT"
 else
   last="$(tail -1 "$d/keys.txt")"
@@ -169,7 +169,7 @@ else
   # Section 3e checks the map against the keys this run read; the line appended here must be among them, or
   # a map that binds broker (which ADD_BROKER_KEY=1 requires) is refused for a key no client carries.
   # Measured on forge 2026-10-25: the run appended the line, then refused its own map.
-  printf '%s' "$OUT" | grep -qx 'SPEC_IS_THE_FILE=yes' \
+  grep -qx 'SPEC_IS_THE_FILE=yes' <<<"$OUT" \
     || fail "C. the keys section 3e checks against the map lack the appended broker line ($(printf '%s' "$OUT" | grep '^SPEC_IDS=')), so the map's broker binding is refused"
 fi
 
@@ -183,7 +183,7 @@ run_case "D" "$d" "$d/keys.txt" "$d/map.json" "1"
 if [ "$RC" -eq 0 ]; then
   fail "D. ADD_BROKER_KEY=1 was accepted with an identity map that does not bind broker"
 else
-  printf '%s' "$OUT" | grep -q 'does not bind key_id broker' || fail "D. the refusal does not say the map does not bind broker: $OUT"
+  grep -q 'does not bind key_id broker' <<<"$OUT" || fail "D. the refusal does not say the map does not bind broker: $OUT"
   [ "$(cat "$d/keys.txt")" = "$before" ] || fail "D. the keys file was appended although the map does not bind broker"
 fi
 
@@ -198,7 +198,7 @@ run_case "G" "$d" "$d/keys.txt" "$d/map.json" ""
 if [ "$RC" -eq 0 ]; then
   fail "G. a map with no binding in unit agents was accepted, so the enrolled operator agent's token would be refused"
 else
-  printf '%s' "$OUT" | grep -q 'unit agents' || fail "G. the refusal does not name unit agents: $OUT"
+  grep -q 'unit agents' <<<"$OUT" || fail "G. the refusal does not name unit agents: $OUT"
   [ "$(cat "$d/keys.txt")" = "$before" ] || fail "G. the keys file changed on a refusal"
   [ ! -e "$d/.env" ] || ! grep -q '^TOKENFUSE_AGENT_TOKENS=' "$d/.env" || fail "G. .env was written before the refusal"
 fi
@@ -228,14 +228,14 @@ for add in "" 1; do
   if [ "$RC" -eq 0 ]; then
     fail "$label. a box whose keys are kept in .env, with no CLIENT_KEYS_FILE this run, was accepted with no broker key"
   else
-    if printf '%s' "$OUT" | grep -q 'unbound variable'; then
+    if grep -q 'unbound variable' <<<"$OUT"; then
       fail "$label. the installer read an unset CLIENT_KEYS_FILE: $(printf '%s' "$OUT" | grep 'unbound variable' | head -1)"
     fi
     [ "$RC" -eq 3 ] || fail "$label. it stopped with exit $RC, not the installer's refusal"
-    printf '%s' "$OUT" | grep -q 'kept in .env' || fail "$label. the refusal does not say the keys are kept in .env"
-    printf '%s' "$OUT" | grep -q 'CLIENT_KEYS_FILE=' || fail "$label. the refusal does not name CLIENT_KEYS_FILE as the way to add the broker's line"
-    printf '%s' "$OUT" | grep -q 'WITH_AGENT_TOKENS=0' || fail "$label. the refusal does not name WITH_AGENT_TOKENS=0"
-    if printf '%s' "$OUT" | grep -q 'gave its own CLIENT_KEYS_FILE'; then
+    grep -q 'kept in .env' <<<"$OUT" || fail "$label. the refusal does not say the keys are kept in .env"
+    grep -q 'CLIENT_KEYS_FILE=' <<<"$OUT" || fail "$label. the refusal does not name CLIENT_KEYS_FILE as the way to add the broker's line"
+    grep -q 'WITH_AGENT_TOKENS=0' <<<"$OUT" || fail "$label. the refusal does not name WITH_AGENT_TOKENS=0"
+    if grep -q 'gave its own CLIENT_KEYS_FILE' <<<"$OUT"; then
       fail "$label. the refusal says this run gave a CLIENT_KEYS_FILE, which it did not"
     fi
   fi

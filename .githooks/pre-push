@@ -60,6 +60,7 @@ step "client keys and the identity map are files, read by the gateway before any
 step "the demo issuer line is migrated exactly, and the mail TLS mode is refused before anything installs" "./scripts/demo-issuer-and-smtp-tls.sh"
 step "a check reports the box, not which of a producer and its reader finished first" "./scripts/checks-survive-a-closed-pipe.sh"
 step "a secret is minted from a bounded read, whatever SIGPIPE is" "./scripts/gen-is-bounded.sh"
+step "no pipe ends in a grep that leaves early" "./scripts/no-reader-leaves-a-pipe-early.sh"
 step "the OpenAI door is opt-in, a gateway like the first, on its own keys and map" "./scripts/openai-door.sh"
 step "every scenario is bound to a test" "./scripts/features-are-bound.sh"
 step "status checks the installed stack and changes nothing" "./scripts/status-is-read-only.sh"

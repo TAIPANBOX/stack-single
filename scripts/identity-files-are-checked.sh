@@ -496,7 +496,7 @@ c_pair() {
   cmp -s "$op/map.json" "$d/$DIR/identity.json" || echo "FAIL: $DOOR door: the installed map is not the map given"
   [ "$(ls -l "$d/$DIR/identity.json" | cut -c1-10)" = "-r--r--r--" ] || echo "FAIL: $DOOR door: the installed map is not 0444"
   ! compgen -G "$d/$DIR.check.*" >/dev/null || echo "FAIL: $DOOR door: the staging directory was left behind"
-  head -n 1 "$d/.env" | grep -qx 'SENTINEL=1' || echo "FAIL: $DOOR door: writing the keys disturbed the rest of .env"
+  grep -qx 'SENTINEL=1' <<<"$(head -n 1 "$d/.env")" || echo "FAIL: $DOOR door: writing the keys disturbed the rest of .env"
   for o in $OTHERS; do
     if grep -q "^$o=" "$d/.env"; then echo "FAIL: $DOOR door: its files wrote $o, another door's line"; fi
   done

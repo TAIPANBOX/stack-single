@@ -28,7 +28,7 @@ while IFS= read -r l; do
     '"$(sq_ '*|'"$(gen '*) continue ;;
   esac
   lit=$(printf '%s' "$val" | sed -E 's/^"(.*)"$/\1/')
-  if printf '%s' "$lit" | grep -qE '[|&;<>()`[:space:]]'; then
+  if grep -qE '[|&;<>()`[:space:]]' <<<"$lit"; then
     echo "FAIL: install.sh:${l%%:*} writes an unquoted value the shell would act on when .env is sourced: $val"
     fail=1
   fi

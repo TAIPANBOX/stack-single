@@ -67,7 +67,7 @@ done
 BLOCK="$(sed -n '/^# approver-key: begin$/,/^# approver-key: end$/p' install.sh)"
 if [ -z "$BLOCK" ]; then
   fail "C. install.sh has no '# approver-key: begin' .. '# approver-key: end' block, so the approver key was not measured"
-elif ! printf '%s\n' "$BLOCK" | grep -q '^approver_key_prepare()' || ! printf '%s\n' "$BLOCK" | grep -q '^approver_jwks_apply()'; then
+elif ! grep -q '^approver_key_prepare()' <<<"$BLOCK" || ! grep -q '^approver_jwks_apply()' <<<"$BLOCK"; then
   fail "C. the approver-key block defines no approver_key_prepare or no approver_jwks_apply"
 elif ! openssl version >/dev/null 2>&1; then
   fail "C. no openssl here, so the key could not be checked. This gate does not pass on a box that cannot run it."
@@ -109,25 +109,25 @@ EOD
   if [ ! -s "$key" ]; then
     fail "C. no approver key was minted at $key"
   else
-    head -1 "$key" | grep -qx -- "$PKCS8_HEADER" \
+    grep -qx -- "$PKCS8_HEADER" <<<"$(head -1 "$key")" \
       || fail "C. the approver key is not PKCS#8 (its first line is not BEGIN PRIVATE KEY), which the console does not read"
-    openssl pkey -in "$key" -noout -text 2>/dev/null | grep -q 'prime256v1' \
+    grep -q 'prime256v1' <<<"$(openssl pkey -in "$key" -noout -text 2>/dev/null)" \
       || fail "C. the approver key is not on P-256 (prime256v1)"
     mode="$(stat -c '%a' "$key" 2>/dev/null || stat -f '%Lp' "$key" 2>/dev/null || echo '?')"
     [ "$mode" = 600 ] || fail "C. the approver key is mode $mode, not 600"
-    printf '%s' "$out1" | grep -q -- "$KEY_MARK" && fail "C. the run printed the approver key"
+    grep -q -- "$KEY_MARK" <<<"$out1" && fail "C. the run printed the approver key"
   fi
   before="$(cat "$key" 2>/dev/null)"
   out2="$(run_block "$box" 1)"
   [ "$(cat "$key" 2>/dev/null)" = "$before" ] || fail "C. a re-run replaced the approver key: rotating it would break every approval the console has signed"
-  printf '%s' "$out2" | grep -q -- "$KEY_MARK" && fail "C. the re-run printed the approver key"
+  grep -q -- "$KEY_MARK" <<<"$out2" && fail "C. the re-run printed the approver key"
   # the pinned console cannot print its key set: that is a fault, and it stops the install, because off
   # would decide every hold on a bearer key with no person named
   boxp="$scratch/boxp"
   mkdir -p "$boxp"
   outp="$(run_block "$boxp" 0)"; rcp=$?
   [ "$rcp" != 0 ] || fail "C. a pinned console that cannot print its key set let the install go on with the approver check off"
-  printf '%s' "$outp" | grep -q 'die: the pinned console image' || fail "C. the stop on a pinned console does not say why: $outp"
+  grep -q 'die: the pinned console image' <<<"$outp" || fail "C. the stop on a pinned console does not say why: $outp"
   if [ -e "$boxp/approver-public/approver-jwks.json" ] || grep -q '^WARDRYX_APPROVER_JWKS=' "$boxp/.env" 2>/dev/null; then
     fail "C. a console that cannot print its key set turned the approver check on (file or WARDRYX_APPROVER_JWKS written)"
   fi
@@ -137,7 +137,7 @@ EOD
   printf 'WARDRYX_APPROVER_JWKS=/etc/wardryx/approver/approver-jwks.json\n' >"$boxo/.env"
   outo="$(run_block "$boxo" 0 older-console:v1)"; rco=$?
   [ "$rco" = 0 ] || fail "C. an operator's older console stopped the install: $outo"
-  printf '%s' "$outo" | grep -q 'approver statements: off' || fail "C. the run does not say that approver statements are off on an operator's older console"
+  grep -q 'approver statements: off' <<<"$outo" || fail "C. the run does not say that approver statements are off on an operator's older console"
   grep -q '^WARDRYX_APPROVER_JWKS=' "$boxo/.env" 2>/dev/null && fail "C. an older console keeps WARDRYX_APPROVER_JWKS, so wardryx refuses every decision it sends"
   # the console can print it: the file is written and the variable names it
   box2="$scratch/box2"

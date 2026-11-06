@@ -139,7 +139,7 @@ PY
 BLOCK="$(sed -n '/^# run-budget-ceiling: begin$/,/^# run-budget-ceiling: end$/p' install.sh)"
 if [ -z "$BLOCK" ]; then
   fail "install.sh has no '# run-budget-ceiling: begin' .. '# run-budget-ceiling: end' block, so this measured nothing about the installer's half"
-elif ! printf '%s' "$BLOCK" | grep -q '^ceiling_resolve()' || ! printf '%s' "$BLOCK" | grep -q '^ceiling_apply()' || ! printf '%s' "$BLOCK" | grep -q '^ceiling_valid()'; then
+elif ! grep -q '^ceiling_resolve()' <<<"$BLOCK" || ! grep -q '^ceiling_apply()' <<<"$BLOCK" || ! grep -q '^ceiling_valid()' <<<"$BLOCK"; then
   fail "the run-budget-ceiling block defines no ceiling_resolve, ceiling_apply or ceiling_valid, so this measured nothing"
 elif ! grep -q '^ceiling_resolve$' install.sh || ! grep -q '^ceiling_apply$' install.sh; then
   fail "install.sh never calls ceiling_resolve and ceiling_apply, so the block is dead text"
@@ -202,7 +202,7 @@ else
     out="$(run "$d" RUN_BUDGET_CEILING_USD="$v")"
     if [ "$(rc_of "$out")" = 0 ]; then
       fail "RUN_BUDGET_CEILING_USD ($label) was accepted, and tokenfuse would exit 2 on it"
-    elif ! printf '%s' "$out" | grep -qF 'RUN_BUDGET_CEILING_USD'; then
+    elif ! grep -qF 'RUN_BUDGET_CEILING_USD' <<<"$out"; then
       fail "RUN_BUDGET_CEILING_USD ($label) was refused without naming the variable"
     elif [ "$(cat "$d/.env")" != "SENTINEL=1" ]; then
       fail "RUN_BUDGET_CEILING_USD ($label) was refused AFTER touching .env, which is half a job"
@@ -210,7 +210,7 @@ else
     # Only a figure long enough not to be a substring of the refusal's own
     # examples ("5 or 2.50", "never 0"): a one-character value would "echo"
     # whatever the message happens to say.
-    if [ "${#v}" -ge 5 ] && printf '%s' "$out" | grep -qF -- "$v"; then
+    if [ "${#v}" -ge 5 ] && grep -qF -- "$v" <<<"$out"; then
       fail "RUN_BUDGET_CEILING_USD ($label) was refused by an answer that echoed the value"
     fi
   }

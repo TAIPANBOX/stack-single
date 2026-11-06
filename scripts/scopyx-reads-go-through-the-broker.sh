@@ -179,14 +179,14 @@ out="$(run_keys "$d" 1 "$AG1")" || fail "the block refused a fresh box: $out"
 vault="$(val "$d" TOKENFUSE_MCP_SECRETS)"
 key="$(items "$vault" | sed -n 's/^scopyx_key_operator=//p')"
 [ -n "$key" ] || fail "the vault holds no scopyx_key_operator after the block ran: $vault"
-items "$vault" | grep -qx "typryx_key=$TYP" || fail "the block dropped the typryx secret from the vault: $vault"
+grep -qx "typryx_key=$TYP" <<<"$(items "$vault")" || fail "the block dropped the typryx secret from the vault: $vault"
 scopes="$(val "$d" TOKENFUSE_MCP_SECRET_SCOPES)"
-items "$scopes" | grep -qx 'typryx_key=tools:ask|ask_freeform|list_questions' || fail "the block dropped the typryx scope: $scopes"
-items "$scopes" | grep -qx "scopyx_key_operator=agents:$AG1;tools:browse|fetch_url" \
+grep -qx 'typryx_key=tools:ask|ask_freeform|list_questions' <<<"$(items "$scopes")" || fail "the block dropped the typryx scope: $scopes"
+grep -qx "scopyx_key_operator=agents:$AG1;tools:browse|fetch_url" <<<"$(items "$scopes")" \
   || fail "the scope of the scopyx key is not 'agents:<that agent>;tools:browse|fetch_url' (an agent resolving it for another agent, or for another tool, would fetch as that agent): $scopes"
 keys="$(val "$d" SCOPYX_KEYS)"
-items "$keys" | grep -qx "$key=$AG1" || fail "scopyx's key list does not pair the vault's key with the agent, as <key>=<agent>: it cannot name who fetched"
-items "$keys" | grep -qx "$OLD=agent://local.invalid/default-agent" || fail "the block dropped the key a box already had from scopyx's list"
+grep -qx "$key=$AG1" <<<"$(items "$keys")" || fail "scopyx's key list does not pair the vault's key with the agent, as <key>=<agent>: it cannot name who fetched"
+grep -qx "$OLD=agent://local.invalid/default-agent" <<<"$(items "$keys")" || fail "the block dropped the key a box already had from scopyx's list"
 grep -qx 'SENTINEL=1' "$d/.env" && grep -qx 'TAIL=last' "$d/.env" || fail "the block rewrote a line it has no business with"
 case "$out" in *"$key"*) fail "the block printed the scopyx key" ;; esac
 
@@ -201,10 +201,10 @@ out="$(run_keys "$d" 1 "$AG2")" || fail "the block refused a changed trust domai
 [ "$(items "$(val "$d" TOKENFUSE_MCP_SECRETS)" | sed -n 's/^scopyx_key_operator=//p')" = "$key" ] || fail "a changed trust domain changed the key"
 scopes="$(val "$d" TOKENFUSE_MCP_SECRET_SCOPES)"
 [ "$(items "$scopes" | grep -c '^scopyx_key_operator=')" = 1 ] || fail "a changed trust domain left two scope entries for the key: $scopes"
-items "$scopes" | grep -qx "scopyx_key_operator=agents:$AG2;tools:browse|fetch_url" || fail "the scope did not follow the new agent: $scopes"
+grep -qx "scopyx_key_operator=agents:$AG2;tools:browse|fetch_url" <<<"$(items "$scopes")" || fail "the scope did not follow the new agent: $scopes"
 keys="$(val "$d" SCOPYX_KEYS)"
 [ "$(items "$keys" | grep -c "^$key=")" = 1 ] || fail "a changed trust domain left two entries for the key in scopyx's list: $keys"
-items "$keys" | grep -qx "$key=$AG2" || fail "scopyx's list did not follow the new agent: $keys"
+grep -qx "$key=$AG2" <<<"$(items "$keys")" || fail "scopyx's list did not follow the new agent: $keys"
 
 # D4: agent tokens off changes nothing
 d="$scratch/off"; mkbox "$d"; cp "$d/.env" "$scratch/off.before"
@@ -217,7 +217,7 @@ KEPT="keptscopyx0123456789ABCDEFGHIJKLMNOPQ"
 sed -i.bak "s|^TOKENFUSE_MCP_SECRETS=.*|TOKENFUSE_MCP_SECRETS=typryx_key=$TYP,scopyx_key_operator=$KEPT|" "$d/.env"; rm -f "$d/.env.bak"
 run_keys "$d" 1 "$AG1" >/dev/null || fail "the block refused a vault that already holds the key"
 [ "$(items "$(val "$d" TOKENFUSE_MCP_SECRETS)" | sed -n 's/^scopyx_key_operator=//p')" = "$KEPT" ] || fail "the block replaced a key the box already had"
-items "$(val "$d" SCOPYX_KEYS)" | grep -qx "$KEPT=$AG1" || fail "scopyx's list does not carry the key the vault already held"
+grep -qx "$KEPT=$AG1" <<<"$(items "$(val "$d" SCOPYX_KEYS)")" || fail "scopyx's list does not carry the key the vault already held"
 
 # D6: a vault key that is not a plain secret is refused, and nothing is written
 d="$scratch/bad"; mkbox "$d"

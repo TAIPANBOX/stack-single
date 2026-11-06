@@ -71,7 +71,7 @@ SENTINEL="felyx-sentinel-$$-$(date +%s)"
 fail() { printf 'FAIL: %s\n' "$*"; problems=$((problems + 1)); }
 if [ -z "$BLOCK" ]; then
   fail "install.sh has no '# identity-files: begin' .. 'end' block, so the note about Felyx cannot be run and this measured nothing about what the end of the run says"
-elif ! printf '%s' "$BLOCK" | grep -q '^felyx_gateway_note()'; then
+elif ! grep -q '^felyx_gateway_note()' <<<"$BLOCK"; then
   fail "the identity-files block defines no felyx_gateway_note, so the closing report's note about Felyx is not something this can run"
 elif [ "$(grep -c '\$(felyx_gateway_note)' install.sh)" -ne 1 ]; then
   fail "install.sh does not call felyx_gateway_note exactly once in the closing report: the note about Felyx is dead text or repeated"

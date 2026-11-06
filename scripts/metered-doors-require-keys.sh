@@ -282,7 +282,7 @@ if [ "$mint_ok" = 1 ]; then
       fail "the installer wrote no agents' key file at \$STACK_DIR/agent-key for the operator to hand out"
     fi
     [ "$(envv "$d" GATEWAY_IDENTITY_MINTED)" = 1 ] || fail "the marker GATEWAY_IDENTITY_MINTED=1 was not written, so a re-run could not tell minted keys from the operator's"
-    head -n 1 "$d/.env" | grep -qx 'SENTINEL=1' || fail "minting disturbed the rest of .env"
+    grep -qx 'SENTINEL=1' <<<"$(head -n 1 "$d/.env")" || fail "minting disturbed the rest of .env"
     if [ -s "$d/map.seen" ]; then
       python3 - "$d/map.seen" <<'PY' || problems=$((problems + 1))
 import fnmatch, json, sys
