@@ -415,7 +415,7 @@ EOF
   check_cfg "the proxy gets the backend config the typed plane has, a key as a file path, and no key value" "
 assert 'typryx-wardryx-proxy' in svc, 'no proxy in the resolved configuration, so this measured nothing'
 p, t = svc['typryx-wardryx-proxy'], svc['typryx']
-for k in ('TYPRYX_BACKEND', 'TYPRYX_JEV_KEY_FILE', 'TYPRYX_OPENAI_URL', 'TYPRYX_OPENAI_MODEL', 'TYPRYX_OPENAI_KEY_FILE', 'TYPRYX_TIMEOUT_MS'):
+for k in ('TYPRYX_BACKEND', 'TYPRYX_JEV_KEY_FILE', 'TYPRYX_OPENAI_URL', 'TYPRYX_OPENAI_MODEL', 'TYPRYX_OPENAI_KEY_FILE', 'TYPRYX_OPENAI_TOP_LOGPROBS', 'TYPRYX_OPENAI_MAX_COMPLETION_TOKENS', 'TYPRYX_OPENAI_REASONING_EFFORT', 'TYPRYX_TIMEOUT_MS'):
     assert p['environment'].get(k) == t['environment'].get(k), k + ' differs: proxy ' + repr(p['environment'].get(k)) + ', typryx ' + repr(t['environment'].get(k))
 assert p['environment']['TYPRYX_BACKEND'] == 'jev'
 m = [v for v in p.get('volumes', []) if v.get('target') == '/run/typed']

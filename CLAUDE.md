@@ -517,6 +517,13 @@ an absent invariant.
     or a value that is neither 1 nor 0, refuses before the box is touched. The
     export carries human truths only, so a Jev answer cannot become a training
     label (TypeSafe's terms), and the data stays in the volume on the box.
+    `TYPRYX_OPENAI_TOP_LOGPROBS`, `_MAX_COMPLETION_TOKENS` and
+    `_REASONING_EFFORT` (typryx v0.6.0) are named in `environment:` on typryx
+    and on the proxy, because compose passes a container only what it names.
+    A current OpenAI model refuses the request without them. Empty unless the
+    operator writes them in `.env`, which is what leaves the request as a local
+    server takes it. No block of the installer writes them, so they are not in
+    `TYPED_OWNED` and survive a change of mode, like the training log.
     Every typryx image pin here is the one tag compose.yaml defaults to.
     *(gate: `scripts/typed-data-mode.sh`, which lifts the `# typed-mode:` block
     out of install.sh and runs it in a scratch directory for each case, reads

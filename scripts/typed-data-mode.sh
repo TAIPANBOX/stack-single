@@ -308,7 +308,7 @@ pin="$(sed -n 's/.*ghcr\.io\/taipanbox\/typryx:\(v[0-9][0-9.]*\).*/\1/p' compose
 if [ -z "$pin" ]; then
   fail "compose.yaml names no ghcr.io/taipanbox/typryx:vX.Y.Z image, so this measured nothing about the pin"
 else
-  [ "$pin" = v0.5.1 ] || fail "compose.yaml pins typryx $pin; the training log needs v0.3.0 or later, the risk-signal proxy v0.4.0, and this gate names v0.5.1"
+  [ "$pin" = v0.6.0 ] || fail "compose.yaml pins typryx $pin; the training log needs v0.3.0 or later, the risk-signal proxy v0.4.0, and this gate names v0.6.0"
   for f in compose.yaml components.json README.md install.sh; do
     while IFS= read -r t; do
       [ "$t" = "$pin" ] || fail "$f names typryx:$t, but compose.yaml pins typryx:$pin"
@@ -363,7 +363,7 @@ e = svc['typryx']['environment']
 assert e['TYPRYX_BACKEND'] == 'stub', 'backend is ' + e['TYPRYX_BACKEND']
 assert not e.get('TYPRYX_JEV_KEY_FILE'), 'a jev key file is named on the stub'
 assert not e.get('TYPRYX_TRAINING_DIR'), 'a training log is on by default: TYPRYX_TRAINING_DIR is ' + repr(e.get('TYPRYX_TRAINING_DIR'))
-assert svc['typryx']['image'].split('@')[0].endswith('/typryx:v0.5.1'), 'the typryx pin is ' + svc['typryx']['image']
+assert svc['typryx']['image'].split('@')[0].endswith('/typryx:v0.6.0'), 'the typryx pin is ' + svc['typryx']['image']
 " --profile typed </dev/null
 
   check_cfg "training on names a directory inside a writable volume, beside the ledger" "
@@ -419,6 +419,39 @@ TYPRYX_BACKEND='openai-logprobs'
 TYPRYX_OPENAI_URL='http://host.docker.internal:11434/v1'
 TYPRYX_OPENAI_MODEL='qwen2.5:7b'
 TYPRYX_TIMEOUT_MS='30000'
+EOF
+
+  # compose passes a container only what its `environment:` names, so a `.env`
+  # line for one of these, absent there, never reaches typryx and every ask on a
+  # current OpenAI model comes back a 400.
+  check_cfg "own-model carries the request settings a current OpenAI model needs" "
+assert 'typryx' in svc, 'no typryx service in the resolved configuration with --profile typed, so this measured nothing'
+e = svc['typryx']['environment']
+assert e.get('TYPRYX_OPENAI_TOP_LOGPROBS') == '5', 'top_logprobs is ' + repr(e.get('TYPRYX_OPENAI_TOP_LOGPROBS'))
+assert e.get('TYPRYX_OPENAI_MAX_COMPLETION_TOKENS') == '16', 'max_completion_tokens is ' + repr(e.get('TYPRYX_OPENAI_MAX_COMPLETION_TOKENS'))
+assert e.get('TYPRYX_OPENAI_REASONING_EFFORT') == 'none', 'reasoning_effort is ' + repr(e.get('TYPRYX_OPENAI_REASONING_EFFORT'))
+" --profile typed <<'EOF'
+TYPED_MODE='own-model'
+TYPRYX_BACKEND='openai-logprobs'
+TYPRYX_OPENAI_URL='https://api.openai.com/v1'
+TYPRYX_OPENAI_MODEL='gpt-6-luna'
+TYPRYX_OPENAI_TOP_LOGPROBS='5'
+TYPRYX_OPENAI_MAX_COMPLETION_TOKENS='16'
+TYPRYX_OPENAI_REASONING_EFFORT='none'
+EOF
+
+  # Unset has to stay empty: typryx reads empty as unset, and that is what keeps
+  # the request byte for byte what a local server already takes.
+  check_cfg "own-model with none of them set leaves the request as it was" "
+assert 'typryx' in svc, 'no typryx service in the resolved configuration with --profile typed, so this measured nothing'
+e = svc['typryx']['environment']
+for k in ('TYPRYX_OPENAI_TOP_LOGPROBS', 'TYPRYX_OPENAI_MAX_COMPLETION_TOKENS', 'TYPRYX_OPENAI_REASONING_EFFORT'):
+    assert k in e and e[k] == '', k + ' is ' + repr(e.get(k)) + ', and only an empty value leaves the request as it was'
+" --profile typed <<'EOF'
+TYPED_MODE='own-model'
+TYPRYX_BACKEND='openai-logprobs'
+TYPRYX_OPENAI_URL='http://host.docker.internal:11434/v1'
+TYPRYX_OPENAI_MODEL='qwen2.5:7b'
 EOF
   rm -rf "$cdir"
 fi
