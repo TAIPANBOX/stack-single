@@ -124,7 +124,7 @@
           "ghcr.io/taipanbox/tokenfuse-control-plane:v1.22.0@sha256:89b220a422a69d0ec4ab97bc05b4c6707da8f3387d34b8401343ad1d18c6a56a",
           "ghcr.io/taipanbox/tokenfuse:v1.22.0@sha256:48bc2eff2d00e76036b6b4f3eb6bd09e29081a41468c7faf2093f8f46bc6c2ac",
           "ghcr.io/taipanbox/trailryx-node:v1.5.0@sha256:f15215cd9708724e83fbd8493f2bf7d2a11980b37edf3b887081d8e17da18bab",
-          "ghcr.io/taipanbox/typryx:v0.5.1@sha256:4b29e110e91945c6324a1f16030d7fe9300f46a1f811fe14ecf7a4ce09a882fa",
+          "ghcr.io/taipanbox/typryx:v0.6.0@sha256:9ffe725c90a51297dca76940cd1e30e968cf323bfac2f61092f0db2acef0812b",
           "ghcr.io/taipanbox/vouchryx:v0.7.0@sha256:c2b684746b854af9cc0a0cef7e5ebcaa8ee5070806ddf3912d5603af45360912",
           "ghcr.io/taipanbox/wardryx:v2.5.1@sha256:2d3c0c9c0798156d3f05b82d0e63cf5b38ee4b9875d6bdbac1829f219c26abf7"
         ]

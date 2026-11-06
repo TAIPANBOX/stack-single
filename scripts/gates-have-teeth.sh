@@ -819,17 +819,27 @@ run_case "typed-data-mode: no volume is mounted where the training log lives" fa
 
 run_case "typed-data-mode: compose still pins a typryx older than the pin" fail \
 	'./scripts/typed-data-mode.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/typryx:v0.5.1@sha256:4b29e110e91945c6324a1f16030d7fe9300f46a1f811fe14ecf7a4ce09a882fa}", "ghcr.io/taipanbox/typryx:v0.2.0}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/typryx:v0.6.0@sha256:9ffe725c90a51297dca76940cd1e30e968cf323bfac2f61092f0db2acef0812b}", "ghcr.io/taipanbox/typryx:v0.2.0}")')" \
 	"compose.yaml pins typryx v0.2.0"
+
+run_case "typed-data-mode: a request setting is not passed to typryx" fail \
+	'./scripts/typed-data-mode.sh' \
+	"$(py 'edit("compose.yaml", "      TYPRYX_OPENAI_REASONING_EFFORT: ${TYPRYX_OPENAI_REASONING_EFFORT:-}\n      TYPRYX_TIMEOUT_MS: ${TYPRYX_TIMEOUT_MS:-}\n      # @decided 2026-09-30", "      TYPRYX_TIMEOUT_MS: ${TYPRYX_TIMEOUT_MS:-}\n      # @decided 2026-09-30")')" \
+	"reasoning_effort is None"
+
+run_case "typed-risk-signal: the proxy misses a request setting typryx has" fail \
+	'./scripts/typed-risk-signal.sh' \
+	"$(py 'edit("compose.yaml", "      TYPRYX_OPENAI_REASONING_EFFORT: ${TYPRYX_OPENAI_REASONING_EFFORT:-}\n      TYPRYX_TIMEOUT_MS: ${TYPRYX_TIMEOUT_MS:-}\n    volumes:", "      TYPRYX_TIMEOUT_MS: ${TYPRYX_TIMEOUT_MS:-}\n    volumes:")')" \
+	"TYPRYX_OPENAI_REASONING_EFFORT differs"
 
 run_case "typed-data-mode: components.json keeps the old typryx pin" fail \
 	'./scripts/typed-data-mode.sh' \
-	"$(py 'edit("components.json", "ghcr.io/taipanbox/typryx:v0.5.1", "ghcr.io/taipanbox/typryx:v0.2.0")')" \
+	"$(py 'edit("components.json", "ghcr.io/taipanbox/typryx:v0.6.0", "ghcr.io/taipanbox/typryx:v0.2.0")')" \
 	"components.json names typryx:v0.2.0"
 
 run_case "typed-data-mode: the README names a typryx tag compose does not pin" fail \
 	'./scripts/typed-data-mode.sh' \
-	"$(py 'edit("README.md", "this launcher pins typryx v0.5.1, so it is there", "this launcher pins ghcr.io/taipanbox/typryx:v0.2.0, so it is there")')" \
+	"$(py 'edit("README.md", "this launcher pins typryx v0.6.0, so it is there", "this launcher pins ghcr.io/taipanbox/typryx:v0.2.0, so it is there")')" \
 	"README.md names typryx:v0.2.0"
 
 # ---- run-budget-ceiling (invariant 20): tokenfuse 1.5.0's ceiling is OFF unless
@@ -1849,7 +1859,7 @@ open("README.md", "w").write(s.replace("when_absent: hold", "when_absent_gone: h
 
 run_case "typed-risk-signal: typryx is pinned before the proxy existed" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/typryx:v0.5.1@sha256:4b29e110e91945c6324a1f16030d7fe9300f46a1f811fe14ecf7a4ce09a882fa}", "ghcr.io/taipanbox/typryx:v0.3.0}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/typryx:v0.6.0@sha256:9ffe725c90a51297dca76940cd1e30e968cf323bfac2f61092f0db2acef0812b}", "ghcr.io/taipanbox/typryx:v0.3.0}")')" \
 	"the proxy (wardryx-proxy) does not exist before it"
 
 run_case "typed-risk-signal: wardryx is pinned before it read signals" fail \
@@ -2505,7 +2515,7 @@ edit("compose.yaml", "      typryx:\n        condition: service_started", "     
 run_case "typed-data-mode: compose names no typryx image to read a pin from" fail \
 	'./scripts/typed-data-mode.sh' \
 	"$(py 's = open("compose.yaml").read()
-a = "image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.5.1@sha256:4b29e110e91945c6324a1f16030d7fe9300f46a1f811fe14ecf7a4ce09a882fa}"
+a = "image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.6.0@sha256:9ffe725c90a51297dca76940cd1e30e968cf323bfac2f61092f0db2acef0812b}"
 assert s.count(a) == 2, "expected the typryx service and the risk-signal proxy to name the image"
 open("compose.yaml", "w").write(s.replace(a, "image: ${TYPRYX_IMAGE:-registry.invalid/typryx}"))')" \
 	"names no ghcr.io/taipanbox/typryx"

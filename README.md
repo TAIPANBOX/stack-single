@@ -1377,6 +1377,18 @@ answers would time out. On Linux the installer also makes `host.docker.internal`
 resolve inside the typryx container, so the URL above reaches a server on this
 same box.
 
+A current OpenAI model behind `TYPED_MODEL_URL` takes three more lines in `.env`,
+because it refuses the request a local server takes:
+
+```sh
+TYPRYX_OPENAI_TOP_LOGPROBS=5
+TYPRYX_OPENAI_MAX_COMPLETION_TOKENS=16
+TYPRYX_OPENAI_REASONING_EFFORT=none
+```
+
+They are yours and survive a change of mode, so take them out when the URL moves
+back to a local server. Left empty, the request stays what it always was.
+
 `jev` is left unpriced here: this launcher wires no prices anywhere else, so
 typryx's cost reporting for Jev stays at zero until you set
 `TYPRYX_JEV_PRICE_PER_MTOK_INPUT` in `.env` yourself (and add it to the
@@ -1414,7 +1426,7 @@ post, never what Jev said.
 
 **The opt-in training log.** `@decided 2026-09-30`: typryx can keep a local
 training log, off by default. typryx v0.3.0 is the first release that has it and
-this launcher pins typryx v0.5.1, so it is there. Switch it on with `TYPED_TRAINING=1` next to any typed mode
+this launcher pins typryx v0.6.0, so it is there. Switch it on with `TYPED_TRAINING=1` next to any typed mode
 (`WITH_TYPED=1`, `TYPED_MODE=jev` or `TYPED_MODE=own-model`):
 
 ```bash

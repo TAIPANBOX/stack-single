@@ -808,7 +808,7 @@ services:
   typryx:
     <<: *restart
     profiles: ["typed"]
-    image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.5.1@sha256:4b29e110e91945c6324a1f16030d7fe9300f46a1f811fe14ecf7a4ce09a882fa}
+    image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.6.0@sha256:9ffe725c90a51297dca76940cd1e30e968cf323bfac2f61092f0db2acef0812b}
     networks:
       - core
     # Group 10001, not 65532 alone, since 2026-09-26: the journal below moved
@@ -828,6 +828,9 @@ services:
       TYPRYX_OPENAI_URL: ${TYPRYX_OPENAI_URL:-}
       TYPRYX_OPENAI_MODEL: ${TYPRYX_OPENAI_MODEL:-}
       TYPRYX_OPENAI_KEY_FILE: ${TYPRYX_OPENAI_KEY_FILE:-}
+      TYPRYX_OPENAI_TOP_LOGPROBS: ${TYPRYX_OPENAI_TOP_LOGPROBS:-}
+      TYPRYX_OPENAI_MAX_COMPLETION_TOKENS: ${TYPRYX_OPENAI_MAX_COMPLETION_TOKENS:-}
+      TYPRYX_OPENAI_REASONING_EFFORT: ${TYPRYX_OPENAI_REASONING_EFFORT:-}
       TYPRYX_TIMEOUT_MS: ${TYPRYX_TIMEOUT_MS:-}
       # @decided 2026-09-30: typryx's opt-in local training log (typryx
       # v0.3.0). Empty, which typryx reads as unset, unless TYPED_TRAINING=1
@@ -1107,7 +1110,7 @@ services:
   typryx-wardryx-proxy:
     <<: *restart
     profiles: ["typed-risk-signal"]
-    image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.5.1@sha256:4b29e110e91945c6324a1f16030d7fe9300f46a1f811fe14ecf7a4ce09a882fa}
+    image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.6.0@sha256:9ffe725c90a51297dca76940cd1e30e968cf323bfac2f61092f0db2acef0812b}
     user: "65532:65532"
     command: ["wardryx-proxy"]
     environment:
@@ -1130,6 +1133,9 @@ services:
       TYPRYX_OPENAI_URL: ${TYPRYX_OPENAI_URL:-}
       TYPRYX_OPENAI_MODEL: ${TYPRYX_OPENAI_MODEL:-}
       TYPRYX_OPENAI_KEY_FILE: ${TYPRYX_OPENAI_KEY_FILE:-}
+      TYPRYX_OPENAI_TOP_LOGPROBS: ${TYPRYX_OPENAI_TOP_LOGPROBS:-}
+      TYPRYX_OPENAI_MAX_COMPLETION_TOKENS: ${TYPRYX_OPENAI_MAX_COMPLETION_TOKENS:-}
+      TYPRYX_OPENAI_REASONING_EFFORT: ${TYPRYX_OPENAI_REASONING_EFFORT:-}
       TYPRYX_TIMEOUT_MS: ${TYPRYX_TIMEOUT_MS:-}
     volumes:
       # The key files TYPED_MODE installed, read only, the same mount typryx has.
