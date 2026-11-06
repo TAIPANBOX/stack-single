@@ -651,7 +651,7 @@ services:
   scopyx:
     <<: *restart
     profiles: ["egress"]
-    image: ${SCOPYX_IMAGE:-ghcr.io/taipanbox/scopyx:v1.2.0@sha256:312bd4fa140fcdff846ed2e7395203395c1a082b99b5b195f074acea56e7541f}
+    image: ${SCOPYX_IMAGE:-ghcr.io/taipanbox/scopyx:v1.3.0@sha256:a1e640a7965273750bd95d245316059046da203924e7ad5048c06a51d3fa555d}
     # NOT on `agents` since G2.1: an agent reaches this service only through the
     # MCP broker, which shares `core` with it. An agent that could reach it
     # directly would fetch with the key and without the broker, and then the run
@@ -724,7 +724,7 @@ services:
   scopyx-browser:
     <<: *restart
     profiles: ["egress-browser"]
-    image: ${SCOPYX_BROWSER_IMAGE:-ghcr.io/taipanbox/scopyx:v1.2.0-chromium@sha256:fb36a0635f4b88c3dc44a63b8bf3033140c66138e322051f6bf423ea6f73afbe}
+    image: ${SCOPYX_BROWSER_IMAGE:-ghcr.io/taipanbox/scopyx:v1.3.0-chromium@sha256:3e5c28024deb462c06d5440414b2f453bfbb70ebd944d087888397367f4d9f99}
     user: "65532:65532"
     # The name the rest of the box reaches it by. Same as the profile above, so
     # nothing else in this file changes when an operator switches profiles.
@@ -917,7 +917,7 @@ services:
   tokenfuse-mcp-broker:
     <<: *restart
     profiles: ["typed", "egress", "egress-browser"]
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.21.0@sha256:5cc6484d20249df3e57db34d19eea5b75c54c64bd9b9dab968136e988374ab2c}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.22.0@sha256:48bc2eff2d00e76036b6b4f3eb6bd09e29081a41468c7faf2093f8f46bc6c2ac}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20012:10001"
@@ -1266,7 +1266,7 @@ services:
   # ---- money: the control API ----------------------------------------------
   tokenfuse-cloud:
     <<: *restart
-    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v1.21.0@sha256:3f3b9831ec1c222d776ebfbf706e207a098aff80e550494f4c78b52c1784ed8d}
+    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v1.22.0@sha256:89b220a422a69d0ec4ab97bc05b4c6707da8f3387d34b8401343ad1d18c6a56a}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20013:10001"
@@ -1312,7 +1312,7 @@ services:
   # gets a hard refusal rather than a log line.
   tokenfuse-gateway:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.21.0@sha256:5cc6484d20249df3e57db34d19eea5b75c54c64bd9b9dab968136e988374ab2c}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.22.0@sha256:48bc2eff2d00e76036b6b4f3eb6bd09e29081a41468c7faf2093f8f46bc6c2ac}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20010:10001"
@@ -1552,7 +1552,7 @@ services:
   #     reading of the variables being absent.
   tokenfuse-gateway-openai:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.21.0@sha256:5cc6484d20249df3e57db34d19eea5b75c54c64bd9b9dab968136e988374ab2c}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.22.0@sha256:48bc2eff2d00e76036b6b4f3eb6bd09e29081a41468c7faf2093f8f46bc6c2ac}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20011:10001"
@@ -1636,7 +1636,7 @@ services:
   # volume, holding no capability of its own.
   wg:
     <<: *restart
-    image: ${WG_IMAGE:-ghcr.io/taipanbox/stack-wg:v1.7.3@sha256:1c70d34197586768164fa8bc3a220a4978bef48351023db318a3053dc8eed7a2}
+    image: ${WG_IMAGE:-ghcr.io/taipanbox/stack-wg:v1.8.1@sha256:8996ce01a5b8a9d38a71b711f06653e23b54d5ad3e1578669be49ae8c79ba3ae}
     networks:
       - edge
     cap_add:
@@ -1673,7 +1673,7 @@ services:
   # simply cannot happen over WireGuard, on any device.
   caddy:
     <<: *restart
-    image: ${CADDY_IMAGE:-ghcr.io/taipanbox/stack-caddy:v1.7.3@sha256:41d37fc74013bf5b0c64a41acc5bbc9fb0af3de7dfeb69787e54f028118b05b7}
+    image: ${CADDY_IMAGE:-ghcr.io/taipanbox/stack-caddy:v1.8.1@sha256:d9376051cc5ac9bb83de557bf3e7e861e26f6f6ae4556cd6ed5a32d1ce352c0a}
     networks:
       - edge
       - front
@@ -1693,7 +1693,7 @@ services:
 
   console:
     <<: *restart
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.7.5@sha256:d68952a3523e517b25bdec39e8515d107e72c009a3dfc89712d09a923f323da5}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.8.1@sha256:5d8392de2fbd63cbb60493bb71bc278293c601f7b6c81a69d3dc691c68e45834}
     networks:
       - core
       - agents
@@ -1717,7 +1717,7 @@ services:
       GENARYX_STATE_DIR: /var/lib/stack/genaryx
       # The Keyryx witness's findings, which are not on the bus (invariant 54):
       # a stream the console tails read only beside its events directory. The
-      # console pinned here (v1.7.5; v1.7.0, built from genaryx #134, reads it too) reads it; an older
+      # console pinned here (v1.8.1; v1.7.0, built from genaryx #134, reads it too) reads it; an older
       # console ignores it.
       GENARYX_EVENTS_EXTRA: /var/lib/keyryx-alerts/keyryx.ndjson
       GENARYX_SCAN_TARGET: /srv/ui
@@ -1994,7 +1994,7 @@ services:
   # The sixth, trailryx-seal, is the `record` profile above.
   focus-export:
     <<: *restart
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.21.0@sha256:5cc6484d20249df3e57db34d19eea5b75c54c64bd9b9dab968136e988374ab2c}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.22.0@sha256:48bc2eff2d00e76036b6b4f3eb6bd09e29081a41468c7faf2093f8f46bc6c2ac}
     networks:
       - core
     user: "10001:10001"
@@ -2096,7 +2096,7 @@ services:
 
   verdryx-drift:
     <<: *restart
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.7.5@sha256:d68952a3523e517b25bdec39e8515d107e72c009a3dfc89712d09a923f323da5}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.8.1@sha256:5d8392de2fbd63cbb60493bb71bc278293c601f7b6c81a69d3dc691c68e45834}
     networks:
       - core
     user: "10001:10001"
