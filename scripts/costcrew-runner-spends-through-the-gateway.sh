@@ -150,7 +150,7 @@ if [ -z "$BLOCK" ]; then
   fail "C. install.sh has no '# costcrew-runner: begin' .. '# costcrew-runner: end' block, so the ceiling was not measured"
 else
   for fn in costcrew_ceiling_valid costcrew_ceiling_resolve costcrew_ceiling_apply; do
-    printf '%s\n' "$BLOCK" | grep -q "^$fn()" || fail "C. the costcrew-runner block defines no $fn"
+    grep -q "^$fn()" <<<"$BLOCK" || fail "C. the costcrew-runner block defines no $fn"
   done
   first_apt="$(grep -n 'apt-get install' install.sh | head -1 | cut -d: -f1)"
   resolve_at="$(grep -n '^costcrew_ceiling_resolve$' install.sh | head -1 | cut -d: -f1)"
@@ -161,16 +161,16 @@ else
   fi
 fi
 MINT="$(sed -n '/^# identity-mint: begin$/,/^# identity-mint: end$/p' install.sh)"
-printf '%s\n' "$MINT" | grep -q 'mint_env_secret GATEWAY_COSTCREW_KEY' \
+grep -q 'mint_env_secret GATEWAY_COSTCREW_KEY' <<<"$MINT" \
   || fail "C. the identity-mint block does not mint GATEWAY_COSTCREW_KEY, so the runner would hold no client key"
-printf '%s\n' "$MINT" | grep -q '"key_id": "costcrew", "unit": "costcrew", "agents": \["agent://%s/costcrew/\*"\]' \
+grep -q '"key_id": "costcrew", "unit": "costcrew", "agents": \["agent://%s/costcrew/\*"\]' <<<"$MINT" \
   || fail "C. the minted map does not bind the crew's key to agent://<domain>/costcrew/* in unit costcrew"
 # The key exists only when a run may spend (invariant 60): the ceiling test is one line, and the
 # key is dropped on a zero ceiling, so no unused credential is ever accepted.
 CEIL_LINE='case "${COSTCREW_CEILING_SET:-0}" in *[1-9]*) costcrew_on=1 ;; esac'
-printf '%s\n' "$MINT" | grep -qF "$CEIL_LINE" \
+grep -qF "$CEIL_LINE" <<<"$MINT" \
   || fail "C. the identity-mint block does not mint the CostCrew key only when the ceiling is above 0 (the ceiling test is missing or changed)"
-printf '%s\n' "$MINT" | grep -qF 'mint_env_forget GATEWAY_COSTCREW_KEY' \
+grep -qF 'mint_env_forget GATEWAY_COSTCREW_KEY' <<<"$MINT" \
   || fail "C. the identity-mint block does not drop GATEWAY_COSTCREW_KEY on a zero ceiling, so an unused credential would be accepted"
 for v in 0 0.00 25.00; do
   got="$(bash -c "costcrew_on=0; COSTCREW_CEILING_SET='$v'; $CEIL_LINE; echo \$costcrew_on")"
@@ -209,7 +209,7 @@ if [ -n "$BLOCK" ]; then
   grep -qx 'COSTCREW_CEILING=25.00' "$scratch/box/.env" || fail "D. COSTCREW_CEILING=25.00 is not written: $out"
   before="$(cat "$scratch/box/.env")"
   out="$(run_resolve_apply "25.005")" || true
-  printf '%s' "$out" | grep -q '^die: ' || fail "D. COSTCREW_CEILING=25.005 was not refused: $out"
+  grep -q '^die: ' <<<"$out" || fail "D. COSTCREW_CEILING=25.005 was not refused: $out"
   [ "$(cat "$scratch/box/.env")" = "$before" ] || fail "D. a refused COSTCREW_CEILING changed .env"
 fi
 

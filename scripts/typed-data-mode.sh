@@ -67,7 +67,7 @@ FAKEKEY="tj_test_FAKE_not_a_real_key_9f3a1c77d20b"
 BLOCK="$(sed -n '/^# typed-mode: begin$/,/^# typed-mode: end$/p' install.sh)"
 if [ -z "$BLOCK" ]; then
   fail "install.sh has no '# typed-mode: begin' .. '# typed-mode: end' block, so this measured nothing about the typed data mode"
-elif ! printf '%s' "$BLOCK" | grep -q '^typed_resolve()' || ! printf '%s' "$BLOCK" | grep -q '^typed_apply()'; then
+elif ! grep -q '^typed_resolve()' <<<"$BLOCK" || ! grep -q '^typed_apply()' <<<"$BLOCK"; then
   fail "the typed-mode block defines no typed_resolve or no typed_apply, so this measured nothing"
 else
   scratch="$(mktemp -d)"
@@ -112,12 +112,12 @@ else
     out="$(run "$d" "$@")"
     if [ "$(rc_of "$out")" = 0 ]; then
       fail "$name: it was accepted, and it must refuse"
-    elif ! printf '%s' "$out" | grep -qF -- "$needle"; then
+    elif ! grep -qF -- "$needle" <<<"$out"; then
       fail "$name: it refused, but not saying '$needle'"
     elif [ "$(cat "$d/.env")" != "SENTINEL=1" ] || [ -e "$d/typed" ]; then
       fail "$name: it refused AFTER touching the box (.env or typed/ changed), which is half a job"
     fi
-    if printf '%s' "$out" | grep -qF -- "$FAKEKEY"; then
+    if grep -qF -- "$FAKEKEY" <<<"$out"; then
       fail "$name: its refusal echoed the key it was given"
     fi
   }
@@ -135,7 +135,7 @@ else
   [ "$(plane_of "$out")" = stub ] || fail "WITH_TYPED=1 alone: the plane is '$(plane_of "$out")', not stub"
   [ "$(cat "$d/.env")" = "SENTINEL=1
 TYPED_MODE='stub'" ] || fail "WITH_TYPED=1 alone: TYPED_MODE='stub' is not the one line written to .env, so a plain ./install.sh turns the typed plane off"
-  printf '%s' "$out" | grep -q 'stub' || fail "WITH_TYPED=1 alone: it does not say it is the stub backend"
+  grep -q 'stub' <<<"$out" || fail "WITH_TYPED=1 alone: it does not say it is the stub backend"
 
   # 3. off wins over WITH_TYPED, and says so.
   d="$(mk)"
@@ -174,7 +174,7 @@ TYPED_MODE='stub'" ] || fail "WITH_TYPED=1 alone: TYPED_MODE='stub' is not the o
   mode="$(stat -c '%a' "$d/typed/jev-key" 2>/dev/null || stat -f '%Lp' "$d/typed/jev-key")"
   [ "$mode" = 400 ] || fail "jev: typed/jev-key is mode $mode, not 400"
   if grep -rqF -- "$FAKEKEY" "$d/.env"; then fail "jev: the key's bytes are in .env"; fi
-  if printf '%s' "$out" | grep -qF -- "$FAKEKEY"; then fail "jev: the key's bytes were printed"; fi
+  if grep -qF -- "$FAKEKEY" <<<"$out"; then fail "jev: the key's bytes were printed"; fi
   if grep -q 'TYPRYX_JEV_KEY=' "$d/.env"; then fail "jev: the key is passed as an environment VALUE (TYPRYX_JEV_KEY)"; fi
   before="$(cat "$d/.env")"
   # 8. the re-run: nothing set, nothing changes, still jev (invariant 2).
@@ -244,7 +244,7 @@ TYPED_MODE='stub'" ] || fail "WITH_TYPED=1 alone: TYPED_MODE='stub' is not the o
   envhas "$d" "^TYPRYX_OPENAI_KEY_FILE='/run/typed/model-key'" || fail "own-model: the key file is not named by its container path"
   cmp -s "$scratch/model.key" "$d/typed/model-key" || fail "own-model: typed/model-key is not a copy of the key file"
   if grep -qF -- "$FAKEKEY" "$d/.env"; then fail "own-model: the key's bytes are in .env"; fi
-  if printf '%s' "$out" | grep -qF -- "$FAKEKEY"; then fail "own-model: the key's bytes were printed"; fi
+  if grep -qF -- "$FAKEKEY" <<<"$out"; then fail "own-model: the key's bytes were printed"; fi
   # the re-run that changes only the URL keeps the mode
   out="$(run "$d" TYPED_MODEL_URL=http://h:9000/v1)"
   [ "$(plane_of "$out")" = own-model ] && envhas "$d" "^TYPRYX_OPENAI_URL='http://h:9000/v1'" || fail "own-model re-run with a new URL: $out"

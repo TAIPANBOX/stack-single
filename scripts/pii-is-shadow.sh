@@ -147,7 +147,7 @@ PY
 BLOCK="$(sed -n '/^# pii-mode: begin$/,/^# pii-mode: end$/p' install.sh)"
 if [ -z "$BLOCK" ]; then
   fail "install.sh has no '# pii-mode: begin' .. '# pii-mode: end' block, so this measured nothing about the installer's half"
-elif ! printf '%s' "$BLOCK" | grep -q '^pii_valid()' || ! printf '%s' "$BLOCK" | grep -q '^pii_resolve()' || ! printf '%s' "$BLOCK" | grep -q '^pii_apply()'; then
+elif ! grep -q '^pii_valid()' <<<"$BLOCK" || ! grep -q '^pii_resolve()' <<<"$BLOCK" || ! grep -q '^pii_apply()' <<<"$BLOCK"; then
   fail "the pii-mode block defines no pii_resolve, pii_apply or pii_valid, so this measured nothing"
 elif ! grep -q '^pii_resolve$' install.sh || ! grep -q '^pii_apply$' install.sh; then
   fail "install.sh never calls pii_resolve and pii_apply, so the block is dead text"
@@ -211,14 +211,14 @@ else
     out="$(run "$d" TOKENFUSE_DLP_PII="$v")"
     if [ "$(rc_of "$out")" = 0 ]; then
       fail "TOKENFUSE_DLP_PII ($label) was accepted, and tokenfuse would refuse to start on it"
-    elif ! printf '%s' "$out" | grep -qF 'TOKENFUSE_DLP_PII'; then
+    elif ! grep -qF 'TOKENFUSE_DLP_PII' <<<"$out"; then
       fail "TOKENFUSE_DLP_PII ($label) was refused without naming the variable"
     elif [ "$(cat "$d/.env")" != "SENTINEL=1" ]; then
       fail "TOKENFUSE_DLP_PII ($label) was refused AFTER touching .env, which is half a job"
     fi
     # Only a value long enough not to occur in the refusal's own wording
     # ("off, shadow, mask or block"): a short one would "echo" by coincidence.
-    if [ "${#v}" -ge 7 ] && printf '%s' "$out" | grep -qF -- "$v"; then
+    if [ "${#v}" -ge 7 ] && grep -qF -- "$v" <<<"$out"; then
       fail "TOKENFUSE_DLP_PII ($label) was refused by an answer that echoed the value"
     fi
   }

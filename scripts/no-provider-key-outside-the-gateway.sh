@@ -174,8 +174,8 @@ else
   # Both writers, each by its own line: a new file (upstream_put, on its temp file) and an
   # existing one re-owned on every run (upstream_own). One generic match let a mode
   # change in either pass while the other still said 0400.
-  printf '%s\n' "$BLOCK" | grep -qF 'chmod 0400 "$tmp"' || fail "the upstream-key block does not set mode 0400 on the key file it writes"
-  printf '%s\n' "$BLOCK" | grep -qF 'chmod 0400 "$1"' || fail "the upstream-key block does not set mode 0400 on an existing key file it re-owns"
+  grep -qF 'chmod 0400 "$tmp"' <<<"$BLOCK" || fail "the upstream-key block does not set mode 0400 on the key file it writes"
+  grep -qF 'chmod 0400 "$1"' <<<"$BLOCK" || fail "the upstream-key block does not set mode 0400 on an existing key file it re-owns"
   # Each door's key file goes to THAT door's uid, read from compose.yaml, never a uid
   # written into this gate: until 1.3.1 this line required uid 10001 while the
   # gateway ran as 20010, so the gate held the defect in place (GOTCHAS, stack-single
@@ -204,14 +204,14 @@ PYU
     elif [ "$got" != "$want" ]; then
       fail "the upstream-key block gives ./upstream/$dir/key to uid '${got}' ($var), but the door that mounts it runs as uid $want in compose.yaml"
     fi
-    printf '%s\n' "$BLOCK" | grep -qE "upstream_put \"\\\$k\" \"\\\$STACK_DIR/upstream/$dir\" \"\\\$$var\"" \
+    grep -qE "upstream_put \"\\\$k\" \"\\\$STACK_DIR/upstream/$dir\" \"\\\$$var\"" <<<"$BLOCK" \
       || fail "the upstream-key block does not write ./upstream/$dir/key for \$$var"
   done
   # Who pays is never changed in silence: the copy of Felyx's old key runs only on the
   # operator's GATEWAY_HOLDS_COPILOT_KEY=1, and a box with only that key is stopped.
-  printf '%s\n' "$BLOCK" | grep -q 'elif \[ "\$UP_ADOPT_COPILOT" = 1 \]' \
+  grep -q 'elif \[ "\$UP_ADOPT_COPILOT" = 1 \]' <<<"$BLOCK" \
     || fail "the upstream-key block copies GENARYX_COPILOT_KEY into the gateway's key file without the operator's GATEWAY_HOLDS_COPILOT_KEY=1"
-  printf '%s\n' "$BLOCK" | grep -q 'the provider key Felyx used before 1.2.0' \
+  grep -q 'the provider key Felyx used before 1.2.0' <<<"$BLOCK" \
     || fail "the upstream-key block does not stop a box whose only provider key is GENARYX_COPILOT_KEY"
 fi
 

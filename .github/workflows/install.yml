@@ -176,7 +176,7 @@ jobs:
       - name: vouchryx runs with agent tokens on by default, and not with them off
         run: |
           cd /opt/agent-stack
-          if sudo docker compose ps --services | grep -qx vouchryx; then running=yes; else running=no; fi
+          if grep -qx vouchryx <<<"$(sudo docker compose ps --services)"; then running=yes; else running=no; fi
           want=yes; case "${{ matrix.profile }}" in identity|static-only) want=no ;; esac
           echo "vouchryx running: $running (want $want)"
           [ "$running" = "$want" ]
@@ -184,7 +184,7 @@ jobs:
       - name: the typed risk signal is up only when asked for
         run: |
           cd /opt/agent-stack
-          if sudo docker compose ps --services | grep -qx typryx-wardryx-proxy; then running=yes; else running=no; fi
+          if grep -qx typryx-wardryx-proxy <<<"$(sudo docker compose ps --services)"; then running=yes; else running=no; fi
           want=no; [ "${{ matrix.profile }}" = typed-risk ] && want=yes
           echo "typryx-wardryx-proxy running: $running (want $want)"
           [ "$running" = "$want" ]
@@ -428,7 +428,7 @@ jobs:
       - name: the chain verifier is up on every profile
         run: |
           cd /opt/agent-stack
-          sudo docker compose ps --status running --services | grep -qx agent-conform
+          grep -qx agent-conform <<<"$(sudo docker compose ps --status running --services)"
 
       # CLAUDE.md invariant 38, on every leg: a container on the agents network, the
       # one an operator's agent container joins, reaches the gateway and nothing else
@@ -488,7 +488,7 @@ jobs:
           sudo env STACK_DIR=/opt/agent-stack WITH_TYPED=1 TYPED_RISK_SIGNAL=0 ./install.sh 2>&1 | tee install-3.log
           grep -q "every check passed" install-3.log || { echo "::error::the install that turned the signal off did not pass every check"; exit 1; }
           cd /opt/agent-stack
-          if sudo docker compose ps --services | grep -qx typryx-wardryx-proxy; then echo "::error::the proxy is still running after TYPED_RISK_SIGNAL=0"; exit 1; fi
+          if grep -qx typryx-wardryx-proxy <<<"$(sudo docker compose ps --services)"; then echo "::error::the proxy is still running after TYPED_RISK_SIGNAL=0"; exit 1; fi
           if sudo grep -q '^TYPED_RISK_' .env; then echo "::error::TYPED_RISK_ lines are still in .env after TYPED_RISK_SIGNAL=0"; exit 1; fi
           if grep -q hold_if_signal policy.yaml; then echo "::error::the managed hold is still in policy.yaml after TYPED_RISK_SIGNAL=0"; exit 1; fi
 

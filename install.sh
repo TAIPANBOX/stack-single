@@ -652,9 +652,8 @@ if compose_has tokenfuse-mcp-broker; then
     # the check names an agent. No starter rule targets this id, so wardryx
     # allows it.
     hdrs+="x-fuse-agent-id: agent://local.invalid/install-check"$'\r\n'
-    http_request POST "$1" "$hdrs" \
-        '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ask","arguments":{"template":"eval.outcome_met","state":{"task":"2+2","final_answer":"4"}},"_meta":{"typryx/key":"{{secret:typryx_key}}"}}}' \
-      | grep -q '"isError":false'
+    grep -q '"isError":false' <<<"$(http_request POST "$1" "$hdrs" \
+        '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ask","arguments":{"template":"eval.outcome_met","state":{"task":"2+2","final_answer":"4"}},"_meta":{"typryx/key":"{{secret:typryx_key}}"}}}')"
   }
   if [ "$TYPED_PLANE" = jev ]; then
     # Not asked on purpose: this ask would go to TypeSafe's API, on every run
@@ -2724,7 +2723,7 @@ else
   # Either install may fail and the box goes on without it: a build is the
   # BUILD_FROM_SOURCE path, and a pull needs no builder at all.
   if ! docker buildx version >/dev/null 2>&1; then
-    if dpkg -s docker-ce 2>/dev/null | grep -q '^Status: install ok installed'; then
+    if grep -q '^Status: install ok installed' <<<"$(dpkg -s docker-ce 2>/dev/null)"; then
       apt-get install -y -qq --no-remove docker-buildx-plugin >/dev/null 2>&1 || true
     else
       apt-get install -y -qq --no-remove docker-buildx >/dev/null 2>&1 || true
@@ -3557,10 +3556,10 @@ approver_key_prepare() {
 
 approver_jwks_apply() { # before `up`: writes the console's public key set and turns the check on
   local img json out="$STACK_DIR/approver-public/approver-jwks.json"
-  img="$(GATEWAY_CLIENT_KEYS="${GATEWAY_CLIENT_KEYS:-not-written-before-section-3e:none}" "${COMPOSE[@]}" config --images 2>/dev/null | grep -m1 'genaryx-console' || true)"
+  img="$(grep -m1 'genaryx-console' <<<"$(GATEWAY_CLIENT_KEYS="${GATEWAY_CLIENT_KEYS:-not-written-before-section-3e:none}" "${COMPOSE[@]}" config --images 2>/dev/null)" || true)"
   if [ -n "$img" ] \
      && json="$(docker run --rm --network none --user 10001:10001 -v "$STACK_DIR/approver/approver.pem:/run/approver.pem:ro" --entrypoint /usr/local/bin/genaryx-web "$img" approver-jwks --key-file /run/approver.pem 2>/dev/null)" \
-     && printf '%s' "$json" | grep -q '"keys"'; then
+     && grep -q '"keys"' <<<"$json"; then
     { printf '%s\n' "$json" >"$out.tmp.$$" && chmod 0644 "$out.tmp.$$" && mv -f "$out.tmp.$$" "$out"; } \
       || die "could not write the console's public key set to $out"
     typed_set_env WARDRYX_APPROVER_JWKS /etc/wardryx/approver/approver-jwks.json
@@ -4285,7 +4284,7 @@ trailryx_root_kid() { # prints the one ES384 kid of keyryx's trailryx-root set; 
     return 3
   fi
   k="$(printf '%s\n' "$es" | sed '/^$/d')"
-  if ! printf '%s' "$k" | grep -qE '^[A-Za-z0-9_-]{43}$'; then
+  if ! grep -qE '^[A-Za-z0-9_-]{43}$' <<<"$k"; then
     echo "trailryx-root: the ES384 kid keyryx serves is not an RFC 7638 thumbprint (43 characters). Refusing." >&2
     return 3
   fi
@@ -4490,7 +4489,7 @@ note "the operator's tunnel: ${WG_LISTEN_PORT:-51820}/udp, open on purpose"
 note "  WireGuard answers nothing without a valid key: no banner, no handshake,"
 note "  nothing for a scanner to find. It is the road in, not an exposed plane."
 note "not published at all: cloud, wardryx, idryx, postgres"
-if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then
+if command -v ufw >/dev/null 2>&1 && grep -q '^Status: active' <<<"$(ufw status 2>/dev/null)"; then
   ufw allow 22/tcp >/dev/null 2>&1 || true
   note "ufw is active: ssh allowed. Note that ufw does NOT govern published container ports."
 fi

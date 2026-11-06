@@ -83,7 +83,7 @@ else
 fi
 FORGET="$(sed -n '/for v in VOUCHRYX_AGENTS VOUCHRYX_ALLOWED_AUDIENCES/,/; do$/p' install.sh)"
 for v in TOKENFUSE_DELEGATION_ORIGINS MCP_BROKER_DELEGATION_ORIGINS; do
-  printf '%s\n' "$FORGET" | grep -q "$v" || fail "B. WITH_AGENT_TOKENS=0 leaves $v in .env"
+  grep -q "$v" <<<"$FORGET" || fail "B. WITH_AGENT_TOKENS=0 leaves $v in .env"
 done
 
 # ---- C. no TODO left ----------------------------------------------------------------------------

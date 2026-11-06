@@ -142,7 +142,7 @@ PY
 BLOCK="$(sed -n '/^# firewall-mode: begin$/,/^# firewall-mode: end$/p' install.sh)"
 if [ -z "$BLOCK" ]; then
   fail "install.sh has no '# firewall-mode: begin' .. '# firewall-mode: end' block, so this measured nothing about the installer's half"
-elif ! printf '%s' "$BLOCK" | grep -q '^firewall_valid()' || ! printf '%s' "$BLOCK" | grep -q '^firewall_resolve()' || ! printf '%s' "$BLOCK" | grep -q '^firewall_apply()'; then
+elif ! grep -q '^firewall_valid()' <<<"$BLOCK" || ! grep -q '^firewall_resolve()' <<<"$BLOCK" || ! grep -q '^firewall_apply()' <<<"$BLOCK"; then
   fail "the firewall-mode block defines no firewall_resolve, firewall_apply or firewall_valid, so this measured nothing"
 elif ! grep -q '^firewall_resolve$' install.sh || ! grep -q '^firewall_apply$' install.sh; then
   fail "install.sh never calls firewall_resolve and firewall_apply, so the block is dead text"
@@ -206,14 +206,14 @@ else
     out="$(run "$d" TOKENFUSE_FIREWALL="$v")"
     if [ "$(rc_of "$out")" = 0 ]; then
       fail "TOKENFUSE_FIREWALL ($label) was accepted, and tokenfuse would refuse to start on it"
-    elif ! printf '%s' "$out" | grep -qF 'TOKENFUSE_FIREWALL'; then
+    elif ! grep -qF 'TOKENFUSE_FIREWALL' <<<"$out"; then
       fail "TOKENFUSE_FIREWALL ($label) was refused without naming the variable"
     elif [ "$(cat "$d/.env")" != "SENTINEL=1" ]; then
       fail "TOKENFUSE_FIREWALL ($label) was refused AFTER touching .env, which is half a job"
     fi
     # Only a value long enough not to occur in the refusal's own wording
     # ("enforce, shadow or off"): a short one would "echo" by coincidence.
-    if [ "${#v}" -ge 7 ] && printf '%s' "$out" | grep -qF -- "$v"; then
+    if [ "${#v}" -ge 7 ] && grep -qF -- "$v" <<<"$out"; then
       fail "TOKENFUSE_FIREWALL ($label) was refused by an answer that echoed the value"
     fi
   }

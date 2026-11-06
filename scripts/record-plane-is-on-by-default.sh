@@ -41,12 +41,12 @@ else
   }
   for v in "" 1; do
     out="$(case_rc "$v")"
-    printf '%s' "$out" | grep -qx 'RECORD_ON=1' || fail "A. WITH_RECORD='$v' does not turn the record plane on: $out"
+    grep -qx 'RECORD_ON=1' <<<"$out" || fail "A. WITH_RECORD='$v' does not turn the record plane on: $out"
   done
   out="$(case_rc 0)"
-  printf '%s' "$out" | grep -qx 'RECORD_ON=0' || fail "A. WITH_RECORD=0 does not turn the record plane off: $out"
+  grep -qx 'RECORD_ON=0' <<<"$out" || fail "A. WITH_RECORD=0 does not turn the record plane off: $out"
   out="$(case_rc yes)"
-  printf '%s' "$out" | grep -q '^DIE:' || fail "A. WITH_RECORD=yes was accepted, and it is neither 0 nor 1: $out"
+  grep -q '^DIE:' <<<"$out" || fail "A. WITH_RECORD=yes was accepted, and it is neither 0 nor 1: $out"
 fi
 
 # B. both profile lists
@@ -60,7 +60,7 @@ if ! grep -q 'UP_PROFILES+=(--profile record)' install.sh; then
 fi
 
 # C. WITH_RECORD builds nothing
-if grep -n 'if \[ -n "\${WITH_RECORD:-}" \]' install.sh | grep -q .; then
+if grep -q . <<<"$(grep -n 'if \[ -n "\${WITH_RECORD:-}" \]' install.sh)"; then
   fail "C. install.sh still builds trailryx when WITH_RECORD is set"
 fi
 
@@ -73,8 +73,8 @@ sect="$(sed -n '/^## The record: what this box did, sealed$/,/^## /p' README.md)
 if [ -z "$sect" ]; then
   fail "E. README.md has no 'The record' section, so the default was not measured"
 else
-  printf '%s' "$sect" | grep -q 'WITH_RECORD=0' || fail "E. the README record section does not say WITH_RECORD=0 turns the plane off"
-  printf '%s' "$sect" | grep -q 'Off unless you ask for it' && fail "E. the README record section still says the plane is off unless asked for"
+  grep -q 'WITH_RECORD=0' <<<"$sect" || fail "E. the README record section does not say WITH_RECORD=0 turns the plane off"
+  grep -q 'Off unless you ask for it' <<<"$sect" && fail "E. the README record section still says the plane is off unless asked for"
 fi
 
 if [ "$problems" -ne 0 ]; then

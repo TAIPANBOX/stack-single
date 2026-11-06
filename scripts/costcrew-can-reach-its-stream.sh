@@ -46,7 +46,7 @@ grep -q 'chown 10003:10001 /vol/events/costcrew.ndjson && chmod 0640 /vol/events
 # C. no group, outside the bus
 costcrew="$(sed -n '/^  costcrew:$/,/^  [a-z][a-z0-9-]*:$/p' compose.yaml)"
 [ -n "$costcrew" ] || { fail "D. costcrew's service block was not found, so its groups were not measured"; }
-if printf '%s' "$costcrew" | grep -q 'group_add'; then
+if grep -q 'group_add' <<<"$costcrew"; then
   fail "C. costcrew has a group_add, so it could read the bus streams through the group bits"
 fi
 

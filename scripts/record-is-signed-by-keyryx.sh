@@ -105,21 +105,21 @@ BLOCK="$(sed -n '/^# record-signer: begin$/,/^# record-signer: end$/p' install.s
 if [ -z "$BLOCK" ]; then
   fail "B. install.sh has no '# record-signer: begin' .. '# record-signer: end' block, so the seal's credential was not measured"
 else
-  printf '%s\n' "$BLOCK" | grep -q '^record_seal_key_prepare()' || fail "B. the record-signer block defines no record_seal_key_prepare"
+  grep -q '^record_seal_key_prepare()' <<<"$BLOCK" || fail "B. the record-signer block defines no record_seal_key_prepare"
   CODE="$(printf '%s\n' "$BLOCK" | grep -v '^[[:space:]]*#')"
-  printf '%s\n' "$CODE" | grep -q 'printf .%s. ' || fail "B. the credential is not written with printf %s (a trailing newline would fail every signature)"
-  printf '%s\n' "$CODE" | grep -q 'chmod 0400' || fail "B. the credential is not set mode 0400"
-  printf '%s\n' "$CODE" | grep -q 'chown 10001:10001' || fail "B. the credential is not given to the seal's uid 10001"
-  printf '%s\n' "$CODE" | grep -q '__RECORD_SEAL_DIGEST__' || fail "B. the block does not fill the policy's digest placeholder"
-  if printf '%s\n' "$CODE" | grep -q 'echo\|note \|say \|die '; then
-    if printf '%s\n' "$CODE" | grep -E 'echo|note |say |die ' | grep -q 'secret\|cat '; then
+  grep -q 'printf .%s. ' <<<"$CODE" || fail "B. the credential is not written with printf %s (a trailing newline would fail every signature)"
+  grep -q 'chmod 0400' <<<"$CODE" || fail "B. the credential is not set mode 0400"
+  grep -q 'chown 10001:10001' <<<"$CODE" || fail "B. the credential is not given to the seal's uid 10001"
+  grep -q '__RECORD_SEAL_DIGEST__' <<<"$CODE" || fail "B. the block does not fill the policy's digest placeholder"
+  if grep -q 'echo\|note \|say \|die ' <<<"$CODE"; then
+    if grep -q 'secret\|cat ' <<<"$(printf '%s\n' "$CODE" | grep -E 'echo|note |say |die ')"; then
       fail "B. the block prints the credential or reads it to a message"
     fi
   fi
 fi
 
 # ---- C. install.sh, behaviour -------------------------------------------------------
-if [ -n "$BLOCK" ] && printf '%s\n' "$BLOCK" | grep -q '^record_seal_key_prepare()'; then
+if [ -n "$BLOCK" ] && grep -q '^record_seal_key_prepare()' <<<"$BLOCK"; then
   scratch="$(mktemp -d)"
   trap 'rm -rf "$scratch" "${cdir:-}"' EXIT
   mkdir -p "$scratch/bin" "$scratch/kd"
@@ -155,7 +155,7 @@ if [ -n "$BLOCK" ] && printf '%s\n' "$BLOCK" | grep -q '^record_seal_key_prepare
   before="$(cat "$secret" 2>/dev/null)"
   out2="$(run_prep)"
   [ "$(cat "$secret" 2>/dev/null)" = "$before" ] || fail "C. a re-run replaced the record seal's credential"
-  if [ -n "$before" ] && printf '%s' "$out1$out2" | grep -qF -- "$before"; then
+  if [ -n "$before" ] && grep -qF -- "$before" <<<"$out1$out2"; then
     fail "C. the run printed the credential"
   fi
 fi

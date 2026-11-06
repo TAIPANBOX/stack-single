@@ -148,7 +148,7 @@ scenario() {
 		fail=1
 		return 1
 	fi
-	if grep '^install ' "$work/apt.log" | grep -qv -- '--no-remove'; then
+	if grep '^install ' "$work/apt.log" | grep -cv -- '--no-remove' >/dev/null; then
 		printf 'FAIL: [%s] apt was asked to install without --no-remove: %s\n' "$name" "$(grep '^install ' "$work/apt.log" | grep -v -- '--no-remove' | head -1)"
 		fail=1
 	fi

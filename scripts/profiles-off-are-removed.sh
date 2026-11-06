@@ -51,10 +51,10 @@ if [ ! -f install.sh ] || [ ! -f compose.yaml ]; then
 fi
 
 TABLE="$(sed -n '/^# profile-table: begin$/,/^# profile-table: end$/p' install.sh)"
-if ! printf '%s\n' "$TABLE" | grep -q '^PROFILES_INSTALLED='; then
+if ! grep -q '^PROFILES_INSTALLED=' <<<"$TABLE"; then
   fail "D. install.sh has no '# profile-table:' block with PROFILES_INSTALLED, so the two kinds are not defined"
 fi
-if ! printf '%s\n' "$TABLE" | grep -q '^PROFILES_OPERATOR='; then
+if ! grep -q '^PROFILES_OPERATOR=' <<<"$TABLE"; then
   fail "D. install.sh's '# profile-table:' block has no PROFILES_OPERATOR, so the operator-started profiles are not defined"
 fi
 printf '%s\n' "$TABLE" >"$scratch/table.sh"
@@ -163,7 +163,7 @@ up_a="$(grep -E ' up -d' "$LOG_A" || true)"
 
 # A. installer-managed profiles that this run turns off: removed by name, under their own profile.
 expect_removed() { # PROFILE SERVICE: removed under that profile
-  printf '%s\n' "$removed_a" | grep -q -E -- "--profile $1 rm -sf( .*)? $2( |\$)" \
+  grep -q -E -- "--profile $1 rm -sf( .*)? $2( |\$)" <<<"$removed_a" \
     || fail "A. the stale $2 of profile $1 is not removed by this run, and that profile is installer-managed and off"
 }
 expect_removed typed typryx
@@ -172,15 +172,15 @@ expect_removed openai-door tokenfuse-gateway-openai
 
 # B. operator-started profiles are never removed; a running one is re-upped at this run's pins.
 for s in costcrew costcrew-init scopyx; do
-  printf '%s\n' "$removed_a" | grep -q -E -- " $s( |\$)" \
+  grep -q -E -- " $s( |\$)" <<<"$removed_a" \
     && fail "B. $s belongs to an operator-started profile, and the installer removed it"
 done
-printf '%s\n' "$up_a" | grep -q -E -- '--profile finops up -d( .*)? costcrew( |$)' \
+grep -q -E -- '--profile finops up -d( .*)? costcrew( |$)' <<<"$up_a" \
   || fail "B. the running costcrew of profile finops is not re-upped at this run's pins, so an upgrade would leave its old image running"
-printf '%s\n' "$up_a" | grep -q -E -- '--profile egress up -d( .*)? scopyx( |$)' \
+grep -q -E -- '--profile egress up -d( .*)? scopyx( |$)' <<<"$up_a" \
   || fail "B. the running scopyx of profile egress is not re-upped at this run's pins, so an upgrade would leave its old image running"
 for s in focus-export verdryx-drift idryx-detect; do
-  printf '%s\n' "$removed_a $up_a" | grep -q -E -- " $s( |\$)" \
+  grep -q -E -- " $s( |\$)" <<<"$removed_a $up_a" \
     && fail "B. $s is an operator-started service that is not running, and the installer removed or started it"
 done
 
@@ -188,16 +188,16 @@ done
 # off: the broker is the only way an agent reads the web, so it is not removed, and, having never run on a box from
 # before G2.1, it is started with the profile that needs it. Run C has no egress service running: nothing needs the
 # broker, and typed is off, so it is removed as before.
-printf '%s\n' "$removed_a" | grep -q -E -- ' tokenfuse-mcp-broker( |$)' \
+grep -q -E -- ' tokenfuse-mcp-broker( |$)' <<<"$removed_a" \
   && fail "H. the broker is shared with the running egress profile, and the cleanup removed it because typed is off: an agent could no longer read the web"
-printf '%s\n' "$up_a" | grep -q -E -- '--profile egress up -d( .*)? tokenfuse-mcp-broker( |$)' \
+grep -q -E -- '--profile egress up -d( .*)? tokenfuse-mcp-broker( |$)' <<<"$up_a" \
   || fail "H. scopyx runs under egress and the broker, which the profile shares with typed, is not started: an agent has no way to reach scopyx"
-grep -E ' rm ' "$LOG_C" | grep -q -E -- '--profile typed rm -sf( .*)? tokenfuse-mcp-broker( |$)' \
+grep -q -E -- '--profile typed rm -sf( .*)? tokenfuse-mcp-broker( |$)' <<<"$(grep -E ' rm ' "$LOG_C")" \
   || fail "H. with typed off and no egress service running, the broker is not removed: the typed plane's broker would outlive the operator turning it off"
 
 # C. a profile this run names keeps its services.
 for s in record-seal vouchryx; do
-  printf '%s\n' "$removed_a" | grep -q -E -- " $s( |\$)" \
+  grep -q -E -- " $s( |\$)" <<<"$removed_a" \
     && fail "C. $s belongs to a profile this run names, and the cleanup removed it"
 done
 
@@ -227,7 +227,7 @@ grep -q 'Operator-started profiles kept on this run' install.sh \
 
 # G. no operator-started profile re-ups or lists a service of the core, and the closing report names none of them.
 for s in tokenfuse-gateway console wardryx; do
-  printf '%s\n' "$up_a" | grep -q -E -- " up -d( .*)? $s( |\$)" \
+  grep -q -E -- " up -d( .*)? $s( |\$)" <<<"$up_a" \
     && fail "G. the core service $s is re-upped under an operator-started profile: the run would restart the gateway, the console or wardryx as if an operator had started them"
   grep -q -E -- ": $s, image" "$REPORT_A" \
     && fail "G. the closing report lists the core service $s as an operator-started service"

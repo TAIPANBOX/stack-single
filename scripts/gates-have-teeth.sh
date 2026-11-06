@@ -127,7 +127,7 @@ run_case() {
 	local name="$1" expect="$2" gate="$3" edit="$4" needle="${5:-}"
 	# TEETH_ONLY=REGEX runs only the cases whose name matches REGEX (1.4.0): a change runs the cases it
 	# touches, and CI runs the whole list. Unset, every case runs, as before.
-	if [ -n "${TEETH_ONLY:-}" ] && ! printf '%s' "$name" | grep -q -E -- "$TEETH_ONLY"; then
+	if [ -n "${TEETH_ONLY:-}" ] && ! grep -q -E -- "$TEETH_ONLY" <<<"$name"; then
 		return 0
 	fi
 	cases=$((cases + 1))
@@ -1600,7 +1600,7 @@ run_case "approver-key-is-wired: a re-run replaces the approver key" fail \
 
 run_case "approver-key-is-wired: the key set is switched on without a console that can print it" fail \
 	'./scripts/approver-key-is-wired.sh' \
-	"$(py 'edit("install.sh", "2>/dev/null)\" \\\n     && printf '"'"'%s'"'"' \"$json\" | grep -q '"'"'\"keys\"'"'"'; then", "2>/dev/null; true)\" \\\n     ; then")')" \
+	"$(py 'edit("install.sh", "2>/dev/null)\" \\\n     && grep -q '"'"'\"keys\"'"'"' <<<\"$json\"; then", "2>/dev/null; true)\" \\\n     ; then")')" \
 	"turned the approver check on"
 
 run_case "approver-key-is-wired: a pinned console that cannot print turns the check off quietly" fail \
@@ -4384,6 +4384,97 @@ run_case "console-proofs: naming the console own account is not a fault" pass \
 i = s.index("  console:\n    <<: *restart\n")
 j = i + len("  console:\n    <<: *restart\n")
 open("compose.yaml", "w").write(s[:j] + "    user: \"10001:10001\"\n" + s[j:])')"
+
+# CLAUDE.md invariant 65. Under pipefail a pipe into grep -q fails when the writer is still writing, so a
+# healthy tree went red at random on a loaded machine. The first cases plant the construct where it
+# lived; the middle ones are what must not be flagged; the last ones break the gate itself, because a
+# reader that has stopped matching reports what a clean tree reports.
+
+run_case "no-reader-leaves-a-pipe-early: a gate pipes its text into grep -q again" fail \
+	'./scripts/no-reader-leaves-a-pipe-early.sh' \
+	"$(py 'edit("scripts/console-password-is-not-printed.sh", "if ! grep -qx \x27rc=0\x27 <<<\"$out\"; then", "if ! printf \x27%s\\n\x27 \"$out\" | grep -qx \x27rc=0\x27; then")')" \
+	'scripts/console-password-is-not-printed.sh:'
+
+run_case "no-reader-leaves-a-pipe-early: the pipe is carried over a line" fail \
+	'./scripts/no-reader-leaves-a-pipe-early.sh' \
+	"$(py 'edit("install.sh", "grep -q \x27^Status: active\x27 <<<\"$(ufw status 2>/dev/null)\"; then", "ufw status 2>/dev/null \\\n  | grep -q \x27^Status: active\x27; then")')" \
+	'install.sh:'
+
+run_case "no-reader-leaves-a-pipe-early: a workflow step reads through the pipe" fail \
+	'./scripts/no-reader-leaves-a-pipe-early.sh' \
+	"$(py 'edit(".github/workflows/install.yml", "grep -qx agent-conform <<<\"$(sudo docker compose ps --status running --services)\"", "sudo docker compose ps --status running --services | grep -qx agent-conform")')" \
+	'.github/workflows/install.yml:'
+
+run_case "no-reader-leaves-a-pipe-early: the words are only in a comment" pass \
+	'./scripts/no-reader-leaves-a-pipe-early.sh' \
+	"$(py 'edit("install.sh", "#!/usr/bin/env bash\n", "#!/usr/bin/env bash\n# printf x | grep -q x\n")')"
+
+run_case "no-reader-leaves-a-pipe-early: the words are a command handed to another shell" pass \
+	'./scripts/no-reader-leaves-a-pipe-early.sh' \
+	"$(py 'edit("install.sh", "#!/usr/bin/env bash\n", "#!/usr/bin/env bash\nsh -c \"printf x | grep -q x\"\n")')"
+
+run_case "no-reader-leaves-a-pipe-early: the words are in a here-document" pass \
+	'./scripts/no-reader-leaves-a-pipe-early.sh' \
+	"$(py 'edit("install.sh", "#!/usr/bin/env bash\n", "#!/usr/bin/env bash\ncat <<\x27EOF\x27\nprintf x | grep -q x\nEOF\n")')"
+
+run_case "no-reader-leaves-a-pipe-early: grep -c reads to the end of a pipe" pass \
+	'./scripts/no-reader-leaves-a-pipe-early.sh' \
+	"$(py 'edit("install.sh", "#!/usr/bin/env bash\n", "#!/usr/bin/env bash\nprintf x | grep -c x >/dev/null\n")')"
+
+run_case "no-reader-leaves-a-pipe-early: a here-string has no pipe to leave" pass \
+	'./scripts/no-reader-leaves-a-pipe-early.sh' \
+	"$(py 'edit("install.sh", "#!/usr/bin/env bash\n", "#!/usr/bin/env bash\ngrep -q x <<<x\n")')"
+
+run_case "no-reader-leaves-a-pipe-early: a substitution in quotes reads through the pipe" fail \
+	'./scripts/no-reader-leaves-a-pipe-early.sh' \
+	"$(py 'edit("install.sh", "#!/usr/bin/env bash\n", "#!/usr/bin/env bash\nx=\"$(printf y | grep -m1 y)\"\n")')" \
+	'install.sh:2 pipes into `grep -m1`'
+
+run_case "no-reader-leaves-a-pipe-early: a long option leaves as early as a short one" fail \
+	'./scripts/no-reader-leaves-a-pipe-early.sh' \
+	"$(py 'edit("install.sh", "#!/usr/bin/env bash\n", "#!/usr/bin/env bash\nprintf y | grep --quiet y\n")')" \
+	'install.sh:2 pipes into `grep --quiet`'
+
+run_case "no-reader-leaves-a-pipe-early: a quote left open loses the reader its place" fail \
+	'./scripts/no-reader-leaves-a-pipe-early.sh' \
+	"$(py 's = open("install.sh").read()
+open("install.sh", "w").write(s + "echo \"open\n")')" \
+	'lost its place'
+
+run_case "no-reader-leaves-a-pipe-early: the reader stops knowing -q" fail \
+	'./scripts/no-reader-leaves-a-pipe-early.sh' \
+	"$(py 'edit("scripts/no-reader-leaves-a-pipe-early.sh", "if ch in \"qmlL\":", "if ch in \"mlL\":")')" \
+	'the reader missed'
+
+run_case "no-reader-leaves-a-pipe-early: the reader stops reporting what it finds" fail \
+	'./scripts/no-reader-leaves-a-pipe-early.sh' \
+	"$(py 'edit("scripts/no-reader-leaves-a-pipe-early.sh", "found.append((m.start(), flag))", "pass")')" \
+	'the reader missed'
+
+run_case "no-reader-leaves-a-pipe-early: the reader starts reading quoted text" fail \
+	'./scripts/no-reader-leaves-a-pipe-early.sh' \
+	"$(py 'edit("scripts/no-reader-leaves-a-pipe-early.sh", "blank(i, end + 1)", "pass")')" \
+	'the reader flagged'
+
+run_case "no-reader-leaves-a-pipe-early: the control writes less than a pipe holds" fail \
+	'./scripts/no-reader-leaves-a-pipe-early.sh' \
+	"$(py 'edit("scripts/no-reader-leaves-a-pipe-early.sh", "WRITER = \"seq 1 400000\"", "WRITER = \"seq 1 3\"")')" \
+	'it must fail every time'
+
+run_case "no-reader-leaves-a-pipe-early: no pipe is read" fail \
+	'./scripts/no-reader-leaves-a-pipe-early.sh' \
+	"$(py 'edit("scripts/no-reader-leaves-a-pipe-early.sh", "pipes += len(PIPE.findall(masked))", "pipes += 0")')" \
+	'measured NOTHING'
+
+run_case "no-reader-leaves-a-pipe-early: no shell file is read" fail \
+	'./scripts/no-reader-leaves-a-pipe-early.sh' \
+	"$(py 'edit("scripts/no-reader-leaves-a-pipe-early.sh", "if path.endswith(\".sh\") or path.startswith(\".githooks/\") or (first.startswith(\"#!\") and \"bash\" in first):", "if False:")')" \
+	'measured NOTHING'
+
+run_case "no-reader-leaves-a-pipe-early: no workflow step is read" fail \
+	'./scripts/no-reader-leaves-a-pipe-early.sh' \
+	"$(py 'edit("scripts/no-reader-leaves-a-pipe-early.sh", "elif path.startswith(\".github/workflows/\") and", "elif path.startswith(\".github/flows/\") and")')" \
+	'measured NOTHING'
 
 echo
 if [ -n "$(git status --porcelain)" ]; then

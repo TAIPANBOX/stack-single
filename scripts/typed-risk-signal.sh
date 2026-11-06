@@ -78,9 +78,9 @@ FAKEKEY="tj_test_FAKE_not_a_real_key_9f3a1c77d20b"
 BLOCK="$(sed -n '/^# typed-mode: begin$/,/^# typed-mode: end$/p' install.sh)"
 if [ -z "$BLOCK" ]; then
   fail "install.sh has no '# typed-mode: begin' .. '# typed-mode: end' block, so this measured nothing about the risk signal"
-elif ! printf '%s' "$BLOCK" | grep -q '^typed_resolve()' || ! printf '%s' "$BLOCK" | grep -q '^typed_apply()'; then
+elif ! grep -q '^typed_resolve()' <<<"$BLOCK" || ! grep -q '^typed_apply()' <<<"$BLOCK"; then
   fail "the typed-mode block defines no typed_resolve or no typed_apply, so this measured nothing"
-elif ! printf '%s' "$BLOCK" | grep -q 'TYPED_RISK_SIGNAL'; then
+elif ! grep -q 'TYPED_RISK_SIGNAL' <<<"$BLOCK"; then
   fail "the typed-mode block never reads TYPED_RISK_SIGNAL, so there is no flag to check"
 else
   scratch="$(mktemp -d)"
@@ -133,7 +133,7 @@ else
     out="$(run "$d" "$@")"
     if [ "$(rc_of "$out")" = 0 ]; then
       fail "$label: it was accepted, and it must refuse"
-    elif ! printf '%s' "$out" | grep -qF -- "$needle"; then
+    elif ! grep -qF -- "$needle" <<<"$out"; then
       fail "$label: it refused, but not saying '$needle'"
     elif [ "$(cat "$d/.env")" != "SENTINEL=1" ] || [ -e "$d/typed" ]; then
       fail "$label: it refused AFTER touching the box (.env or typed/ changed), which is half a job"
@@ -158,7 +158,7 @@ else
     grep -qx "TYPED_RISK_WARDRYX_MODE='enforce'" "$d/.env" || fail "$label: the broker's policy client is not set to enforce"
     grep -qx "TYPED_RISK_WARDRYX_URL='http://typryx-wardryx-proxy:4330'" "$d/.env" || fail "$label: the broker's policy client does not point at the proxy"
     [ "$(riskenv "$d")" = 3 ] || fail "$label: the flag wrote $(riskenv "$d") TYPED_RISK_ lines, not three"
-    printf '%s' "$out" | grep -q 'hold_if_signal' || fail "$label: the run does not say that nothing seeds a hold_if_signal policy"
+    grep -q 'hold_if_signal' <<<"$out" || fail "$label: the run does not say that nothing seeds a hold_if_signal policy"
     if grep -qF -- "$FAKEKEY" "$d/.env"; then fail "$label: the key's bytes are in .env"; fi
     before="$(cat "$d/.env")"
     # A re-run says nothing about the flag, and nothing about the mode either: all
@@ -226,7 +226,7 @@ fi
 seeded="$(sed -n "/cat > policy.yaml <<'EOF'/,/^EOF\$/p" install.sh)"
 if [ -z "$seeded" ]; then
   fail "install.sh seeds no policy.yaml heredoc, so this measured nothing about what it seeds"
-elif printf '%s' "$seeded" | grep -q 'hold_if_signal'; then
+elif grep -q 'hold_if_signal' <<<"$seeded"; then
   fail "install.sh seeds a hold_if_signal policy: a classifier would hold tool calls on a box whose operator never chose that"
 fi
 grep -q 'hold_if_signal' README.md || fail "README.md shows no hold_if_signal example, and the signal does nothing until the operator writes one"
@@ -239,7 +239,7 @@ grep -q 'when_absent: hold' README.md || fail "README.md shows no when_absent: h
 PBLOCK="$(sed -n '/^# typed-risk-policy: begin$/,/^# typed-risk-policy: end$/p' install.sh)"
 if [ -z "$PBLOCK" ]; then
   fail "install.sh has no '# typed-risk-policy: begin' .. '# typed-risk-policy: end' block, so the seeded hold was not measured"
-elif ! printf '%s' "$PBLOCK" | grep -q '^typed_risk_policy_apply()' || ! printf '%s' "$PBLOCK" | grep -q '^typed_risk_policy_block()'; then
+elif ! grep -q '^typed_risk_policy_apply()' <<<"$PBLOCK" || ! grep -q '^typed_risk_policy_block()' <<<"$PBLOCK"; then
   fail "the typed-risk-policy block defines no typed_risk_policy_apply or no typed_risk_policy_block, so the seeded hold was not measured"
 else
   escratch="$(mktemp -d)"
@@ -283,14 +283,14 @@ else
   out="$(erun "$d" WITH_TYPED=1)"
   [ "$(printf '%s' "$out" | sed -n 's/^rc=//p' | tail -1)" = 0 ] || fail "E1: a run with the flag off was refused: $out"
   cmp -s "$d/policy.yaml" "$starter_file" || fail "E1: with the flag off policy.yaml differs from the starter, so a rule was seeded without the flag"
-  printf '%s' "$out" | grep -q 'changed=0' || fail "E1: with the flag off the run reports a policy change"
+  grep -q 'changed=0' <<<"$out" || fail "E1: with the flag off the run reports a policy change"
 
   # E2. flag on: exactly one managed rule, after the starter's rules: it holds a call with
   # no signal and the three high-risk classes at 0.8, and nothing else.
   d="$(ebox)"
   out="$(erun "$d" WITH_TYPED=1 TYPED_RISK_SIGNAL=1)"
   [ "$(printf '%s' "$out" | sed -n 's/^rc=//p' | tail -1)" = 0 ] || fail "E2: the flag on was refused: $out"
-  printf '%s' "$out" | grep -q 'changed=1' || fail "E2: with the flag on the run does not report that policy.yaml changed"
+  grep -q 'changed=1' <<<"$out" || fail "E2: with the flag on the run does not report that policy.yaml changed"
   n="$(grep -c '^- name: typed-risk-hold-when-absent$' "$d/policy.yaml" || true)"
   [ "$n" = 1 ] || fail "E2: the flag on wrote $n typed-risk-hold-when-absent rules, not one"
   grep -q '^# typed-risk-hold: begin' "$d/policy.yaml" && grep -q '^# typed-risk-hold: end' "$d/policy.yaml" \
@@ -298,22 +298,22 @@ else
   head -n "$(wc -l <"$starter_file")" "$d/policy.yaml" | cmp -s - "$starter_file" \
     || fail "E2: the starter rules changed, so the seeded rule is not an addition to them"
   block="$(sed -n '/^# typed-risk-hold: begin/,/^# typed-risk-hold: end/p' "$d/policy.yaml")"
-  printf '%s\n' "$block" | grep -q '^  target: "agent://\*"$' || fail "E2: the seeded rule does not target every agent (agent://*)"
-  printf '%s\n' "$block" | grep -q '^    name: action.risk_class$' || fail "E2: the seeded rule reads a signal other than action.risk_class"
-  printf '%s\n' "$block" | grep -q '^    when_absent: hold$' || fail "E2: the seeded rule does not hold when the signal is absent"
+  grep -q '^  target: "agent://\*"$' <<<"$block" || fail "E2: the seeded rule does not target every agent (agent://*)"
+  grep -q '^    name: action.risk_class$' <<<"$block" || fail "E2: the seeded rule reads a signal other than action.risk_class"
+  grep -q '^    when_absent: hold$' <<<"$block" || fail "E2: the seeded rule does not hold when the signal is absent"
   vals="$(printf '%s\n' "$block" | sed -n 's/^    values: \[\(.*\)\]$/\1/p')"
   [ -n "$vals" ] || fail "E2: the seeded rule has no values line in the form wardryx reads"
   vals_set="$(printf '%s' "$vals" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | sort | paste -sd, -)"
   [ "$vals_set" = "destructive,external_send,financial" ] \
     || fail "E2: the seeded rule holds on $vals; it must hold on destructive, external_send and financial, the classes stack-up's rule holds, and no other"
-  printf '%s\n' "$block" | grep -q '^    min_probability: 0.8$' \
+  grep -q '^    min_probability: 0.8$' <<<"$block" \
     || fail "E2: the seeded rule's min_probability is not 0.8, the threshold stack-up's rule uses"
 
   # E3. a re-run with the same answers changes no byte.
   before="$(cat "$d/policy.yaml")"
   out="$(erun "$d" WITH_TYPED=1 TYPED_RISK_SIGNAL=1)"
   [ "$(printf '%s' "$out" | sed -n 's/^rc=//p' | tail -1)" = 0 ] && [ "$(cat "$d/policy.yaml")" = "$before" ] \
-    && printf '%s' "$out" | grep -q 'changed=0' \
+    && grep -q 'changed=0' <<<"$out" \
     || fail "E3: a re-run with the flag on changed policy.yaml or reported a change: $out"
 
   # E4. the operator's own rule survives, and turning the flag off removes the managed rule only.
@@ -324,7 +324,7 @@ else
   grep -q '^- name: operator-own-rule$' "$d/policy.yaml" || fail "E4: turning the flag off removed the operator's own rule"
   head -n "$(wc -l <"$starter_file")" "$d/policy.yaml" | cmp -s - "$starter_file" \
     || fail "E4: turning the flag off did not restore the starter rules"
-  printf '%s' "$out" | grep -q 'changed=1' || fail "E4: turning the flag off does not report that policy.yaml changed"
+  grep -q 'changed=1' <<<"$out" || fail "E4: turning the flag off does not report that policy.yaml changed"
 fi
 
 # ---- B. compose ------------------------------------------------------------------

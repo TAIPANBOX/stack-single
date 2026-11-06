@@ -44,13 +44,13 @@ fi
 BLOCK="$(sed -n '/^# console-password: begin$/,/^# console-password: end$/p' install.sh)"
 if [ -z "$BLOCK" ]; then
   fail "install.sh has no '# console-password: begin' .. '# console-password: end' block, so the password's file was not measured"
-elif ! printf '%s\n' "$BLOCK" | grep -q '^console_password_file()'; then
+elif ! grep -q '^console_password_file()' <<<"$BLOCK"; then
   fail "the console-password block defines no console_password_file"
 else
   # Code lines only: a comment that says "umask 077" proves nothing about the code.
   CODE="$(printf '%s\n' "$BLOCK" | grep -v '^[[:space:]]*#')"
-  printf '%s\n' "$CODE" | grep -q 'umask 077;' || fail "console_password_file does not make its file under umask 077"
-  printf '%s\n' "$CODE" | grep -q 'chmod 0600' || fail "console_password_file does not set its file 0600"
+  grep -q 'umask 077;' <<<"$CODE" || fail "console_password_file does not make its file under umask 077"
+  grep -q 'chmod 0600' <<<"$CODE" || fail "console_password_file does not set its file 0600"
 fi
 
 # ---- B. no variable holds the value -------------------------------------------
@@ -61,7 +61,7 @@ gen_outside="$(grep -n 'gen 28' install.sh | grep -v '^[0-9]*:[[:space:]]*#' || 
 if [ -n "$gen_outside" ]; then
   while IFS= read -r l; do
     lineno="${l%%:*}"
-    if [ -z "$BLOCK" ] || ! printf '%s\n' "$BLOCK" | grep -qF -- "${l#*:}"; then
+    if [ -z "$BLOCK" ] || ! grep -qF -- "${l#*:}" <<<"$BLOCK"; then
       fail "install.sh:$lineno generates the console password outside the console-password block: ${l#*:}"
     fi
   done <<<"$gen_outside"
@@ -100,10 +100,10 @@ else
     ( umask 022; console_password_file "$D" ) 2>&1
     printf "rc=%s\n" "$?"' 2>&1)"
   value="$(head -1 "$scratch/pw" 2>/dev/null || true)"
-  if ! printf '%s\n' "$out" | grep -qx 'rc=0'; then
+  if ! grep -qx 'rc=0' <<<"$out"; then
     fail "behaviour: console_password_file failed: $out"
   fi
-  if [ -n "$value" ] && printf '%s\n' "$out" | grep -qF -- "$value"; then
+  if [ -n "$value" ] && grep -qF -- "$value" <<<"$out"; then
     fail "behaviour: console_password_file printed the password on its own output"
   fi
   mode="$(stat -c '%a' "$scratch/pw" 2>/dev/null || stat -f '%Lp' "$scratch/pw" 2>/dev/null || echo '?')"
