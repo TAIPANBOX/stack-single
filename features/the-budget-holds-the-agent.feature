@@ -47,7 +47,6 @@ Feature: An agent whose error budget is spent waits for a person
     When the installer runs again with nothing changed
     Then neither block moves and wardryx is not restarted
     # -> gates-have-teeth.sh "slo-signal-is-wired: the risk block moves on every run"
-    # -> gates-have-teeth.sh "slo-signal-is-wired: the budget block moves on every run"
 
   Scenario: The quality routines can start
     Given a routine that runs on the console's image

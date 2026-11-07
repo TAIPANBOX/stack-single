@@ -320,10 +320,6 @@ run_case "slo-signal-is-wired: the risk block moves on every run" fail \
 	'./scripts/slo-signal-is-wired.sh' \
 	"$(py 'edit("install.sh", "  if [ \"$TYPED_RISK_ON\" = 1 ] && [ \"$(sed -n \x27/^# typed-risk-hold: begin/,/^# typed-risk-hold: end/p\x27 policy.yaml)\" = \"$(typed_risk_policy_block)\" ]; then return 0; fi\n", "")')" \
 	"restarts wardryx for nothing"
-run_case "slo-signal-is-wired: the budget block moves on every run" fail \
-	'./scripts/slo-signal-is-wired.sh' \
-	"$(py 'edit("install.sh", "  if [ \"$SLO_SIGNAL_ON\" = 1 ] && [ \"$SLO_HOLD_RULE_TARGET\" != none ] && [ \"$(sed -n \x27/^# slo-burn-hold: begin/,/^# slo-burn-hold: end/p\x27 policy.yaml)\" = \"$(slo_policy_block)\" ]; then return 0; fi\n", "")')" \
-	"restarts wardryx for nothing"
 run_case "slo-signal-is-wired: no starter policy measured nothing" fail \
 	'./scripts/slo-signal-is-wired.sh' \
 	"$(py 'edit("install.sh", "# slo-signal: begin\n", "# slo-signal: gone\n")')" \

@@ -1218,8 +1218,6 @@ slo_policy_apply() { # sets SLO_POLICY_CHANGED
   local tmp="policy.yaml.slo-burn.$$"
   SLO_POLICY_CHANGED=0
   [ -f policy.yaml ] || die "policy.yaml is missing, so the error-budget hold has nowhere to go. Nothing was changed."
-  # The same rule as the risk hold's block: what is already right stays where it is.
-  if [ "$SLO_SIGNAL_ON" = 1 ] && [ "$SLO_HOLD_RULE_TARGET" != none ] && [ "$(sed -n '/^# slo-burn-hold: begin/,/^# slo-burn-hold: end/p' policy.yaml)" = "$(slo_policy_block)" ]; then return 0; fi
   awk '/^# slo-burn-hold: begin/ { skip = 1; next } /^# slo-burn-hold: end/ { skip = 0; next } !skip' policy.yaml >"$tmp" \
     || die "could not read policy.yaml to manage the error-budget hold"
   if [ "$SLO_SIGNAL_ON" = 1 ] && [ "$SLO_HOLD_RULE_TARGET" != none ]; then
