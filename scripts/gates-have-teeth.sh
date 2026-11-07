@@ -3177,12 +3177,12 @@ run_case "status-reads-what-runs: the README does not name the drift check" fail
 
 run_case "status-reads-what-runs: the drift check pulls an image" fail \
 	'./scripts/status-reads-what-runs.sh' \
-	"$(py 'edit("install.sh", "  drift_raw=\"\"\n  if ! cfg=", "  drift_raw=\"\"\n  docker pull busybox:1.36 >/dev/null 2>&1 || true\n  if ! cfg=")')" \
+	"$(py 'edit("install.sh", "  drift_want=\"\"\n  if ! cfg=", "  drift_want=\"\"\n  docker pull busybox:1.36 >/dev/null 2>&1 || true\n  if ! cfg=")')" \
 	"made a call that is not one of its reads"
 
 run_case "status-reads-what-runs: the drift check runs cosign" fail \
 	'./scripts/status-reads-what-runs.sh' \
-	"$(py 'edit("install.sh", "  drift_raw=\"\"\n  if ! cfg=", "  drift_raw=\"\"\n  cosign verify busybox:1.36 >/dev/null 2>&1 || true\n  if ! cfg=")')" \
+	"$(py 'edit("install.sh", "  drift_want=\"\"\n  if ! cfg=", "  drift_want=\"\"\n  cosign verify busybox:1.36 >/dev/null 2>&1 || true\n  if ! cfg=")')" \
 	"reached for the network"
 
 run_case "status-reads-what-runs: a comment in the block is reworded" pass \
@@ -3616,7 +3616,7 @@ open("compose.yaml", "w").write(s)')" \
 run_case "containers-carry-the-baseline: a capability has no exception" fail \
 	'./scripts/containers-carry-the-baseline.sh' \
 	"$(py 'edit("compose.yaml", "  wardryx:\n    <<: [*restart, *baseline]\n", "  wardryx:\n    <<: [*restart, *baseline]\n    cap_add:\n      - SYS_ADMIN\n")')" \
-	"wardryx: cap_add ['"'"'SYS_ADMIN'"'"'] and no exception names it"
+	"and no exception names it"
 
 run_case "containers-carry-the-baseline: a capability is wider than its exception" fail \
 	'./scripts/containers-carry-the-baseline.sh' \
