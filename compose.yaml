@@ -1705,7 +1705,7 @@ services:
 
   console:
     <<: *restart
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.8.1@sha256:5d8392de2fbd63cbb60493bb71bc278293c601f7b6c81a69d3dc691c68e45834}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.8.4@sha256:f018407dba47800acf3be54bb24fb85117c8dd14477b4a4f4dd9bae99376eb30}
     networks:
       - core
       - agents
@@ -1729,7 +1729,7 @@ services:
       GENARYX_STATE_DIR: /var/lib/stack/genaryx
       # The Keyryx witness's findings, which are not on the bus (invariant 54):
       # a stream the console tails read only beside its events directory. The
-      # console pinned here (v1.8.1; v1.7.0, built from genaryx #134, reads it too) reads it; an older
+      # console pinned here (v1.8.4; v1.7.0, built from genaryx #134, reads it too) reads it; an older
       # console ignores it.
       GENARYX_EVENTS_EXTRA: /var/lib/keyryx-alerts/keyryx.ndjson
       GENARYX_SCAN_TARGET: /srv/ui
@@ -2108,7 +2108,7 @@ services:
 
   verdryx-drift:
     <<: *restart
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.8.1@sha256:5d8392de2fbd63cbb60493bb71bc278293c601f7b6c81a69d3dc691c68e45834}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.8.4@sha256:f018407dba47800acf3be54bb24fb85117c8dd14477b4a4f4dd9bae99376eb30}
     networks:
       - core
     user: "10001:10001"
@@ -2156,7 +2156,7 @@ services:
   # the container and `docker compose ps` shows it restarting.
   verdryx-slo:
     <<: *restart
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.8.1@sha256:5d8392de2fbd63cbb60493bb71bc278293c601f7b6c81a69d3dc691c68e45834}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.8.4@sha256:f018407dba47800acf3be54bb24fb85117c8dd14477b4a4f4dd9bae99376eb30}
     user: "20020:10001"
     profiles: ["slo-signal"]
     environment:
