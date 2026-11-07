@@ -22,7 +22,8 @@
 # an on-box chain verification, the record seal and an opt-in fire drill) run here
 # on any schedule; stack-k8s runs three of
 # the four safe ones as CronJobs, stack-up runs its six default ones as OS timers, and
-# this compose file runs none of them. See the README's "What this box does
+# this compose file runs none of them. The error budget is the one routine it
+# does run (verdryx-slo, invariant 66). See the README's "What this box does
 # not run" section for the rest of the comparison, including the memory
 # plane.
 #
@@ -4925,8 +4926,9 @@ $CONSOLE_ACCESS_NOTE
       cd $STACK_DIR && ${COMPOSE[*]} logs -f tokenfuse-gateway
       cd $STACK_DIR && ${COMPOSE[*]} down     # stop, keeping every volume
 
-  Nothing on this box runs the governance routines (FinOps export, crypto
-  trend, quality drift, identity sweep) on a schedule. Run one by hand with
+  The error budget is measured every six hours (verdryx-slo; SLO_SIGNAL=0 turns
+  it off). Nothing on this box runs the other governance routines (FinOps export,
+  crypto trend, quality drift, identity sweep) on a schedule. Run one by hand with
   ${COMPOSE[*]} exec, or see the README for how stack-up and stack-k8s do it.
 
 EOF

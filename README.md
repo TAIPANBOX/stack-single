@@ -95,7 +95,7 @@ identity-anomaly sweep, an on-box chain verification and the record seal. It als
 has an opt-in fire drill. `stack-k8s` runs three of
 those as CronJobs (`crypto-trend`, `quality-drift`, `identity-sweep`; its own
 docs explain why the fourth, the FinOps export, cannot run as a CronJob
-there). No install starts one of them. `compose.yaml` does define two of them as looping
+there). No install starts one of them, and the error budget is the one routine an install does start ([below](#an-agent-whose-error-budget-is-spent-waits-for-a-person)). `compose.yaml` does define two of them as looping
 services (`focus-export` and `verdryx-drift`) behind a `routines` profile that no
 install enables, so `docker compose --profile routines up -d` would start them. Run
 one by hand
