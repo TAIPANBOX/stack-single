@@ -73,7 +73,7 @@ browse_says() { # what one fetch answers, in a line
   printf 'header = "content-type: application/json"\nheader = "X-Scopyx-Key: %s"\n' "$key" \
     | curl -s -m 120 -K - -X POST "http://$ip:4300/" \
       -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"browse","arguments":{"url":"'"$page"'"}}}' \
-    | python3 -c 'import json,sys; r=json.load(sys.stdin).get("result") or {}; t=" ".join(c.get("text","") for c in r.get("content",[])); print(("refused: "+t[:170]) if r.get("isError") else f"rendered, {len(t)} characters")'
+    | python3 -c 'import json,sys; r=json.load(sys.stdin).get("result") or {}; t=" ".join(c.get("text","") for c in r.get("content",[])); print(("refused: "+t[:260]) if r.get("isError") else f"rendered, {len(t)} characters")'
 }
 
 # The pick, by the installer's own block.
