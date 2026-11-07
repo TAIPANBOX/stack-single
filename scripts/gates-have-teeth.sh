@@ -332,6 +332,158 @@ run_case "slo-signal-is-wired: a comment naming the switch is not a fault" pass 
 	'./scripts/slo-signal-is-wired.sh' \
 	"$(py 'edit("compose.yaml", "  verdryx-slo:\n", "  # holds nothing by itself, || true is not used here\n  verdryx-slo:\n")')"
 
+
+# invariant 70: a tool call nothing grants waits for a person, and an upgrade stops with the list.
+# A seed too wide switches the control off with every check green, and a seed too narrow stops an
+# agent with no word, so these are the mutants of a T3 change, each planted where it would be silent.
+run_case "tool-hold-is-seeded: the block is never written" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "\ntool_hold_policy_apply\nslo_policy_apply\n", "\nslo_policy_apply\n")')" \
+	"never calls tool_hold_policy_apply"
+run_case "tool-hold-is-seeded: the floor narrows to agent ids with a scheme" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "    \x27  target: \"*\"\x27 \\\n    \x27  when_no_grant: hold\x27", "    \x27  target: \"agent://*\"\x27 \\\n    \x27  when_no_grant: hold\x27")')" \
+	"walks past it"
+run_case "tool-hold-is-seeded: the floor is written as a word wardryx refuses" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "\x27  when_no_grant: hold\x27", "\x27  when_no_grant: holds\x27")')" \
+	"does not say when_no_grant: hold"
+run_case "tool-hold-is-seeded: a seed grants every agent" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "\x27  target: agent://mockryx.local/*\x27 \\\n    \x27  grant_tool: [\"*\"]\x27", "\x27  target: agent://*\x27 \\\n    \x27  grant_tool: [\"*\"]\x27")')" \
+	"no trust domain"
+run_case "tool-hold-is-seeded: the drills lose their seed" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "    \x27- name: grant-drills\x27 \\\n    \x27  target: agent://mockryx.local/*\x27 \\\n    \x27  grant_tool: [\"*\"]\x27 \\\n", "")')" \
+	"fire drills would be held"
+run_case "tool-hold-is-seeded: the install-check seed is gone" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "    \x27  target: agent://local.invalid/install-check\x27 \\\n", "    \x27  target: agent://local.invalid/other\x27 \\\n")')" \
+	"its check would be held"
+run_case "tool-hold-is-seeded: the install-check seed asks for an agent token" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "\x27  require_identity_source: [client-key]\x27", "\x27  require_identity_source: [agent-token]\x27")')" \
+	"the installer's check through the broker's static key"
+run_case "tool-hold-is-seeded: the web grant denies scopyx's question" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "*) printf \x27agent-token, none\x27 ;;", "*) printf \x27agent-token\x27 ;;")')" \
+	"scopyx"
+run_case "tool-hold-is-seeded: the web grant lets a static key borrow the name" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "*) printf \x27agent-token, none\x27 ;;", "*) printf \x27agent-token, client-key, none\x27 ;;")')" \
+	"no static key"
+run_case "tool-hold-is-seeded: the web grant is on every box" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "  if tool_hold_web_wanted; then\n", "  if true; then\n")')" \
+	"does not use"
+run_case "tool-hold-is-seeded: felyx gets a grant it does not need" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "    \x27- name: grant-install-check\x27 \\\n", "    \x27- name: grant-felyx\x27 \\\n    \x27  target: agent://local/genaryx/felyx\x27 \\\n    \x27  grant_tool: [ask]\x27 \\\n    \x27- name: grant-install-check\x27 \\\n")')" \
+	"model calls only"
+run_case "tool-hold-is-seeded: TOOL_HOLD=0 leaves the block" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "  tool_hold_render \"$file\" \"$tmp\" \"$TOOL_HOLD_ON\" ||", "  tool_hold_render \"$file\" \"$tmp\" 1 ||")')" \
+	"leaves the block"
+run_case "tool-hold-is-seeded: a broken marker costs the operator lines" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "  tool_hold_markers_ok \"$file\" || die", "  true || die")')" \
+	"B7"
+run_case "tool-hold-is-seeded: a comment outside the markers is not a fault" pass \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "tool_hold_policy_apply() { # reads", "# when_no_grant and grant_tool in a comment mean nothing\ntool_hold_policy_apply() { # reads")')"
+run_case "tool-hold-is-seeded: the block moves on every run" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "  if [ \"$TOOL_HOLD_ON\" = 1 ] && [ \"$(sed -n \x27/^# tool-hold: begin/,/^# tool-hold: end/p\x27 \"$file\")\" = \"$(tool_hold_block)\" ]; then return 0; fi\n", "")')" \
+	"B2"
+run_case "tool-hold-is-seeded: a changed block does not restart wardryx" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", " || [ \"${TOOL_HOLD_POLICY_CHANGED:-0}\" = 1 ]; }", "; }")')" \
+	"does not restart wardryx"
+run_case "tool-hold-is-seeded: the replay check is gone" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "\ntool_hold_resolve\ntool_hold_upgrade_check\n", "\ntool_hold_resolve\n")')" \
+	"never calls tool_hold_upgrade_check"
+run_case "tool-hold-is-seeded: the question comes after the journal's first line" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "\ntool_hold_resolve\ntool_hold_upgrade_check\n", "\ntool_hold_resolve\n"); edit("install.sh", "cd \"$STACK_DIR\"\n\n# ---- 1b. notifications", "tool_hold_upgrade_check\ncd \"$STACK_DIR\"\n\n# ---- 1b. notifications")')" \
+	"before the package step"
+run_case "tool-hold-is-seeded: a stopped run keeps the image it pulled" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "  if [ \"$pulled\" = 1 ]; then docker image rm \"$TOOL_HOLD_WARDRYX_IMAGE\" >/dev/null 2>&1 || true; fi\n", "")')" \
+	"left the image it pulled"
+run_case "tool-hold-is-seeded: the question leaves the seeds out" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "\"$d/candidate/policy.yaml\" 1 ||", "\"$d/candidate/policy.yaml\" 0 ||")')" \
+	"not about the policy this run would write"
+run_case "tool-hold-is-seeded: unexamined decisions read as nothing to hold" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "    if [ -z \"$rows\" ] && [ \"$unexamined\" = 0 ]; then\n", "    if [ -z \"$rows\" ]; then\n")')" \
+	"read as nothing to hold"
+run_case "tool-hold-is-seeded: .env answers for a person" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "  TOOL_HOLD_SAID=\"$on\"\n  [ -n \"$on\" ] || on=\"$(tool_hold_env_get TOOL_HOLD)\"\n", "  [ -n \"$on\" ] || on=\"$(tool_hold_env_get TOOL_HOLD)\"\n  TOOL_HOLD_SAID=\"$on\"\n")')" \
+	"a line in .env answered for a person"
+run_case "tool-hold-is-seeded: a hostile id is printed to paste" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "    if ! [[ \"$agent\" =~ ^agent://[A-Za-z0-9._~-]+(:[0-9]+)?(/[A-Za-z0-9._~:/-]*)?$ ]] || ! [[ \"$tool\" =~ ^[A-Za-z0-9._:/-]+$ ]]; then\n", "    if false; then\n")')" \
+	"printed as a command to paste"
+run_case "tool-hold-is-seeded: the store is left out of the question" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "  [ -s \"$d/candidate/stored.json\" ] || rm -f \"$d/candidate/stored.json\"\n", "  rm -f \"$d/candidate/stored.json\"\n")')" \
+	"not in the question"
+run_case "tool-hold-is-seeded: an empty store breaks the question" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "  [ -z \"$TOOL_HOLD_BODY\" ] || printf \x27%s\\n\x27 \"$TOOL_HOLD_BODY\"\n", "  printf \x27%s\\n\x27 \"$TOOL_HOLD_BODY\"\n")')" \
+	"an empty store broke the question"
+run_case "tool-hold-is-seeded: the admin key goes on a command line" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "  TOOL_HOLD_STATUS=\"$(status_of \"$out\")\"\n", "  docker version --format \"$(tool_hold_env_get WARDRYX_ADMIN)\" >/dev/null 2>&1 || true\n  TOOL_HOLD_STATUS=\"$(status_of \"$out\")\"\n")')" \
+	"a key reached a docker argument list"
+run_case "tool-hold-is-seeded: agent-allow goes on with no reason" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "  rollback_reason_ok \"$why\" \\\n    || die \"$cmd needs --why", "  true \\\n    || die \"$cmd needs --why")')" \
+	"no --why"
+run_case "tool-hold-is-seeded: a second grant replaces the first" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "tools=\"$(tr \x27,\x27 \x27\\n\x27 <<<\"$kept,$tools\" | sed", "tools=\"$(tr \x27,\x27 \x27\\n\x27 <<<\"$tools\" | sed")')" \
+	"a second grant keeps the first"
+run_case "tool-hold-is-seeded: agent-allow takes a target with no trust domain" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "  [[ \"$agent\" =~ ^agent://[A-Za-z0-9._~-]+(:[0-9]+)?(/[A-Za-z0-9._~:/*-]*)?$ ]] \\\n", "  true \\\n")')" \
+	"agent-allow took"
+run_case "tool-hold-is-seeded: all gives no warning" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "    printf \x27\\n   WARNING: %s may now call", "    printf \x27\\n   Note: %s may now call")')" \
+	"prints no warning"
+run_case "tool-hold-is-seeded: status prints no line" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "  journal_status\n  tool_hold_status\n", "  journal_status\n")')" \
+	"status prints no line"
+run_case "tool-hold-is-seeded: nothing reads what wardryx loaded" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "  check \"policy plane: wardryx loaded the tool hold\"", "  true \"policy plane: wardryx loaded the tool hold\"")')" \
+	"a file that says on is believed"
+run_case "tool-hold-is-seeded: the question runs another image" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "TOOL_HOLD_WARDRYX_IMAGE=\"ghcr.io/taipanbox/wardryx:v2.6.0@sha256:26113779", "TOOL_HOLD_WARDRYX_IMAGE=\"ghcr.io/taipanbox/wardryx:v2.6.0@sha256:00113779")')" \
+	"not the one compose.yaml pins"
+run_case "tool-hold-is-seeded: the pin goes below 2.6.0" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("compose.yaml", "wardryx:v2.6.0@", "wardryx:v2.5.1@")')" \
+	"older than 2.6.0"
+run_case "tool-hold-is-seeded: a wardryx that refuses the file gets it anyway" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "  if [ \"$TOOL_HOLD_ON\" = 1 ] && ! tool_hold_reads \"$tmp\"; then\n", "  if false; then\n")')" \
+	"was given it"
+run_case "tool-hold-is-seeded: the installer seeds CI's identity" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "    \x27  target: agent://local.invalid/install-check\x27 \\\n", "    \x27  target: agent://local.invalid/install-check\x27 \\\n    \x27# agent://local.invalid/ci\x27 \\\n")')" \
+	"seeds CI"
+run_case "tool-hold-is-seeded: no block measured nothing" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "# tool-hold: begin\n", "# tool-hold: gone\n")')" \
+	"NOT measured"
+
 # invariant 10: the bus has a writer, and every volume a non-root service
 # writes has an owner. Both faults were live on every install until 2026-09-13.
 run_case "bus-has-a-writer: the gateway stops exporting events" fail \
@@ -641,7 +793,7 @@ run_case "manifest-is-true: a routine arrives and the manifest does not claim it
 # is one character in one tag, which is exactly how it would arrive.
 run_case "manifest-is-true: a pulled tag moves in compose and not in the manifest" fail \
 	'./scripts/manifest-is-true.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.5.1", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.6.0", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
 	"an image it pulls"
 
 # invariant 15: the delegation plane's default is byte-for-byte what it was
@@ -1682,7 +1834,7 @@ run_case "approver-key-is-wired: the bare-key switch is set" fail \
 
 run_case "approver-key-is-wired: wardryx is pinned back to 2.3.0" fail \
 	'./scripts/approver-key-is-wired.sh' \
-	"$(py 'edit_all("compose.yaml", "wardryx:v2.5.1@sha256:2d3c0c9c", "wardryx:v2.3.0@sha256:2d3c0c9c")')" \
+	"$(py 'edit_all("compose.yaml", "wardryx:v2.6.0@sha256:26113779", "wardryx:v2.3.0@sha256:26113779")')" \
 	"older than v2.4.0"
 
 run_case "approver-key-is-wired: the console loses its key mount" fail \
@@ -1926,17 +2078,17 @@ run_case "typed-risk-signal: typryx is pinned before the proxy existed" fail \
 
 run_case "typed-risk-signal: wardryx is pinned before it read signals" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.5.1@sha256:2d3c0c9c0798156d3f05b82d0e63cf5b38ee4b9875d6bdbac1829f219c26abf7}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.6.0@sha256:26113779c4b830d6b27e626874965c722fd8b41dc5d7085d226a3d903927af7b}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
 	"hold_if_signal and signals on /v1/decide do not exist before it"
 
 run_case "typed-risk-signal: wardryx is pinned before when_absent" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.5.1@sha256:2d3c0c9c0798156d3f05b82d0e63cf5b38ee4b9875d6bdbac1829f219c26abf7}", "ghcr.io/taipanbox/wardryx:v1.3.2}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.6.0@sha256:26113779c4b830d6b27e626874965c722fd8b41dc5d7085d226a3d903927af7b}", "ghcr.io/taipanbox/wardryx:v1.3.2}")')" \
 	"needs v1.4.0 or later"
 
 run_case "typed-risk-signal: tokenfuse is pinned before it sent the tool call" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/tokenfuse:v1.22.0@sha256:48bc2eff2d00e76036b6b4f3eb6bd09e29081a41468c7faf2093f8f46bc6c2ac}", "ghcr.io/taipanbox/tokenfuse:v1.4.1}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/tokenfuse:v1.23.0@sha256:192cfc7138eea6911d3c563427cdb996dac52c77e7f04f6ae71f84b6a6dc4535}", "ghcr.io/taipanbox/tokenfuse:v1.4.1}")')" \
 	"the broker sends no tool_call to the policy plane before it"
 
 run_case "typed-risk-signal: install.sh starts the proxy profile unconditionally" fail \
@@ -2391,7 +2543,7 @@ run_case "felyx-through-the-gateway: the closing report speaks of Felyx with cli
 
 run_case "felyx-through-the-gateway: the closing report never calls the note" fail \
 	'./scripts/felyx-through-the-gateway.sh' \
-	"$(py 'edit("install.sh", "IDENTITY_REACH=\"$IDENTITY_REACH$(felyx_gateway_note)$(upstream_reach_note)$(agent_tokens_reach_note)$(profile_reach_note)\"", "IDENTITY_REACH=\"$IDENTITY_REACH$(upstream_reach_note)$(agent_tokens_reach_note)$(profile_reach_note)\"")')" \
+	"$(py 'edit("install.sh", "IDENTITY_REACH=\"$IDENTITY_REACH$(felyx_gateway_note)$(upstream_reach_note)$(agent_tokens_reach_note)$(profile_reach_note)$(tool_hold_reach_note)\"", "IDENTITY_REACH=\"$IDENTITY_REACH$(upstream_reach_note)$(agent_tokens_reach_note)$(profile_reach_note)$(tool_hold_reach_note)\"")')" \
 	"does not call felyx_gateway_note exactly once"
 
 run_case "felyx-through-the-gateway: a comment about Felyx changes" pass \
@@ -4700,7 +4852,7 @@ run_case "shell-lint: a comment naming code() is not a fault" pass \
 
 run_case "no-secret-on-argv: the request helper pipes into nc and loses the answer" fail \
 	'./scripts/no-secret-on-argv.sh' \
-	"$(py 'edit("install.sh", "sh -c \x27f=/tmp/nc-in; mkfifo \"$f\" || exit 1; nc -w 10 \"$1\" \"$2\" < \"$f\" & pid=$!; exec 3>\"$f\"; cat >&3; wait \"$pid\"\x27", "sh -c \x27cat | nc -w 5 \"$1\" \"$2\"\x27")')" \
+	"$(py 'edit("install.sh", "sh -c \x27f=/tmp/nc-in; mkfifo \"$f\" || exit 1; nc -w \"$3\" \"$1\" \"$2\" < \"$f\" & pid=$!; exec 3>\"$f\"; cat >&3; wait \"$pid\"\x27", "sh -c \x27cat | nc -w 5 \"$1\" \"$2\"\x27")')" \
 	"end of input before the server answers"
 
 

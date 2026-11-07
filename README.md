@@ -117,6 +117,10 @@ what it reports is true of the moment it ran.
 `status` also prints one line from the install journal: the last good install, its index,
 and the last override (see the next section).
 
+It prints one line about the tool hold too: whether the floor is on and how many grants
+there are, from `policy.yaml`, the store and what wardryx loaded at its last start (see "An
+agent's tool call waits for a person until something grants the tool").
+
 ## Going backwards by mistake: the install journal and the rollback index
 
 Each run of `./install.sh` writes to a journal on the box, `$STACK_DIR/.install-history`
@@ -751,7 +755,7 @@ run. Felyx authenticates with this key and never with your provider key.
 A console that carries genaryx invariant 24 can present a key of its own:
 `compose.yaml` already hands it `GENARYX_COPILOT_FUSE_KEY_REF`, which points at
 `GENARYX_COPILOT_FUSE_KEY` in `.env`, and such a console sends that key as
-`x-fuse-key`. The console pinned here (v1.8.4) carries it; an older one ignores
+`x-fuse-key`. The console pinned here (v1.8.6) carries it; an older one ignores
 the setting. Measured 2026-10-13 with two throwaway v1.1.44 consoles against a
 gateway holding client keys: with the key set, a question to Felyx was answered;
 with it empty, the gateway answered 401. To give Felyx a key:
@@ -1001,7 +1005,8 @@ have no host port at all, so nothing outside this machine can address them.
 docker compose --profile egress up -d scopyx
 ```
 
-`WITH_EGRESS=1 ./install.sh` pulls the scopyx image during the install; starting it is
+`WITH_EGRESS=1 ./install.sh` pulls the scopyx image during the install and grants the
+operator agent its web tools (see "An agent's tool call waits for a person"); starting it is
 still the command above. The same command starts the MCP broker, which is in both egress
 profiles as well as the typed one.
 
@@ -1189,7 +1194,7 @@ What is wired now, and what is not:
 - **the witness's findings are mailed** by heraldyx (pin `v0.8.2`; v0.8.0 is the first release
   that renders the keyryx source), at `ALERT_MIN_SEVERITY`, `high` by default; the
   medium ones go in the digest. heraldyx reads them through a read-only mount.
-- **the console shows them** as incidents: the console pinned here (v1.8.4) reads
+- **the console shows them** as incidents: the console pinned here (v1.8.6) reads
   `GENARYX_EVENTS_EXTRA`, which compose.yaml sets. An older console ignores it, and
   then the findings reach the mail and not the console.
 - **a box installed before this release** keeps its old `alerts.ndjson` on the
@@ -1222,6 +1227,55 @@ On by default. Every six hours a routine (`verdryx-slo`) measures each agent's e
 **What you can see.** `curl` wardryx's `/readyz` for `"signal_events": "ok"`, `"unreadable"` or `"broken"`. Every decision records the signal, whether or not it held anything, and heraldyx alerts on each `slo_burn` line. The routine shows as restarting in `docker compose ps` when it cannot measure, because a routine that cannot measure must not look like a fleet with nothing to report.
 
 **What guards the file.** It is `verdryx.ndjson` on the bus, owned by a uid nothing else runs as, in a directory no plane can write. Its hash chain says a line was not edited, and does not say who wrote it, so that ownership is the guard. A file that cannot be believed holds nobody, on purpose: this signal can only add a hold, and every other control stands without it. The file grows by a line per spent indicator per run, and wardryx stops believing it at 32 MiB; move it aside before then, and the next run starts a new chain.
+
+## An agent's tool call waits for a person until something grants the tool
+
+On by default on a new box. When an agent calls a tool through the MCP broker and nothing grants it that tool, wardryx holds the call for a person: the agent gets a refusal (`-32004`, `requires approval`, with the policy's reason) and the console shows the hold. Model calls pass as they did, and so do scopyx's questions about where a fetch may go. A rule that only restricts an agent, a `deny_tool` or a `max_steps`, does not end the hold: a restriction is not a permission.
+
+**Give an agent a tool, in one command, on the box:**
+
+```bash
+./install.sh agent-allow agent://acme.example/agents/billing lookup_invoice,send_reminder --why 'the monthly reminders'
+./install.sh agent-allow agent://acme.example/agents/billing all --why 'a rehearsal'     # every tool, with a warning
+./install.sh agent-deny  agent://acme.example/agents/billing send_reminder --why 'reminders stopped'
+./install.sh agent-list
+```
+
+Run it as root, like `status`: it reads the admin key from `.env` and sends it on standard input, never on a command line. `agent-allow` writes through `PUT /v1/policies`, so it is in force at once with no restart, it is on the record as `policy_updated`, and it survives a restart. The agent must name a trust domain, `agent://<domain>/...`, and a `*` may follow the domain. `--why` is required and goes in the policy's name beside the date. `agent-deny` takes the tool back, and the next call waits for a person again. `agent-list` shows whether the hold is on, every grant and where it lives, and, with the hold off, what the hold would stop.
+
+A grant asks for an agent token, so a holder of a static key cannot borrow a granted name: the broker reports the static key, and the call is refused. An agent that really calls with a static key takes `--static-key`, and then its id is the caller's word. On a box with `WITH_AGENT_TOKENS=0` a grant asks for nothing, and the command says so. A grant also lists `none`, the source scopyx sends when it asks about the same agent's fetch.
+
+**What a new box comes with.** One block in `policy.yaml` between two marker lines the installer alone writes. Every other line of the file stays yours.
+
+| Rule | What it is for |
+| --- | --- |
+| `tool-hold` | The floor: `target: "*"`, `when_no_grant: hold`. It lives in the file, and `PUT` refuses it, so a key cannot take it away |
+| `grant-drills` | Every tool for `agent://mockryx.local/*`, the fire drills. Their own deny rules still apply |
+| `grant-install-check` | `ask` for `agent://local.invalid/install-check`, the installer's own check, under the broker's static key |
+| `grant-operator-web` | `fetch_url` and `browse` for `agent://<trust domain>/agents/operator`. Written when the run names `WITH_EGRESS` or `WITH_BROWSER`, or a scopyx of this box runs; a box that starts egress by hand after the install gets it on its next run, or with `agent-allow` |
+
+Felyx and CostCrew get nothing: both make model calls only.
+
+**An existing box stops the upgrade and changes nothing.** Before anything on the box changes, the installer asks `wardryx replay -policy <what this run would write> -format json` about the box's own recorded decisions, grants written through `agent-allow` included. If a call of an agent outside the seeds would be held, the run stops: it prints the agent, the tool, how many calls and when last, and the commands to run. No file changes, the journal gets no line, so the rollback floor cannot move, and the image it pulled to ask is removed again. The same goes for a history that could not be asked. A box that already carries the block is not asked again.
+
+A wardryx older than 2.6.0 cannot store a grant, so the box moves first, with the hold off:
+
+```bash
+TOOL_HOLD=0 ./install.sh                # this release, no hold
+./install.sh agent-allow <agent> <tools> --why 'what it is for'
+./install.sh agent-list                 # asks again: what would still wait
+TOOL_HOLD=1 ./install.sh                # turns it on, and shows anything still on the list
+```
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `TOOL_HOLD` | `1` | `0` removes the block and its grants, and is kept in `.env`. `1` in the environment turns the hold on over whatever the question found: a line in `.env` never does that |
+
+**Going back.** `TOOL_HOLD=0 ./install.sh` first, and only then an older tree or image. A wardryx older than 2.6.0 refuses `when_no_grant` and `grant_tool` at load, and with the doors failing closed that refuses every call. The block goes with `TOOL_HOLD=0`; a `grant_tool` you wrote yourself outside the markers has to go by hand. Grants written through `agent-allow` can stay in the store: 2.5.1 reads past the key. The rollback index does not move for this: the wrong order stops loudly and refuses, and an older tree is safe once the block is out.
+
+**What a person can do about one call.** The console lists each hold with the tool and its target, not the arguments. An approval there shows a token for that one call, once, and whoever runs the agent sends it with the retry as `x-fuse-approval-token`. For anything that will come again, the answer is a grant. wardryx keeps one row per agent, run and call, and at most 20 waiting per agent (`WARDRYX_PENDING_PER_AGENT`), so an agent repeating a call does not flood the queue.
+
+**What it does not see.** A tool an agent reaches around the broker. On a box with no typed plane and no egress there is no broker, so no tool call reaches wardryx at all. An id with no `agent://` scheme is held and cannot be granted, so a person answers its calls one at a time.
 
 ## The record: what this box did, sealed
 
@@ -1710,7 +1764,7 @@ A profile in `compose.yaml` that is in neither list, or in both, is refused by t
 
 Every image the stack runs is pinned to the digest of the bytes it names. The
 tag stays beside it for reading. A tag can be moved by whoever controls the
-registry; a digest cannot, so a box running `wardryx:v2.5.1@sha256:2d3c...` runs
+registry; a digest cannot, so a box running `wardryx:v2.6.0@sha256:2611...` runs
 that build and nothing else.
 
 The images this project publishes (`ghcr.io/taipanbox/...`) are also signed,
@@ -2064,8 +2118,8 @@ into `./closure/secret`, readable only by the console. Nothing prints it, and a
 re-run keeps it. To turn closing off again, remove `CLOSURE_SECRET` and
 `CLOSURE_SECRET_FILE` from `.env` and run `docker compose up -d`.
 
-It needs tokenfuse v1.9.0 or later and console v1.1.34 or later. The images pinned here are tokenfuse v1.22.0 and
-console v1.8.4; an older image ignores the setting.
+It needs tokenfuse v1.9.0 or later and console v1.1.34 or later. The images pinned here are tokenfuse v1.23.0 and
+console v1.8.6; an older image ignores the setting.
 
 ## Approvals and the console's approver key
 

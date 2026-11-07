@@ -58,6 +58,9 @@
 #   SLO_SIGNAL=0 ./install.sh             # on unless you say so: an agent whose error
 #     budget is spent has its calls put to a person. SLO_HOLD_TARGET=agent://acme.example/*
 #     narrows the rule, =none measures and records without holding. See the README.
+#   TOOL_HOLD=0 ./install.sh              # on unless you say so: an agent's tool call that
+#     nothing grants waits for a person, and model calls pass. ./install.sh agent-allow
+#     <agent> <tool[,tool]|all> --why 'text' grants it. See the README.
 #   RUN_BUDGET_CEILING_USD=2.50 ./install.sh   # the most a caller can make one
 #     run's budget (tokenfuse 1.5.0), 5.00 unless you say otherwise
 #   TOKENFUSE_FIREWALL=shadow ./install.sh     # the agent firewall: enforce (the
@@ -302,10 +305,13 @@ http_request() { # method, url, headers (CRLF-terminated, may hold a key), body
   # cancel the request, so they answer nothing (measured 2026-10-19 against tokenfuse
   # v1.18.0: nc returned 0 and no bytes for healthz and for every key check; wget got 200).
   # So nc reads a FIFO, the request is written into it, and the FIFO stays open until nc
-  # exits, which is when the server has answered and closed. No secret is on any argv.
+  # exits. No secret is on any argv. With its stdin open this nc does not leave when the server
+  # closes: it waits out -w twice, so a request lasts 2 x HTTP_WAIT whatever the server does
+  # (measured 2026-11-07, Docker 26.1.5: 20 s at -w 10, and no -w never ended). A caller
+  # that talks to a plane answering at once, and runs by hand, names a shorter one.
   } | docker run -i --rm --network "$NET" busybox:1.36 \
-        sh -c 'f=/tmp/nc-in; mkfifo "$f" || exit 1; nc -w 10 "$1" "$2" < "$f" & pid=$!; exec 3>"$f"; cat >&3; wait "$pid"' \
-        sh "${hostport%%:*}" "${hostport##*:}"
+        sh -c 'f=/tmp/nc-in; mkfifo "$f" || exit 1; nc -w "$3" "$1" "$2" < "$f" & pid=$!; exec 3>"$f"; cat >&3; wait "$pid"' \
+        sh "${hostport%%:*}" "${hostport##*:}" "${HTTP_WAIT:-10}"
 }
 # The status code on a response's first line, 0 when nothing answered.
 # shellcheck disable=SC2329,SC2317  # invoked indirectly, from http_status() and the checks that call it
@@ -665,8 +671,8 @@ if compose_has tokenfuse-mcp-broker; then
     hdrs="Content-Type: application/json"$'\r\n'"X-Fuse-Mcp-Upstream: typryx"$'\r\n'"x-fuse-key: $2"$'\r\n'
     # The broker is a policy enforcement point on every box (invariant 36): it
     # asks wardryx about each tools/call and refuses one it cannot attribute, so
-    # the check names an agent. No starter rule targets this id, so wardryx
-    # allows it.
+    # the check names an agent. The tool hold's seed grants this id `ask` and nothing else, under
+    # the broker's static key, which is how this check comes.
     hdrs+="x-fuse-agent-id: agent://local.invalid/install-check"$'\r\n'
     grep -q '"isError":false' <<<"$(http_request POST "$1" "$hdrs" \
         '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ask","arguments":{"template":"eval.outcome_met","state":{"task":"2+2","final_answer":"4"}},"_meta":{"typryx/key":"{{secret:typryx_key}}"}}}')"
@@ -744,6 +750,12 @@ if compose_has vouchryx; then
   # resolves the money plane" checks a wired value rather than a live call.
   check "gateway resolves the delegation door" \
         "$DC exec -T tokenfuse-gateway printenv TOKENFUSE_DELEGATION_ISSUER"
+fi
+
+# Read off the bus, not off the file: wardryx writes the floors it loaded at each start, so a box
+# whose file says on and whose running wardryx says otherwise fails here.
+if [ -f "$STACK_DIR/policy.yaml" ] && grep -q '^# tool-hold: begin' "$STACK_DIR/policy.yaml"; then
+  check "policy plane: wardryx loaded the tool hold" "[ \"\$(tool_hold_loaded)\" = on ]"
 fi
 
 # Last, so no probe of the checks above is still on a network when it looks.
@@ -1303,6 +1315,549 @@ journal_status() {
 }
 # install-journal: end
 
+# tool-hold: begin
+# A tool call of an agent nothing grants is held for a person, on a box where nobody chose
+# anything (CLAUDE.md invariant 70). Model calls pass, and only a grant lifts the hold: a
+# restriction on the agent never does. That is wardryx 2.6.0's `when_no_grant: hold`, on one
+# rule with target "*", so an agent id with no agent:// scheme cannot walk past it.
+#
+# The rule and the grants this stack needs for its own checks are one block in policy.yaml,
+# between two marker lines this block alone writes, so TOOL_HOLD=0 takes out everything a
+# wardryx older than 2.6.0 would refuse at load. Every line outside the markers is the
+# operator's, byte for byte. wardryx reads policy.yaml at start, so a run that changes it
+# restarts wardryx after `up` (section 5). A grant written with `./install.sh agent-allow`
+# goes through PUT /v1/policies instead: in force with no restart, and on the record.
+#
+# A box with a history is asked first. Before anything on it changes, wardryx's own replay
+# puts the box's recorded decisions to the policy this run would write. If an agent outside
+# the seeds would be held, the run stops with the list and changes nothing, so nothing that
+# worked yesterday stops without a word. Nothing is written before that question: no line in
+# the journal, so a stopped run cannot move the floor (invariant 68), and the image it pulled
+# to ask goes again. A new box has no history, and a box that carries the block was asked.
+#
+# TOOL_HOLD=1 in the environment is the operator's decision to turn it on over that list. It
+# is read from the environment and never from .env, like ALLOW_ROLLBACK: a line left in a
+# file must not answer for a person.
+TOOL_HOLD_WARDRYX_IMAGE="ghcr.io/taipanbox/wardryx:v2.6.0@sha256:26113779c4b830d6b27e626874965c722fd8b41dc5d7085d226a3d903927af7b"
+TOOL_HOLD_ON=1
+TOOL_HOLD_SAID=""
+NET="${NET:-agent-stack_core}"
+TOOL_HOLD_POLICY_CHANGED=0
+tool_hold_env_get() { # NAME: what .env holds for NAME, single quotes removed
+  local v
+  [ -f "$STACK_DIR/.env" ] || return 0
+  v="$(sed -n "/^$1=/{s///p;q;}" "$STACK_DIR/.env")"
+  v="${v#\'}"
+  v="${v%\'}"
+  printf '%s' "$v"
+}
+tool_hold_resolve() { # reads TOOL_HOLD, then .env; sets TOOL_HOLD_ON and TOOL_HOLD_SAID
+  local on="${TOOL_HOLD:-}"
+  TOOL_HOLD_SAID="$on"
+  [ -n "$on" ] || on="$(tool_hold_env_get TOOL_HOLD)"
+  case "${on:-1}" in
+    1) TOOL_HOLD_ON=1 ;;
+    0) TOOL_HOLD_ON=0 ;;
+    *) die "TOOL_HOLD must be 1 (on) or 0 (off). Nothing was installed." ;;
+  esac
+}
+tool_hold_apply() { # keeps the choice in .env, so a re-run with nothing said changes nothing
+  typed_set_env TOOL_HOLD "$TOOL_HOLD_ON"
+}
+tool_hold_domain() { # the trust domain, as the identity block reads it
+  local td
+  td="$(tool_hold_env_get RECORD_TRUST_DOMAIN)"
+  [ -n "$td" ] || td="${RECORD_TRUST_DOMAIN:-local}"
+  printf '%s' "$td"
+}
+# Whether this box reads the web through the broker. WITH_EGRESS only pulls the image and an
+# operator starts the profile by hand, so three things say yes: this run names it, a scopyx of
+# this project runs, or the block already carries the grant. Never with agent tokens off: the
+# broker's route to scopyx needs them (invariant 55).
+tool_hold_web_wanted() {
+  local running
+  if [ "${WITH_AGENT_TOKENS:-}" = 0 ] || [ "$(tool_hold_env_get TOKENFUSE_AGENT_TOKENS)" = off ]; then return 1; fi
+  if [ -n "${WITH_EGRESS:-}${WITH_BROWSER:-}" ]; then return 0; fi
+  if [ -f "$STACK_DIR/policy.yaml" ] && grep -q '^- name: grant-operator-web$' "$STACK_DIR/policy.yaml"; then return 0; fi
+  running="$(docker ps --filter "label=com.docker.compose.project=${NET%_core}" --format '{{.Label "com.docker.compose.service"}}' 2>/dev/null || true)"
+  grep -qxE 'scopyx|scopyx-browser' <<<"$running"
+}
+# How a grant may be reached. The broker says client-key for a static key, so leaving that out
+# is what keeps a static key from borrowing a granted name. `none` stays in because scopyx asks
+# wardryx about the same agent's fetch and sends no source at all, so a grant that took it out
+# would deny the read the grant is for. A box that names `agents` among its static keys has
+# said this agent comes with one, and is taken at its word.
+tool_hold_sources() { # [static]: the identity sources of a grant, comma and space
+  local keys
+  keys=",$(tool_hold_env_get TOKENFUSE_AGENT_TOKENS_STATIC_KEYS),$(tool_hold_env_get TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS),"
+  case "${1:-}$keys" in
+    static*|*,agents,*) printf 'agent-token, client-key, none' ;;
+    *) printf 'agent-token, none' ;;
+  esac
+}
+# grant-install-check is reached with the broker's own static key, so it names client-key: a
+# grant that asked for an agent token here would deny the installer's own check.
+tool_hold_block() {
+  printf '%s\n' \
+    '# tool-hold: begin (managed by install.sh; TOOL_HOLD, invariant 70)' \
+    '- name: tool-hold' \
+    '  target: "*"' \
+    '  when_no_grant: hold' \
+    '- name: grant-drills' \
+    '  target: agent://mockryx.local/*' \
+    '  grant_tool: ["*"]' \
+    '- name: grant-install-check' \
+    '  target: agent://local.invalid/install-check' \
+    '  grant_tool: [ask]' \
+    '  require_identity_source: [client-key]' \
+    '  deny_if_chain_unproven: true'
+  if tool_hold_web_wanted; then
+    printf '%s\n' \
+      '- name: grant-operator-web' \
+      "  target: agent://$(tool_hold_domain)/agents/operator" \
+      '  grant_tool: [fetch_url, browse]' \
+      "  require_identity_source: [$(tool_hold_sources)]" \
+      '  deny_if_chain_unproven: true'
+  fi
+  printf '%s\n' '# tool-hold: end'
+}
+tool_hold_markers_ok() { # FILE: a begin with no end would take the operator's lines with it
+  [ "$(grep -c '^# tool-hold: begin' "$1")" = "$(grep -c '^# tool-hold: end' "$1")" ]
+}
+tool_hold_render() { # SOURCE DEST ON: SOURCE with the block taken out, and put back when ON is 1
+  awk '/^# tool-hold: begin/ { skip = 1; next } /^# tool-hold: end/ { skip = 0; next } !skip' "$1" >"$2" || return 1
+  [ "$3" = 1 ] || return 0
+  if [ -s "$2" ] && [ "$(tail -c 1 "$2" | od -An -c | tr -d ' ')" != '\n' ]; then printf '\n' >>"$2"; fi
+  tool_hold_block >>"$2"
+}
+# Whether the wardryx this box will run loads FILE. An older one refuses the two keys at load,
+# and on a box whose doors fail closed that is every call refused, model calls too.
+tool_hold_reads() { # FILE
+  local image why
+  image="$(compose_image wardryx)"
+  [ -n "$image" ] || image="$TOOL_HOLD_WARDRYX_IMAGE"
+  chmod 0644 "$1" || return 1
+  why="$(docker run --rm --network none -v "$1:/etc/wardryx/policy.yaml:ro" "$image" check /etc /etc/wardryx/policy.yaml 2>&1 >/dev/null)" && return 0
+  TOOL_HOLD_WHY="${why%%$'\n'*}"
+  return 1
+}
+tool_hold_policy_apply() { # reads TOOL_HOLD_ON; sets TOOL_HOLD_POLICY_CHANGED
+  local file="$STACK_DIR/policy.yaml" tmp="$STACK_DIR/policy.yaml.tool-hold.$$"
+  TOOL_HOLD_POLICY_CHANGED=0
+  [ -f "$file" ] || die "policy.yaml is missing, so the tool hold has nowhere to go. Nothing was changed."
+  tool_hold_markers_ok "$file" || die "policy.yaml has a '# tool-hold:' marker with no partner, so the block cannot be told from your own lines. Correct the file and run again."
+  # A block that already says the right thing stays where it is. Taken out and put back, it
+  # would land below the error-budget block, and each run would restart wardryx for nothing.
+  if [ "$TOOL_HOLD_ON" = 1 ] && [ "$(sed -n '/^# tool-hold: begin/,/^# tool-hold: end/p' "$file")" = "$(tool_hold_block)" ]; then return 0; fi
+  tool_hold_render "$file" "$tmp" "$TOOL_HOLD_ON" || die "could not read policy.yaml to manage the tool hold"
+  if cmp -s "$file" "$tmp"; then
+    rm -f "$tmp"
+    return 0
+  fi
+  if [ "$TOOL_HOLD_ON" = 1 ] && ! tool_hold_reads "$tmp"; then
+    rm -f "$tmp"
+    die "the wardryx this box runs does not load the tool hold, so policy.yaml was left as it was. It said: ${TOOL_HOLD_WHY:-nothing}. Run a wardryx of 2.6.0 or later, or set TOOL_HOLD=0."
+  fi
+  { chmod 0644 "$tmp" && mv -f "$tmp" "$file"; } || die "could not write policy.yaml with the tool hold"
+  TOOL_HOLD_POLICY_CHANGED=1
+  if [ "$TOOL_HOLD_ON" = 1 ]; then
+    note "tool hold: policy.yaml now holds, for a person, a tool call nothing grants"
+  else
+    note "tool hold: policy.yaml no longer carries the hold or its grants"
+  fi
+}
+# A response on stdin: its body, with the chunks joined. wardryx sends a long list chunked,
+# and a chunk can end inside a string.
+tool_hold_body() {
+  LC_ALL=C awk 'BEGIN { RS = "\001" } { s = s $0 } END {
+    i = index(s, "\r\n\r\n"); head = tolower(substr(s, 1, i - 1)); b = substr(s, i + 4)
+    if (head !~ /transfer-encoding: *chunked/) { printf "%s", b; exit }
+    while (length(b) > 0) {
+      j = index(b, "\r\n"); n = 0; hex = tolower(substr(b, 1, j - 1))
+      for (k = 1; k <= length(hex); k++) n = n * 16 + index("0123456789abcdef", substr(hex, k, 1)) - 1
+      if (n <= 0) break
+      printf "%s", substr(b, j + 2, n); b = substr(b, j + 2 + n + 2)
+    }
+  }'
+}
+# JSON on stdin: each object of the top level on a line of its own, with the white space wardryx
+# indents it with taken out. A string can hold anything, so this keeps track of strings rather
+# than looking for "},{".
+tool_hold_objects() {
+  LC_ALL=C awk 'BEGIN { RS = "\001" } { s = s $0 } END {
+    n = length(s)
+    for (i = 1; i <= n; i++) {
+      c = substr(s, i, 1)
+      if (str) { cur = cur c; if (esc) esc = 0; else if (c == "\\") esc = 1; else if (c == "\"") str = 0; continue }
+      if (c == "{") depth++
+      if (depth == 0 || c == " " || c == "\n" || c == "\r" || c == "\t") continue
+      cur = cur c
+      if (c == "\"") str = 1
+      if (c == "}") { depth--; if (depth == 0) { print cur; cur = "" } }
+    }
+  }'
+}
+tool_hold_request() { # METHOD PATH [BODY]: sets TOOL_HOLD_STATUS and TOOL_HOLD_BODY. The key rides on stdin, never on argv.
+  local out hdrs
+  hdrs="Authorization: Bearer $(tool_hold_env_get WARDRYX_ADMIN)"$'\r\n'
+  [ -z "${3:-}" ] || hdrs+="Content-Type: application/json"$'\r\n'
+  # wardryx answers at once, or in 3 s with a store that is gone, so 4 s is enough, and an owner waits for this.
+  out="$(HTTP_WAIT="${HTTP_WAIT:-2}" http_request "$1" "http://wardryx:8090$2" "$hdrs" "${3:-}" 2>/dev/null || true)"
+  TOOL_HOLD_STATUS="$(status_of "$out")"
+  TOOL_HOLD_BODY="$(tool_hold_body <<<"$out" | tool_hold_objects)"
+}
+tool_hold_stored() { # prints what the store holds, one policy a line; fails when wardryx did not answer
+  docker network inspect "$NET" >/dev/null 2>&1 || return 1
+  tool_hold_request GET /v1/policies
+  [ "$TOOL_HOLD_STATUS" = 200 ] || return 1
+  [ -z "$TOOL_HOLD_BODY" ] || printf '%s\n' "$TOOL_HOLD_BODY"
+}
+tool_hold_field() { # NAME OBJECT: the first text of NAME in one object of the store
+  local key="\"$1\":\"" rest
+  rest="${2#*"$key"}"
+  [ "$rest" != "$2" ] || return 0
+  sed -E 's/^(([^"\\]|\\.)*)".*/\1/' <<<"$rest"
+}
+tool_hold_list() { # NAME OBJECT: the texts of the list NAME in one object, comma and no space
+  sed -nE 's/.*"'"$1"'":\[([^]]*)\].*/\1/p' <<<"$2" | tr -d '"'
+}
+# Puts the box's own decisions to the policy this run would write. wardryx runs from the image
+# this tree pins, on no network, as the uid that owns the stream, and can only read. Sets
+# TOOL_HOLD_WHY when it could not ask, and writes DIR/report.json when it could.
+tool_hold_ask() { # DIR
+  local d="$1" volume="${NET%_core}_events"
+  install -d "$d/candidate" || return 1
+  tool_hold_render "$STACK_DIR/policy.yaml" "$d/candidate/policy.yaml" 1 || { TOOL_HOLD_WHY="policy.yaml could not be read"; return 1; }
+  # What agent-allow wrote is in force too, and in no file. The store keeps two fields of its
+  # own that a policy file refuses. A wardryx that is down leaves the file alone, which errs
+  # toward listing more.
+  tool_hold_stored 2>/dev/null \
+    | sed -E 's/^\{"id":"([^"\\]|\\.)*",?/{/; s/,?"updated_at":"([^"\\]|\\.)*"\}$/}/' >"$d/candidate/stored.json" || true
+  [ -s "$d/candidate/stored.json" ] || rm -f "$d/candidate/stored.json"
+  chgrp -R 10001 "$d" 2>/dev/null || chmod -R o+rX "$d"
+  chmod -R g+rX "$d"
+  if ! docker volume inspect "$volume" >/dev/null 2>&1; then
+    printf '{\n  "total": 0,\n  "unexamined": 0,\n  "would_hold": []\n}\n' >"$d/report.json"
+    return 0
+  fi
+  # A replay that finds a row its own version no longer reproduces exits 1 and still prints the
+  # report, so the report is what is read, and the count of what it could not ask decides.
+  docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --user 20001:10001 \
+    -v "$volume:/var/lib/stack/events:ro" -v "$d/candidate:/candidate:ro" "$TOOL_HOLD_WARDRYX_IMAGE" replay \
+    -events /var/lib/stack/events/wardryx.ndjson -archive /var/lib/stack/events/wardryx-policy-archive \
+    -policy /candidate -format json >"$d/report.json" 2>"$d/report.err" || true
+  if [ -z "$(tool_hold_count total "$d/report.json")" ] || [ -z "$(tool_hold_count unexamined "$d/report.json")" ]; then
+    TOOL_HOLD_WHY="$(head -c 300 "$d/report.err" | tr -d '\r' | head -n 1)"
+    return 1
+  fi
+}
+tool_hold_count() { # NAME FILE: one figure of the report
+  sed -nE 's/^  "'"$1"'": ([0-9]+),?$/\1/p' "$2"
+}
+tool_hold_rows() { # FILE: what the report would hold, one tab-separated line each: agent, tool, calls, last
+  awk '
+    function text(line) { sub(/^ *"[a-z_]+": "/, "", line); sub(/",?$/, "", line); return line }
+    /^  "would_hold": \[$/ { on = 1; next }
+    on && /^  \]/ { on = 0 }
+    on && /^      "agent_id": / { agent = text($0) }
+    on && /^      "tool": / { tool = text($0) }
+    on && /^      "calls": / { calls = $2; sub(/,$/, "", calls) }
+    on && /^      "last": / { printf "%s\t%s\t%s\t%s\n", agent, tool, calls, text($0) }
+  ' "$1" | LC_ALL=C tr -c '[:print:]\t\n' '?'
+}
+tool_hold_table() { # FILE: at most forty rows, because an agent id is whatever a caller wrote
+  local agent tool calls last shown=0 all
+  all="$(tool_hold_rows "$1")"
+  printf '   %-6s  %-20s  %-24s  %s\n' CALLS 'LAST SEEN' TOOL AGENT
+  while IFS=$'\t' read -r agent tool calls last; do
+    shown=$((shown + 1))
+    [ "$shown" -le 40 ] || continue
+    printf '   %-6s  %-20s  %-24s  %s\n' "$calls" "${last%%.*}" "$tool" "$agent"
+  done <<<"$all"
+  [ "$shown" -le 40 ] || printf '   ... and %s more\n' "$((shown - 40))"
+}
+# The commands to paste. An agent id and a tool name are whatever a caller wrote, so a command
+# is printed only for text that means nothing to a shell, and the row is counted otherwise.
+tool_hold_commands() { # FILE
+  local agent tool calls last prev="" tools="" left=0 printed=0
+  while IFS=$'\t' read -r agent tool calls last; do
+    if ! [[ "$agent" =~ ^agent://[A-Za-z0-9._~-]+(:[0-9]+)?(/[A-Za-z0-9._~:/-]*)?$ ]] || ! [[ "$tool" =~ ^[A-Za-z0-9._:/-]+$ ]]; then
+      left=$((left + 1))
+      continue
+    fi
+    if [ "$agent" != "$prev" ]; then
+      if [ -n "$prev" ] && [ "$printed" -lt 40 ]; then printf "     ./install.sh agent-allow '%s' '%s' --why 'what it is for'\n" "$prev" "$tools"; printed=$((printed + 1)); fi
+      prev="$agent"
+      tools="$tool"
+    else
+      tools="$tools,$tool"
+    fi
+  done < <(tool_hold_rows "$1" | sort)
+  if [ -n "$prev" ] && [ "$printed" -lt 40 ]; then printf "     ./install.sh agent-allow '%s' '%s' --why 'what it is for'\n" "$prev" "$tools"; fi
+  [ "$left" -eq 0 ] || printf '   %s row(s) have no command: no grant can name an id without agent://, and text a shell reads is not printed to paste.\n' "$left"
+}
+tool_hold_verify() { # DIR: fetches cosign there, and asks it about the image
+  local STACK_DIR="$1"
+  cosign_install
+  image_verify "$TOOL_HOLD_WARDRYX_IMAGE"
+}
+tool_hold_upgrade_check() {
+  local d rows total unexamined pulled=0 stop
+  [ "$TOOL_HOLD_ON" = 1 ] || return 0
+  [ -f "$STACK_DIR/policy.yaml" ] || return 0
+  if grep -q '^# tool-hold: begin' "$STACK_DIR/policy.yaml"; then return 0; fi
+  say "this box has a history: asking what the tool hold would stop, before anything changes"
+  d="$(mktemp -d)" || die "could not make a temporary directory to ask in. Nothing was changed."
+  TOOL_HOLD_WHY=""
+  if ! docker image inspect "$TOOL_HOLD_WARDRYX_IMAGE" >/dev/null 2>&1; then
+    # Invariant 44 holds here too: the signature is checked before the pull. cosign stays in
+    # the scratch directory, so a run that stops leaves no file behind.
+    if [ -x "$STACK_DIR/bin/cosign" ]; then mkdir -p "$d/bin" && cp -p "$STACK_DIR/bin/cosign" "$d/bin/cosign"; fi
+    if ( tool_hold_verify "$d" ) \
+       && docker pull -q "$TOOL_HOLD_WARDRYX_IMAGE" >/dev/null; then
+      pulled=1
+    else
+      TOOL_HOLD_WHY="the image it runs in, $TOOL_HOLD_WARDRYX_IMAGE, could not be checked and pulled"
+    fi
+  fi
+  if [ -z "$TOOL_HOLD_WHY" ] && tool_hold_ask "$d/ask"; then
+    rows="$(tool_hold_rows "$d/ask/report.json")"
+    total="$(tool_hold_count total "$d/ask/report.json")"
+    unexamined="$(tool_hold_count unexamined "$d/ask/report.json")"
+    if [ -z "$rows" ] && [ "$unexamined" = 0 ]; then
+      note "tool hold: $total decision(s) on this box asked, and no call outside the seeds would wait for a person"
+      rm -rf "$d"
+      return 0
+    fi
+    if [ -n "$rows" ]; then
+      printf '\n   With the tool hold on, these calls would wait for a person (%s of %s decisions could not be asked):\n\n' "$unexamined" "$total"
+      tool_hold_table "$d/ask/report.json"
+      stop="the tool hold would stop what the agents above do today."
+    else
+      printf '\n   %s of %s decisions on this box could not be asked, so no list here says what the tool hold would stop.\n' "$unexamined" "$total"
+      stop="what the tool hold would stop on this box is not known."
+    fi
+  else
+    printf '\n   wardryx could not be asked what the tool hold would stop: %s\n' "${TOOL_HOLD_WHY:-it answered nothing}"
+    stop="what the tool hold would stop on this box is not known."
+  fi
+  if [ "$TOOL_HOLD_SAID" = 1 ]; then
+    note "TOOL_HOLD=1 was said, so the hold goes on over that: an agent above waits for a person until something grants its tool"
+    rm -rf "$d"
+    return 0
+  fi
+  printf '\n   To give each agent what it needs, move the box first, with the hold off, then grant, then turn it on:\n\n'
+  printf '     TOOL_HOLD=0 ./install.sh\n'
+  if [ -n "${rows:-}" ]; then
+    tool_hold_commands "$d/ask/report.json"
+  else
+    printf "     ./install.sh agent-allow '<agent>' '<tool[,tool]>' --why 'what it is for'\n"
+  fi
+  printf '     TOOL_HOLD=1 ./install.sh\n\n'
+  printf '   A wardryx older than 2.6.0 cannot store a grant, which is why the box moves first. An agent that\n'
+  printf '   calls with a static key adds --static-key. ./install.sh agent-list asks again at any time.\n'
+  printf '   Or leave the hold off: TOOL_HOLD=0 ./install.sh, and nothing more.\n'
+  rm -rf "$d"
+  if [ "$pulled" = 1 ]; then docker image rm "$TOOL_HOLD_WARDRYX_IMAGE" >/dev/null 2>&1 || true; fi
+  die "$stop Nothing was changed."
+}
+# What wardryx said at its last start: it writes the names of the floors it loaded on the bus.
+# Prints on, off, or nothing for a wardryx that wrote no such line.
+tool_hold_loaded() {
+  local line
+  line="$(docker run --rm -v "${NET%_core}_events:/e:ro" busybox:1.36 grep -F '"policy_loaded"' /e/wardryx.ndjson 2>/dev/null | tail -n 1 || true)"
+  case "$line" in *'"policy_loaded"'*) ;; *) return 0 ;; esac
+  if grep -qE '"no_grant_floors":\[[^]]*"tool-hold"' <<<"$line"; then printf on; else printf off; fi
+}
+tool_hold_status() { # one line; it only reads
+  local file="$STACK_DIR/policy.yaml" state loaded infile=0 instore="not read" stored
+  [ -f "$file" ] || { printf '   tool hold: no policy.yaml here, so it says nothing\n'; return 0; }
+  state=off
+  if grep -qE '^ *when_no_grant: *"?hold' "$file"; then state=on; fi
+  infile="$(grep -cE '^ *grant_tool:' "$file" || true)"
+  if stored="$(tool_hold_stored)"; then instore="$(grep -c '"grant_tool":' <<<"$stored" || true)"; fi
+  loaded="$(tool_hold_loaded)"
+  if [ -n "$loaded" ] && [ "$loaded" != "$state" ]; then
+    printf '   tool hold: %s in policy.yaml and %s in the wardryx running, which reads the file at start; %s in policy.yaml, %s through agent-allow\n' "$state" "$loaded" "$infile" "$instore"
+  else
+    printf '   tool hold: %s, grants: %s in policy.yaml, %s through agent-allow\n' "$state" "$infile" "$instore"
+  fi
+}
+tool_hold_file_grants() { # policy.yaml's grants, one tab-separated line each: agent, tools, name
+  awk '
+    function clean(v) { gsub(/^[ "\047\[]+|[ "\047\]]+$/, "", v); gsub(/[ "\047]/, "", v); return v }
+    function flush() { if (tools != "") printf "%s\t%s\t%s\n", target, tools, name; name = target = tools = ""; open = 0 }
+    /^- / { flush() }
+    /^(- |  )name:/ { v = $0; sub(/^[- ]+name: */, "", v); name = v; open = 0 }
+    /^(- |  )target:/ { v = $0; sub(/^[- ]+target: */, "", v); target = clean(v); open = 0 }
+    /^(- |  )grant_tool:/ { v = $0; sub(/^[- ]+grant_tool: */, "", v); tools = clean(v); open = (tools == ""); next }
+    open && /^ +- / { v = $0; sub(/^ +- */, "", v); tools = tools (tools == "" ? "" : ",") clean(v); next }
+    /^[^ ]|^  [a-z]/ { open = 0 }
+    END { flush() }
+  ' "$1"
+}
+tool_hold_id() { # AGENT: the id of its policy in the store, which no two agents share
+  local slug
+  slug="$(printf '%s' "${1#agent://}" | tr -c 'A-Za-z0-9._-' '-')"
+  printf 'grant-%s-%s' "$slug" "$(printf '%s' "$1" | sha256sum | cut -c1-8)"
+}
+tool_hold_json() { # A,B: the same as a JSON list
+  local out="" one
+  while IFS= read -r one; do
+    [ -n "$one" ] || continue
+    out="$out${out:+,}\"$one\""
+  done <<<"$(tr -d ' ' <<<"$1" | tr ',' '\n')"
+  printf '[%s]' "$out"
+}
+tool_hold_put() { # AGENT TOOLS SOURCES WHY: writes the one policy of AGENT; SOURCES empty requires none
+  local body
+  body="{\"name\":\"grant $1 $(date -u +%Y-%m-%d): $4\",\"target\":\"$1\",\"grant_tool\":$(tool_hold_json "$2")"
+  [ -z "$3" ] || body="$body,\"require_identity_source\":$(tool_hold_json "$3")"
+  tool_hold_request PUT "/v1/policies/$(tool_hold_id "$1")" "$body,\"deny_if_chain_unproven\":true}"
+  [ "$TOOL_HOLD_STATUS" = 200 ] && return 0
+  if grep -q 'grant_tool' <<<"$TOOL_HOLD_BODY"; then
+    die "wardryx on this box refused the grant, and it is older than 2.6.0 or the target names no trust domain. It said: $(head -c 300 <<<"$TOOL_HOLD_BODY"). To move the box first: TOOL_HOLD=0 ./install.sh. Nothing was changed."
+  fi
+  die "wardryx did not take the grant: HTTP $TOOL_HOLD_STATUS $(head -c 300 <<<"$TOOL_HOLD_BODY"). Nothing was changed."
+}
+tool_hold_allow() { # AGENT TOOLS WHY STATIC
+  local agent="$1" tools="$2" why="$3" static="$4" sources kept=""
+  tool_hold_request GET "/v1/policies/$(tool_hold_id "$agent")"
+  case "$TOOL_HOLD_STATUS" in
+    200)
+      kept="$(tool_hold_list grant_tool "$TOOL_HOLD_BODY")"
+      # A grant that took a static key keeps taking one: this command adds tools, and takes nothing away.
+      if [[ ",$(tool_hold_list require_identity_source "$TOOL_HOLD_BODY")," == *,client-key,* ]]; then static=static; fi
+      ;;
+    404) ;;
+    *) die "wardryx did not answer about this agent: HTTP $TOOL_HOLD_STATUS. Nothing was changed." ;;
+  esac
+  sources="$(tool_hold_sources "$static")"
+  if [ "$(tool_hold_env_get TOKENFUSE_AGENT_TOKENS)" = off ]; then
+    sources=""
+    note "agent tokens are off on this box, so this grant requires no source and the id is the caller's word"
+  fi
+  if [ "$tools" = all ] || [ "$kept" = '*' ]; then
+    tools='*'
+  elif [ -n "$kept" ]; then
+    tools="$(tr ',' '\n' <<<"$kept,$tools" | sed '/^$/d' | sort -u | tr '\n' ',' | sed 's/,$//')"
+  fi
+  tool_hold_put "$agent" "$tools" "$sources" "$why"
+  if [ "$tools" = '*' ]; then
+    printf '\n   WARNING: %s may now call every tool the broker reaches, with no person in the way.\n' "$agent"
+    printf '   A tool with root on this box gives the agent root. Name the tools it needs instead when you can.\n\n'
+  fi
+  note "granted $tools to $agent, in force now with no restart, and on the record as policy_updated"
+  grep -qE '^ *when_no_grant: *"?hold' "$STACK_DIR/policy.yaml" 2>/dev/null \
+    || note "the tool hold is off on this box, so this grant lifts nothing yet"
+  if [ -n "$sources" ] && [ -z "$static" ]; then
+    note "this grant asks for an agent token: an agent that calls with a static key is refused until you repeat this with --static-key"
+  fi
+}
+tool_hold_deny() { # AGENT TOOLS WHY
+  local agent="$1" tools="$2" why="$3" id kept left one sources
+  id="$(tool_hold_id "$agent")"
+  tool_hold_request GET "/v1/policies/$id"
+  case "$TOOL_HOLD_STATUS" in
+    200) ;;
+    404) die "agent-allow wrote no grant for $agent. A grant in policy.yaml is edited there. Nothing was changed." ;;
+    *) die "wardryx did not answer about this agent: HTTP $TOOL_HOLD_STATUS. Nothing was changed." ;;
+  esac
+  kept="$(tool_hold_list grant_tool "$TOOL_HOLD_BODY")"
+  sources="$(tool_hold_list require_identity_source "$TOOL_HOLD_BODY")"
+  left="$kept"
+  if [ "$tools" = all ]; then
+    left=""
+  else
+    [ "$kept" != '*' ] || die "$agent holds every tool, so one cannot be taken out: agent-deny '$agent' all, then agent-allow what it needs. Nothing was changed."
+    for one in ${tools//,/ }; do
+      [[ ",$left," == *",$one,"* ]] || die "$agent has no grant of $one through agent-allow. Nothing was changed."
+      left="$(tr ',' '\n' <<<"$left" | grep -vxF "$one" | tr '\n' ',' | sed 's/,$//' || true)"
+    done
+  fi
+  if [ -z "$left" ]; then
+    tool_hold_request DELETE "/v1/policies/$id"
+    [ "$TOOL_HOLD_STATUS" = 204 ] || die "wardryx did not take the grant away: HTTP $TOOL_HOLD_STATUS $(head -c 300 <<<"$TOOL_HOLD_BODY")"
+  else
+    tool_hold_put "$agent" "$left" "$sources" "$why"
+  fi
+  note "taken from $agent: $tools. Its next call waits for a person, in force now with no restart, and on the record as policy_updated"
+}
+tool_hold_print_grants() {
+  local stored line tools name
+  printf '\n   %-44s  %-26s  %s\n' AGENT TOOLS WHERE
+  if [ -f "$STACK_DIR/policy.yaml" ]; then
+    while IFS=$'\t' read -r line tools name; do
+      [ -n "$line" ] || continue
+      printf '   %-44s  %-26s  policy.yaml: %s\n' "$line" "$tools" "$name"
+    done <<<"$(tool_hold_file_grants "$STACK_DIR/policy.yaml")"
+  fi
+  if stored="$(tool_hold_stored)"; then
+    while IFS= read -r line; do
+      grep -q '"grant_tool":' <<<"$line" || continue
+      printf '   %-44s  %-26s  agent-allow: %s\n' "$(tool_hold_field target "$line")" "$(tool_hold_list grant_tool "$line")" "$(tool_hold_field name "$line")"
+    done <<<"$stored"
+  else
+    printf '   wardryx did not answer, so what agent-allow wrote is not listed here\n'
+  fi
+}
+tool_hold_preview() { # with the hold off: what it would stop, when the image is on the box
+  local d
+  docker image inspect "$TOOL_HOLD_WARDRYX_IMAGE" >/dev/null 2>&1 || return 0
+  d="$(mktemp -d)" || return 0
+  if tool_hold_ask "$d/ask"; then
+    if [ -n "$(tool_hold_rows "$d/ask/report.json")" ]; then
+      printf '\n   With the hold on, these calls would wait for a person:\n\n'
+      tool_hold_table "$d/ask/report.json"
+    else
+      printf '\n   With the hold on, no call on this box would wait for a person (%s of %s decisions could not be asked).\n' \
+        "$(tool_hold_count unexamined "$d/ask/report.json")" "$(tool_hold_count total "$d/ask/report.json")"
+    fi
+  else
+    printf '\n   wardryx could not be asked what the hold would stop: %s\n' "${TOOL_HOLD_WHY:-it answered nothing}"
+  fi
+  rm -rf "$d"
+}
+# The three commands an owner has. They read .env, talk to wardryx and write nothing on the box:
+# what they change is in the store, under wardryx's own record.
+tool_hold_main() {
+  local cmd="$1" agent="${2:-}" tools="${3:-}" why="" static=""
+  shift
+  [ -f "$STACK_DIR/.env" ] || die "nothing is installed in $STACK_DIR (there is no .env there). Set STACK_DIR if it lives elsewhere. Nothing was changed."
+  [ -r "$STACK_DIR/.env" ] || die "$STACK_DIR/.env is not readable by this user: it holds the box's keys, mode 0600. Run this as root. Nothing was changed."
+  EXPLAINED=1
+  if [ "$cmd" = agent-list ]; then
+    tool_hold_status
+    tool_hold_print_grants
+    grep -qE '^ *when_no_grant: *"?hold' "$STACK_DIR/policy.yaml" 2>/dev/null || tool_hold_preview
+    exit 0
+  fi
+  [ "$#" -ge 2 ] || die "usage: ./install.sh $cmd <agent> <tool[,tool]|all> --why 'what it is for'"
+  shift 2
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --why) [ "$#" -ge 2 ] || die "--why needs the reason after it. Nothing was changed."; why="$2"; shift 2 ;;
+      --static-key) static=static; shift ;;
+      *) die "$cmd does not read $1. Nothing was changed." ;;
+    esac
+  done
+  [[ "$agent" =~ ^agent://[A-Za-z0-9._~-]+(:[0-9]+)?(/[A-Za-z0-9._~:/*-]*)?$ ]] \
+    || die "$cmd takes an agent as agent://<domain>/<path>, and a * only after the domain: a grant must name the trust domain it is for. Nothing was changed."
+  [[ "$tools" =~ ^[A-Za-z0-9._:/-]+(,[A-Za-z0-9._:/-]+)*$ ]] \
+    || die "$cmd takes tools as one name, a,b or all. Nothing was changed."
+  rollback_reason_ok "$why" \
+    || die "$cmd needs --why: a written reason, one line of at most 300 characters with no quote or backslash, which goes in the policy's name. Nothing was changed."
+  docker network inspect "$NET" >/dev/null 2>&1 || die "network $NET is missing, so there is no stack here to ask. Nothing was changed."
+  if [ "$cmd" = agent-allow ]; then tool_hold_allow "$agent" "$tools" "$why" "$static"; else tool_hold_deny "$agent" "$tools" "$why"; fi
+  exit 0
+}
+tool_hold_reach_note() {
+  [ "$TOOL_HOLD_ON" = 1 ] || { printf '\n\n  The tool hold is OFF (TOOL_HOLD=0): an agent'"'"'s tool call passes unless a rule stops it.'; return 0; }
+  printf '\n\n  The tool hold is ON: an agent'"'"'s tool call that nothing grants waits for a person, and model\n'
+  printf '  calls pass. Give an agent a tool: ./install.sh agent-allow <agent> <tool[,tool]|all> --why '"'"'text'"'"'.'
+}
+# tool-hold: end
+
 # ---- status: the same checks, against the stack already installed -------------
 # `./install.sh status` changes nothing. It reads .env and the running stack, runs
 # stack_checks (the list section 8 runs, not a copy of it), and prints one line per
@@ -1349,6 +1904,7 @@ status_main() {
   unmeasured=0
   stack_checks
   journal_status
+  tool_hold_status
   EXPLAINED=1
   if [ "$fail" -eq 0 ] && [ "$unmeasured" -eq 0 ]; then printf '\nevery check passed\n'; exit 0; fi
   # What was found outranks what was not: a failed check beside an empty reading is still 1.
@@ -1357,6 +1913,7 @@ status_main() {
   exit 1
 }
 if [ "${1:-}" = status ]; then status_main; fi
+case "${1:-}" in agent-allow|agent-deny|agent-list) tool_hold_main "$@" ;; esac
 
 # ---- 0. preflight -----------------------------------------------------------
 [ "$(id -u)" = "0" ] || die "run as root: this installs packages and a firewall rule."
@@ -1390,6 +1947,84 @@ smtp_tls_resolve() {
 }
 smtp_tls_resolve
 # smtp-tls: end
+
+# image-verify: begin
+# CLAUDE.md invariant 44. The images this project publishes are signed keyless by
+# the release workflows of the TAIPANBOX repositories, by digest, with the job's
+# GitHub OIDC identity, and carry a provenance attestation. Before this installer
+# pulls one of them it checks that signature, and a signature that does not check
+# stops the install before anything is started. Third-party images (busybox,
+# postgres) are pinned by digest and are not signature-checked.
+COSIGN_VERSION="v3.1.3"
+# The SHA-256 of each cosign release binary, copied from that release's own
+# cosign_checksums.txt. That file is signed by the sigstore release identity
+# (keyless@projectsigstore.iam.gserviceaccount.com, issuer accounts.google.com),
+# and the signature was checked before these values were copied.
+# shellcheck disable=SC2034 # both are read by name, as ${!want}, in cosign_install below
+COSIGN_SHA256_amd64="4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71"
+# shellcheck disable=SC2034 # read by name, as ${!want}, in cosign_install below
+COSIGN_SHA256_arm64="c5d324e091826b0d7a78eb16fef316450b4eb9aaec045611c08ba06f5e73220a"
+# A signature is accepted only from the release workflow of a TAIPANBOX repository
+# (release.yml), or from the two image workflows of stack-k8s (console-image.yml and
+# tunnel-images.yml), run on a version tag and signed through GitHub's own OIDC
+# issuer. That is the identity stack-k8s's own admission policy names. Nothing
+# wider: not another workflow file, not a branch, not another organisation.
+TAIPANBOX_SIGNER='^https://github\.com/TAIPANBOX/(?:[A-Za-z0-9._-]+/\.github/workflows/release\.yml|stack-k8s/\.github/workflows/(?:console-image|tunnel-images)\.yml)@refs/tags/v[0-9][A-Za-z0-9._+-]*$'
+TAIPANBOX_ISSUER='https://token.actions.githubusercontent.com'
+
+cosign_install() {
+  local arch want dest url
+  case "$(uname -m)" in
+    x86_64|amd64) arch=amd64 ;;
+    aarch64|arm64) arch=arm64 ;;
+    *) die "no pinned cosign for $(uname -m): image signatures are checked on amd64 and arm64 only" ;;
+  esac
+  want="COSIGN_SHA256_$arch"
+  want="${!want}"
+  dest="$STACK_DIR/bin/cosign"
+  # A binary already in place with the pinned bytes is kept, so a re-run downloads nothing.
+  if [ -f "$dest" ] && printf '%s  %s\n' "$want" "$dest" | sha256sum -c --status; then
+    return 0
+  fi
+  url="https://github.com/sigstore/cosign/releases/download/$COSIGN_VERSION/cosign-linux-$arch"
+  mkdir -p "$STACK_DIR/bin"
+  note "fetching cosign $COSIGN_VERSION for $arch"
+  # curl names the host that failed in its own message. The file is served by github.com,
+  # which redirects it to release-assets.githubusercontent.com, so either can be the one.
+  if ! fetch_err="$(curl -fsSL -o "$dest.download" "$url" 2>&1)"; then
+    rm -f "$dest.download"
+    die "could not download cosign $COSIGN_VERSION (needs outbound HTTPS to github.com and release-assets.githubusercontent.com; see README, \"What the install needs from the network\"). curl said: ${fetch_err%%$'\n'*}"
+  fi
+  # The bytes are checked before anything can run them. A download that does not match
+  # the SHA-256 pinned above is removed and never installed.
+  if ! printf '%s  %s\n' "$want" "$dest.download" | sha256sum -c --status; then
+    rm -f "$dest.download"
+    die "the cosign binary from $url does not match its pinned SHA-256, so it was not installed"
+  fi
+  chmod 0755 "$dest.download"
+  mv -f "$dest.download" "$dest"
+}
+
+image_verify() {
+  local ref="$1" out why name
+  name="${ref%%@*}"
+  # cosign's stderr is kept, so a refusal can say whether the image has no signature or
+  # cosign could not reach the services that check one.
+  if ! out="$("$STACK_DIR/bin/cosign" verify --certificate-identity-regexp "$TAIPANBOX_SIGNER" --certificate-oidc-issuer "$TAIPANBOX_ISSUER" "$ref" 2>&1 >/dev/null)"; then
+    why="$(grep -i -m1 'error' <<<"$out" || printf '%s' "${out%%$'\n'*}")"
+    if grep -qiE 'no matching signatures|no signatures found' <<<"$out"; then
+      die "$name has no signature from a TAIPANBOX release workflow for its digest, so it was not pulled and the stack was not started"
+    elif grep -qiE 'tuf|trusted root|trusted_root' <<<"$out"; then
+      die "could not reach the Sigstore trust root at tuf-repo-cdn.sigstore.dev, so $name was not checked and was not pulled. This install needs outbound HTTPS to tuf-repo-cdn.sigstore.dev (see README, \"What the install needs from the network\"). cosign said: $why"
+    elif grep -qi 'ghcr.io' <<<"$out"; then
+      die "could not reach the registry ghcr.io to check $name, so it was not pulled. This install needs outbound HTTPS to ghcr.io. cosign said: $why"
+    else
+      die "could not check the signature of $name, so it was not pulled. cosign said: $why"
+    fi
+  fi
+  note "signature verified: $name"
+}
+# image-verify: end
 
 # ---- 0b. typed answers: where does the data go? ------------------------------
 # @decided 2026-09-30: an operator chooses where typed answers come from, one
@@ -3365,6 +4000,8 @@ fi
 mint_resolve
 upstream_resolve
 agent_tokens_resolve
+tool_hold_resolve
+tool_hold_upgrade_check
 
 say "installing docker and git"
 export DEBIAN_FRONTEND=noninteractive
@@ -4010,6 +4647,7 @@ add_env_default TOKENFUSE_MCP_SECRET_SCOPES "$(sq_ 'typryx_key=tools:ask|ask_fre
 # copied into ./typed. Refusals were made before anything was touched.
 typed_apply
 slo_apply
+tool_hold_apply
 # The ceiling on a run budget (section 0c): written only when this run set it.
 ceiling_apply
 costcrew_ceiling_apply
@@ -4390,84 +5028,6 @@ posture and README says so."
   # the key's thumbprint as `kid`, not whatever label a keygen run gave it.
 fi
 
-# image-verify: begin
-# CLAUDE.md invariant 44. The images this project publishes are signed keyless by
-# the release workflows of the TAIPANBOX repositories, by digest, with the job's
-# GitHub OIDC identity, and carry a provenance attestation. Before this installer
-# pulls one of them it checks that signature, and a signature that does not check
-# stops the install before anything is started. Third-party images (busybox,
-# postgres) are pinned by digest and are not signature-checked.
-COSIGN_VERSION="v3.1.3"
-# The SHA-256 of each cosign release binary, copied from that release's own
-# cosign_checksums.txt. That file is signed by the sigstore release identity
-# (keyless@projectsigstore.iam.gserviceaccount.com, issuer accounts.google.com),
-# and the signature was checked before these values were copied.
-# shellcheck disable=SC2034 # both are read by name, as ${!want}, in cosign_install below
-COSIGN_SHA256_amd64="4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71"
-# shellcheck disable=SC2034 # read by name, as ${!want}, in cosign_install below
-COSIGN_SHA256_arm64="c5d324e091826b0d7a78eb16fef316450b4eb9aaec045611c08ba06f5e73220a"
-# A signature is accepted only from the release workflow of a TAIPANBOX repository
-# (release.yml), or from the two image workflows of stack-k8s (console-image.yml and
-# tunnel-images.yml), run on a version tag and signed through GitHub's own OIDC
-# issuer. That is the identity stack-k8s's own admission policy names. Nothing
-# wider: not another workflow file, not a branch, not another organisation.
-TAIPANBOX_SIGNER='^https://github\.com/TAIPANBOX/(?:[A-Za-z0-9._-]+/\.github/workflows/release\.yml|stack-k8s/\.github/workflows/(?:console-image|tunnel-images)\.yml)@refs/tags/v[0-9][A-Za-z0-9._+-]*$'
-TAIPANBOX_ISSUER='https://token.actions.githubusercontent.com'
-
-cosign_install() {
-  local arch want dest url
-  case "$(uname -m)" in
-    x86_64|amd64) arch=amd64 ;;
-    aarch64|arm64) arch=arm64 ;;
-    *) die "no pinned cosign for $(uname -m): image signatures are checked on amd64 and arm64 only" ;;
-  esac
-  want="COSIGN_SHA256_$arch"
-  want="${!want}"
-  dest="$STACK_DIR/bin/cosign"
-  # A binary already in place with the pinned bytes is kept, so a re-run downloads nothing.
-  if [ -f "$dest" ] && printf '%s  %s\n' "$want" "$dest" | sha256sum -c --status; then
-    return 0
-  fi
-  url="https://github.com/sigstore/cosign/releases/download/$COSIGN_VERSION/cosign-linux-$arch"
-  mkdir -p "$STACK_DIR/bin"
-  note "fetching cosign $COSIGN_VERSION for $arch"
-  # curl names the host that failed in its own message. The file is served by github.com,
-  # which redirects it to release-assets.githubusercontent.com, so either can be the one.
-  if ! fetch_err="$(curl -fsSL -o "$dest.download" "$url" 2>&1)"; then
-    rm -f "$dest.download"
-    die "could not download cosign $COSIGN_VERSION (needs outbound HTTPS to github.com and release-assets.githubusercontent.com; see README, \"What the install needs from the network\"). curl said: ${fetch_err%%$'\n'*}"
-  fi
-  # The bytes are checked before anything can run them. A download that does not match
-  # the SHA-256 pinned above is removed and never installed.
-  if ! printf '%s  %s\n' "$want" "$dest.download" | sha256sum -c --status; then
-    rm -f "$dest.download"
-    die "the cosign binary from $url does not match its pinned SHA-256, so it was not installed"
-  fi
-  chmod 0755 "$dest.download"
-  mv -f "$dest.download" "$dest"
-}
-
-image_verify() {
-  local ref="$1" out why name
-  name="${ref%%@*}"
-  # cosign's stderr is kept, so a refusal can say whether the image has no signature or
-  # cosign could not reach the services that check one.
-  if ! out="$("$STACK_DIR/bin/cosign" verify --certificate-identity-regexp "$TAIPANBOX_SIGNER" --certificate-oidc-issuer "$TAIPANBOX_ISSUER" "$ref" 2>&1 >/dev/null)"; then
-    why="$(grep -i -m1 'error' <<<"$out" || printf '%s' "${out%%$'\n'*}")"
-    if grep -qiE 'no matching signatures|no signatures found' <<<"$out"; then
-      die "$name has no signature from a TAIPANBOX release workflow for its digest, so it was not pulled and the stack was not started"
-    elif grep -qiE 'tuf|trusted root|trusted_root' <<<"$out"; then
-      die "could not reach the Sigstore trust root at tuf-repo-cdn.sigstore.dev, so $name was not checked and was not pulled. This install needs outbound HTTPS to tuf-repo-cdn.sigstore.dev (see README, \"What the install needs from the network\"). cosign said: $why"
-    elif grep -qi 'ghcr.io' <<<"$out"; then
-      die "could not reach the registry ghcr.io to check $name, so it was not pulled. This install needs outbound HTTPS to ghcr.io. cosign said: $why"
-    else
-      die "could not check the signature of $name, so it was not pulled. cosign said: $why"
-    fi
-  fi
-  note "signature verified: $name"
-}
-# image-verify: end
-
 # ---- 3c. the images, pulled ---------------------------------------------------
 # Here rather than in section 2, and the reason is mechanical: the list comes
 # from `docker compose config`, which interpolates .env, and .env does not
@@ -4668,6 +5228,9 @@ EOF
   note "wrote policy.yaml"
 fi
 typed_risk_policy_apply
+# Between the two: the budget block is taken out and put back last, so it stays last and the
+# tool hold, which leaves itself alone when it says the right thing, does not move.
+tool_hold_policy_apply
 slo_policy_apply
 mkdir -p environments
 if [ ! -f environments/single.json ]; then
@@ -5130,7 +5693,7 @@ profile_reach_note() {
   fi
 }
 profiles_off_remove
-if { [ "${TYPED_RISK_POLICY_CHANGED:-0}" = 1 ] || [ "${SLO_POLICY_CHANGED:-0}" = 1 ]; } && [ "$WARDRYX_WAS_RUNNING" = 1 ]; then
+if { [ "${TYPED_RISK_POLICY_CHANGED:-0}" = 1 ] || [ "${SLO_POLICY_CHANGED:-0}" = 1 ] || [ "${TOOL_HOLD_POLICY_CHANGED:-0}" = 1 ]; } && [ "$WARDRYX_WAS_RUNNING" = 1 ]; then
   "${COMPOSE[@]}" restart wardryx >/dev/null || die "could not restart wardryx to read the changed policy.yaml"
   note "wardryx restarted to read the changed policy.yaml"
 fi
@@ -5409,7 +5972,7 @@ elif [ "$IDENTITY_KEYS_COUNT" -gt 0 ]; then
 fi
 # The gateway always holds client keys now (compose requires them), so the branch
 # for a map with no keys, which used to follow, is gone with it.
-IDENTITY_REACH="$IDENTITY_REACH$(felyx_gateway_note)$(upstream_reach_note)$(agent_tokens_reach_note)$(profile_reach_note)"
+IDENTITY_REACH="$IDENTITY_REACH$(felyx_gateway_note)$(upstream_reach_note)$(agent_tokens_reach_note)$(profile_reach_note)$(tool_hold_reach_note)"
 
 # The OpenAI door, when this box runs it: where an agent points, what it sends,
 # who pays, and what this box does not see of it. Its keys are named by where they

@@ -153,6 +153,10 @@ EOF
 printf '2026-11-09T06:18:44Z good version=1.7.0 index=1 commit=abc1234\n' >"$SANDBOX/stack/.install-history"
 journal_before="$(cksum <"$SANDBOX/stack/.install-history")"
 
+# A floor: status reads the file, the store and what wardryx loaded, and writes none of them.
+printf -- '- name: tool-hold\n  target: "*"\n  when_no_grant: hold\n' >"$SANDBOX/stack/policy.yaml"
+policy_before="$(cksum <"$SANDBOX/stack/policy.yaml")"
+
 fail=0
 report() { printf 'FAIL: %s\n' "$1"; fail=$((fail + 1)); }
 
@@ -177,6 +181,12 @@ fi
 # text: a reworded success verdict would go unseen by the run above.
 if ! grep -qF "\\nevery check passed\\n'; exit 0" install.sh; then
 	report "install.sh does not print the success verdict, so a passing run would say nothing"
+fi
+if ! grep -q '^   tool hold: on, grants: 0 in policy.yaml, ' "$out"; then
+	report "status printed no line about the tool hold"
+fi
+if [ "$policy_before" != "$(cksum <"$SANDBOX/stack/policy.yaml")" ]; then
+	report "status changed policy.yaml"
 fi
 if ! grep -q 'docker compose ps --services' "$LOG"; then
 	report "status never read the service list, so the stub was never reached and this measured nothing"

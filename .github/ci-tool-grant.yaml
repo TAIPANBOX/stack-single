@@ -1,0 +1,7 @@
+# The grant of CI's own identity, and of nothing else. Under the tool hold (CLAUDE.md
+# invariant 70) a tool call nothing grants is held, and this identity is a workflow's, so no
+# box seeds it: .github/workflows/install.yml adds this file to the policy of the runner's box.
+- name: grant-ci
+  target: agent://local.invalid/ci
+  grant_tool: [ask]
+  require_identity_source: [client-key]

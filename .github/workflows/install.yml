@@ -395,6 +395,38 @@ jobs:
       # is needed); the broker answers the token's tools/list (200) and its tools/call to typryx is answered (not
       # refused by the agent-token door); a tampered token is refused (401). The wardryx log holds no agent-token
       # refusal for the run. The static-key checks are the steps above.
+      # CLAUDE.md invariant 70, on a real box through the real broker: a tool call nothing grants
+      # is held, one command ends the hold with no restart and leaves it on the record, another
+      # brings it back, and status says so. The last line gives the agent of the evidence run
+      # below the one tool it asks for, because its call is held like any other.
+      - name: a tool call nothing grants is held, and one command ends the hold with no restart
+        if: matrix.profile == 'typed-risk'
+        run: |
+          set -euo pipefail
+          cd /opt/agent-stack
+          mkey="$(sudo sed -n 's/^TOKENFUSE_MCP_KEYS=\([^:]*\):.*/\1/p' .env | head -1)"
+          td="$(sudo sed -n "s/^RECORD_TRUST_DOMAIN='\(.*\)'\$/\1/p" .env)"; td="${td:-local}"
+          ask='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ask","arguments":{"template":"eval.outcome_met","state":{"task":"2+2","final_answer":"4"}},"_meta":{"typryx/key":"{{secret:typryx_key}}"}}}'
+          who=agent://ci.example/tool-user
+          mcp() { curl -s -X POST http://127.0.0.1:4200/mcp -H 'content-type: application/json' -H 'X-Fuse-Mcp-Upstream: typryx' -H "x-fuse-key: $mkey" -H "x-fuse-agent-id: $who" -d "$ask"; }
+          started="$(sudo docker inspect --format '{{.State.StartedAt}}' "$(sudo docker compose ps -q wardryx)")"
+          held="$(mcp)"
+          echo "before: $(cut -c1-120 <<<"$held")"
+          grep -q '"code":-32004' <<<"$held" || { echo "::error::a tool call nothing grants was not held: $held"; exit 1; }
+          grep -q 'requires approval' <<<"$held" || { echo "::error::the refusal is not a hold: $held"; exit 1; }
+          sudo env STACK_DIR=/opt/agent-stack "$GITHUB_WORKSPACE/install.sh" agent-allow "$who" ask --static-key --why 'a rehearsal in CI'
+          open="$(mcp)"
+          grep -q '"isError":false' <<<"$open" || { echo "::error::the grant did not end the hold: $open"; exit 1; }
+          [ "$started" = "$(sudo docker inspect --format '{{.State.StartedAt}}' "$(sudo docker compose ps -q wardryx)")" ] || { echo "::error::the grant needed a restart"; exit 1; }
+          sudo docker run --rm -v agent-stack_events:/e:ro busybox:1.36 grep -F '"policy_updated"' /e/wardryx.ndjson >/dev/null || { echo "::error::the grant left no policy_updated"; exit 1; }
+          sudo env STACK_DIR=/opt/agent-stack "$GITHUB_WORKSPACE/install.sh" agent-list | tee "$RUNNER_TEMP/agent-list.log"
+          grep -q 'tool hold: on' "$RUNNER_TEMP/agent-list.log" || { echo "::error::agent-list does not say the hold is on"; exit 1; }
+          grep -q 'a rehearsal in CI' "$RUNNER_TEMP/agent-list.log" || { echo "::error::agent-list does not show the grant and its reason"; exit 1; }
+          sudo env STACK_DIR=/opt/agent-stack "$GITHUB_WORKSPACE/install.sh" agent-deny "$who" all --why 'the rehearsal is over'
+          again="$(mcp)"
+          grep -q '"code":-32004' <<<"$again" || { echo "::error::a grant taken back did not hold the call again: $again"; exit 1; }
+          sudo env STACK_DIR=/opt/agent-stack "$GITHUB_WORKSPACE/install.sh" agent-allow "agent://$td/agents/operator" ask --why 'the agent-token evidence run'
+
       - name: "agent tokens, end to end: issued, admitted at the gateway (402 past identity) and the broker, asked of typryx, and no resource refused"
         if: matrix.profile == 'typed-risk'
         run: |
@@ -519,6 +551,10 @@ jobs:
         if: matrix.profile == 'typed-risk'
         run: |
           cd /opt/agent-stack
+          # CI's identity is no box's business: its grant is a file of its own, read at wardryx's start.
+          sudo sh -c "cat '$GITHUB_WORKSPACE/.github/ci-tool-grant.yaml' >>policy.yaml"
+          sudo docker compose restart wardryx
+          for _ in $(seq 1 30); do sudo docker run --rm --network agent-stack_core busybox:1.36 wget -q -T2 -O /dev/null http://wardryx:8090/readyz && break; sleep 1; done
           [ "$(sudo docker compose exec -T tokenfuse-mcp-broker printenv TOKENFUSE_WARDRYX_URL)" = http://wardryx:8090 ] \
             || { echo "::error::without the risk signal the broker does not ask wardryx directly"; exit 1; }
           mkey="$(sudo sed -n 's/^TOKENFUSE_MCP_KEYS=\([^:]*\):.*/\1/p' .env | head -1)"
@@ -613,6 +649,89 @@ jobs:
             echo "::error::the override moved the floor"; exit 1
           fi
           sudo env STACK_DIR=/opt/agent-stack ./install.sh status 2>&1 | grep 'install journal:'
+
+      - name: state on failure
+        if: failure()
+        run: |
+          cd /opt/agent-stack 2>/dev/null && sudo docker compose ps -a || true
+          cd /opt/agent-stack 2>/dev/null && sudo docker compose logs --tail=40 || true
+
+  # A box with a history, on a real runner: the previous tag with an agent that really called a
+  # tool, then this tree (CLAUDE.md invariant 70). The run must stop with the list and change
+  # nothing; the way through must work end to end; and going back must work in the order the
+  # README gives.
+  upgrade-tool-hold:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: install the previous tag, and call a tool as an agent no seed names
+        run: |
+          prev="$(git tag --merged HEAD --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed -n 1p)"
+          [ -n "$prev" ] || { echo "::error::no previous tag"; exit 1; }
+          echo "installing $prev"
+          mkdir -p "$RUNNER_TEMP/prev"
+          git archive "$prev" | tar -x -C "$RUNNER_TEMP/prev"
+          (cd "$RUNNER_TEMP/prev" && sudo env STACK_DIR=/opt/agent-stack WITH_TYPED=1 ./install.sh 2>&1) | tee "$RUNNER_TEMP/prev.log"
+          grep -q "every check passed" "$RUNNER_TEMP/prev.log" || { echo "::error::the previous tag did not install"; exit 1; }
+          cat >"$RUNNER_TEMP/call.sh" <<'SH'
+          mkey="$(sudo sed -n 's/^TOKENFUSE_MCP_KEYS=\([^:]*\):.*/\1/p' /opt/agent-stack/.env | head -1)"
+          curl -s -X POST http://127.0.0.1:4200/mcp -H 'content-type: application/json' -H 'X-Fuse-Mcp-Upstream: typryx' -H "x-fuse-key: $mkey" -H "x-fuse-agent-id: $1" \
+            -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ask","arguments":{"template":"eval.outcome_met","state":{"task":"2+2","final_answer":"4"}},"_meta":{"typryx/key":"{{secret:typryx_key}}"}}}'
+          SH
+          grep -q '"isError":false' <<<"$(bash "$RUNNER_TEMP/call.sh" agent://ci.example/tool-user)" || { echo "::error::the call the history needs was not answered"; exit 1; }
+
+      - name: this tree stops with the list, and changes nothing
+        run: |
+          cd /opt/agent-stack
+          # The previous tag may have no journal, and a stopped run must not start one either.
+          snap() { sudo sh -c 'sha256sum .env policy.yaml compose.yaml; cat .install-history 2>/dev/null | sha256sum; ls -a | sha256sum'; }
+          snap >"$RUNNER_TEMP/before.txt"
+          # shellcheck disable=SC2046
+          sudo docker inspect --format '{{.Name}} {{.Image}} {{.State.StartedAt}} {{.RestartCount}}' $(sudo docker ps -aq) | sort >"$RUNNER_TEMP/ps-before.txt"
+          cd "$GITHUB_WORKSPACE"
+          if sudo env STACK_DIR=/opt/agent-stack ./install.sh >"$RUNNER_TEMP/stop.log" 2>&1; then
+            cat "$RUNNER_TEMP/stop.log"; echo "::error::a box with an ungranted caller did not stop"; exit 1
+          fi
+          cat "$RUNNER_TEMP/stop.log"
+          grep -qE 'ask +agent://ci.example/tool-user' "$RUNNER_TEMP/stop.log" || { echo "::error::the stop does not list the agent and the tool"; exit 1; }
+          grep -qF "./install.sh agent-allow 'agent://ci.example/tool-user' 'ask'" "$RUNNER_TEMP/stop.log" || { echo "::error::the stop does not say how to grant"; exit 1; }
+          grep -qF 'TOOL_HOLD=0 ./install.sh' "$RUNNER_TEMP/stop.log" || { echo "::error::the stop does not name TOOL_HOLD=0"; exit 1; }
+          cd /opt/agent-stack
+          snap | diff "$RUNNER_TEMP/before.txt" - || { echo "::error::a stopped run changed the box"; exit 1; }
+          # shellcheck disable=SC2046
+          sudo docker inspect --format '{{.Name}} {{.Image}} {{.State.StartedAt}} {{.RestartCount}}' $(sudo docker ps -aq) | sort | diff "$RUNNER_TEMP/ps-before.txt" - || { echo "::error::a stopped run touched a container"; exit 1; }
+          pin="$(sed -nE 's/^TOOL_HOLD_WARDRYX_IMAGE="(.*)"$/\1/p' "$GITHUB_WORKSPACE/install.sh")"
+          if sudo docker image inspect "$pin" >/dev/null 2>&1; then echo "::error::a stopped run left the image it pulled"; exit 1; fi
+
+      - name: the way through - this release with the hold off, a grant, then the hold on
+        run: |
+          sudo env STACK_DIR=/opt/agent-stack TOOL_HOLD=0 ./install.sh 2>&1 | tee "$RUNNER_TEMP/off.log"
+          grep -q "every check passed" "$RUNNER_TEMP/off.log" || { echo "::error::the run with the hold off did not pass"; exit 1; }
+          if grep -q 'tool-hold' /opt/agent-stack/policy.yaml; then echo "::error::TOOL_HOLD=0 wrote the block"; exit 1; fi
+          grep -q '"isError":false' <<<"$(bash "$RUNNER_TEMP/call.sh" agent://ci.example/tool-user)" || { echo "::error::with the hold off a call was stopped"; exit 1; }
+          sudo env STACK_DIR=/opt/agent-stack ./install.sh agent-list | tee "$RUNNER_TEMP/preview.log"
+          grep -qE 'ask +agent://ci.example/tool-user' "$RUNNER_TEMP/preview.log" || { echo "::error::agent-list with the hold off does not show what it would stop"; exit 1; }
+          sudo env STACK_DIR=/opt/agent-stack ./install.sh agent-allow agent://ci.example/tool-user ask --static-key --why 'it asks for its living'
+          sudo env STACK_DIR=/opt/agent-stack TOOL_HOLD=1 ./install.sh 2>&1 | tee "$RUNNER_TEMP/on.log"
+          grep -q "every check passed" "$RUNNER_TEMP/on.log" || { echo "::error::the run that turned the hold on did not pass"; exit 1; }
+          grep -q 'no call outside the seeds would wait' "$RUNNER_TEMP/on.log" || { echo "::error::the question did not read the grant in the store"; exit 1; }
+          grep -q '^# tool-hold: begin' /opt/agent-stack/policy.yaml || { echo "::error::TOOL_HOLD=1 wrote no block"; exit 1; }
+          grep -q '"isError":false' <<<"$(bash "$RUNNER_TEMP/call.sh" agent://ci.example/tool-user)" || { echo "::error::the granted agent was stopped"; exit 1; }
+          grep -q '"code":-32004' <<<"$(bash "$RUNNER_TEMP/call.sh" agent://ci.example/stranger)" || { echo "::error::an agent nothing grants was not held"; exit 1; }
+          sudo env STACK_DIR=/opt/agent-stack ./install.sh status 2>&1 | tee "$RUNNER_TEMP/status.log"
+          grep -qE '^   tool hold: on, grants: [0-9]+ in policy.yaml, 1 through agent-allow$' "$RUNNER_TEMP/status.log" || { echo "::error::status does not say the hold is on and how many grants"; exit 1; }
+
+      - name: going back - the hold off first, then the previous tree
+        run: |
+          sudo env STACK_DIR=/opt/agent-stack TOOL_HOLD=0 ./install.sh 2>&1 | tee "$RUNNER_TEMP/back-1.log"
+          grep -q "every check passed" "$RUNNER_TEMP/back-1.log" || { echo "::error::turning the hold off did not pass"; exit 1; }
+          (cd "$RUNNER_TEMP/prev" && sudo env STACK_DIR=/opt/agent-stack ./install.sh 2>&1) | tee "$RUNNER_TEMP/back-2.log"
+          grep -q "every check passed" "$RUNNER_TEMP/back-2.log" || { echo "::error::the previous tree did not run after the hold came off"; exit 1; }
+          grep -q '"isError":false' <<<"$(bash "$RUNNER_TEMP/call.sh" agent://ci.example/tool-user)" || { echo "::error::a call was stopped after going back"; exit 1; }
 
       - name: state on failure
         if: failure()
