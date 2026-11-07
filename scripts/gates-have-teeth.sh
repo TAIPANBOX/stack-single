@@ -5443,17 +5443,17 @@ run_case "console-proofs: the archive directory is open to other" fail \
 
 run_case "console-proofs: the archive directory is owned by another plane" fail \
 	"$CP" \
-	"$(py 'edit("compose.yaml", "chown -R 20001:10001 /vol/events/wardryx-policy-archive &&", "chown -R 10002:10001 /vol/events/wardryx-policy-archive &&")')" \
+	"$(py 'edit("compose.yaml", "chown -R 20001:10001 /vol/events/wardryx-policy-archive;", "chown -R 10002:10001 /vol/events/wardryx-policy-archive;")')" \
 	"want wardryx's uid"
 
 run_case "console-proofs: the archive directory is in a group the console is not in" fail \
 	"$CP" \
-	"$(py 'edit("compose.yaml", "chown -R 20001:10001 /vol/events/wardryx-policy-archive &&", "chown -R 20001:20001 /vol/events/wardryx-policy-archive &&")')" \
+	"$(py 'edit("compose.yaml", "chown -R 20001:10001 /vol/events/wardryx-policy-archive;", "chown -R 20001:20001 /vol/events/wardryx-policy-archive;")')" \
 	"not a group the console runs in"
 
 run_case "console-proofs: the archive is given away without a recursive chown" fail \
 	"$CP" \
-	"$(py 'edit("compose.yaml", "chown -R 20001:10001 /vol/events/wardryx-policy-archive &&", "chown 20001:10001 /vol/events/wardryx-policy-archive &&")')" \
+	"$(py 'edit("compose.yaml", "chown -R 20001:10001 /vol/events/wardryx-policy-archive;", "chown 20001:10001 /vol/events/wardryx-policy-archive;")')" \
 	"a version in the archive is owned by"
 
 run_case "console-proofs: versions an earlier wardryx wrote stay 0600" fail \
