@@ -4098,7 +4098,7 @@ run_case "profiles-off-are-removed: a profile the two lists leave out is refused
 
 run_case "profiles-off-are-removed: the record plane left out of the installer list keeps record-seal under WITH_RECORD=0" fail \
 	'./scripts/profiles-off-are-removed.sh' \
-	"$(py 'edit("install.sh", "PROFILES_INSTALLED=\"record typed typed-risk-signal delegation openai-door\"", "PROFILES_INSTALLED=\"typed typed-risk-signal delegation openai-door\"")')" \
+	"$(py 'edit("install.sh", "PROFILES_INSTALLED=\"record typed typed-risk-signal delegation openai-door slo-signal\"", "PROFILES_INSTALLED=\"typed typed-risk-signal delegation openai-door slo-signal\"")')" \
 	"D. with WITH_RECORD=0 the running record-seal is not removed"
 
 run_case "finops-is-opt-in: the installer-managed list names the add-on, so the installer could start it" fail \
@@ -4429,7 +4429,7 @@ run_case "console-proofs: versions are made writable by the group" fail \
 
 run_case "console-proofs: wardryx names no archive, so there is nothing to read" fail \
 	"$CP" \
-	"$(py 'edit("compose.yaml", "      WARDRYX_POLICY_ARCHIVE: /var/lib/stack/events/wardryx-policy-archive\n      # Agent tokens, verified here", "      # Agent tokens, verified here")')" \
+	"$(py 'edit("compose.yaml", "      WARDRYX_POLICY_ARCHIVE: /var/lib/stack/events/wardryx-policy-archive\n      # An agent whose error budget", "      # An agent whose error budget")')" \
 	"measured nothing"
 
 run_case "console-proofs: a reworded comment above the repair is not a fault" pass \

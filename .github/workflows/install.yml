@@ -190,9 +190,9 @@ jobs:
           [ "$running" = "$want" ]
           # The installer seeds one rule that reads the signal, and only with the flag (invariant 57).
           # An explicit if: a bare `! grep` is exempt from errexit and could never fail this step.
-          rules="$(grep -c hold_if_signal policy.yaml || true)"
+          rules="$(grep -c 'name: action.risk_class' policy.yaml || true)"
           want_rules=0; [ "${{ matrix.profile }}" = typed-risk ] && want_rules=1
-          if [ "$rules" != "$want_rules" ]; then echo "::error::policy.yaml carries $rules hold_if_signal rule(s), want $want_rules"; exit 1; fi
+          if [ "$rules" != "$want_rules" ]; then echo "::error::policy.yaml carries $rules rule(s) on the risk signal, want $want_rules"; exit 1; fi
           if [ "$want_rules" = 1 ] && ! grep -q '^- name: typed-risk-hold-when-absent$' policy.yaml; then echo "::error::the one hold_if_signal rule is not the managed one"; exit 1; fi
 
       - name: the OpenAI door is up only when asked for, and 4110 answers only then
@@ -435,6 +435,25 @@ jobs:
       # outside the box. It has no name for an address on the internet, no route to
       # one, and no plane by name. The first probe is a positive control on the edge
       # network, so a runner with no internet cannot make the negative checks pass.
+      # Invariant 66. Up, not restarting: a routine that cannot read a trace stops, and on the wrong console
+      # image that is every start. wardryx says it can believe the file, which init-volumes made for it.
+      - name: the error budget is measured on every profile, and wardryx believes its file
+        run: |
+          cd /opt/agent-stack
+          sid="$(sudo docker compose ps -q verdryx-slo)"
+          if [ -z "$sid" ]; then echo "::error::verdryx-slo is not running"; exit 1; fi
+          restarts="$(sudo docker inspect -f '{{.RestartCount}}' "$sid")"
+          if [ "$restarts" != 0 ]; then
+            sudo docker compose logs --tail 30 verdryx-slo
+            echo "::error::verdryx-slo restarted $restarts time(s), so it could not measure"; exit 1
+          fi
+          owner="$(sudo docker compose exec -T console stat -c '%u %a' /var/lib/stack/events/verdryx.ndjson)"
+          if [ "$owner" != "20020 640" ]; then echo "::error::verdryx.ndjson is $owner, want 20020 640"; exit 1; fi
+          ready="$(sudo docker compose exec -T console python3 -c "import urllib.request as u; print(u.urlopen('http://wardryx:8090/readyz').read().decode())")"
+          echo "$ready"
+          if ! grep -q '"signal_events":"ok"' <<<"$ready"; then echo "::error::wardryx does not believe the file"; exit 1; fi
+          if ! grep -q '^- name: slo-burn-hold$' policy.yaml; then echo "::error::policy.yaml carries no slo-burn-hold rule"; exit 1; fi
+
       - name: "agents network: no direct internet, the gateway reachable"
         run: |
           probe() { sudo docker run --rm --network "$1" busybox:1.36 sh -c "$2" >/dev/null 2>&1; }
