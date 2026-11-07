@@ -579,6 +579,41 @@ jobs:
           done >>"$RUNNER_TEMP/after.txt"
           diff "$RUNNER_TEMP/before.txt" "$RUNNER_TEMP/after.txt" || { echo "::error::status changed the stack"; exit 1; }
 
+      # Every run of this leg is in the journal, and status reads it back. Then the default leg
+      # does on a real box what a person would do by mistake: a tree below the floor is refused
+      # with nothing changed, the way through keeps its reason, and the floor stays.
+      - name: the journal holds this leg's runs
+        run: |
+          cd /opt/agent-stack
+          sudo sed 's/ commit=.*//' .install-history
+          [ "$(sudo grep -c ' good ' .install-history)" -ge 2 ] || { echo "::error::the journal does not hold two good runs"; exit 1; }
+          [ "$(sudo stat -c '%a %U' .install-history)" = "640 root" ] || { echo "::error::the journal is not 0640 root"; exit 1; }
+          grep -q '^   install journal: last good install ' "$RUNNER_TEMP/status.log" || { echo "::error::status printed no line from the journal"; exit 1; }
+
+      - name: a tree below the floor is refused, and the way through keeps its reason
+        if: matrix.profile == 'default'
+        run: |
+          below="$RUNNER_TEMP/tree-below"
+          mkdir -p "$below"
+          git archive HEAD | tar -x -C "$below"
+          sed -i 's/^STACK_ROLLBACK_INDEX=1$/STACK_ROLLBACK_INDEX=0/' "$below/install.sh"
+          grep -q '^STACK_ROLLBACK_INDEX=0$' "$below/install.sh" || { echo "::error::the index line moved"; exit 1; }
+          sudo sha256sum /opt/agent-stack/.env /opt/agent-stack/.install-history /opt/agent-stack/compose.yaml >"$RUNNER_TEMP/floor-before.txt"
+          if sudo env STACK_DIR=/opt/agent-stack bash "$below/install.sh" >"$RUNNER_TEMP/refused.log" 2>&1; then
+            echo "::error::a tree below the floor was not refused"; cat "$RUNNER_TEMP/refused.log"; exit 1
+          fi
+          cat "$RUNNER_TEMP/refused.log"
+          grep -q "ALLOW_ROLLBACK=1 ROLLBACK_REASON='why' ./install.sh" "$RUNNER_TEMP/refused.log" || { echo "::error::the refusal gives no way through"; exit 1; }
+          sudo sha256sum /opt/agent-stack/.env /opt/agent-stack/.install-history /opt/agent-stack/compose.yaml | diff "$RUNNER_TEMP/floor-before.txt" - \
+            || { echo "::error::a refusal changed the box"; exit 1; }
+          sudo env STACK_DIR=/opt/agent-stack ALLOW_ROLLBACK=1 ROLLBACK_REASON='a rehearsal of going back' bash "$below/install.sh" >"$RUNNER_TEMP/override.log" 2>&1 \
+            || { echo "::error::the way through did not go through"; tail -30 "$RUNNER_TEMP/override.log"; exit 1; }
+          sudo grep -q 'rollback .*index=0 .*reason="a rehearsal of going back"$' /opt/agent-stack/.install-history || { echo "::error::the reason is not in the journal"; exit 1; }
+          if sudo env STACK_DIR=/opt/agent-stack bash "$below/install.sh" >"$RUNNER_TEMP/refused.log" 2>&1; then
+            echo "::error::the override moved the floor"; exit 1
+          fi
+          sudo env STACK_DIR=/opt/agent-stack ./install.sh status 2>&1 | grep 'install journal:'
+
       - name: state on failure
         if: failure()
         run: |

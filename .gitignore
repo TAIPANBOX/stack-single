@@ -2,6 +2,7 @@
 # deployment has, and the two files below are seeded from the installer and
 # then edited in place by whoever runs it.
 .env
+.install-history
 policy.yaml
 environments/
 src/

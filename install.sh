@@ -116,6 +116,14 @@
 # Re-running never changes an existing box: the value lives in .env from the
 # first run, and .env is left alone.
 #
+# Each run writes a line to $STACK_DIR/.install-history. A tree whose rollback index is
+# below what the box has run is refused before anything changes, with the way through:
+#
+#   ALLOW_ROLLBACK=1 ROLLBACK_REASON='why' ./install.sh
+#
+# That is a guard against mistakes, not against an attacker. See the README, "Going
+# backwards by mistake".
+#
 # Requires: a Debian or Ubuntu host, root, and outbound internet. Everything
 # else it installs. Every image is PULLED from ghcr.io and nothing is compiled.
 # `BUILD_FROM_SOURCE=1`
@@ -1086,6 +1094,169 @@ running_images() {
 }
 # running-images: end
 
+# install-journal: begin
+# The install journal and the rollback index (CLAUDE.md invariant 68). A guard against
+# running the wrong tree by mistake: a stale clone, the wrong tag, an old path in a script.
+# It is not protection against an attacker. This check lives inside the tree it checks and
+# the tree is not signed, so an older tree simply does not have it, and root on the box can
+# edit the journal.
+#
+# The decision reads a plain integer and never a version. A version says when a tree was
+# cut; the index says an older tree has become unsafe. So most releases share an index, the
+# rollback trees kept on a box still pass, and no dotted number is ever compared in bash.
+#
+# STACK_VERSION is what the journal records: the newest docs/releases/vX.Y.Z.md, the same
+# number as x-stack-version in compose.yaml (scripts/version-is-one-number.sh).
+STACK_VERSION="1.6.4"
+# Raised only when an older tree has become unsafe to run on a box that ran this one, and
+# only with a line in that release's notes that starts `security:` or `irreversible:` and
+# names `rollback index N` (scripts/rollback-floor.sh).
+STACK_ROLLBACK_INDEX=1
+# One line per event, root's, 0640, only ever appended to. The floor of a box is the highest
+# index of a `good` line: a run that ended with every check passed. An `attempt` with no
+# result after it is a run that stopped on the way.
+JOURNAL="$STACK_DIR/.install-history"
+JOURNAL_LINE='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z (first-seen|attempt|good|failed|rollback) version=([^ ]+) index=(0|[1-9][0-9]{0,8}) commit=([^ ]+)( .*)?$'
+# A line that cannot be read is named and never skipped: a skipped line can be the one that
+# held the floor. Sets journal_bad to its number, or to 0 when the path is not a readable file.
+journal_read() {
+  local n=0 line
+  journal_floor=""
+  journal_floor_version=""
+  journal_good=""
+  journal_override=""
+  journal_bad=""
+  [ -e "$JOURNAL" ] || return 0
+  if [ ! -f "$JOURNAL" ] || [ ! -r "$JOURNAL" ]; then
+    journal_bad=0
+    return 0
+  fi
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n + 1))
+    if ! [[ "$line" =~ $JOURNAL_LINE ]]; then
+      [ -n "$journal_bad" ] || journal_bad="$n"
+      continue
+    fi
+    case "${BASH_REMATCH[1]}" in
+      good)
+        journal_good="$line"
+        if [ -z "$journal_floor" ] || [ "${BASH_REMATCH[3]}" -gt "$journal_floor" ]; then
+          journal_floor="${BASH_REMATCH[3]}"
+          journal_floor_version="${BASH_REMATCH[2]}"
+        fi
+        ;;
+      rollback) journal_override="$line" ;;
+    esac
+  done <"$JOURNAL"
+}
+# One line of a file the floor is read from: any alphabet, and nothing that could end the
+# line or the quotes around it, because a reason with a new line in it is a forged run.
+rollback_reason_ok() { # REASON
+  [ "${#1}" -le 300 ] || return 1
+  [ -n "${1//[[:space:]]/}" ] || return 1
+  case "$1" in
+    *[[:cntrl:]]*|*\"*|*\\*) return 1 ;;
+  esac
+}
+# In the preflight, before a package, a file or a container changes. Reads and refuses; the
+# first line of this run is written by journal_begin, after every refusal.
+rollback_floor_check() {
+  local why
+  rollback_reason=""
+  journal_first_seen=0
+  journal_read
+  if [ ! -e "$JOURNAL" ] && [ -f "$STACK_DIR/.env" ]; then journal_first_seen=1; fi
+  if [ -n "$journal_bad" ]; then
+    why="$JOURNAL cannot be read (line $journal_bad), so the floor of this box is not known.
+   Correct or remove that line by hand. To go on before that:"
+  elif [ -n "$journal_floor" ] && [ "$STACK_ROLLBACK_INDEX" -lt "$journal_floor" ]; then
+    why="this tree is stack $STACK_VERSION (rollback index $STACK_ROLLBACK_INDEX). This box has run index $journal_floor since $journal_floor_version.
+   Going below it can run images with known defects, or data a newer release changed.
+   If you mean it:"
+  else
+    [ "${ALLOW_ROLLBACK:-}" != 1 ] || note "ALLOW_ROLLBACK=1 is set and this run does not need it, so nothing is recorded as an override"
+    return 0
+  fi
+  if [ "${ALLOW_ROLLBACK:-}" != 1 ]; then
+    die "$why
+     ALLOW_ROLLBACK=1 ROLLBACK_REASON='why' ./install.sh
+   In a piped install the two go before bash, not before curl.
+   Nothing was changed."
+  fi
+  rollback_reason_ok "${ROLLBACK_REASON:-}" \
+    || die "ALLOW_ROLLBACK=1 needs ROLLBACK_REASON: a written reason, one line of at most 300 characters with no quote or backslash, which goes in the journal. Nothing was changed."
+  rollback_reason="$ROLLBACK_REASON"
+  note "going on under ALLOW_ROLLBACK=1; the reason goes in $JOURNAL, and the floor of this box does not move"
+}
+# Two requests fetch a piped install, so the compose file may be another commit's.
+stack_version_check() { # FILE: the compose file this run is about to use
+  local v
+  v="$(awk -F'"' '/^x-stack-version:/ { print $2 }' "$1" 2>/dev/null || true)"
+  if [ "$v" != "$STACK_VERSION" ]; then
+    rm -f "$STACK_DIR/compose.yaml.fetched"
+    die "this install.sh is stack $STACK_VERSION and its compose file says ${v:-no version at all}: the two are not one tree. Run it again, or from a clone of one tag. Nothing in $STACK_DIR was changed."
+  fi
+}
+journal_append() { # LINE
+  ( umask 027; printf '%s\n' "$1" >>"$JOURNAL" ) || return 1
+  chmod 0640 "$JOURNAL"
+}
+journal_entry() { # EVENT: when, what, and which tree
+  printf '%s %s version=%s index=%s commit=%s' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$STACK_VERSION" "$STACK_ROLLBACK_INDEX" "$journal_tree"
+}
+# The first lines of a run, after every refusal and before the box's files change.
+journal_begin() { # TREE: its directory, empty for a piped install, which has no commit to name
+  local cv dv
+  journal_tree=piped
+  if [ -n "$1" ]; then
+    journal_tree="$(git -c safe.directory="$1" -C "$1" describe --tags --always 2>/dev/null || true)"
+    case "$journal_tree" in ""|*[!A-Za-z0-9._+-]*) journal_tree=unknown ;; esac
+  fi
+  dv="$(docker version --format '{{.Server.Version}}' 2>/dev/null || true)"
+  cv="$("${COMPOSE[@]}" version --short 2>/dev/null || true)"
+  case "$dv" in ""|*[!A-Za-z0-9._+~-]*) dv=unknown ;; esac
+  case "$cv" in ""|*[!A-Za-z0-9._+~-]*) cv=unknown ;; esac
+  if [ "$journal_first_seen" = 1 ]; then
+    journal_append "$(journal_entry first-seen)" || die "could not write $JOURNAL"
+  fi
+  if [ -n "$rollback_reason" ]; then
+    journal_append "$(journal_entry rollback) reason=\"$rollback_reason\"" || die "could not write $JOURNAL"
+  fi
+  journal_append "$(journal_entry attempt) compose=$cv docker=$dv" || die "could not write $JOURNAL"
+}
+# The last thing a run does. Only a run with no failed check moves the floor.
+journal_end() {
+  local line
+  if [ "$fail" -eq 0 ]; then
+    line="$(journal_entry good)"
+  else
+    line="$(journal_entry failed) fail=$fail"
+  fi
+  journal_append "$line" || note "could not write $JOURNAL: this run is not recorded, and the floor of this box did not move"
+}
+# What status says about it: one line, and it only reads.
+journal_status() {
+  local good="none recorded" override="none" reason
+  journal_read
+  if [ ! -e "$JOURNAL" ]; then
+    printf '   install journal: no journal on this box, so it has no floor; a run of a tree that keeps one starts it\n'
+    return 0
+  fi
+  if [ -n "$journal_bad" ]; then
+    printf '   install journal: %s cannot be read (line %s), so the floor of this box is not known\n' "$JOURNAL" "$journal_bad"
+    return 0
+  fi
+  if [ -n "$journal_good" ] && [[ "$journal_good" =~ $JOURNAL_LINE ]]; then
+    good="${journal_good%% *}, version ${BASH_REMATCH[2]}, commit ${BASH_REMATCH[4]}, index ${BASH_REMATCH[3]} (floor $journal_floor)"
+  fi
+  if [ -n "$journal_override" ] && [[ "$journal_override" =~ $JOURNAL_LINE ]]; then
+    reason="${journal_override#*reason=\"}"
+    override="${journal_override%% *}, index ${BASH_REMATCH[3]}: ${reason%\"}"
+  fi
+  printf '   install journal: last good install %s; last override %s\n' "$good" "$override"
+}
+# install-journal: end
+
 # ---- status: the same checks, against the stack already installed -------------
 # `./install.sh status` changes nothing. It reads .env and the running stack, runs
 # stack_checks (the list section 8 runs, not a copy of it), and prints one line per
@@ -1131,6 +1302,7 @@ status_main() {
   fail=0
   unmeasured=0
   stack_checks
+  journal_status
   EXPLAINED=1
   if [ "$fail" -eq 0 ] && [ "$unmeasured" -eq 0 ]; then printf '\nevery check passed\n'; exit 0; fi
   # What was found outranks what was not: a failed check beside an empty reading is still 1.
@@ -1149,6 +1321,8 @@ case "${ID:-}${ID_LIKE:-}" in
   *debian*|*ubuntu*) ;;
   *) die "this expects Debian or Ubuntu; found ${PRETTY_NAME:-unknown}." ;;
 esac
+# Before anything else that reads or asks, because this one refuses the whole tree.
+rollback_floor_check
 
 # smtp-tls: begin
 # heraldyx 0.8.0 sends mail only over TLS: STARTTLS by default, implicit TLS on port 465 on its own, and
@@ -3205,11 +3379,22 @@ note "docker $(docker --version | awk '{print $3}' | tr -d ,), compose present"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
 mkdir -p "$STACK_DIR"
 if [ -n "$HERE" ] && [ -f "$HERE/compose.yaml" ]; then
-  [ "$HERE" = "$STACK_DIR" ] || cp -a "$HERE/." "$STACK_DIR/"
+  stack_version_check "$HERE/compose.yaml"
+  journal_begin "$HERE"
+  if [ "$HERE" != "$STACK_DIR" ]; then
+    # A tree copied from a box carries that box's journal, and cp would put its floor here.
+    cp -p "$JOURNAL" "$JOURNAL.kept" || die "could not keep $JOURNAL through the copy"
+    cp -a "$HERE/." "$STACK_DIR/"
+    mv -f "$JOURNAL.kept" "$JOURNAL" || die "could not put $JOURNAL back after the copy"
+  fi
 else
   say "fetching the stack definition"
+  # To a name of its own: the file on the box stays what it was until it is known to be this tree's.
   curl -fsSL "${REPO_SINGLE_RAW:-https://raw.githubusercontent.com/TAIPANBOX/stack-single/main}/compose.yaml" \
-    -o "$STACK_DIR/compose.yaml" || die "could not fetch compose.yaml"
+    -o "$STACK_DIR/compose.yaml.fetched" || die "could not fetch compose.yaml"
+  stack_version_check "$STACK_DIR/compose.yaml.fetched"
+  journal_begin ""
+  mv -f "$STACK_DIR/compose.yaml.fetched" "$STACK_DIR/compose.yaml" || die "could not put compose.yaml in place"
 fi
 cd "$STACK_DIR"
 
@@ -5287,6 +5472,7 @@ EOF
 # The banner above already said what failed, so the trap must not narrate a
 # non-zero exit here as if the script had crashed: it ran to the end.
 EXPLAINED=1
+journal_end
 # C here is `echo`, which does not fail, so the branch is a plain ternary.
 # shellcheck disable=SC2015
 exit "$([ "$fail" -eq 0 ] && echo 0 || echo 1)"

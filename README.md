@@ -114,6 +114,71 @@ pins by accident. Its word is Docker's on this box and the pins are a file on th
 so a person with root can change either side. The bytes on disk are not re-hashed, and
 what it reports is true of the moment it ran.
 
+`status` also prints one line from the install journal: the last good install, its index,
+and the last override (see the next section).
+
+## Going backwards by mistake: the install journal and the rollback index
+
+Each run of `./install.sh` writes to a journal on the box, `$STACK_DIR/.install-history`
+(root's, mode 0640, only ever appended to): when it ran, the tree's version and its tag or
+commit, the tree's rollback index, and how the run ended.
+
+```
+2026-11-09T06:10:03Z attempt version=1.7.0 index=1 commit=v1.7.0 compose=2.26.1-4 docker=26.1.5
+2026-11-09T06:18:44Z good version=1.7.0 index=1 commit=v1.7.0
+2026-11-12T01:02:11Z rollback version=1.6.9 index=0 commit=v1.6.9 reason="gateway refused keys after 1.7.0"
+```
+
+The rollback index is a plain whole number in `install.sh`, `STACK_ROLLBACK_INDEX`. It is
+not the version. It goes up only when an older tree has become unsafe to run on a box that
+ran a newer one, and that release's notes then carry a `security:` or `irreversible:` line
+that names it. So most releases share an index, and an ordinary rollback to the release
+before, from a tree you kept on the box, goes through without a word.
+
+The floor of a box is the highest index of a run that ended with every check passed. A run
+with a failed check leaves the floor where it was, so a failed upgrade never makes going
+back harder. A box with no journal yet is treated as new: nothing is refused, and if it
+already has a `.env` the first line says the journal started there.
+
+A tree whose index is below the floor is refused in the preflight, before a package, a file
+or a container changes, and the refusal says what to do:
+
+```
+!! this tree is stack 1.6.9 (rollback index 0). This box has run index 1 since 1.7.0.
+   Going below it can run images with known defects, or data a newer release changed.
+   If you mean it:
+     ALLOW_ROLLBACK=1 ROLLBACK_REASON='why' ./install.sh
+   In a piped install the two go before bash, not before curl.
+   Nothing was changed.
+```
+
+The reason is required, goes in the journal, and is shown by `status`. The override moves no
+floor, so the next run of that tree needs a reason of its own. A journal with a line that
+cannot be read stops a run the same way, naming the line, because the line it cannot read
+may be the one that holds the floor.
+
+A piped install fetches `install.sh` and `compose.yaml` in two requests. The file carries the
+version the script carries, and a pair that differ is refused before the box's own file is
+replaced.
+
+**This is a guard against mistakes, not protection against an attacker.** It stops a stale
+clone, the wrong tag, an old path in a script. It stops nobody who means it, because the
+check lives inside the tree it checks and the tree is not signed: whoever hands a box an old
+tree hands it the old check too, and root on the box can edit the journal.
+
+A tree older than this change has no check at all. It runs on any box, whatever the floor
+says, and leaves no line in the journal.
+
+It also does not cover:
+
+- A `*_IMAGE` line in `.env`. It moves one service to any image, an older one included, and
+  the installer reads it as the operator's choice. `status` shows it as an override, and
+  `cosign verify` passes an old image too: an old signature stays good.
+- `docker compose up` run by hand, with any compose file. The installer takes no part, so
+  neither the floor nor the journal does. The drift check in `status` is what sees the result.
+- Restoring `$STACK_DIR` from a backup. The journal comes back as it was that day, and the
+  floor with it. Removing the file makes the box new again.
+
 ## This is not the sandbox
 
 [`stack-up`](https://github.com/TAIPANBOX/stack-up) is the local try: it binds

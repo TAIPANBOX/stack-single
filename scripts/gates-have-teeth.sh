@@ -3213,6 +3213,304 @@ run_case "status-reads-what-runs: compose.yaml has no services" fail \
 	"$(py 'edit("compose.yaml", "\nservices:\n", "\nservicez:\n")')" \
 	"measured NOTHING"
 
+run_case "status-is-read-only: status prints no line from the journal" fail \
+	'./scripts/status-is-read-only.sh' \
+	"$(py 'edit("install.sh", "  stack_checks\n  journal_status\n", "  stack_checks\n")')" \
+	"status printed no line from the install journal"
+
+# The install journal and the rollback index (scripts/rollback-floor.sh, CLAUDE.md invariant 68).
+# Each fault is a way of refusing what must pass, passing what must stop, or claiming more than it holds.
+run_case "rollback-floor: a tree below the floor passes" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("install.sh", "  elif [ -n \"$journal_floor\" ] && [ \"$STACK_ROLLBACK_INDEX\" -lt \"$journal_floor\" ]; then\n", "  elif false; then\n")')" \
+	"a tree below the floor is not refused"
+
+run_case "rollback-floor: the same index is refused" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("install.sh", "[ \"$STACK_ROLLBACK_INDEX\" -lt \"$journal_floor\" ]", "[ \"$STACK_ROLLBACK_INDEX\" -le \"$journal_floor\" ]")')" \
+	"a tree of the same index is refused"
+
+run_case "rollback-floor: the indices are compared as strings" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("install.sh", "[ \"$STACK_ROLLBACK_INDEX\" -lt \"$journal_floor\" ]", "[[ \"$STACK_ROLLBACK_INDEX\" < \"$journal_floor\" ]]")')" \
+	"10 is above 9 and was refused"
+
+run_case "rollback-floor: the floor is taken as a string" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("install.sh", "[ \"${BASH_REMATCH[3]}\" -gt \"$journal_floor\" ]", "[[ \"${BASH_REMATCH[3]}\" > \"$journal_floor\" ]]")')" \
+	"the floor stayed 9 after a good run at 10"
+
+run_case "rollback-floor: the floor moves from an attempt" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("install.sh", "      good)\n        journal_good=", "      good|attempt)\n        journal_good=")')" \
+	"an attempt that never ended well moved the floor"
+
+run_case "rollback-floor: a failed run writes a good line" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("install.sh", "  if [ \"$fail\" -eq 0 ]; then\n    line=\"$(journal_entry good)\"", "  if true; then\n    line=\"$(journal_entry good)\"")')" \
+	"a run with a failed check recorded a good end"
+
+run_case "rollback-floor: a good run writes no good line" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("install.sh", "    line=\"$(journal_entry good)\"\n", "    line=\"$(journal_entry attempt)\"\n")')" \
+	"a run with no failed check does not record a good end"
+
+run_case "rollback-floor: the end of the run is written before the checks" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("install.sh", "EXPLAINED=1\njournal_end\n", "EXPLAINED=1\n")
+edit("install.sh", "stack_checks                                 # the checks", "journal_end\nstack_checks                                 # the checks")')" \
+	"the journal's last line is written before the checks ran"
+
+run_case "rollback-floor: the override needs no reason" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("install.sh", "  rollback_reason_ok \"${ROLLBACK_REASON:-}\" \\\n", "  true \\\n")')" \
+	"a blank reason passed"
+
+run_case "rollback-floor: the reason is not kept" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("install.sh", "\"$(journal_entry rollback) reason=\\\"$rollback_reason\\\"\"", "\"$(journal_entry rollback)\"")')" \
+	"the reason is not in the journal"
+
+run_case "rollback-floor: a flag other than 1 opens the way" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("install.sh", "  if [ \"${ALLOW_ROLLBACK:-}\" != 1 ]; then\n    die \"$why", "  if [ -z \"${ALLOW_ROLLBACK:-}\" ]; then\n    die \"$why")')" \
+	"ALLOW_ROLLBACK=yes turned the refusal off"
+
+run_case "rollback-floor: a reason can forge a run" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("install.sh", "    *[[:cntrl:]]*|", "    ")')" \
+	"a reason holding a new line that forges a run went into the journal"
+
+run_case "rollback-floor: the refusal drops the way through" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("install.sh", "\n     ALLOW_ROLLBACK=1 ROLLBACK_REASON=", "\n     see the README, and ROLLBACK=")')" \
+	"the refusal does not give the exact way through"
+
+run_case "rollback-floor: the journal is written before the refusal" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("install.sh", "  journal_read\n  if [ ! -e \"$JOURNAL\" ] && [ -f", "  journal_read\n  [ ! -e \"$JOURNAL\" ] || journal_append \"$(date -u +%Y-%m-%dT%H:%M:%SZ) attempt version=1 index=0 commit=x\"\n  if [ ! -e \"$JOURNAL\" ] && [ -f")')" \
+	"the journal changed before the refusal"
+
+run_case "rollback-floor: the check stands after the package step" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("install.sh", "\nrollback_floor_check\n\n# smtp-tls: begin\n", "\n\n# smtp-tls: begin\n")
+edit("install.sh", "say \"installing docker and git\"\nexport DEBIAN_FRONTEND=noninteractive\n", "say \"installing docker and git\"\nexport DEBIAN_FRONTEND=noninteractive\napt-get update -qq\nrollback_floor_check\n")')" \
+	"the floor check comes after the first apt-get"
+
+run_case "rollback-floor: a box with no journal is refused" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("install.sh", "  [ -e \"$JOURNAL\" ] || return 0\n  if [ ! -f", "  [ -e \"$JOURNAL\" ] || { journal_bad=1; return 0; }\n  if [ ! -f")')" \
+	"a box with no journal is refused"
+
+run_case "rollback-floor: first seen is not written" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("install.sh", "  if [ \"$journal_first_seen\" = 1 ]; then\n", "  if false; then\n")')" \
+	"is not recorded as first seen"
+
+run_case "rollback-floor: a line that cannot be read is skipped" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("install.sh", "      [ -n \"$journal_bad\" ] || journal_bad=\"$n\"\n      continue\n", "      continue\n")')" \
+	"a line that cannot be read was skipped"
+
+run_case "rollback-floor: the version of the compose file is not compared" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("install.sh", "  if [ \"$v\" != \"$STACK_VERSION\" ]; then\n", "  if false; then\n")')" \
+	"a piped install whose compose file is another version: it was not refused"
+
+run_case "rollback-floor: the fetch writes over the box's file" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("install.sh", "    -o \"$STACK_DIR/compose.yaml.fetched\" || die", "    -o \"$STACK_DIR/compose.yaml\" || die")')" \
+	"the box's compose.yaml was replaced before the refusal"
+
+run_case "rollback-floor: the tree's journal replaces the box's" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("install.sh", "    mv -f \"$JOURNAL.kept\" \"$JOURNAL\" || die \"could not put $JOURNAL back after the copy\"\n", "    rm -f \"$JOURNAL.kept\"\n")')" \
+	"the tree's journal replaced the box's"
+
+run_case "rollback-floor: status drops the index" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("install.sh", ", commit ${BASH_REMATCH[4]}, index ${BASH_REMATCH[3]} (floor $journal_floor)\"", ", commit ${BASH_REMATCH[4]}\"")')" \
+	"status does not name the index of the last good install"
+
+run_case "rollback-floor: status drops the override" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("install.sh", "    override=\"${journal_override%% *}, index", "    override=\"none, index")')" \
+	"status does not name the last override"
+
+run_case "rollback-floor: status writes the journal" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("install.sh", "  local good=\"none recorded\" override=\"none\" reason\n  journal_read\n", "  local good=\"none recorded\" override=\"none\" reason\n  journal_read\n  [ ! -e \"$JOURNAL\" ] || [ -n \"$journal_bad\" ] || journal_append \"$(date -u +%Y-%m-%dT%H:%M:%SZ) attempt version=1 index=0 commit=x\"\n")')" \
+	"status wrote to the journal"
+
+run_case "rollback-floor: the block compares versions" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("install.sh", "  journal_first_seen=0\n", "  journal_first_seen=0\n  printf \"%s\\n\" 1.9.9 1.10.0 | sort -V >/dev/null\n")')" \
+	"the block compares versions"
+
+run_case "rollback-floor: the index comes from the environment" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'import re
+s = open("install.sh").read()
+n = re.subn(r"^STACK_ROLLBACK_INDEX=(\d+)$", lambda m: "STACK_ROLLBACK_INDEX=\"${STACK_ROLLBACK_INDEX:-" + m.group(1) + "}\"", s, flags=re.M)
+assert n[1] == 1
+open("install.sh", "w").write(n[0])')" \
+	"measured NOTHING"
+
+run_case "rollback-floor: the index is raised with no release note" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'import re
+s = open("install.sh").read()
+n = re.subn(r"^STACK_ROLLBACK_INDEX=(\d+)$", "STACK_ROLLBACK_INDEX=77", s, flags=re.M)
+assert n[1] == 1
+open("install.sh", "w").write(n[0])')" \
+	"no release note has a"
+
+run_case "rollback-floor: the index is raised with its release note" pass \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'import re
+s = open("install.sh").read()
+n = re.subn(r"^STACK_ROLLBACK_INDEX=(\d+)$", "STACK_ROLLBACK_INDEX=77", s, flags=re.M)
+assert n[1] == 1
+open("install.sh", "w").write(n[0])
+open("docs/releases/v99.0.0.md", "w").write("security: an older tree mishandles a key, rollback index 77\n")')"
+
+run_case "rollback-floor: the README says the stack cannot be rolled back" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("README.md", "## Going backwards by mistake: the install journal and the rollback index\n", "## Going backwards by mistake: the install journal and the rollback index\n\nThis stack cannot be rolled back.\n")')" \
+	"the README claims the stack cannot be rolled back"
+
+run_case "rollback-floor: the README stops saying it guards against mistakes" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("README.md", "**This is a guard against mistakes, not protection against an attacker.**", "**This is not protection against an attacker.**")')" \
+	"it does not say this is a guard against mistakes"
+
+run_case "rollback-floor: the README stops naming the attacker" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("README.md", "**This is a guard against mistakes, not protection against an attacker.**", "**This is a guard against mistakes.**")')" \
+	"it does not say this is not protection against an attacker"
+
+run_case "rollback-floor: the README stops saying the tree is not signed" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("README.md", "and the tree is not signed: whoever", "and whoever")')" \
+	"it does not say the tree is not signed"
+
+run_case "rollback-floor: the README stops saying where the check lives" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("README.md", "the\ncheck lives inside the tree it checks and", "the\ncheck is in the script and")')" \
+	"it does not say the check lives inside the tree it checks"
+
+run_case "rollback-floor: the README stops saying an older tree has no check" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("README.md", "A tree older than this change has no check at all.", "An older tree behaves differently.")')" \
+	"it does not say an older tree has no check at all"
+
+run_case "rollback-floor: the README drops the image overrides" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("README.md", "- A `*_IMAGE` line in `.env`. It moves", "- An image line. It moves")')" \
+	"it does not name .env image overrides as outside this"
+
+run_case "rollback-floor: the README drops a direct compose up" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("README.md", "- `docker compose up` run by hand, with any compose file.", "- Compose run by hand, with any compose file.")')" \
+	"it does not name a direct docker compose up as outside this"
+
+run_case "rollback-floor: a comment in the block is reworded" pass \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("install.sh", "# The last thing a run does. Only a run", "# Last of all. Only a run")')"
+
+run_case "rollback-floor: a sentence of the refusal is reworded" pass \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("install.sh", "Going below it can run images with known defects,", "Going below it can run images with defects,")')"
+
+run_case "rollback-floor: the block is gone" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("install.sh", "# install-journal: begin\n", "# install journal\n")')" \
+	"measured NOTHING"
+
+run_case "rollback-floor: the function is gone" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("install.sh", "rollback_floor_check() {\n", "rollback_floor_read() {\n")')" \
+	"measured NOTHING"
+
+run_case "rollback-floor: section 1 calls nothing" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("install.sh", "  journal_begin \"$HERE\"\n", "")
+edit("install.sh", "  journal_begin \"\"\n", "")')" \
+	"measured NOTHING"
+
+run_case "rollback-floor: the README section is gone" fail \
+	'./scripts/rollback-floor.sh' \
+	"$(py 'edit("README.md", "## Going backwards by mistake:", "## Rollback:")')" \
+	"measured against NOTHING"
+
+# scripts/version-is-one-number.sh. The numbers are read, not written here, so a release moves nothing below.
+run_case "version-is-one-number: compose.yaml says another number" fail \
+	'./scripts/version-is-one-number.sh' \
+	"$(py 'import re
+s = open("compose.yaml").read()
+n = re.subn(r"^x-stack-version: .*$", "x-stack-version: \"0.0.1\"", s, flags=re.M)
+assert n[1] == 1
+open("compose.yaml", "w").write(n[0])')" \
+	"and compose.yaml says 0.0.1"
+
+run_case "version-is-one-number: install.sh says another number" fail \
+	'./scripts/version-is-one-number.sh' \
+	"$(py 'import re
+s = open("install.sh").read()
+n = re.subn(r"^STACK_VERSION=.*$", "STACK_VERSION=\"0.0.1\"", s, flags=re.M)
+assert n[1] == 1
+open("install.sh", "w").write(n[0])')" \
+	"install.sh says 0.0.1"
+
+run_case "version-is-one-number: install.sh says it twice" fail \
+	'./scripts/version-is-one-number.sh' \
+	"$(py 'edit("install.sh", "\nSTACK_ROLLBACK_INDEX=", "\nSTACK_VERSION=\"0.0.1\"\nSTACK_ROLLBACK_INDEX=")')" \
+	"install.sh sets STACK_VERSION 2 times"
+
+run_case "version-is-one-number: release notes arrive with no bump" fail \
+	'./scripts/version-is-one-number.sh' \
+	"$(py 'open("docs/releases/v99.0.0.md", "w").write("# the next release\n")')" \
+	"the newest notes are docs/releases/v99.0.0.md"
+
+run_case "version-is-one-number: the newest notes are found as numbers" fail \
+	'./scripts/version-is-one-number.sh' \
+	"$(py 'open("docs/releases/v99.9.0.md", "w").write("# older\n")
+open("docs/releases/v99.10.0.md", "w").write("# newer\n")')" \
+	"the newest notes are docs/releases/v99.10.0.md"
+
+run_case "version-is-one-number: a tag of another number" fail_env \
+	'GITHUB_REF_TYPE=tag GITHUB_REF_NAME=v0.0.1 ./scripts/version-is-one-number.sh' \
+	"$(py 'pass')" \
+	"this is tag v0.0.1"
+
+run_case "version-is-one-number: a comment beside the version is reworded" pass \
+	'./scripts/version-is-one-number.sh' \
+	"$(py 'edit("compose.yaml", "# The release this file belongs to,", "# The release of this file,")')"
+
+run_case "version-is-one-number: install.sh has no version" fail \
+	'./scripts/version-is-one-number.sh' \
+	"$(py 'import re
+s = open("install.sh").read()
+n = re.subn(r"^STACK_VERSION=.*$", "", s, flags=re.M)
+assert n[1] == 1
+open("install.sh", "w").write(n[0])')" \
+	"measured NOTHING"
+
+run_case "version-is-one-number: compose.yaml has no version" fail \
+	'./scripts/version-is-one-number.sh' \
+	"$(py 'import re
+s = open("compose.yaml").read()
+n = re.subn(r"^x-stack-version: .*$", "", s, flags=re.M)
+assert n[1] == 1
+open("compose.yaml", "w").write(n[0])')" \
+	"measured NOTHING"
+
+run_case "version-is-one-number: there are no release notes" fail \
+	'./scripts/version-is-one-number.sh' \
+	"$(py 'import shutil
+shutil.rmtree("docs/releases")')" \
+	"measured NOTHING"
+
 # health-checks: Docker watches every service that exposes a health path, and no
 # distroless one (scripts/health-checks-are-declared.sh).
 run_case "health-checks-are-declared: the console has no healthcheck" fail \
