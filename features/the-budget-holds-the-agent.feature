@@ -42,6 +42,12 @@ Feature: An agent whose error budget is spent waits for a person
     And SLO_HOLD_TARGET narrows the rule to one agent glob, or none measures and holds nobody
     # -> gates-have-teeth.sh "slo-signal-is-wired: the flag off leaves wardryx reading"
 
+  Scenario: A second run leaves the policy where it is
+    Given a box with the risk hold and the budget hold in policy.yaml
+    When the installer runs again with nothing changed
+    Then neither block moves and wardryx is not restarted
+    # -> gates-have-teeth.sh "slo-signal-is-wired: the risk block moves on every run"
+
   Scenario: The quality routines can start
     Given a routine that runs on the console's image
     Then it replaces the image's entrypoint

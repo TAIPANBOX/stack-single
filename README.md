@@ -1723,6 +1723,9 @@ not decide what a proven chain is allowed to do; that is `wardryx`'s policy,
 unchanged by this. It does not run the hand-off (delegate-of-a-delegate)
 path or Cross App Access; both exist in vouchryx and neither is wired here.
 
+
+**A restart spends one of four keys.** vouchryx keeps its working key in memory, so each restart asks custody to certify a new one. Custody keeps at most four certified keys of that name live, each for up to 72 hours and ten minutes. A restart past the fourth inside that time leaves vouchryx with no key until the oldest ages out: the installer fails `vouchryx holds a certified key`, and a token request gets `no_certified_signing_key`. It recovers alone, because vouchryx asks again every five minutes. Callers on a static key are not touched. A release that changes `init-volumes` restarts vouchryx too, because compose recreates what depends on it.
+
 ## The FinOps console (CostCrew), optional
 
 Off, and nothing here turns it on for you. `install.sh` does not know it exists:
