@@ -779,8 +779,13 @@ PROFILES_OPERATOR="egress egress-browser finops routines manual crew"
 #   Never .Config.Image: that is the name the container was created with, the text compose
 #   wrote down, and it matches whatever the bytes are.
 #
+# A container on the right image can still have lost what the file gives it, so what runs is
+# held to the container baseline too (invariant 69): read_only, cap_drop, no-new-privileges and
+# pids_limit, as compose.yaml says them and NOT as compose.override.yaml does, because an
+# override that turns one off would otherwise agree with itself.
+#
 # Only reads, and only of this box: docker ps, inspect, image inspect, network ls, network
-# inspect, and one `compose config`. No registry and no cosign: status promises to read
+# inspect, and `compose config`, a second time without the override when there is one. No registry and no cosign: status promises to read
 # and nothing else, and a signature needs the network. The pins are read once, for every
 # profile, and not through compose_image: that function is defined below the line where
 # status ends, costs one compose run per service, and swallows a failed read, which here
@@ -923,6 +928,21 @@ drift_judge() { # SERVICE PIN IMAGE_ID STATE RESTARTS
   esac
   drift_tally "$label" "$svc" "$state" "$detail"
 }
+# One FAIL line, and only for what the file gives this service and the container does not have.
+drift_baseline() { # SERVICE READONLY PIDS CAPDROP SECOPT, as Docker reports them
+  local row ro pids cap nnp missing=""
+  row="$(grep -- "^$1|" <<<"$drift_want" || true)"
+  IFS='|' read -r _ ro pids cap nnp <<<"$row"
+  [ "$ro" != true ] || [ "$2" = true ] || missing="$missing read_only"
+  [ -z "$pids" ] || [ "$3" = "$pids" ] || missing="$missing pids_limit"
+  if [ "$cap" = ALL ]; then
+    case "$4" in *ALL*) ;; *) missing="$missing cap_drop" ;; esac
+  fi
+  if [ "$nnp" = true ]; then
+    case "$5" in *no-new-privileges:true*) ;; *) missing="$missing no-new-privileges" ;; esac
+  fi
+  [ -z "$missing" ] || drift_tally FAIL "$1" running "compose.yaml gives it${missing}, and the container does not have it"
+}
 drift_absent() { # SERVICE PROFILES RESTART: compose declares it and Docker has no container for it
   case "$2" in
     "")
@@ -952,9 +972,10 @@ drift_stopped() { # SERVICE PIN PROFILES RESTART IMAGE_ID STATE CODE RESTARTS: n
   fi
 }
 drift_measure() {
-  local cfg pins project ids rows mine nets net out member strangers="" live
-  local svc pin profiles restart id oneoff name image state code restarts
+  local cfg file_cfg pins project ids rows mine nets net out member strangers="" live
+  local svc pin profiles restart id oneoff name image state code restarts ro limit capdrop secopt
   drift_raw=""
+  drift_want=""
   if ! cfg="$("${COMPOSE[@]}" --profile '*' config 2>/dev/null)"; then
     drift_cannot "compose could not resolve compose.yaml, so there is no pin to compare with"
     return 0
@@ -976,7 +997,29 @@ drift_measure() {
     drift_cannot "compose gave no services or no project name, so there is no pin to compare with"
     return 0
   fi
-  [ ! -f compose.override.yaml ] || drift_tally note compose.override.yaml '' "on this box, and what it sets counts as the pin here"
+  file_cfg="$cfg"
+  if [ -f compose.override.yaml ]; then
+    drift_tally note compose.override.yaml '' "on this box, and what it sets counts as the pin here"
+    if ! file_cfg="$("${COMPOSE[@]}" -f compose.yaml --profile '*' config 2>/dev/null)"; then
+      drift_cannot "compose could not resolve compose.yaml without its override"
+      return 0
+    fi
+  fi
+  # What the file gives each service: "service|read_only|pids_limit|ALL|true".
+  drift_want="$(awk '
+    function emit() { if (svc != "") print svc "|" ro "|" pids "|" cap "|" nnp; svc = ""; ro = ""; pids = ""; cap = ""; nnp = "" }
+    /^services:/ { on = 1; next }
+    /^[^ ]/ { if (on) emit(); on = 0 }
+    !on { next }
+    /^  [^ ]/ { emit(); svc = $1; sub(/:$/, "", svc); list = ""; next }
+    /^    [^ ]/ { list = "" }
+    /^    read_only: / { ro = $2 }
+    /^    pids_limit: / { pids = $2 }
+    /^    cap_drop:/ { list = "cap" }
+    /^    security_opt:/ { list = "sec" }
+    /^      - ALL$/ { if (list == "cap") cap = "ALL" }
+    /^      - no-new-privileges:true$/ { if (list == "sec") nnp = "true" }
+    END { emit() }' <<<"$file_cfg")"
   # The file as written: "service|variable|default". A literal image has no variable.
   drift_raw="$(awk '
     /^services:/ { on = 1; next }
@@ -1000,7 +1043,7 @@ drift_measure() {
     return 0
   fi
   # shellcheck disable=SC2086  # one id per line, hex, and each has to be its own argument
-  if ! rows="$(docker inspect --format '{{.Id}}|{{index .Config.Labels "com.docker.compose.service"}}|{{index .Config.Labels "com.docker.compose.oneoff"}}|{{.Name}}|{{.Image}}|{{.State.Status}}|{{.State.ExitCode}}|{{.RestartCount}}' $ids 2>/dev/null)"; then
+  if ! rows="$(docker inspect --format '{{.Id}}|{{index .Config.Labels "com.docker.compose.service"}}|{{index .Config.Labels "com.docker.compose.oneoff"}}|{{.Name}}|{{.Image}}|{{.State.Status}}|{{.State.ExitCode}}|{{.RestartCount}}|{{.HostConfig.ReadonlyRootfs}}|{{.HostConfig.PidsLimit}}|{{.HostConfig.CapDrop}}|{{.HostConfig.SecurityOpt}}' $ids 2>/dev/null)"; then
     drift_cannot "Docker would not describe the containers of project $project"
     return 0
   fi
@@ -1017,12 +1060,15 @@ drift_measure() {
     # An interrupted recreate can leave a stopped copy beside the one that runs. The one that
     # runs is what the service is judged by, and the copy is named so nobody mistakes it.
     live=""
-    while IFS='|' read -r _ _ _ _ _ state _ _; do
+    while IFS='|' read -r _ _ _ _ _ state _ _ _ _ _ _; do
       case "$state" in running|restarting|paused) live=1 ;; esac
     done <<<"$mine"
-    while IFS='|' read -r _ _ _ name image state code restarts; do
+    while IFS='|' read -r _ _ _ name image state code restarts ro limit capdrop secopt; do
       case "$state" in
-        running|restarting|paused) drift_judge "$svc" "$pin" "$image" "$state" "$restarts" ;;
+        running|restarting|paused)
+          drift_judge "$svc" "$pin" "$image" "$state" "$restarts"
+          drift_baseline "$svc" "$ro" "$limit" "$capdrop" "$secopt"
+          ;;
         *)
           if [ -n "$live" ]; then
             [ "$state" != exited ] || state="exited $code"
@@ -1035,7 +1081,7 @@ drift_measure() {
     done <<<"$mine"
   done <<<"$pins"
   # This project's containers compose.yaml does not declare, and the runs a person started by hand.
-  while IFS='|' read -r _ svc oneoff name _ state _ _; do
+  while IFS='|' read -r _ svc oneoff name _ state _ _ _ _ _ _; do
     if [ "$oneoff" = True ]; then
       drift_tally note "$svc" "$state" "a one-off run, not compared: ${name#/}"
     elif ! grep -q -- "^$svc|" <<<"$pins"; then

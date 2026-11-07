@@ -136,6 +136,11 @@ for line in open(log).read().splitlines():
         chowns.append((parts[0], parts[2:]))
 
 SHARED = {"events", "checkpoints"}
+# A named volume takes the owner of the image's directory on its first use, and postgres's data
+# directory is uid 70 in the image; a volume from before invariant 69 was chowned to 70 by the image's
+# entrypoint. So nothing has to give pgdata an owner, and init-volumes cannot be asked to: it stays
+# untouched until G3.11. Measured on Compose 2.26.1, 2026-11-07: both volumes opened as 70:70.
+IMAGE_OWNED = {"pgdata"}
 checked, problems, excluded = 0, [], set()
 for name, s in sorted(services.items()):
     if s["user"] is None or s["user"] == 0:
@@ -143,7 +148,7 @@ for name, s in sorted(services.items()):
     uid = s["user"]
     for rw in s["rw"]:
         vol = rw["volume"]
-        if vol in SHARED:
+        if vol in SHARED or vol in IMAGE_OWNED:
             excluded.add(vol)
             continue
         # The one-shot that mounts this volume, and the path it mounts it at there.

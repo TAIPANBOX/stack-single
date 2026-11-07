@@ -99,6 +99,8 @@ jobs:
         run: ./scripts/status-is-read-only.sh
       - name: the drift check says what Docker runs against the pins, and only reads (invariant 67)
         run: ./scripts/status-reads-what-runs.sh
+      - name: every container carries the baseline, or names why not (invariant 69)
+        run: ./scripts/containers-carry-the-baseline.sh
       - name: a tree below the box's rollback index is refused before anything changes (invariant 68)
         run: ./scripts/rollback-floor.sh
       - name: the tree says one version everywhere (invariant 68)

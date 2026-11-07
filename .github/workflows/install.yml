@@ -619,3 +619,76 @@ jobs:
         run: |
           cd /opt/agent-stack 2>/dev/null && sudo docker compose ps -a || true
           cd /opt/agent-stack 2>/dev/null && sudo docker compose logs --tail=40 || true
+
+  # Upgrading from the last tag on the Compose that matters. Below 2.35 a recreated service takes
+  # everything under it, and a new start of vouchryx spends one of four certified keys. The runner's
+  # own Compose (2.38) has no such cascade, so no other leg here can ever show it. So this one pins
+  # 2.26.1, what Debian 13 ships, installs the previous tag, upgrades to this tree, and counts.
+  upgrade:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Compose 2.26.1, what Debian 13 ships
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/compose" https://github.com/docker/compose/releases/download/v2.26.1/docker-compose-linux-x86_64
+          echo "2f61856d1b8c9de29ffdaedaa1c6d0a5fc5c79da45068f1f4310feed8d3a3f61  $RUNNER_TEMP/compose" | sha256sum -c -
+          plugin="$(docker info --format '{{range .ClientInfo.Plugins}}{{if eq .Name "compose"}}{{.Path}}{{end}}{{end}}')"
+          [ -n "$plugin" ] || { echo "::error::docker reports no compose plugin to replace"; exit 1; }
+          sudo install -m 0755 "$RUNNER_TEMP/compose" "$plugin"
+          v="$(sudo docker compose version)"
+          echo "$v"
+          grep -q 'v2\.26\.1' <<<"$v" || { echo "::error::Compose is not 2.26.1, so this leg would show nothing"; exit 1; }
+
+      - name: install the previous tag
+        run: |
+          prev="$(git tag --merged HEAD --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed -n 1p)"
+          [ -n "$prev" ] || { echo "::error::no previous tag"; exit 1; }
+          echo "installing $prev"
+          mkdir -p "$RUNNER_TEMP/prev"
+          git archive "$prev" | tar -x -C "$RUNNER_TEMP/prev"
+          cd "$RUNNER_TEMP/prev"
+          sudo env STACK_DIR=/opt/agent-stack ./install.sh 2>&1 | tee "$RUNNER_TEMP/prev.log"
+          grep -q "every check passed" "$RUNNER_TEMP/prev.log" || { echo "::error::the previous tag did not install"; exit 1; }
+
+      - name: the certified keys before
+        run: |
+          sudo docker run --rm --network agent-stack_core busybox:1.36 wget -qO- http://keyryx:4340/v1/keys >"$RUNNER_TEMP/keys-before.json"
+          n="$(python3 -c 'import json,sys; print(sum(k["name"].startswith("vouchryx") for k in json.load(open(sys.argv[1]))["keys"]))' "$RUNNER_TEMP/keys-before.json")"
+          echo "vouchryx keys: $n"
+          [ "$n" -ge 1 ] || { echo "::error::custody holds no vouchryx key, so the count below would measure nothing"; exit 1; }
+          echo "KEYS_BEFORE=$n" >>"$GITHUB_ENV"
+
+      - name: upgrade to this tree, and count what was recreated
+        run: |
+          sudo env STACK_DIR=/opt/agent-stack ./install.sh 2>&1 | tee "$RUNNER_TEMP/upgrade.log"
+          grep -q "every check passed" "$RUNNER_TEMP/upgrade.log" || { echo "::error::the upgrade did not pass every check"; exit 1; }
+          seen="$(grep -cE 'Container agent-stack-[a-z0-9-]+-1  (Recreate|Running|Started|Created)' "$RUNNER_TEMP/upgrade.log" || true)"
+          [ "$seen" -gt 0 ] || { echo "::error::no line of compose's own in the log, so a count of nothing would mean nothing"; exit 1; }
+          grep -E 'Container agent-stack-[a-z0-9-]+-1  Recreate$' "$RUNNER_TEMP/upgrade.log" | sort -u | tee "$RUNNER_TEMP/recreated.txt" || true
+          echo "recreated: $(grep -c . "$RUNNER_TEMP/recreated.txt" || true)"
+          if grep -E 'agent-stack-(init-volumes|keyryx|vouchryx)-1  Recreate$' "$RUNNER_TEMP/recreated.txt"; then
+            echo "::error::the upgrade recreated what vouchryx hangs on, and a new start spends a certified key"; exit 1
+          fi
+
+      - name: the certified keys after, and a second run recreates nothing
+        run: |
+          sudo docker run --rm --network agent-stack_core busybox:1.36 wget -qO- http://keyryx:4340/v1/keys >"$RUNNER_TEMP/keys-after.json"
+          n="$(python3 -c 'import json,sys; print(sum(k["name"].startswith("vouchryx") for k in json.load(open(sys.argv[1]))["keys"]))' "$RUNNER_TEMP/keys-after.json")"
+          echo "vouchryx keys: $KEYS_BEFORE before, $n after"
+          [ "$n" = "$KEYS_BEFORE" ] || { echo "::error::the upgrade spent a certified key"; exit 1; }
+          sudo env STACK_DIR=/opt/agent-stack ./install.sh 2>&1 | tee "$RUNNER_TEMP/again.log"
+          grep -q "every check passed" "$RUNNER_TEMP/again.log" || { echo "::error::the second run did not pass every check"; exit 1; }
+          again="$(grep -cE 'Container agent-stack-[a-z0-9-]+-1  Recreate$' "$RUNNER_TEMP/again.log" || true)"
+          echo "recreated by the second run: $again"
+          [ "$again" = 0 ] || { echo "::error::a second run recreated something"; exit 1; }
+          sudo env STACK_DIR=/opt/agent-stack ./install.sh status
+
+      - name: state on failure
+        if: failure()
+        run: |
+          cd /opt/agent-stack 2>/dev/null && sudo docker compose ps -a || true
+          cd /opt/agent-stack 2>/dev/null && sudo docker compose logs --tail=40 || true

@@ -1737,6 +1737,77 @@ To move a pin, change the tag and its digest together in `compose.yaml` and in
 `components.json`, and in the one place `install.sh` names the same image.
 `scripts/images-are-digest-pinned.sh` refuses a pair that disagrees.
 
+## Every container starts with the least it needs
+
+Every service in `compose.yaml` runs with the same baseline, unless a named line says why not:
+
+- `read_only: true`: nothing writes to the image. A service writes to its volumes, and to a
+  sized `tmpfs` where it needs a temp directory.
+- `cap_drop: [ALL]`: no Linux capability, and any that is added back is named.
+- `no-new-privileges:true`: nothing it runs can gain one through setuid or a file capability.
+- `pids_limit`: a number per service, well above what it was measured to use, there to stop
+  a fork bomb and not to hold a service under a ceiling.
+- `ulimits: core: 0`: no core dump with a key in it.
+- a user that is not root.
+
+There is no default memory limit. One number for every service is an out-of-memory kill
+waiting on a request path, so only the browser, whose size comes from the pages it is
+handed, has one (2 GiB, with 512 MiB of `/dev/shm` and `init: true`, the values stack-k8s
+measured). Its `init: true` is not optional: a zombie counts against `pids_limit`, and its
+PID 1 reaps nothing.
+
+`read_only` covers the image and not what an image declares as a `VOLUME`: Docker gives each
+of those an anonymous volume, which stays writable and survives a recreate. The tokenfuse
+images have one at `/data`, and wardryx, idryx, heraldyx and the error-budget routine one at
+`/var/lib/stack`.
+
+### Reading a named exception
+
+What a service does not take is a line in `hardening-exceptions.json`, and
+`scripts/containers-carry-the-baseline.sh` fails on any service that has neither the baseline
+nor that line:
+
+```json
+{"service": "wg", "key": "cap_add", "value": ["NET_ADMIN", "CHOWN", "FSETID"],
+ "why": "the interface; chgrp and socat's group=; chmod 2770 keeps setgid only with FSETID, and loses it with no error",
+ "until": "permanent"}
+```
+
+- `key` is what it does not take: `read_only`, `cap_drop`, `no_new_privileges`, `pids`, `core`,
+  `user`, `cap_add`, `seccomp`, or `baseline` for all of the first five.
+- `value` is exactly what it has instead. A `cap_add` in `compose.yaml` wider than the line, or
+  narrower, fails the gate.
+- `until` is `permanent`, or the name of what closes it.
+- An exception that excuses nothing fails too, so whoever fixes a service takes its line out.
+
+Three services stay as they were, `init-volumes`, `keyryx` and `vouchryx`, each named with
+`until: G3.11`. Changing one of them on a Compose below 2.35 starts vouchryx again, and a new
+start spends a certified key (see "A restart spends one of four keys"). They change once, in a
+release of their own, after that is fixed.
+
+The file is not the whole story, so the drift check in `status` holds each running container
+to what `compose.yaml` gives it, leaving `compose.override.yaml` out of that reading: an override
+that turns `read_only` off shows as a `FAIL` line.
+
+An upgrade to the release that brings this recreates each service that took the baseline,
+once, and a second run recreates nothing. On a Compose below 2.35 that takes what sits below
+each of them too, and none of that reaches `keyryx` or `vouchryx`. Your own
+`compose.override.yaml` can hold a mount or a port this baseline does not know about: a
+service that writes outside its volumes now gets `Read-only file system`.
+
+AppArmor decides whether `scopyx-browser` can start Chrome's sandbox, and the two hosts this
+installer supports disagree, so `compose.yaml` sets nothing and each was measured with this
+whole baseline on:
+
+| Host | Docker's default profile | `apparmor=unconfined` |
+|---|---|---|
+| Ubuntu 24.04, Docker 28.0.4 | renders a page | `No usable sandbox`, because `kernel.apparmor_restrict_unprivileged_userns` is 1 |
+| Debian 13, Docker 26.1.5 | `credentials.cc`, `Permission denied`, with or without this baseline | renders a page |
+
+A browser that cannot start its sandbox answers `browse` with that error and fetches nothing.
+On a box like the second row, `apparmor=unconfined` for this one service in your
+`compose.override.yaml` is the line that works, and it is a wider door, so it is your decision.
+
 ## What the installer will not do quietly
 
 It verifies itself and tells you what it found. Three of its checks have to
@@ -1848,7 +1919,7 @@ unchanged by this. It does not run the hand-off (delegate-of-a-delegate)
 path or Cross App Access; both exist in vouchryx and neither is wired here.
 
 
-**A restart spends one of four keys.** vouchryx keeps its working key in memory, so each restart asks custody to certify a new one. Custody keeps at most four certified keys of that name live, each for up to 72 hours and ten minutes. A restart past the fourth inside that time leaves vouchryx with no key until the oldest ages out: the installer fails `vouchryx holds a certified key`, and a token request gets `no_certified_signing_key`. It recovers alone, because vouchryx asks again every five minutes. Callers on a static key are not touched. A release that changes `init-volumes` restarts vouchryx too, because compose recreates what depends on it.
+**A restart spends one of four keys.** vouchryx keeps its working key in memory, so each restart asks custody to certify a new one. Custody keeps at most four certified keys of that name live, each for up to 72 hours and ten minutes. A restart past the fourth inside that time leaves vouchryx with no key until the oldest ages out: the installer fails `vouchryx holds a certified key`, and a token request gets `no_certified_signing_key`. It recovers alone, because vouchryx asks again every five minutes. Callers on a static key are not touched. What restarts it besides its own recreate depends on your Compose: only `init-volumes` and `keyryx` sit above vouchryx, and on a Compose below 2.35 a change to either one restarts vouchryx too, because Compose takes everything below a recreated service with it in that `up`. On 2.35 and later it does not, because nothing in `compose.yaml` asks for `restart: true`. `docker compose version` tells you which box you have.
 
 ## The FinOps console (CostCrew), optional
 

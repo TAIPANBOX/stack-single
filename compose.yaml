@@ -31,6 +31,23 @@ x-stack-version: "1.6.4"
 x-restart: &restart
   restart: unless-stopped
 
+# The container baseline (CLAUDE.md invariant 69): no writes to the image, no capabilities,
+# no way to gain any, no core dump. Every service merges it except the three the certified
+# key hangs on, `init-volumes`, `keyryx` and `vouchryx`: on a Compose below 2.35 changing one
+# of them recreates vouchryx, and a new start spends a key. Each service sets its own
+# pids_limit beside it, because a limit is a measured number and not a default. There is no
+# memory limit here: one number for every service is an OOM kill waiting on a request path.
+# What a service does not take is a named line in hardening-exceptions.json, and
+# scripts/containers-carry-the-baseline.sh reads the resolved configuration, not this anchor.
+x-baseline: &baseline
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  # On one line: several gates find services as two-space keys alone on a line.
+  ulimits: { core: 0 }
+
 services:
   # ---- one-shot: make the shared volumes writable --------------------------
   # Kubernetes has `fsGroup` for exactly this and Compose has no equivalent, so
@@ -267,7 +284,14 @@ services:
   # Every console-block policy and the whole approval trail lives here, so a
   # restart must not forget what the fleet is forbidden to do.
   policy-db:
-    <<: *restart
+    <<: [*restart, *baseline]
+    pids_limit: 800
+    # Starts as postgres itself: the entrypoint's chown and su-exec need capabilities this
+    # container no longer has. A volume the image's entrypoint set up is already uid 70.
+    user: "70:70"
+    tmpfs:
+      - /var/run/postgresql:uid=70,gid=70,mode=2775,size=1m
+      - /tmp:size=16m
     image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     networks:
       - core
@@ -340,7 +364,8 @@ services:
         condition: service_completed_successfully
 
   keyryx-witness:
-    <<: *restart
+    <<: [*restart, *baseline]
+    pids_limit: 128
     image: ${KEYRYX_IMAGE:-ghcr.io/taipanbox/keyryx:v0.1.3@sha256:26d5d49cd4a67eb463f35895de96e628e2304183775bf031170e190c579c0147}
     user: "20100:10001"
     command:
@@ -384,7 +409,8 @@ services:
         condition: service_completed_successfully
 
   wardryx:
-    <<: *restart
+    <<: [*restart, *baseline]
+    pids_limit: 512
     image: ${WARDRYX_IMAGE:-ghcr.io/taipanbox/wardryx:v2.5.1@sha256:2d3c0c9c0798156d3f05b82d0e63cf5b38ee4b9875d6bdbac1829f219c26abf7}
     # Its own uid (CLAUDE.md invariant 41): wardryx.ndjson is its stream, and
     # no other plane's uid can write it. The GID stays the bus group, so it
@@ -484,7 +510,8 @@ services:
   # Read-only on the event log: idryx builds its graph FROM it and never
   # writes, and the mount says so.
   idryx:
-    <<: *restart
+    <<: [*restart, *baseline]
+    pids_limit: 256
     image: ${IDRYX_IMAGE:-ghcr.io/taipanbox/idryx:v1.4.0@sha256:2c80d101a01b2d3ac300abd57d397f38d8ff5515e34c5f851849244029ba6d15}
     networks:
       - core
@@ -521,7 +548,8 @@ services:
   # access and there is no NetworkPolicy here to narrow it. That difference is
   # real and is not hidden: on one machine the boundary is the machine.
   heraldyx:
-    <<: *restart
+    <<: [*restart, *baseline]
+    pids_limit: 256
     image: ${HERALDYX_IMAGE:-ghcr.io/taipanbox/heraldyx:v0.9.0@sha256:0b22664f56dbcffa71568a5b593cf8cad2995d1649c68464880d4c51e96b6f31}
     networks:
       - edge
@@ -618,7 +646,8 @@ services:
   # first pass on a fresh box has only empty streams), and that record-seal,
   # which reads this stream too, has anything to say about its schema.
   agent-conform:
-    <<: *restart
+    <<: [*restart, *baseline]
+    pids_limit: 128
     image: ${AGENT_CONFORM_IMAGE:-ghcr.io/taipanbox/agent-conform:v2.0.2@sha256:65c0c1ef78effe96f09c5684a203616fed396375e182bedb142a5beaa178b713}
     networks:
       - core
@@ -665,7 +694,8 @@ services:
   # anything reaching the port could fetch under the operator's allowance and
   # with their name on the record.
   scopyx:
-    <<: *restart
+    <<: [*restart, *baseline]
+    pids_limit: 256
     profiles: ["egress"]
     image: ${SCOPYX_IMAGE:-ghcr.io/taipanbox/scopyx:v1.3.0@sha256:a1e640a7965273750bd95d245316059046da203924e7ad5048c06a51d3fa555d}
     # NOT on `agents` since G2.1: an agent reaches this service only through the
@@ -738,7 +768,15 @@ services:
   # bind the same name in the compose network, and running both would give the
   # gateway two services called scopyx and no way to say which one it reached.
   scopyx-browser:
-    <<: *restart
+    <<: [*restart, *baseline]
+    pids_limit: 2048
+    # PID 1 here is a Go binary that kills the browser and reaps only that child, so the
+    # renderers it leaves become zombies, and a zombie counts against pids_limit. init reaps
+    # them. It comes with the limit, never after it. /dev/shm and memory as stack-k8s sets
+    # them (48-scopyx-browser.yaml): Chromium runs out of 64 MiB on ordinary pages.
+    init: true
+    shm_size: 512m
+    mem_limit: 2g
     profiles: ["egress-browser"]
     image: ${SCOPYX_BROWSER_IMAGE:-ghcr.io/taipanbox/scopyx:v1.3.0-chromium@sha256:3e5c28024deb462c06d5440414b2f453bfbb70ebd944d087888397367f4d9f99}
     user: "65532:65532"
@@ -782,8 +820,14 @@ services:
     # Chrome's sandbox needs syscalls the default profile refuses. Measured
     # 2026-08-10: with the default profile the browser refuses to start and
     # names the sandbox; with this line it renders a live page.
+    # AppArmor decides whether the sandbox starts, and the two supported hosts disagree. Measured
+    # 2026-11-07 with this whole baseline: on Ubuntu 24.04, Docker 28.0.4, Docker's default profile
+    # renders a page and apparmor=unconfined does not; on Debian 13, Docker 26.1.5, the default
+    # profile stops the sandbox, with or without the baseline, and apparmor=unconfined renders. So
+    # no line here is right for both. The README says what to do.
     security_opt:
       - seccomp:unconfined
+      - no-new-privileges:true
     # A browser writes: a profile directory per fetch, and its own temporary
     # files. Both land here, both are wiped with the container, and neither
     # touches a named volume, because a profile that outlived a fetch is
@@ -822,7 +866,8 @@ services:
   # bind with no credential is an unauthenticated typed-answer service, and
   # anything reaching it could ask under the operator's name.
   typryx:
-    <<: *restart
+    <<: [*restart, *baseline]
+    pids_limit: 256
     profiles: ["typed"]
     image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.6.0@sha256:9ffe725c90a51297dca76940cd1e30e968cf323bfac2f61092f0db2acef0812b}
     networks:
@@ -931,7 +976,8 @@ services:
   # subcommand, not the bare binary, the same shape focus-export already sits
   # outside that gate for.
   tokenfuse-mcp-broker:
-    <<: *restart
+    <<: [*restart, *baseline]
+    pids_limit: 1024
     profiles: ["typed", "egress", "egress-browser"]
     image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.22.0@sha256:48bc2eff2d00e76036b6b4f3eb6bd09e29081a41468c7faf2093f8f46bc6c2ac}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
@@ -1124,7 +1170,8 @@ services:
   # ask, whatever the policy reads. typryx's hourly cap (1000 by default) is the
   # limit; a spent cap just stops signals being added.
   typryx-wardryx-proxy:
-    <<: *restart
+    <<: [*restart, *baseline]
+    pids_limit: 256
     profiles: ["typed-risk-signal"]
     image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.6.0@sha256:9ffe725c90a51297dca76940cd1e30e968cf323bfac2f61092f0db2acef0812b}
     user: "65532:65532"
@@ -1281,7 +1328,8 @@ services:
 
   # ---- money: the control API ----------------------------------------------
   tokenfuse-cloud:
-    <<: *restart
+    <<: [*restart, *baseline]
+    pids_limit: 1024
     image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v1.22.0@sha256:89b220a422a69d0ec4ab97bc05b4c6707da8f3387d34b8401343ad1d18c6a56a}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
@@ -1327,7 +1375,8 @@ services:
   # Everything it does is metered, and an over-budget or policy-denied call
   # gets a hard refusal rather than a log line.
   tokenfuse-gateway:
-    <<: *restart
+    <<: [*restart, *baseline]
+    pids_limit: 1024
     image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.22.0@sha256:48bc2eff2d00e76036b6b4f3eb6bd09e29081a41468c7faf2093f8f46bc6c2ac}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
@@ -1567,7 +1616,8 @@ services:
   #     through one gateway only. Both stay off here, which is tokenfuse's
   #     reading of the variables being absent.
   tokenfuse-gateway-openai:
-    <<: *restart
+    <<: [*restart, *baseline]
+    pids_limit: 1024
     image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.22.0@sha256:48bc2eff2d00e76036b6b4f3eb6bd09e29081a41468c7faf2093f8f46bc6c2ac}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
@@ -1651,12 +1701,18 @@ services:
   # The console manages peers over the UAPI socket on the shared `wgapi`
   # volume, holding no capability of its own.
   wg:
-    <<: *restart
+    <<: [*restart, *baseline]
+    pids_limit: 128
     image: ${WG_IMAGE:-ghcr.io/taipanbox/stack-wg:v1.8.1@sha256:8996ce01a5b8a9d38a71b711f06653e23b54d5ad3e1578669be49ae8c79ba3ae}
     networks:
       - edge
+    # NET_ADMIN for the interface; CHOWN for the chgrp of /var/run/wireguard and socat's
+    # group=; FSETID so chmod 2770 keeps its setgid bit, which is dropped with no error
+    # without it (capabilities(7)).
     cap_add:
       - NET_ADMIN
+      - CHOWN
+      - FSETID
     devices:
       - /dev/net/tun:/dev/net/tun
     environment:
@@ -1688,7 +1744,15 @@ services:
   # refuses a bare IP as the relying party. Without it the passkey ceremony
   # simply cannot happen over WireGuard, on any device.
   caddy:
-    <<: *restart
+    <<: [*restart, *baseline]
+    pids_limit: 256
+    # The image's binary carries a file capability, so exec fails with EPERM unless the bounding
+    # set still holds it. The entrypoint writes /etc/caddy/Caddyfile on every start.
+    cap_add:
+      - NET_BIND_SERVICE
+    tmpfs:
+      - /etc/caddy:size=1m
+      - /tmp:size=16m
     image: ${CADDY_IMAGE:-ghcr.io/taipanbox/stack-caddy:v1.8.1@sha256:d9376051cc5ac9bb83de557bf3e7e861e26f6f6ae4556cd6ed5a32d1ce352c0a}
     networks:
       - edge
@@ -1708,7 +1772,12 @@ services:
         condition: service_started
 
   console:
-    <<: *restart
+    <<: [*restart, *baseline]
+    pids_limit: 1024
+    # SQLite's VACUUM and big sorts need a temp file, and with no writable /tmp it answers
+    # `disk I/O error (6410)`, a warning that goes red nowhere (invariant 24).
+    tmpfs:
+      - /tmp:size=256m
     image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.8.4@sha256:f018407dba47800acf3be54bb24fb85117c8dd14477b4a4f4dd9bae99376eb30}
     networks:
       - core
@@ -1865,7 +1934,10 @@ services:
   # `concurrencyPolicy: Forbid` on its CronJob. Serial here is structural, not
   # a promise.
   record-seal:
-    <<: *restart
+    <<: [*restart, *baseline]
+    pids_limit: 128
+    tmpfs:
+      - /tmp:size=64m
     image: ${TRAILRYX_IMAGE:-ghcr.io/taipanbox/trailryx-node:v1.5.0@sha256:f15215cd9708724e83fbd8493f2bf7d2a11980b37edf3b887081d8e17da18bab}
     networks:
       - core
@@ -2009,7 +2081,10 @@ services:
   #
   # The sixth, trailryx-seal, is the `record` profile above.
   focus-export:
-    <<: *restart
+    <<: [*restart, *baseline]
+    pids_limit: 128
+    tmpfs:
+      - /tmp:size=64m
     image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.22.0@sha256:48bc2eff2d00e76036b6b4f3eb6bd09e29081a41468c7faf2093f8f46bc6c2ac}
     networks:
       - core
@@ -2017,9 +2092,11 @@ services:
     profiles: ["routines"]
     environment:
       ROUTINE_INTERVAL: ${ROUTINE_INTERVAL:-3600}
+    # The image's entrypoint is the gateway, so without this line the script below is handed
+    # to it as arguments and the service exits asking for an upstream (found in the hardening
+    # lab, 2026-11-07: it had never started; verdryx-drift had the same fault).
+    entrypoint: ["/bin/sh", "-c"]
     command:
-      - /bin/sh
-      - -c
       - |
         set -u
         traces=/var/lib/stack/traces/gateway
@@ -2087,6 +2164,8 @@ services:
   # and still loop: focus-export runs on the tokenfuse image and verdryx-drift
   # on the console, and both of those have a shell.
   idryx-detect:
+    <<: *baseline
+    pids_limit: 64
     restart: "no"
     image: ${IDRYX_IMAGE:-ghcr.io/taipanbox/idryx:v1.4.0@sha256:2c80d101a01b2d3ac300abd57d397f38d8ff5515e34c5f851849244029ba6d15}
     networks:
@@ -2111,7 +2190,10 @@ services:
         condition: service_completed_successfully
 
   verdryx-drift:
-    <<: *restart
+    <<: [*restart, *baseline]
+    pids_limit: 128
+    tmpfs:
+      - /tmp:size=64m
     image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.8.4@sha256:f018407dba47800acf3be54bb24fb85117c8dd14477b4a4f4dd9bae99376eb30}
     networks:
       - core
@@ -2159,7 +2241,8 @@ services:
   # routine that cannot measure must not look like a fleet with nothing to report, so a failure stops
   # the container and `docker compose ps` shows it restarting.
   verdryx-slo:
-    <<: *restart
+    <<: [*restart, *baseline]
+    pids_limit: 128
     image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.8.4@sha256:f018407dba47800acf3be54bb24fb85117c8dd14477b4a4f4dd9bae99376eb30}
     user: "20020:10001"
     profiles: ["slo-signal"]
@@ -2260,6 +2343,13 @@ services:
   # restart on every box that enabled this).
   costcrew-init:
     profiles: ["finops"]
+    <<: *baseline
+    pids_limit: 32
+    # chown and chmod over paths other uids own, for the few seconds it lives.
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
     image: busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
     networks:
       - core
@@ -2282,7 +2372,8 @@ services:
         condition: service_completed_successfully
 
   costcrew:
-    <<: *restart
+    <<: [*restart, *baseline]
+    pids_limit: 256
     profiles: ["finops"]
     image: ${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.10.1@sha256:2fb72d878eb11702141ce0822049a95a28feae8fec9001bc8d568d144ae43036}
     networks:
@@ -2360,6 +2451,8 @@ services:
   # `agents` and nothing else, so it has no route out (invariant 38): a provider is
   # reachable only through the gateway.
   costcrew-run:
+    <<: *baseline
+    pids_limit: 128
     profiles: ["crew"]
     image: ${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.10.1@sha256:2fb72d878eb11702141ce0822049a95a28feae8fec9001bc8d568d144ae43036}
     entrypoint: ["/usr/local/bin/costcrew-run"]

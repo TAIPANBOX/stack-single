@@ -94,7 +94,7 @@ printf '%s\n%s\n' "$TABLE" "$BLOCK" >"$SANDBOX/lifted.sh"
 
 # Every call this check may make. A reader of a fixture cannot notice a write, so what
 # may be called is a list and everything else is a finding.
-READS='^docker (ps -a -q --no-trunc --filter label=com\.docker\.compose\.project=agent-stack|inspect --format .*|image inspect --format .*|network ls -q --filter label=com\.docker\.compose\.project=agent-stack|network inspect --format .*|compose --profile \* config)$'
+READS='^docker (ps -a -q --no-trunc --filter label=com\.docker\.compose\.project=agent-stack|inspect --format .*|image inspect --format .*|network ls -q --filter label=com\.docker\.compose\.project=agent-stack|network inspect --format .*|compose --profile \* config|compose -f compose\.yaml --profile \* config)$'
 
 cat >"$SANDBOX/bin/docker" <<'STUB'
 #!/usr/bin/env bash
@@ -113,6 +113,7 @@ case "${1:-}" in
       *" config "*)
         [ -f "$FIX/config" ] || { printf 'required variable X is missing a value\n' >&2; exit 1; }
         case " $* " in
+          *" -f compose.yaml "*) cat "$FIX/config-file" 2>/dev/null || cat "$FIX/config" ;;
           *" --profile * "*) cat "$FIX/config" ;;
           *) cat "$FIX/config-core" ;;
         esac
@@ -139,6 +140,10 @@ case "${1:-}" in
       fill '{{.State.Status}}' "$C_STATUS"
       fill '{{.State.ExitCode}}' "$C_EXIT"
       fill '{{.RestartCount}}' "$C_RESTARTS"
+      fill '{{.HostConfig.ReadonlyRootfs}}' "${C_READONLY:-true}"
+      fill '{{.HostConfig.PidsLimit}}' "${C_PIDS:-512}"
+      fill '{{.HostConfig.CapDrop}}' "${C_CAPDROP:-[ALL]}"
+      fill '{{.HostConfig.SecurityOpt}}' "${C_SECOPT:-[no-new-privileges:true]}"
       fill '{{index .Config.Labels "com.docker.compose.service"}}' "$C_SERVICE"
       fill '{{index .Config.Labels "com.docker.compose.oneoff"}}' "$C_ONEOFF"
       case "$o" in *'{{'*) printf 'stub: a field this fixture does not know: %s\n' "$o" >&2; exit 3 ;; esac
@@ -277,6 +282,7 @@ render() { # writes compose.yaml as a person wrote it, and the two renders compo
 					printf '    profiles:\n'
 					for p in $profiles; do printf '      - %s\n' "$p"; done
 				fi
+				printf '    read_only: true\n    pids_limit: 512\n    security_opt:\n      - no-new-privileges:true\n'
 				printf '    restart: %s\n    user: "20001:10001"\n' "$restart"
 			done <"$FIX/services"
 			printf 'networks:\n  core:\n    name: agent-stack_core\n    internal: true\nvolumes:\n  events:\n    name: agent-stack_events\n'
@@ -577,6 +583,42 @@ go "a labelled container compose does not declare"
 sees "^   FAIL  agent-stack-wardryx-old-1 +running +unknown container" "a container of this project that compose.yaml does not declare is not found"
 counts 1 0 "a labelled stranger did not fail"
 
+# ---- what the file gives a container, against what it runs with --------------------
+hand_made() { # the field, as Docker reports it, for the running wardryx
+	printf '%s\n' "$1" >>"$FIX/c/w1"
+}
+fresh
+hand_made "C_READONLY=false"
+go "a container with a writable root"
+sees "^   FAIL  wardryx +running +compose\.yaml gives it read_only, and the container does not have it" "a running container that lost read_only passes"
+counts 1 0 "a running container that lost read_only did not fail"
+
+fresh
+hand_made "C_PIDS=0"
+go "a container with no process limit"
+sees "gives it pids_limit" "a running container with no process limit passes"
+counts 1 0 "a running container with no process limit did not fail"
+
+fresh
+hand_made "C_CAPDROP='[]'"
+go "a container that kept its capabilities"
+sees "gives it cap_drop" "a running container that kept its capabilities passes"
+
+fresh
+hand_made "C_SECOPT='[]'"
+go "a container that can gain privileges"
+sees "gives it no-new-privileges" "a running container that can gain privileges passes"
+
+# An override that turns one off agrees with itself, so the file is read without it.
+fresh
+: >"$BOX/compose.override.yaml"
+cp "$FIX/config" "$FIX/config-file"
+sed -i.bak 's/^    read_only: true$/    read_only: false/' "$FIX/config"
+hand_made "C_READONLY=false"
+go "an override that turns the baseline off"
+sees "gives it read_only" "an override that turns read_only off reads as what the file says"
+counts 1 0 "an override that turns read_only off passed"
+
 # ---- could not measure -----------------------------------------------------------
 fresh
 : >"$FIX/down"
@@ -644,6 +686,8 @@ real_box() { # WITH_PROFILES: a container on its pin for every service, or only 
 		else
 			container "r$n" "$svc" running 0 0 "$cfgid" "$line"
 		fi
+		# The limit the render gives it, so a good container is one that has it.
+		awk -v want="  $svc:" '/^services:/{on=1;next} /^[^ ]/{on=0} on&&/^  [^ ]/{s=($0==want)} on&&s&&/^    pids_limit: /{print "C_PIDS=" $2}' "$FIX/config" >>"$FIX/c/r$n"
 		repo="${line%%@*}"
 		case "${repo##*/}" in *:*) repo="${repo%:*}" ;; esac
 		image "$cfgid" "$repo@${line##*@}"
