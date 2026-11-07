@@ -820,10 +820,11 @@ services:
     # Chrome's sandbox needs syscalls the default profile refuses. Measured
     # 2026-08-10: with the default profile the browser refuses to start and
     # names the sandbox; with this line it renders a live page.
-    # Measured 2026-11-07 on Debian 13, Docker 26.1.5: docker-default, the AppArmor profile Docker
-    # applies there, still stops the sandbox (credentials.cc, Permission denied), with or without
-    # the baseline. With apparmor=unconfined the whole baseline runs and pages render. The README
-    # says so; that line is not here, because a wider door on this service is an operator's call.
+    # AppArmor decides whether the sandbox starts, and the two supported hosts disagree. Measured
+    # 2026-11-07 with this whole baseline: on Ubuntu 24.04, Docker 28.0.4, Docker's default profile
+    # renders a page and apparmor=unconfined does not; on Debian 13, Docker 26.1.5, the default
+    # profile stops the sandbox, with or without the baseline, and apparmor=unconfined renders. So
+    # no line here is right for both. The README says what to do.
     security_opt:
       - seccomp:unconfined
       - no-new-privileges:true
@@ -2341,6 +2342,7 @@ services:
   # "other" bits (a stream it could not read would make the verifier exit and
   # restart on every box that enabled this).
   costcrew-init:
+    profiles: ["finops"]
     <<: *baseline
     pids_limit: 32
     # chown and chmod over paths other uids own, for the few seconds it lives.
@@ -2348,7 +2350,6 @@ services:
       - CHOWN
       - DAC_OVERRIDE
       - FOWNER
-    profiles: ["finops"]
     image: busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
     networks:
       - core

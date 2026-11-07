@@ -1795,11 +1795,18 @@ each of them too, and none of that reaches `keyryx` or `vouchryx`. Your own
 `compose.override.yaml` can hold a mount or a port this baseline does not know about: a
 service that writes outside its volumes now gets `Read-only file system`.
 
-On a host with AppArmor, `scopyx-browser` does not render a page, with or without this
-baseline: Docker's `docker-default` profile stops Chrome's sandbox (`credentials.cc`,
-`Permission denied`), so `browse` answers with that error and fetches nothing. Measured on
-Debian 13 with Docker 26.1.5. With `apparmor=unconfined` on that one service the whole baseline
-works and pages render. That line is a wider door, so it is your decision and not a default.
+AppArmor decides whether `scopyx-browser` can start Chrome's sandbox, and the two hosts this
+installer supports disagree, so `compose.yaml` sets nothing and each was measured with this
+whole baseline on:
+
+| Host | Docker's default profile | `apparmor=unconfined` |
+|---|---|---|
+| Ubuntu 24.04, Docker 28.0.4 | renders a page | `No usable sandbox`, because `kernel.apparmor_restrict_unprivileged_userns` is 1 |
+| Debian 13, Docker 26.1.5 | `credentials.cc`, `Permission denied`, with or without this baseline | renders a page |
+
+A browser that cannot start its sandbox answers `browse` with that error and fetches nothing.
+On a box like the second row, `apparmor=unconfined` for this one service in your
+`compose.override.yaml` is the line that works, and it is a wider door, so it is your decision.
 
 ## What the installer will not do quietly
 

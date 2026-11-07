@@ -648,7 +648,8 @@ jobs:
           prev="$(git tag --merged HEAD --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed -n 1p)"
           [ -n "$prev" ] || { echo "::error::no previous tag"; exit 1; }
           echo "installing $prev"
-          git worktree add -q "$RUNNER_TEMP/prev" "$prev"
+          mkdir -p "$RUNNER_TEMP/prev"
+          git archive "$prev" | tar -x -C "$RUNNER_TEMP/prev"
           cd "$RUNNER_TEMP/prev"
           sudo env STACK_DIR=/opt/agent-stack ./install.sh 2>&1 | tee "$RUNNER_TEMP/prev.log"
           grep -q "every check passed" "$RUNNER_TEMP/prev.log" || { echo "::error::the previous tag did not install"; exit 1; }
@@ -685,19 +686,6 @@ jobs:
           echo "recreated by the second run: $again"
           [ "$again" = 0 ] || { echo "::error::a second run recreated something"; exit 1; }
           sudo env STACK_DIR=/opt/agent-stack ./install.sh status
-
-      # TEMPORARY-MEASURE: read once for section 2.4, item 6, on Ubuntu 24.04, then removed.
-      - name: measure, the browser's sandbox on Ubuntu 24.04
-        if: always()
-        run: |
-          echo "apparmor_restrict_unprivileged_userns=$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null)"
-          img="$(grep -oE 'ghcr.io/taipanbox/scopyx:v[0-9.]+-chromium@sha256:[0-9a-f]{64}' compose.yaml | sed -n 1p)"
-          sudo docker pull -q "$img"
-          for extra in "" "--security-opt apparmor=unconfined"; do
-            echo "=== extra: [$extra]"
-            sudo docker run --rm --user 65532:65532 -e HOME=/tmp --read-only --cap-drop ALL --security-opt no-new-privileges=true --security-opt seccomp=unconfined $extra \
-              --init --shm-size 512m --tmpfs /tmp:size=512m --entrypoint chromium "$img" --headless --disable-gpu --dump-dom 'data:text/html,<p>rendered</p>' 2>&1 | tail -3 | cut -c1-180 || true
-          done
 
       - name: state on failure
         if: failure()
