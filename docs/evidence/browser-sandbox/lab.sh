@@ -80,6 +80,7 @@ STACK_DIR="$lab"
 note() { printf '   %s\n' "$*"; }
 picked=""
 env_set_if_changed() { picked="$2"; }
+eval "$(grep '^BROWSER_SECCOMP=' "$tree/install.sh")"
 eval "$(sed -n '/^# browser-apparmor: begin$/,/^# browser-apparmor: end$/p' "$tree/install.sh")"
 printf '%s, Docker %s, Compose %s\n' "$(. /etc/os-release; printf '%s' "$PRETTY_NAME")" "$(docker version --format '{{.Server.Version}}')" "$(docker compose version --short)"
 browser_apparmor_apply

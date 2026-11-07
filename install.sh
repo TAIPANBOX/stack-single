@@ -624,8 +624,10 @@ fi
 
 # The typed plane's own door, only when WITH_TYPED actually brought it up
 # (section 5): a check that asked a service nothing started would prove
-# nothing, the same reasoning every other opt-in check here follows.
-if compose_has tokenfuse-mcp-broker; then
+# nothing, the same reasoning every other opt-in check here follows. The broker
+# alone does not say so: it also runs for the egress profiles (G2.1), and on a box
+# that reads the web with no typed plane an ask has no typryx to reach.
+if compose_has tokenfuse-mcp-broker && compose_has typryx; then
   # Not `docker compose exec ... curl`: the same reason as the money and
   # policy planes above, this image has neither curl nor a shell. The MCP
   # wire is JSON-RPC over HTTP, so this is one wget POST with the right
@@ -4073,7 +4075,6 @@ note "docker $(docker --version | awk '{print $3}' | tr -d ,), compose present"
 # (a new user namespace, a map, a chroot) under the narrowest profile first. busybox, because the
 # browser's image is a gigabyte that most boxes never pull, and the answer is the host's.
 # Measured to agree with Chrome itself on both hosts: docs/evidence/browser-sandbox/.
-BROWSER_SECCOMP=seccomp/chromium-v1.json
 browser_probe() { # APPARMOR COMMAND...
   local aa="$1"
   shift
@@ -4104,6 +4105,8 @@ browser_apparmor_apply() { # writes SCOPYX_BROWSER_APPARMOR to .env, on every ru
 # browser-apparmor: end
 
 # ---- 1. this repo, whether cloned or piped ----------------------------------
+# The browser's profile, which compose.yaml names by a path beside itself.
+BROWSER_SECCOMP=seccomp/chromium-v1.json
 # C here is `true`, so the fallback is an empty HERE, which the next line handles.
 # shellcheck disable=SC2015
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"

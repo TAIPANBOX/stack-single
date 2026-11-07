@@ -735,10 +735,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: install the previous tag, and call a tool as an agent no seed names
+      # The last release without the hold, by name: from 1.7.0 the previous tag carries the hold
+      # too, so its install holds this call and there is no history to ask about.
+      - name: install the last tag before the hold, and call a tool as an agent no seed names
         run: |
-          prev="$(git tag --merged HEAD --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed -n 1p)"
-          [ -n "$prev" ] || { echo "::error::no previous tag"; exit 1; }
+          prev=v1.6.4
+          git rev-parse -q --verify "refs/tags/$prev" >/dev/null || { echo "::error::no tag $prev"; exit 1; }
           echo "installing $prev"
           mkdir -p "$RUNNER_TEMP/prev"
           git archive "$prev" | tar -x -C "$RUNNER_TEMP/prev"

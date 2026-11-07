@@ -310,7 +310,7 @@ if browser is not None:
         problems.append("install.sh has no '# browser-apparmor:' block, so nothing measures the host")
     else:
         body = block.group(1)
-        m = re.search(r"^BROWSER_SECCOMP=(\S+)$", body, re.M)
+        m = re.search(r"^BROWSER_SECCOMP=(\S+)$", install, re.M)
         if not m or f"seccomp:./{m.group(1)}" not in (browser.get("security_opt") or []):
             problems.append("install.sh measures with a profile compose.yaml does not name for the browser")
         for flag in ("--cap-drop ALL", "--read-only", "no-new-privileges:true", f"--user {browser.get('user')}"):

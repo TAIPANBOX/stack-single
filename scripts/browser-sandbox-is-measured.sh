@@ -66,7 +66,7 @@ ask_host() { # NAME CONTROL DEFAULT UNCONFINED WANT SAYS [NOT_ASKED]
 	: >"$work/asked"
 	rm -f "$work/picked"
 	out="$(
-		PATH="$work/bin:$PATH" CONTROL="$2" DEFAULT="$3" UNCONFINED="$4" ASKED="$work/asked" STACK_DIR="$work" bash -c '
+		PATH="$work/bin:$PATH" CONTROL="$2" DEFAULT="$3" UNCONFINED="$4" ASKED="$work/asked" STACK_DIR="$work" BROWSER_SECCOMP=x bash -c '
 			set -euo pipefail
 			note() { printf "%s\n" "$*"; }
 			env_set_if_changed() { printf "%s" "$2" >"$STACK_DIR/picked"; }
