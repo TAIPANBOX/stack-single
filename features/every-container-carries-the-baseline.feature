@@ -71,7 +71,7 @@ Feature: every container carries the baseline, or names why not
   Scenario: the browser keeps Chrome's sandbox and reaps its children
     Given scopyx-browser, where a zombie counts against the process limit
     When the gate reads it
-    Then it has init, its shared memory and its memory limit beside pids_limit, and it alone may be seccomp:unconfined
+    Then it has init, its shared memory and its memory limit beside pids_limit, and no service runs with its filter off
     # -> gates-have-teeth.sh "containers-carry-the-baseline: the browser loses init"
     # -> gates-have-teeth.sh "containers-carry-the-baseline: a second service is seccomp:unconfined"
 

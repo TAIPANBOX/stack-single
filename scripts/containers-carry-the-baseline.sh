@@ -14,6 +14,14 @@
 #
 #   read_only: true, cap_drop: [ALL], security_opt: no-new-privileges:true, a pids_limit
 #   that is a real limit, and ulimits: core: 0. A user that is not root. Every tmpfs sized.
+#   Nobody runs with the syscall filter off: a service that needs more than Docker's default
+#   names a profile file, and that file is Docker's default plus the rules named here.
+#
+# A PROFILE IS A FILE, AND COMPOSE DOES NOT READ IT WHEN IT COMPARES
+#
+# Compose hashes the line that names the file and never its contents, so a profile edited under
+# the same name leaves a running service on the old filter with every check green. So a profile
+# is pinned by digest to its versioned name, here, and a change is a new name in compose.yaml.
 #
 # HOW
 #
@@ -51,6 +59,7 @@ if ! docker compose version >/dev/null 2>&1; then
 	exit 1
 fi
 python3 - <<'PY'
+import hashlib
 import json
 import os
 import re
@@ -59,10 +68,23 @@ import sys
 import tempfile
 
 PIDS_CEILING = 2048
-KEYS = {"baseline", "read_only", "cap_drop", "no_new_privileges", "pids", "core", "user", "cap_add", "seccomp"}
+KEYS = {"baseline", "read_only", "cap_drop", "no_new_privileges", "pids", "core", "user", "cap_add", "seccomp", "apparmor"}
 # What `baseline` excuses: a service that takes none of it yet.
 BASELINE = {"read_only", "cap_drop", "no_new_privileges", "pids", "core"}
 FORBIDDEN_SERVICE_KEYS = {"privileged": True, "pid": "host", "ipc": "host", "network_mode": "host"}
+# The digest of each profile, written once. A published name never changes its bytes: a change
+# is the next version, a new row here and a new line in compose.yaml.
+PROFILES = {"./seccomp/chromium-v1.json": "744d959fbe18e8187de3be9152da259b2a553cdff01b6b969b4f96af2e5ce74e"}
+# Docker's default profile as canonical JSON: moby's profiles/seccomp/default.json, the same
+# bytes in 26.1.5 and 28.0.4, the two engines the supported hosts run.
+DOCKER_DEFAULT = "885442dc08f21f8d60f99ea43d59af88b1c529103815fe24bbf9ce998d3a609d"
+# What a profile may add to it, each with the mask it was measured under. clone may carry a
+# user, pid and net namespace and no other; unshare a user namespace and nothing else.
+ADDED = {
+    "chroot": [],
+    "clone": [{"index": 0, "value": 0x0E020000, "op": "SCMP_CMP_MASKED_EQ"}],
+    "unshare": [{"index": 0, "value": 0xEFFFFFFF, "op": "SCMP_CMP_MASKED_EQ"}],
+}
 
 src = open("compose.yaml").read()
 required = sorted(set(re.findall(r"\$\{([A-Za-z0-9_]+):\?", src)))
@@ -135,6 +157,7 @@ def core_limit(s):
     return u
 
 
+profiles_used = set()
 for svc in sorted(services):
     s = services[svc]
     say = lambda msg: problems.append(f"{svc}: {msg}")
@@ -189,11 +212,31 @@ for svc in sorted(services):
         say("read_only: false written out")
     if "no-new-privileges:false" in sec:
         say("no-new-privileges:false written out")
-    if "seccomp:unconfined" in sec:
-        if (svc, "seccomp") not in excused:
-            say("seccomp:unconfined, and no exception says why")
-        else:
+    for opt in sec:
+        name, _, value = opt.replace("=", ":", 1).partition(":")
+        if name == "seccomp":
+            if value == "unconfined":
+                say("seccomp:unconfined turns the filter off, and no exception can say why: name a profile file")
+                continue
+            e = excused.get((svc, "seccomp"))
+            if e is None:
+                say(f"{opt}, and no exception says why")
+                continue
             used.add((svc, "seccomp"))
+            if e["value"] != value:
+                say(f"{opt}, and its exception names {e['value']}")
+            profiles_used.add(value)
+        elif name == "apparmor":
+            if value == "unconfined":
+                say("apparmor=unconfined written out: on the hosts that need it install.sh measures that, and on the rest it is a wider door")
+                continue
+            e = excused.get((svc, "apparmor"))
+            if e is None:
+                say(f"{opt}, and no exception says why")
+                continue
+            used.add((svc, "apparmor"))
+            if f"- apparmor={e['value']}\n" not in src:
+                say(f"its exception names apparmor={e['value']}, and compose.yaml has no such line")
 
 # A zombie counts against pids_limit, and the browser's PID 1 reaps nothing, so the limit comes
 # with init or not at all. Measured: 66 zombies after eleven fetches without it, none with it.
@@ -208,6 +251,45 @@ else:
     if not browser.get("mem_limit"):
         problems.append("scopyx-browser: no mem_limit, the one service whose size comes from what it is handed")
 
+    secopts = browser.get("security_opt") or []
+    if not any(o.startswith("seccomp:./seccomp/") for o in secopts):
+        problems.append("scopyx-browser: no profile of its own, and the default refuses Chrome's sandbox")
+    if not any(o.startswith("apparmor=") for o in secopts):
+        problems.append("scopyx-browser: no apparmor line, so on one of the two supported hosts its sandbox does not start")
+
+
+def canonical(o):
+    return hashlib.sha256(json.dumps(o, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+for path in sorted(profiles_used):
+    want = PROFILES.get(path)
+    if want is None:
+        problems.append(f"{path}: no digest in this gate, so nothing holds it to its name")
+        continue
+    try:
+        raw = open(path, "rb").read()
+        profile = json.loads(raw)
+    except (OSError, ValueError) as e:
+        problems.append(f"{path} cannot be read: {e}")
+        continue
+    if hashlib.sha256(raw).hexdigest() != want:
+        problems.append(f"{path} changed and kept its name: Compose hashes the name, so a running service keeps the old filter. Make the next version")
+    tag = os.path.basename(path).removesuffix(".json") + ":"
+    rules = profile.get("syscalls") or []
+    added = [r for r in rules if str(r.get("comment", "")).startswith(tag)]
+    if canonical({**profile, "syscalls": [r for r in rules if r not in added]}) != DOCKER_DEFAULT:
+        problems.append(f"{path}: take out its {tag} rules and what is left is not Docker's default")
+    names = sorted(n for r in added for n in r.get("names", []))
+    if names != sorted(ADDED):
+        problems.append(f"{path} adds {names}, and what Chrome's sandbox was measured to need is {sorted(ADDED)}")
+    for r in added:
+        for n in r.get("names", []):
+            if n in ADDED and r.get("args", []) != ADDED[n]:
+                problems.append(f"{path}: {n} is not held to the mask it was measured under")
+            if r.get("action") != "SCMP_ACT_ALLOW":
+                problems.append(f"{path}: {n} is not a plain allow")
+
 # The three a certified key hangs on: each named, and each pointing at what closes it.
 for svc, key in (("init-volumes", "baseline"), ("keyryx", "pids"), ("keyryx", "core"), ("vouchryx", "baseline")):
     e = excused.get((svc, key))
@@ -218,8 +300,26 @@ for key, e in sorted(excused.items()):
     if key not in used:
         problems.append(f"the exception for {e['service']} {e['key']} excuses nothing: take it out")
 
-# The installer writes one override of its own. It may not take the baseline back.
+# The installer asks the host, and the question has to be the browser's own: the same filter, the
+# same user, none of the capabilities. A throwaway with more than the browser has answers for
+# something else.
 install = open("install.sh").read()
+if browser is not None:
+    block = re.search(r"^# browser-apparmor: begin$(.*?)^# browser-apparmor: end$", install, re.M | re.S)
+    if not block:
+        problems.append("install.sh has no '# browser-apparmor:' block, so nothing measures the host")
+    else:
+        body = block.group(1)
+        m = re.search(r"^BROWSER_SECCOMP=(\S+)$", install, re.M)
+        if not m or f"seccomp:./{m.group(1)}" not in (browser.get("security_opt") or []):
+            problems.append("install.sh measures with a profile compose.yaml does not name for the browser")
+        for flag in ("--cap-drop ALL", "--read-only", "no-new-privileges:true", f"--user {browser.get('user')}"):
+            if flag not in body:
+                problems.append(f"the installer's throwaway has no {flag}, so it does not ask what the browser would be told")
+        if "for one in docker-default unconfined;" not in body:
+            problems.append("the installer does not try docker-default first, so a host could lose AppArmor it does not need to lose")
+
+# The installer writes one override of its own. It may not take the baseline back.
 block = re.search(r"^# egress-override: begin$(.*?)^# egress-override: end$", install, re.M | re.S)
 if not block:
     problems.append("install.sh has no '# egress-override:' block, so what it writes was measured against nothing")

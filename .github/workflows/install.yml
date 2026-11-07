@@ -660,6 +660,73 @@ jobs:
   # tool, then this tree (CLAUDE.md invariant 70). The run must stop with the list and change
   # nothing; the way through must work end to end; and going back must work in the order the
   # README gives.
+  # CLAUDE.md invariant 71. The browser's sandbox on Ubuntu 24.04: the lab first, in a project of
+  # its own, with the controls that prove each claim by taking it away, then the operator's own
+  # path. The second half is the first fetch through `egress-browser` in CI: the installer's
+  # measurement, the README's command, the wardryx the installer started, and a real page.
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: this host
+        run: |
+          uname -r
+          cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          docker version --format '{{.Server.Version}}'
+          docker compose version --short
+
+      - name: the browser's sandbox in a project of its own, with its controls
+        run: |
+          set -euo pipefail
+          ./docs/evidence/browser-sandbox/lab.sh "$GITHUB_WORKSPACE" https://example.com/ 2>&1 | tee lab.log
+          grep -q 'apparmor=docker-default is the narrowest line' lab.log || { echo "::error::the installer's block did not pick docker-default on Ubuntu 24.04"; exit 1; }
+
+      - name: install with the browser, as an operator does
+        run: |
+          set -euo pipefail
+          sudo env STACK_DIR=/opt/agent-stack WITH_BROWSER=1 ./install.sh 2>&1 | tee install-1.log
+          grep -q "every check passed" install-1.log || { echo "::error::the install did not pass every check"; exit 1; }
+          sudo grep -qx "SCOPYX_BROWSER_APPARMOR='docker-default'" /opt/agent-stack/.env || { echo "::error::.env does not hold what this host measured"; sudo grep '^SCOPYX_BROWSER_APPARMOR=' /opt/agent-stack/.env; exit 1; }
+          [ -s /opt/agent-stack/seccomp/chromium-v1.json ] || { echo "::error::the profile did not reach the box"; exit 1; }
+
+      - name: start it with the README's command, and read a real page through the policy plane
+        run: |
+          set -euo pipefail
+          cd /opt/agent-stack
+          sudo docker compose --profile egress-browser up -d scopyx-browser
+          c="$(sudo docker compose --profile egress-browser ps -q scopyx-browser)"
+          echo "BROWSER_CONTAINER=$c" >>"$GITHUB_ENV"
+          ip="$(sudo docker inspect -f '{{with index .NetworkSettings.Networks "agent-stack_browser-broker"}}{{.IPAddress}}{{end}}' "$c")"
+          td="$(sudo sed -n "s/^RECORD_TRUST_DOMAIN='\(.*\)'\$/\1/p" .env)"; td="${td:-local}"
+          key="$(sudo sed -n 's/^SCOPYX_KEYS=//p' .env | tr -d "'" | tr ',' '\n' | sed -n "s|=agent://$td/agents/operator\$||p")"
+          [ -n "$ip" ] && [ -n "$key" ] || { echo "::error::no address or no key for the browser"; exit 1; }
+          for _ in 1 2 3 4 5 6 7 8 9 10; do
+            if curl -s -m2 -o /dev/null "http://$ip:4300/"; then break; fi
+            sleep 1
+          done
+          sudo env CONTAINER="$c" DOOR_URL="http://$ip:4300/" DOOR_KEY="$key" PAGE_URL=https://example.com/ \
+            PROFILE="$GITHUB_WORKSPACE/seccomp/chromium-v1.json" "$GITHUB_WORKSPACE/docs/evidence/browser-sandbox/measure.sh"
+
+      - name: a re-run keeps the line and the container, and status passes with the browser up
+        run: |
+          set -euo pipefail
+          sudo env STACK_DIR=/opt/agent-stack ./install.sh 2>&1 | tee install-2.log
+          grep -q "every check passed" install-2.log || { echo "::error::the re-run did not pass every check"; exit 1; }
+          cd /opt/agent-stack
+          now="$(sudo docker compose --profile egress-browser ps -q scopyx-browser)"
+          [ "$now" = "$BROWSER_CONTAINER" ] || { echo "::error::the re-run recreated the browser"; exit 1; }
+          sudo env STACK_DIR=/opt/agent-stack "$GITHUB_WORKSPACE/install.sh" status | tee "$GITHUB_WORKSPACE/status.log"
+          grep -q 'scopyx-browser' "$GITHUB_WORKSPACE/status.log" || { echo "::error::status does not read the browser"; exit 1; }
+
+      - name: state on failure
+        if: failure()
+        run: |
+          cd /opt/agent-stack 2>/dev/null || exit 0
+          sudo docker compose --profile egress-browser ps -a || true
+          sudo docker compose --profile egress-browser logs --tail 40 scopyx-browser || true
+
   upgrade-tool-hold:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -668,10 +735,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: install the previous tag, and call a tool as an agent no seed names
+      # The last release without the hold, by name: from 1.7.0 the previous tag carries the hold
+      # too, so its install holds this call and there is no history to ask about.
+      - name: install the last tag before the hold, and call a tool as an agent no seed names
         run: |
-          prev="$(git tag --merged HEAD --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed -n 1p)"
-          [ -n "$prev" ] || { echo "::error::no previous tag"; exit 1; }
+          prev=v1.6.4
+          git rev-parse -q --verify "refs/tags/$prev" >/dev/null || { echo "::error::no tag $prev"; exit 1; }
           echo "installing $prev"
           mkdir -p "$RUNNER_TEMP/prev"
           git archive "$prev" | tar -x -C "$RUNNER_TEMP/prev"

@@ -1,0 +1,62 @@
+# CI job `browser`, run 42407737200, commit d7e656e, 2026-11-07. Each refusal line is cut at 170 characters; zygote_host_impl_linux.cc:130 is the line that says No usable sandbox.
+# Host: kernel 7.0.0-1017-azure, kernel.apparmor_restrict_unprivileged_userns 1.
+
+Ubuntu 24.04.5 LTS, Docker 28.0.4, Compose 2.38.2
+   browser sandbox: apparmor=docker-default is the narrowest line Chrome's sandbox starts under on this host (measured, saved in .env)
+
+== as shipped: the profile, the baseline, the line the installer picked
+PASS  Docker holds the profile file for this container, byte for byte
+      options: seccomp=<the file> no-new-privileges:true apparmor=docker-default
+      AppArmor: docker-default
+PASS  the container's filter is on: NoNewPrivs: 1 Seccomp: 2 
+PASS  browse rendered https://example.com/: 1974 characters of HTML
+      renderer: NSpid: 232 14 1;Seccomp: 2;Seccomp_filters: 2; uid_map: 65532 65532 1;
+PASS  the renderer is in a PID namespace of its own
+PASS  the renderer runs under Chrome's own filter on top of Docker's
+PASS  the renderer is in a user namespace of its own
+   10 of 10 more fetches rendered
+
+== the file's refusals, from inside the same container
+   unshare -Ur   allowed
+   unshare -Urm  refused
+   unshare -Urn  refused
+   unshare -Uri  refused
+   unshare -Uru  refused
+
+== a second run recreates nothing
+   same container
+
+== control: the other AppArmor line
+   apparmor=unconfined: refused: cdp: Target.createTarget: the browser closed the connection. The browser said: [17:17:1107/194550.827901:ERROR:content/browser/zygote_host/zygote_host_impl_linux.cc:130] 
+
+== control: Docker's default filter, without the profile
+   default filter: refused: cdp: Target.createTarget: the browser closed the connection. The browser said: [16:16:1107/194552.133003:ERROR:content/browser/zygote_host/zygote_host_impl_linux.cc:130] 
+
+== control: each rule taken out of the profile
+   without chroot:  refused: cdp: Target.createTarget: the browser closed the connection. The browser said: [17:17:1107/194554.109913:FATAL:content/browser/zygote_host/zygote_host_impl_linux.cc:251] 
+   without clone:   refused: cdp: Target.createTarget: the browser closed the connection. The browser said: [17:17:1107/194556.046228:ERROR:content/browser/zygote_host/zygote_host_impl_linux.cc:130] 
+   without unshare: refused: cdp: Target.createTarget: the browser closed the connection. The browser said: [17:17:1107/194557.500249:ERROR:content/browser/zygote_host/zygote_host_impl_linux.cc:130] 
+
+== control: Chrome's sandbox off, so measure.sh has to go red
+PASS  Docker holds the profile file for this container, byte for byte
+      options: seccomp=<the file> no-new-privileges:true apparmor=docker-default
+      AppArmor: docker-default
+PASS  the container's filter is on: NoNewPrivs: 1 Seccomp: 2 
+PASS  browse rendered https://example.com/: 1974 characters of HTML
+      renderer: NSpid: 24;Seccomp: 2;Seccomp_filters: 1; uid_map: 0 0 4294967295;
+FAIL  the renderer is in the container's PID namespace
+FAIL  the renderer has one seccomp filter, Docker's: Chrome's own is not on
+FAIL  the renderer is in the container's user namespace
+   measure.sh went red, as it must
+
+== the operator's path: WITH_BROWSER=1 ./install.sh, the README's command, a fetch decided by the wardryx the installer started
+PASS  Docker holds the profile file for this container, byte for byte
+      options: seccomp=<the file> no-new-privileges:true apparmor=docker-default
+      AppArmor: docker-default
+PASS  the container's filter is on: NoNewPrivs: 1 Seccomp: 2 
+PASS  browse rendered https://example.com/: 1974 characters of HTML
+      renderer: NSpid: 228 14 1;Seccomp: 2;Seccomp_filters: 2; uid_map: 65532 65532 1;
+PASS  the renderer is in a PID namespace of its own
+PASS  the renderer runs under Chrome's own filter on top of Docker's
+PASS  the renderer is in a user namespace of its own
+   a re-run kept the container and every check passed, and status read scopyx-browser on its pin

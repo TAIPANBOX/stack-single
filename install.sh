@@ -624,8 +624,10 @@ fi
 
 # The typed plane's own door, only when WITH_TYPED actually brought it up
 # (section 5): a check that asked a service nothing started would prove
-# nothing, the same reasoning every other opt-in check here follows.
-if compose_has tokenfuse-mcp-broker; then
+# nothing, the same reasoning every other opt-in check here follows. The broker
+# alone does not say so: it also runs for the egress profiles (G2.1), and on a box
+# that reads the web with no typed plane an ask has no typryx to reach.
+if compose_has tokenfuse-mcp-broker && compose_has typryx; then
   # Not `docker compose exec ... curl`: the same reason as the money and
   # policy planes above, this image has neither curl nor a shell. The MCP
   # wire is JSON-RPC over HTTP, so this is one wget POST with the right
@@ -942,9 +944,9 @@ drift_judge() { # SERVICE PIN IMAGE_ID STATE RESTARTS
 }
 # One FAIL line, and only for what the file gives this service and the container does not have.
 drift_baseline() { # SERVICE READONLY PIDS CAPDROP SECOPT, as Docker reports them
-  local row ro pids cap nnp missing=""
+  local row ro pids cap nnp sc missing=""
   row="$(grep -- "^$1|" <<<"$drift_want" || true)"
-  IFS='|' read -r _ ro pids cap nnp <<<"$row"
+  IFS='|' read -r _ ro pids cap nnp sc <<<"$row"
   [ "$ro" != true ] || [ "$2" = true ] || missing="$missing read_only"
   [ -z "$pids" ] || [ "$3" = "$pids" ] || missing="$missing pids_limit"
   if [ "$cap" = ALL ]; then
@@ -952,6 +954,10 @@ drift_baseline() { # SERVICE READONLY PIDS CAPDROP SECOPT, as Docker reports the
   fi
   if [ "$nnp" = true ]; then
     case "$5" in *no-new-privileges:true*) ;; *) missing="$missing no-new-privileges" ;; esac
+  fi
+  # Compose hands the daemon a profile file's whole text as seccomp={...}.
+  if [ "$sc" = file ]; then
+    case "$5" in *'seccomp={'*) ;; *) missing="$missing seccomp-profile" ;; esac
   fi
   [ -z "$missing" ] || drift_tally FAIL "$1" running "compose.yaml gives it${missing}, and the container does not have it"
 }
@@ -1017,9 +1023,9 @@ drift_measure() {
       return 0
     fi
   fi
-  # What the file gives each service: "service|read_only|pids_limit|ALL|true".
+  # What the file gives each service: "service|read_only|pids_limit|ALL|true|file".
   drift_want="$(awk '
-    function emit() { if (svc != "") print svc "|" ro "|" pids "|" cap "|" nnp; svc = ""; ro = ""; pids = ""; cap = ""; nnp = "" }
+    function emit() { if (svc != "") print svc "|" ro "|" pids "|" cap "|" nnp "|" sc; svc = ""; ro = ""; pids = ""; cap = ""; nnp = ""; sc = "" }
     /^services:/ { on = 1; next }
     /^[^ ]/ { if (on) emit(); on = 0 }
     !on { next }
@@ -1031,6 +1037,7 @@ drift_measure() {
     /^    security_opt:/ { list = "sec" }
     /^      - ALL$/ { if (list == "cap") cap = "ALL" }
     /^      - no-new-privileges:true$/ { if (list == "sec") nnp = "true" }
+    /^      - seccomp:/ { if (list == "sec") sc = "file" }
     END { emit() }' <<<"$file_cfg")"
   # The file as written: "service|variable|default". A literal image has no variable.
   drift_raw="$(awk '
@@ -4056,7 +4063,50 @@ fi
 note "docker $(docker --version | awk '{print $3}' | tr -d ,), compose present"
 
 
+# ---- the browser's sandbox, as this host answers for it (CLAUDE.md invariant 71) ------------
+# browser-apparmor: begin
+# Chrome's sandbox needs a user namespace it can map itself into and chroot inside, and AppArmor
+# answers differently per host. On Debian 13 docker-default has no userns rule, so the kernel
+# refuses userns_create. On Ubuntu 24.04 kernel.apparmor_restrict_unprivileged_userns is 1, so an
+# unconfined process gets the namespace and loses its capabilities in it, and docker-default is
+# what keeps them. So compose.yaml cannot name one value, and a person should not have to.
+#
+# This asks the host. A throwaway under the browser's own flags takes the same steps Chrome takes
+# (a new user namespace, a map, a chroot) under the narrowest profile first. busybox, because the
+# browser's image is a gigabyte that most boxes never pull, and the answer is the host's.
+# Measured to agree with Chrome itself on both hosts: docs/evidence/browser-sandbox/.
+browser_probe() { # APPARMOR COMMAND...
+  local aa="$1"
+  shift
+  docker run --rm --user 65532:65532 --cap-drop ALL --read-only --network none \
+    --security-opt no-new-privileges:true --security-opt "seccomp=$STACK_DIR/$BROWSER_SECCOMP" \
+    --security-opt "apparmor=$aa" busybox:1.36 "$@" >/dev/null 2>&1
+}
+browser_apparmor_apply() { # writes SCOPYX_BROWSER_APPARMOR to .env, on every run: a host can change
+  local one pick=""
+  # A throwaway that cannot start at all says nothing about the sandbox, so that is asked first.
+  if ! browser_probe docker-default true; then
+    note "browser sandbox: not measured, a throwaway would not start here, so SCOPYX_BROWSER_APPARMOR stays as it was"
+    return 0
+  fi
+  for one in docker-default unconfined; do
+    if browser_probe "$one" unshare -Ur chroot / /bin/true; then
+      pick="$one"
+      break
+    fi
+  done
+  if [ -z "$pick" ]; then
+    note "browser sandbox: this host gives it no user namespace under any AppArmor line, so scopyx-browser answers browse with the error and fetches nothing. The README, \"About the sandbox\", has the ways out"
+    return 0
+  fi
+  env_set_if_changed SCOPYX_BROWSER_APPARMOR "$pick"
+  note "browser sandbox: apparmor=$pick is the narrowest line Chrome's sandbox starts under on this host (measured, saved in .env)"
+}
+# browser-apparmor: end
+
 # ---- 1. this repo, whether cloned or piped ----------------------------------
+# The browser's profile, which compose.yaml names by a path beside itself.
+BROWSER_SECCOMP=seccomp/chromium-v1.json
 # C here is `true`, so the fallback is an empty HERE, which the next line handles.
 # shellcheck disable=SC2015
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
@@ -4078,6 +4128,10 @@ else
   stack_version_check "$STACK_DIR/compose.yaml.fetched"
   journal_begin ""
   mv -f "$STACK_DIR/compose.yaml.fetched" "$STACK_DIR/compose.yaml" || die "could not put compose.yaml in place"
+  # compose.yaml names this file by a relative path, and a piped install has no tree to copy it from.
+  mkdir -p "$STACK_DIR/${BROWSER_SECCOMP%/*}"
+  curl -fsSL "${REPO_SINGLE_RAW:-https://raw.githubusercontent.com/TAIPANBOX/stack-single/main}/$BROWSER_SECCOMP" \
+    -o "$STACK_DIR/$BROWSER_SECCOMP" || die "could not fetch $BROWSER_SECCOMP, which compose.yaml names for the browser"
 fi
 cd "$STACK_DIR"
 
@@ -5352,6 +5406,8 @@ egress_override() { # $1: the stack directory. Reads TYPED_MODE.
   } >"$f.tmp" && mv "$f.tmp" "$f"
 }
 # egress-override: end
+
+browser_apparmor_apply
 
 # ---- 5. up ------------------------------------------------------------------
 say "starting the stack"

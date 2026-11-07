@@ -609,6 +609,26 @@ hand_made "C_SECOPT='[]'"
 go "a container that can gain privileges"
 sees "gives it no-new-privileges" "a running container that can gain privileges passes"
 
+# A profile file reaches the daemon as its whole text, so a filter turned off has no such option.
+file_names_a_profile() {
+	for out in config config-core; do
+		awk '{ print } /^      - no-new-privileges:true$/ { print "      - seccomp:./seccomp/chromium-v1.json" }' "$FIX/$out" >"$FIX/$out.new"
+		mv "$FIX/$out.new" "$FIX/$out"
+	done
+}
+fresh
+file_names_a_profile
+hand_made "C_SECOPT='[seccomp:unconfined no-new-privileges:true]'"
+go "a container whose filter was turned off"
+sees "gives it seccomp-profile" "a running container whose filter was turned off passes"
+counts 1 0 "a running container whose filter was turned off did not fail"
+
+fresh
+file_names_a_profile
+hand_made "C_SECOPT='[seccomp={\"defaultAction\":\"SCMP_ACT_ERRNO\"} no-new-privileges:true]'"
+go "a container that holds its profile"
+counts 0 0 "a running container that holds its profile failed"
+
 # An override that turns one off agrees with itself, so the file is read without it.
 fresh
 : >"$BOX/compose.override.yaml"
@@ -688,6 +708,8 @@ real_box() { # WITH_PROFILES: a container on its pin for every service, or only 
 		fi
 		# The limit the render gives it, so a good container is one that has it.
 		awk -v want="  $svc:" '/^services:/{on=1;next} /^[^ ]/{on=0} on&&/^  [^ ]/{s=($0==want)} on&&s&&/^    pids_limit: /{print "C_PIDS=" $2}' "$FIX/config" >>"$FIX/c/r$n"
+		# And the profile it names, as Compose hands one to the daemon: the file's text.
+		awk -v want="  $svc:" -v q="'" '/^services:/{on=1;next} /^[^ ]/{on=0} on&&/^  [^ ]/{s=($0==want)} on&&s&&/^      - seccomp:/{print "C_SECOPT=" q "[seccomp={} no-new-privileges:true]" q}' "$FIX/config" >>"$FIX/c/r$n"
 		repo="${line%%@*}"
 		case "${repo##*/}" in *:*) repo="${repo%:*}" ;; esac
 		image "$cfgid" "$repo@${line##*@}"
