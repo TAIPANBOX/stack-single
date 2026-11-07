@@ -76,6 +76,7 @@
         "schedules_routines": {
           "focus-export": "focus-export",
           "verdryx-drift": "verdryx-drift",
+          "verdryx-slo": "verdryx-slo",
           "record-seal": "trailryx-seal"
         },
         "manual_jobs": {

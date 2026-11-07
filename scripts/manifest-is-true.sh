@@ -219,7 +219,7 @@ compare(
 # than a list because the names differ: the `record` profile's service is called
 # `record-seal` here and `trailryx-seal` everywhere else, and a list would have
 # to choose one vocabulary and be wrong in the other.
-ROUTINES = {"focus-export", "qryx-trend", "verdryx-drift", "idryx-detect",
+ROUTINES = {"focus-export", "qryx-trend", "verdryx-drift", "verdryx-slo", "idryx-detect",
             "mockryx-drill", "trailryx-seal"}
 schedules = checked.get("schedules_routines", {})
 if not isinstance(schedules, dict):
