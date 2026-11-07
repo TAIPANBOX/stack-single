@@ -290,11 +290,28 @@ for path in sorted(profiles_used):
             if r.get("action") != "SCMP_ACT_ALLOW":
                 problems.append(f"{path}: {n} is not a plain allow")
 
-# The three a certified key hangs on: each named, and each pointing at what closes it.
-for svc, key in (("init-volumes", "baseline"), ("keyryx", "pids"), ("keyryx", "core"), ("vouchryx", "baseline")):
-    e = excused.get((svc, key))
-    if e is not None and e.get("until") != "G3.11":
-        problems.append(f"{svc} {key}: until says {e.get('until')}, and it stays out until G3.11 closes")
+# The three a certified key hangs on (CLAUDE.md invariant 72). They stayed out of the baseline while a
+# new start of vouchryx could find custody at its bound of four live keys and get none (G3.11). keyryx
+# v0.1.4 retires the owner's oldest key at the bound instead, so they carry the baseline like the rest,
+# nothing waits on G3.11 any more, and a keyryx pinned below v0.1.4 would put the bound back under them.
+CLOSED = {"G3.11": "keyryx v0.1.4 closed it"}
+KEY_SERVICES = ("init-volumes", "keyryx", "vouchryx")
+for (svc, key), e in sorted(excused.items()):
+    if e.get("until") in CLOSED:
+        problems.append(f"{svc} {key}: until says {e['until']}, and {CLOSED[e['until']]}: take the line out, or name what it waits on now")
+for svc in KEY_SERVICES:
+    if svc not in services:
+        problems.append(f"there is no {svc}, so the three a certified key hangs on were measured against NOTHING")
+        continue
+    held = sorted(k for k in BASELINE | {"baseline"} if (svc, k) in excused)
+    if held:
+        problems.append(f"{svc}: excused from the baseline ({', '.join(held)}), and since keyryx v0.1.4 nothing keeps it out")
+pins = re.findall(r"ghcr\.io/taipanbox/keyryx:v(\d+)\.(\d+)\.(\d+)@sha256:[0-9a-f]{64}", src)
+if not pins:
+    problems.append("compose.yaml pins no keyryx by tag and digest, so the custody under the three was measured against NOTHING")
+for pin in pins:
+    if tuple(int(x) for x in pin) < (0, 1, 4):
+        problems.append(f"keyryx is pinned at v{'.'.join(pin)}, below v0.1.4: a new start of vouchryx at the bound gets no key, and changing the three starts it")
 
 for key, e in sorted(excused.items()):
     if key not in used:

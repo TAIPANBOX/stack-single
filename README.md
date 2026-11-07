@@ -1854,10 +1854,15 @@ nor that line:
 - `until` is `permanent`, or the name of what closes it.
 - An exception that excuses nothing fails too, so whoever fixes a service takes its line out.
 
-Three services stay as they were, `init-volumes`, `keyryx` and `vouchryx`, each named with
-`until: G3.11`. Changing one of them on a Compose below 2.35 starts vouchryx again, and a new
-start spends a certified key (see "A restart spends one of four keys"). They change once, in a
-release of their own, after that is fixed.
+`init-volumes`, `keyryx` and `vouchryx` took the baseline last, in 1.7.1. Changing one of them on a
+Compose below 2.35 starts vouchryx again, and before keyryx v0.1.4 a start at custody's bound of
+four live keys got no key (see "A restart spends a key, and the bound holds"). 1.7.1 pins v0.1.4,
+which retires vouchryx's oldest key at the bound instead, and the gate fails if keyryx is ever pinned
+below it. `init-volumes` stays root, because re-owning every
+volume is its whole job, and takes back three capabilities, each measured by taking it out:
+`CHOWN`, `DAC_OVERRIDE` to enter keyryx's 0700 directory, and `FOWNER` to chmod what other uids own.
+Each of its chowns is a command of its own, so a refused one stops it instead of ending
+`volumes ready`: `sh -e` does not stop on a command before `&&`.
 
 The file is not the whole story, so the drift check in `status` holds each running container
 to what `compose.yaml` gives it, leaving `compose.override.yaml` out of that reading: an override
@@ -1865,7 +1870,9 @@ that turns `read_only` off shows as a `FAIL` line.
 
 An upgrade to the release that brings this recreates each service that took the baseline,
 once, and a second run recreates nothing. On a Compose below 2.35 that takes what sits below
-each of them too, and none of that reaches `keyryx` or `vouchryx`. Your own
+each of them too. Going to 1.7.0 none of that reached `keyryx` or `vouchryx`; going to 1.7.1
+`init-volumes`, `keyryx`, `keyryx-witness` and `vouchryx` are recreated once, and vouchryx asks
+custody for a new key. Your own
 `compose.override.yaml` can hold a mount or a port this baseline does not know about: a
 service that writes outside its volumes now gets `Read-only file system`.
 
@@ -1997,7 +2004,7 @@ unchanged by this. It does not run the hand-off (delegate-of-a-delegate)
 path or Cross App Access; both exist in vouchryx and neither is wired here.
 
 
-**A restart spends one of four keys.** vouchryx keeps its working key in memory, so each restart asks custody to certify a new one. Custody keeps at most four certified keys of that name live, each for up to 72 hours and ten minutes. A restart past the fourth inside that time leaves vouchryx with no key until the oldest ages out: the installer fails `vouchryx holds a certified key`, and a token request gets `no_certified_signing_key`. It recovers alone, because vouchryx asks again every five minutes. Callers on a static key are not touched. What restarts it besides its own recreate depends on your Compose: only `init-volumes` and `keyryx` sit above vouchryx, and on a Compose below 2.35 a change to either one restarts vouchryx too, because Compose takes everything below a recreated service with it in that `up`. On 2.35 and later it does not, because nothing in `compose.yaml` asks for `restart: true`. `docker compose version` tells you which box you have.
+**A restart spends a key, and the bound holds.** vouchryx keeps its working key in memory, so each start asks custody to certify a new one. Custody keeps at most four certified keys of that name live, each for up to 72 hours and ten minutes. From keyryx v0.1.4, pinned since 1.7.1, a new key at that bound retires vouchryx's oldest once the next key has been signing for the name's overlap, ten minutes here, so no token the old key signed is still alive. A retired key leaves the key set at once, reads `retired` in custody's `GET /v1/keys`, and is not revoked. Starts closer together than that are refused at first, as before: vouchryx has no key until the pause has passed and its next request, every five minutes, so the installer's `vouchryx holds a certified key` can fail on a burst of restarts, and a token request gets `no_certified_signing_key` meanwhile. Callers on a static key are not touched. On 1.7.0 and earlier the fifth start inside 72 hours and ten minutes got no key until the oldest aged out. What restarts it besides its own recreate depends on your Compose: only `init-volumes` and `keyryx` sit above vouchryx, and on a Compose below 2.35 a change to either one restarts vouchryx too, because Compose takes everything below a recreated service with it in that `up`. On 2.35 and later it does not, because nothing in `compose.yaml` asks for `restart: true`. `docker compose version` tells you which box you have.
 
 ## The FinOps console (CostCrew), optional
 

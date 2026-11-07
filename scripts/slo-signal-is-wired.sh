@@ -108,7 +108,7 @@ else:
 init = "\n".join(blocks.get("init-volumes", []))
 if "/vol/events/verdryx.ndjson ] || : > /vol/events/verdryx.ndjson" not in init:
     bad.append("init-volumes: it does not pre-create verdryx.ndjson, and the routine cannot create in the bus")
-if uid and f"chown {uid}:10001 /vol/events/verdryx.ndjson && chmod 0640 /vol/events/verdryx.ndjson" not in init:
+if uid and f"chown {uid}:10001 /vol/events/verdryx.ndjson; chmod 0640 /vol/events/verdryx.ndjson" not in init:
     bad.append(f"init-volumes: verdryx.ndjson is not {uid}:10001 0640, so the routine alone does not hold it")
 
 ward = "\n".join(blocks.get("wardryx", []))

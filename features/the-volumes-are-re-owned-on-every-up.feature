@@ -17,3 +17,11 @@ Feature: an upgraded box's files are given back to the uid that writes them
     When init-volumes runs on an upgraded box
     Then volumes-are-reowned.sh fails if the ledger volume is not re-owned at all
     # -> gates-have-teeth.sh "volumes-are-reowned: typryx's ledger volume is never re-owned"
+
+  Scenario: a chown the one-shot is refused stops it, instead of ending "volumes ready"
+    Given init-volumes and costcrew-init run as root with only the capabilities their exceptions give back
+    When any one chown of theirs is refused
+    Then the one-shot stops with a non-zero status, so compose holds back every service that waits on it
+    # -> gates-have-teeth.sh "volumes-are-reowned: init-volumes goes on past a failed chown"
+    # -> gates-have-teeth.sh "volumes-are-reowned: costcrew-init goes on past a failed chown"
+    # -> gates-have-teeth.sh "volumes-are-reowned: a chown and its chmod on two lines still stop the body (must pass)"

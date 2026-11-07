@@ -40,7 +40,7 @@ fi
 # B. the stream, given to costcrew and created before it starts.
 grep -q '\[ -e /vol/events/costcrew.ndjson \] || : > /vol/events/costcrew.ndjson' compose.yaml \
   || fail "B. costcrew-init does not create costcrew.ndjson"
-grep -q 'chown 10003:10001 /vol/events/costcrew.ndjson && chmod 0640 /vol/events/costcrew.ndjson' compose.yaml \
+grep -q 'chown 10003:10001 /vol/events/costcrew.ndjson; chmod 0640 /vol/events/costcrew.ndjson' compose.yaml \
   || fail "B. costcrew-init does not give costcrew.ndjson to 10003:10001 at 0640"
 
 # C. no group, outside the bus

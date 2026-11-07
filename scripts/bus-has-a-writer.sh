@@ -251,7 +251,7 @@ for name, block in blocks.items():
             continue
         path = init_mounts[vol]
         # 1.4.0: a re-own is recursive (`chown -R`), and a user-only re-own names no group (keyryx).
-        owned = re.search(r"chown\s+(?:-R\s+)?([0-9]+)(?::([0-9]+))?\s+([^\n&]*" + re.escape(path) + r"(?=[\s&]|$))", init_text)
+        owned = re.search(r"chown\s+(?:-R\s+)?([0-9]+)(?::([0-9]+))?\s+([^\n&;]*" + re.escape(path) + r"(?=[\s&;]|$))", init_text)
         if not owned:
             note(f"{name} (user {user}) writes volume {vol}, mounted by init-volumes at {path}, but no chown line there names {path}")
             continue

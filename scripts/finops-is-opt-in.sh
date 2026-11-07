@@ -383,7 +383,7 @@ for n in sorted(subjects):
         else:
             d = re.escape(imounts[data_vol].rstrip("/"))
             # 1.4.0 (invariant 49): the data volume is re-owned by a recursive chown (`chown -R`), which this accepts.
-            chown = re.search(r"chown\s+(?:-R\s+)?([0-9]+):([0-9]+)\s+" + d + r"(?=[\s&]|$)", itext)
+            chown = re.search(r"chown\s+(?:-R\s+)?([0-9]+):([0-9]+)\s+" + d + r"(?=[\s&;]|$)", itext)
             if not chown:
                 note(f"{init_name[0]} does not chown {imounts[data_vol]}, the console's data volume")
             elif uid is not None and (chown.group(1), chown.group(2)) != (uid, gid):
