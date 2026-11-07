@@ -1794,7 +1794,7 @@ services:
     # `disk I/O error (6410)`, a warning that goes red nowhere (invariant 24).
     tmpfs:
       - /tmp:size=256m
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.8.6@sha256:ca99cc8be803a143643b6da56aa898af32d9bab22b9c03d6cc59b12203081549}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.8.8@sha256:55765e22aeb5a157099b30a9ecbda53b83121c17b3b98b6896af5733ba16f9a5}
     networks:
       - core
       - agents
@@ -2210,7 +2210,7 @@ services:
     pids_limit: 128
     tmpfs:
       - /tmp:size=64m
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.8.6@sha256:ca99cc8be803a143643b6da56aa898af32d9bab22b9c03d6cc59b12203081549}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.8.8@sha256:55765e22aeb5a157099b30a9ecbda53b83121c17b3b98b6896af5733ba16f9a5}
     networks:
       - core
     user: "10001:10001"
@@ -2259,7 +2259,7 @@ services:
   verdryx-slo:
     <<: [*restart, *baseline]
     pids_limit: 128
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.8.6@sha256:ca99cc8be803a143643b6da56aa898af32d9bab22b9c03d6cc59b12203081549}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.8.8@sha256:55765e22aeb5a157099b30a9ecbda53b83121c17b3b98b6896af5733ba16f9a5}
     user: "20020:10001"
     profiles: ["slo-signal"]
     environment:
