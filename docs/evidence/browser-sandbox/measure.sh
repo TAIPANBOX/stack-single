@@ -63,9 +63,10 @@ docker exec "$CONTAINER" sh -c '
   echo "$seen"' >"$work/renderer" 2>/dev/null &
 watcher=$!
 sleep 0.3
-code="$(curl -s -m 120 -o "$work/browse.json" -w '%{http_code}' -X POST "$DOOR_URL" \
-  -H 'content-type: application/json' -H "X-Scopyx-Key: $DOOR_KEY" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"browse","arguments":{"url":"'"$PAGE_URL"'"}}}')"
+# The key goes on curl's stdin, never on an argument list.
+code="$(printf 'header = "content-type: application/json"\nheader = "X-Scopyx-Key: %s"\n' "$DOOR_KEY" \
+  | curl -s -m 120 -K - -o "$work/browse.json" -w '%{http_code}' -X POST "$DOOR_URL" \
+    -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"browse","arguments":{"url":"'"$PAGE_URL"'"}}}')"
 python3 - "$work/browse.json" "$code" "$PAGE_URL" <<'PY' || fail=1
 import json, sys
 path, code, url = sys.argv[1:4]

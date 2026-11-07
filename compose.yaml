@@ -806,9 +806,9 @@ services:
       # NOT set here, and the omission is the decision.
       #
       # Chromium ships with its renderer sandbox on. In a container that cannot
-      # give it the user namespaces it needs, it refuses to start and says so,
-      # and the operator then chooses which sandbox to keep. The two ways out
-      # are below, and this file takes the one that keeps CHROME's, because
+      # give it the user namespaces it needs, it refuses to start and says so.
+      # This file gives it those and nothing else, in its own profile below, and
+      # keeps both sandboxes. It never turns CHROME's off, because
       # with that off a renderer exploit runs as this container's user and can
       # open sockets directly: egress that never passes the proxy and never
       # appears in the record. The container's seccomp filter protects the host

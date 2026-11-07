@@ -6,7 +6,7 @@
 # steps as install.sh for the AppArmor line, then renders a real page, then proves each thing it
 # claims by taking it away.
 #
-#   ./lab.sh <a checkout of this repository> [page]
+#   ./lab.sh <a checkout of this repository> [page]     RENDERS=10 fetches after the first
 #
 # Needs Docker and python3, and a route to the page. It uses test values only, publishes no port,
 # and touches no project but its own. It leaves nothing behind.
@@ -70,13 +70,14 @@ measure() {
     PROFILE=seccomp/chromium-v1.json "$here/measure.sh"
 }
 browse_says() { # what one fetch answers, in a line
-  curl -s -m 120 -X POST "http://$ip:4300/" -H 'content-type: application/json' -H "X-Scopyx-Key: $key" \
-    -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"browse","arguments":{"url":"'"$page"'"}}}' \
+  printf 'header = "content-type: application/json"\nheader = "X-Scopyx-Key: %s"\n' "$key" \
+    | curl -s -m 120 -K - -X POST "http://$ip:4300/" \
+      -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"browse","arguments":{"url":"'"$page"'"}}}' \
     | python3 -c 'import json,sys; r=json.load(sys.stdin).get("result") or {}; t=" ".join(c.get("text","") for c in r.get("content",[])); print(("refused: "+t[:170]) if r.get("isError") else f"rendered, {len(t)} characters")'
 }
 
 # The pick, by the installer's own block.
-STACK_DIR="$lab"
+export STACK_DIR="$lab"
 note() { printf '   %s\n' "$*"; }
 picked=""
 env_set_if_changed() { picked="$2"; }
@@ -92,6 +93,13 @@ printf 'SCOPYX_BROWSER_APPARMOR=%s\n' "$picked" >>.env
 echo; echo "== as shipped: the profile, the baseline, the line the installer picked"
 up
 measure
+renders="${RENDERS:-10}"
+rendered=0
+for _ in $(seq "$renders"); do
+  case "$(browse_says)" in rendered*) rendered=$((rendered + 1)) ;; esac
+done
+printf '   %s of %s more fetches rendered\n' "$rendered" "$renders"
+[ "$rendered" = "$renders" ] || { echo "FAIL: not every fetch rendered"; exit 1; }
 echo; echo "== the file's refusals, from inside the same container"
 for flags in "-Ur" "-Urm" "-Urn" "-Uri" "-Uru"; do
   if docker exec "$project-scopyx-browser-1" unshare "$flags" true >/dev/null 2>&1; then a=allowed; else a=refused; fi
