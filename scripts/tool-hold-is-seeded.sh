@@ -121,7 +121,7 @@ scratch="$(mktemp -d)"
 live=""
 cleanup() {
 	if [ -n "$live" ]; then
-		docker rm -f "$live-wardryx" >/dev/null 2>&1 || true
+		docker rm -f "$live-wardryx-1" >/dev/null 2>&1 || true
 		docker network rm "${live}_core" >/dev/null 2>&1 || true
 		docker volume rm "${live}_events" >/dev/null 2>&1 || true
 	fi
@@ -559,7 +559,7 @@ cp "$scratch/starter.yaml" "$e/policy.yaml"
 out="$(harness "$e" 'tool_hold_resolve; tool_hold_policy_apply' WITH_EGRESS=1 STUB_IMAGE="$PIN" NET="${live}_core" PATH="$scratch/shim:$PATH")"
 [ "$(rc_of "$out")" = 0 ] || fail "E: the image this box runs does not load the block: $out"
 chmod 0644 "$e/policy.yaml"
-docker run -d --name "$live-wardryx" --network "${live}_core" --network-alias wardryx --user 20001:10001 \
+docker run -d --name "$live-wardryx-1" --network "${live}_core" --network-alias wardryx --user 20001:10001 \
 	-e WARDRYX_KEYS="$ADMIN:default:admin,$PEP:default:pep" -e WARDRYX_APPROVAL_SECRET=holdgate-approval-secret-0000000000000000 \
 	-e WARDRYX_POLICY_ARCHIVE=/var/lib/stack/events/wardryx-policy-archive \
 	-v "${live}_events:/var/lib/stack/events" -v "$e/policy.yaml:/etc/wardryx/policy.yaml:ro" "$PIN" \
@@ -579,7 +579,7 @@ for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
 	sleep 1
 done
 if [ "${ready:-0}" != 1 ]; then
-	docker logs "$live-wardryx" 2>&1 | tail -5
+	docker logs "$live-wardryx-1" 2>&1 | tail -5
 	printf 'FAIL: the pinned wardryx did not answer on the block, so this measured NOTHING.\n'
 	exit 1
 fi
@@ -643,7 +643,7 @@ grep -qE ' +ask +agent://acme.example/stranger$' <<<"$out" || fail "E: an empty 
 floorput="$(lib 'tool_hold_request PUT /v1/policies/x "{\"target\":\"*\",\"when_no_grant\":\"hold\"}"; printf "%s\n" "$TOOL_HOLD_STATUS"' | sed -n 1p)"
 [ "$floorput" = 400 ] || fail "E: the floor was written through the policy API: HTTP $floorput"
 
-started="$(docker inspect --format '{{.State.StartedAt}}' "$live-wardryx")"
+started="$(docker inspect --format '{{.State.StartedAt}}' "$live-wardryx-1")"
 AG=agent://acme.example/lab/one
 out="$(lib "tool_hold_allow '$AG' 'ask,browse' 'the gate grants this' ''")"
 [ "$(rc_of "$out")" = 0 ] || fail "E: agent-allow was refused: $out"
@@ -655,7 +655,7 @@ out="$(lib "tool_hold_allow '$AG' 'fetch_url' 'one more' ''")"
 want "a second grant keeps the first" allow "$AG" browse agent-token
 want "a second grant adds its tool" allow "$AG" fetch_url agent-token
 settle
-[ "$started" = "$(docker inspect --format '{{.State.StartedAt}}' "$live-wardryx")" ] || fail "E: the grant needed a restart"
+[ "$started" = "$(docker inspect --format '{{.State.StartedAt}}' "$live-wardryx-1")" ] || fail "E: the grant needed a restart"
 events="$(docker run --rm -v "${live}_events:/e:ro" busybox:1.36 cat /e/wardryx.ndjson)"
 grep -q '"policy_updated"' <<<"$events" || fail "E: agent-allow left no policy_updated on the record"
 listed="$(lib "tool_hold_status; tool_hold_print_grants")"
@@ -664,6 +664,10 @@ grep -qF 'one more' <<<"$listed" || fail "E: agent-list does not show the reason
 grep -q "$AG" <<<"$listed" || fail "E: agent-list does not show the grant"
 grep -q 'grant-drills' <<<"$listed" || fail "E: agent-list does not show the grants in policy.yaml"
 [ "$(lib 'printf "%s\n" "$(tool_hold_loaded)"' | sed -n 1p)" = on ] || fail "E: wardryx's own start record does not say the floor is on"
+# A start record 2.6.0 left on the bus names an older start, so it must not decide: one with no floor,
+# planted after the real start, leaves the answer on.
+docker run --rm -v "${live}_events:/e" busybox:1.36 sh -c 'printf "%s\n" "{\"type\":\"policy_loaded\",\"source\":\"wardryx\",\"data\":{\"no_grant_floors\":[]}}" >>/e/wardryx.ndjson'
+[ "$(lib 'printf "%s\n" "$(tool_hold_loaded)"' | sed -n 1p)" = on ] || fail "E: a start record left on the bus by an older wardryx decides what the running one loaded"
 
 # The stop against the real replay: the agent with a stored grant is off the list, the stranger is on it.
 st="$scratch/e-old"

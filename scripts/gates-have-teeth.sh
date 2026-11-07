@@ -431,6 +431,11 @@ run_case "tool-hold-is-seeded: the store is left out of the question" fail \
 	'./scripts/tool-hold-is-seeded.sh' \
 	"$(py 'edit("install.sh", "  [ -s \"$d/candidate/stored.json\" ] || rm -f \"$d/candidate/stored.json\"\n", "  rm -f \"$d/candidate/stored.json\"\n")')" \
 	"not in the question"
+run_case "tool-hold-is-seeded: what wardryx loaded is read off the bus again" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "docker logs \"${NET%_core}-wardryx-1\" 2>&1 | grep -F", "docker run --rm -v \"${NET%_core}_events:/e:ro\" busybox:1.36 cat /e/wardryx.ndjson 2>&1 | grep -F")')" \
+	"start record does not say the floor is on"
+
 run_case "tool-hold-is-seeded: an empty store breaks the question" fail \
 	'./scripts/tool-hold-is-seeded.sh' \
 	"$(py 'edit("install.sh", "  [ -z \"$TOOL_HOLD_BODY\" ] || printf \x27%s\\n\x27 \"$TOOL_HOLD_BODY\"\n", "  printf \x27%s\\n\x27 \"$TOOL_HOLD_BODY\"\n")')" \
@@ -465,11 +470,11 @@ run_case "tool-hold-is-seeded: nothing reads what wardryx loaded" fail \
 	"a file that says on is believed"
 run_case "tool-hold-is-seeded: the question runs another image" fail \
 	'./scripts/tool-hold-is-seeded.sh' \
-	"$(py 'edit("install.sh", "TOOL_HOLD_WARDRYX_IMAGE=\"ghcr.io/taipanbox/wardryx:v2.6.0@sha256:26113779", "TOOL_HOLD_WARDRYX_IMAGE=\"ghcr.io/taipanbox/wardryx:v2.6.0@sha256:00113779")')" \
+	"$(py 'edit("install.sh", "TOOL_HOLD_WARDRYX_IMAGE=\"ghcr.io/taipanbox/wardryx:v2.6.1@sha256:2101d23b", "TOOL_HOLD_WARDRYX_IMAGE=\"ghcr.io/taipanbox/wardryx:v2.6.1@sha256:0001d23b")')" \
 	"not the one compose.yaml pins"
 run_case "tool-hold-is-seeded: the pin goes below 2.6.0" fail \
 	'./scripts/tool-hold-is-seeded.sh' \
-	"$(py 'edit("compose.yaml", "wardryx:v2.6.0@", "wardryx:v2.5.1@")')" \
+	"$(py 'edit("compose.yaml", "wardryx:v2.6.1@", "wardryx:v2.5.1@")')" \
 	"older than 2.6.0"
 run_case "tool-hold-is-seeded: a wardryx that refuses the file gets it anyway" fail \
 	'./scripts/tool-hold-is-seeded.sh' \
@@ -793,7 +798,7 @@ run_case "manifest-is-true: a routine arrives and the manifest does not claim it
 # is one character in one tag, which is exactly how it would arrive.
 run_case "manifest-is-true: a pulled tag moves in compose and not in the manifest" fail \
 	'./scripts/manifest-is-true.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.6.0", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.6.1", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
 	"an image it pulls"
 
 # invariant 15: the delegation plane's default is byte-for-byte what it was
@@ -1834,7 +1839,7 @@ run_case "approver-key-is-wired: the bare-key switch is set" fail \
 
 run_case "approver-key-is-wired: wardryx is pinned back to 2.3.0" fail \
 	'./scripts/approver-key-is-wired.sh' \
-	"$(py 'edit_all("compose.yaml", "wardryx:v2.6.0@sha256:26113779", "wardryx:v2.3.0@sha256:26113779")')" \
+	"$(py 'edit_all("compose.yaml", "wardryx:v2.6.1@sha256:2101d23b", "wardryx:v2.3.0@sha256:2101d23b")')" \
 	"older than v2.4.0"
 
 run_case "approver-key-is-wired: the console loses its key mount" fail \
@@ -2078,12 +2083,12 @@ run_case "typed-risk-signal: typryx is pinned before the proxy existed" fail \
 
 run_case "typed-risk-signal: wardryx is pinned before it read signals" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.6.0@sha256:26113779c4b830d6b27e626874965c722fd8b41dc5d7085d226a3d903927af7b}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.6.1@sha256:2101d23bbe8ecb1b932a530611ffa02f1c7c9b82394c4fa8db238f7d0e7bd667}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
 	"hold_if_signal and signals on /v1/decide do not exist before it"
 
 run_case "typed-risk-signal: wardryx is pinned before when_absent" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.6.0@sha256:26113779c4b830d6b27e626874965c722fd8b41dc5d7085d226a3d903927af7b}", "ghcr.io/taipanbox/wardryx:v1.3.2}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.6.1@sha256:2101d23bbe8ecb1b932a530611ffa02f1c7c9b82394c4fa8db238f7d0e7bd667}", "ghcr.io/taipanbox/wardryx:v1.3.2}")')" \
 	"needs v1.4.0 or later"
 
 run_case "typed-risk-signal: tokenfuse is pinned before it sent the tool call" fail \
