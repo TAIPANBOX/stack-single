@@ -75,6 +75,7 @@ change here is a change to something with root on somebody else's box.
 ./scripts/status-is-read-only.sh
 ./scripts/status-reads-what-runs.sh
 ./scripts/containers-carry-the-baseline.sh
+./scripts/browser-sandbox-is-measured.sh
 ./scripts/rollback-floor.sh
 ./scripts/version-is-one-number.sh
 ./scripts/health-checks-are-declared.sh

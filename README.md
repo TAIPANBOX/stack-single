@@ -475,9 +475,9 @@ What this means for you:
 - The browser asks wardryx before every fetch. It reaches wardryx through
   `browser-policy`, a network of its own whose only other member is wardryx, so
   the browser is not on `core`. The path is measured at the network level (a
-  container on it reaches wardryx and not the gateway or the internet). No fetch
-  through the `egress-browser` profile has run in CI yet, so whether the profile
-  decides each fetch end to end is not proven by this release.
+  container on it reaches wardryx and not the gateway or the internet), and CI's
+  `browser` job makes a real fetch through the `egress-browser` profile, decided
+  by the wardryx the installer started.
 - The host firewall is untouched. An agent that runs as a process on the host,
   rather than in a container, is outside all of this.
 
@@ -1103,12 +1103,32 @@ owns, and that proxy refuses any destination your policy did not allow.
 **About the sandbox**, because it will come up. Chromium's renderer sandbox
 needs kernel features a container does not give it by default, and it refuses
 to start rather than quietly running without one. This profile keeps Chrome's
-sandbox and relaxes the container's syscall filter (`seccomp:unconfined`),
-which is the better trade here: with Chrome's sandbox off, an exploit in a
-hostile page runs as the container's user and can open sockets directly, and
-that is egress that never passes the proxy and never reaches the record. If
-your policy is the other way round, set `SCOPYX_CHROMIUM_NO_SANDBOX=1` in
-`.env` and drop the `security_opt` line.
+sandbox and the container's syscall filter, both: `seccomp/chromium-v1.json` is
+Docker's default profile plus the three calls the sandbox makes, and each was
+measured by taking it out.
+
+| Added to Docker's default | Chrome uses it to | Taken out, the browser says |
+|---|---|---|
+| `chroot` | move into an empty directory | `Check failed: sys_chroot` |
+| `clone`, with a user, pid and net namespace and no other | start its zygote | `No usable sandbox` (no `clone` rule, or the pid or net flag out: the browser closes) |
+| `unshare`, of a user namespace and nothing else | move a process to a new user namespace | `No usable sandbox` |
+
+A mount, cgroup, uts or ipc namespace stays refused, and so do `mount`, `setns`
+and everything else the default refuses a container with no capabilities. With
+Chrome's sandbox off, an exploit in a hostile page runs as the container's user
+and can open sockets directly, and that is egress that never passes the proxy
+and never reaches the record, which is why this file keeps it. If your policy is
+the other way round, add `SCOPYX_CHROMIUM_NO_SANDBOX: "1"` to this service in
+your `compose.override.yaml`.
+
+A box with something other than the supported hosts, where the installer reports
+that no AppArmor line gives the sandbox a user namespace, has that same choice,
+or the sysctl that withholds the namespace.
+
+The profile's name carries a version because Compose hashes the line that names
+the file and never the file: `chromium-v2.json` is how a change reaches a
+running browser, and `scripts/containers-carry-the-baseline.sh` fails on a change
+under the old name.
 The console is on loopback because it arrives over your own tunnel:
 
 ```bash
@@ -1850,17 +1870,21 @@ each of them too, and none of that reaches `keyryx` or `vouchryx`. Your own
 service that writes outside its volumes now gets `Read-only file system`.
 
 AppArmor decides whether `scopyx-browser` can start Chrome's sandbox, and the two hosts this
-installer supports disagree, so `compose.yaml` sets nothing and each was measured with this
-whole baseline on:
+installer supports disagree, each measured with this whole baseline on:
 
-| Host | Docker's default profile | `apparmor=unconfined` |
-|---|---|---|
-| Ubuntu 24.04, Docker 28.0.4 | renders a page | `No usable sandbox`, because `kernel.apparmor_restrict_unprivileged_userns` is 1 |
-| Debian 13, Docker 26.1.5 | `credentials.cc`, `Permission denied`, with or without this baseline | renders a page |
+| Host | Docker's default profile | `apparmor=unconfined` | The installer writes |
+|---|---|---|---|
+| Ubuntu 24.04, Docker 28.0.4 | renders a page | `No usable sandbox`, because `kernel.apparmor_restrict_unprivileged_userns` is 1 | `docker-default` |
+| Debian 13, Docker 26.1.5 | `credentials.cc`, `Permission denied`: the kernel logs `userns_create` denied, because `docker-default` has no `userns` rule | renders a page | `unconfined` |
 
-A browser that cannot start its sandbox answers `browse` with that error and fetches nothing.
-On a box like the second row, `apparmor=unconfined` for this one service in your
-`compose.override.yaml` is the line that works, and it is a wider door, so it is your decision.
+So `compose.yaml` reads the line from `.env`, and `install.sh` measures it on every run: a
+throwaway with the browser's own user, filter and capabilities takes the steps Chrome takes
+(a new user namespace, a map, a chroot) under `docker-default` and then under `unconfined`, and
+the first that works becomes `SCOPYX_BROWSER_APPARMOR`. The run says which. There is nothing for
+you to do on either host. On the second row the browser has no AppArmor profile, and the rest of
+the baseline holds: the filter still refuses `mount`, `setns` and a mount namespace, in a
+container with no capabilities and a read-only root. A profile of your own goes in
+`compose.override.yaml`, and the installer leaves that file alone.
 
 ## What the installer will not do quietly
 

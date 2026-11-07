@@ -103,6 +103,8 @@ jobs:
         run: ./scripts/status-reads-what-runs.sh
       - name: every container carries the baseline, or names why not (invariant 69)
         run: ./scripts/containers-carry-the-baseline.sh
+      - name: the browser's AppArmor line is the narrowest one this host allows, measured (invariant 71)
+        run: ./scripts/browser-sandbox-is-measured.sh
       - name: a tree below the box's rollback index is refused before anything changes (invariant 68)
         run: ./scripts/rollback-floor.sh
       - name: the tree says one version everywhere (invariant 68)

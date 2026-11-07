@@ -3668,6 +3668,11 @@ run_case "status-reads-what-runs: a container that lost its baseline passes" fai
 	"$(py 'edit("install.sh", "  [ \"$ro\" != true ] || [ \"$2\" = true ] || missing=\"$missing read_only\"\n", "")')" \
 	"a running container that lost read_only passes"
 
+run_case "status-reads-what-runs: a browser with its filter off passes" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "    case \"$5\" in *'"'"'seccomp={'"'"'*) ;; *) missing=\"$missing seccomp-profile\" ;; esac\n", "    :\n")')" \
+	"a running container whose filter was turned off passes"
+
 run_case "status-reads-what-runs: the override is read as the file" fail \
 	'./scripts/status-reads-what-runs.sh' \
 	"$(py 'edit("install.sh", "    if ! file_cfg=\"$(\"${COMPOSE[@]}\" -f compose.yaml --profile '"'"'*'"'"' config 2>/dev/null)\"; then\n", "    if false; then\n")')" \
@@ -3813,7 +3818,130 @@ run_case "containers-carry-the-baseline: the browser loses init" fail \
 run_case "containers-carry-the-baseline: a second service is seccomp:unconfined" fail \
 	'./scripts/containers-carry-the-baseline.sh' \
 	"$(py 'edit("compose.yaml", "  wardryx:\n    <<: [*restart, *baseline]\n", "  wardryx:\n    <<: [*restart, *baseline]\n    security_opt:\n      - seccomp:unconfined\n      - no-new-privileges:true\n")')" \
-	"wardryx: seccomp:unconfined, and no exception says why"
+	"wardryx: seccomp:unconfined turns the filter off"
+
+# The browser's own profile (CLAUDE.md invariant 71).
+run_case "containers-carry-the-baseline: the browser goes back to seccomp:unconfined" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'edit("compose.yaml", "      - seccomp:./seccomp/chromium-v1.json\n", "      - seccomp:unconfined\n")')" \
+	"scopyx-browser: seccomp:unconfined turns the filter off"
+
+run_case "containers-carry-the-baseline: the browser falls to Docker's default filter" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'edit("compose.yaml", "      - seccomp:./seccomp/chromium-v1.json\n", "")')" \
+	"scopyx-browser: no profile of its own"
+
+run_case "containers-carry-the-baseline: a profile is edited under the same name" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'edit("seccomp/chromium-v1.json", "the zygote starts in its own", "the zygote now starts in its own")')" \
+	"changed and kept its name"
+
+run_case "containers-carry-the-baseline: a profile allows a fourth call" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'import json
+p = json.load(open("seccomp/chromium-v1.json"))
+p["syscalls"].append({"names": ["mount"], "action": "SCMP_ACT_ALLOW", "comment": "chromium-v1: more"})
+json.dump(p, open("seccomp/chromium-v1.json", "w"))')" \
+	"and what Chrome"
+
+run_case "containers-carry-the-baseline: clone loses its mask" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'import json
+p = json.load(open("seccomp/chromium-v1.json"))
+for r in p["syscalls"]:
+    if str(r.get("comment", "")).startswith("chromium-v1:") and r["names"] == ["clone"]:
+        del r["args"]
+json.dump(p, open("seccomp/chromium-v1.json", "w"))')" \
+	"clone is not held to the mask"
+
+run_case "containers-carry-the-baseline: a default rule is widened in the profile" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'import json
+p = json.load(open("seccomp/chromium-v1.json"))
+p["defaultAction"] = "SCMP_ACT_ALLOW"
+json.dump(p, open("seccomp/chromium-v1.json", "w"))')" \
+	"what is left is not Docker"
+
+run_case "containers-carry-the-baseline: a new version has no digest" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'import shutil
+shutil.copy("seccomp/chromium-v1.json", "seccomp/chromium-v2.json")
+edit("compose.yaml", "      - seccomp:./seccomp/chromium-v1.json\n", "      - seccomp:./seccomp/chromium-v2.json\n")
+edit("hardening-exceptions.json", "./seccomp/chromium-v1.json", "./seccomp/chromium-v2.json")
+edit("install.sh", "BROWSER_SECCOMP=seccomp/chromium-v1.json", "BROWSER_SECCOMP=seccomp/chromium-v2.json")')" \
+	"no digest in this gate"
+
+run_case "containers-carry-the-baseline: a profile has no exception" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'import json
+d = json.load(open("hardening-exceptions.json"))
+d["exceptions"] = [e for e in d["exceptions"] if e["key"] != "seccomp"]
+json.dump(d, open("hardening-exceptions.json", "w"))')" \
+	"seccomp:./seccomp/chromium-v1.json, and no exception says why"
+
+run_case "containers-carry-the-baseline: apparmor=unconfined is written out" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'edit("compose.yaml", "      - apparmor=${SCOPYX_BROWSER_APPARMOR:-docker-default}\n", "      - apparmor=unconfined\n")')" \
+	"apparmor=unconfined written out"
+
+run_case "containers-carry-the-baseline: the browser has no apparmor line" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'edit("compose.yaml", "      - apparmor=${SCOPYX_BROWSER_APPARMOR:-docker-default}\n", "")')" \
+	"scopyx-browser: no apparmor line"
+
+run_case "containers-carry-the-baseline: the installer's throwaway keeps its capabilities" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'edit("install.sh", "docker run --rm --user 65532:65532 --cap-drop ALL --read-only", "docker run --rm --user 65532:65532 --read-only")')" \
+	"has no --cap-drop ALL"
+
+run_case "containers-carry-the-baseline: the installer's throwaway is another user" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'edit("install.sh", "docker run --rm --user 65532:65532 --cap-drop ALL", "docker run --rm --user 0:0 --cap-drop ALL")')" \
+	"has no --user 65532:65532"
+
+run_case "containers-carry-the-baseline: the installer measures with another profile" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'edit("install.sh", "BROWSER_SECCOMP=seccomp/chromium-v1.json", "BROWSER_SECCOMP=seccomp/default.json")')" \
+	"measures with a profile compose.yaml does not name"
+
+run_case "containers-carry-the-baseline: a comment says seccomp:unconfined" pass \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'edit("compose.yaml", "  wardryx:\n    <<: [*restart, *baseline]\n", "  wardryx:\n    # never seccomp:unconfined\n    <<: [*restart, *baseline]\n")')"
+
+# The installer's pick (scripts/browser-sandbox-is-measured.sh, CLAUDE.md invariant 71).
+run_case "browser-sandbox-is-measured: the wider line is tried first" fail \
+	'./scripts/browser-sandbox-is-measured.sh' \
+	"$(py 'edit("install.sh", "for one in docker-default unconfined;", "for one in unconfined docker-default;")')" \
+	"wrote unconfined to .env where docker-default was right"
+
+run_case "browser-sandbox-is-measured: docker-default is never left" fail \
+	'./scripts/browser-sandbox-is-measured.sh' \
+	"$(py 'edit("install.sh", "for one in docker-default unconfined;", "for one in docker-default;")')" \
+	"where unconfined was right"
+
+run_case "browser-sandbox-is-measured: a throwaway that never started reads as a refusal" fail \
+	'./scripts/browser-sandbox-is-measured.sh' \
+	"$(py 'edit("install.sh", "  if ! browser_probe docker-default true; then\n", "  if false; then\n")')" \
+	"a throwaway that does not start: did not say not measured"
+
+run_case "browser-sandbox-is-measured: a host that refuses stops the install" fail \
+	'./scripts/browser-sandbox-is-measured.sh' \
+	"$(py 'edit("install.sh", "    if browser_probe \"$one\" unshare -Ur chroot / /bin/true; then\n", "    if true && browser_probe \"$one\" unshare -Ur chroot / /bin/true || exit 1; then\n")')" \
+	"the block exited non-zero"
+
+run_case "browser-sandbox-is-measured: a comment in the block is reworded" pass \
+	'./scripts/browser-sandbox-is-measured.sh' \
+	"$(py 'edit("install.sh", "# (a new user namespace, a map, a chroot)", "# (a new user namespace, its map, a chroot)")')"
+
+run_case "browser-sandbox-is-measured: nothing calls it" fail \
+	'./scripts/browser-sandbox-is-measured.sh' \
+	"$(py 'edit("install.sh", "\nbrowser_apparmor_apply\n", "\n")')" \
+	"never calls browser_apparmor_apply"
+
+run_case "browser-sandbox-is-measured: the block is gone" fail \
+	'./scripts/browser-sandbox-is-measured.sh' \
+	"$(py 'edit("install.sh", "# browser-apparmor: begin\n", "")')" \
+	"measured NOTHING"
 
 run_case "containers-carry-the-baseline: keyryx's exception points nowhere" fail \
 	'./scripts/containers-carry-the-baseline.sh' \
