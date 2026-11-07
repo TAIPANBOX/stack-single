@@ -10,6 +10,7 @@ name: gates
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
 
 permissions:
@@ -98,6 +99,10 @@ jobs:
         run: ./scripts/status-is-read-only.sh
       - name: the drift check says what Docker runs against the pins, and only reads (invariant 67)
         run: ./scripts/status-reads-what-runs.sh
+      - name: a tree below the box's rollback index is refused before anything changes (invariant 68)
+        run: ./scripts/rollback-floor.sh
+      - name: the tree says one version everywhere (invariant 68)
+        run: ./scripts/version-is-one-number.sh
       - name: Docker watches every service with a health path, and no distroless one
         run: ./scripts/health-checks-are-declared.sh
       - name: the gateway every box runs requires client keys, minted when none are given

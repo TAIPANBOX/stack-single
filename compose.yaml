@@ -23,6 +23,10 @@
 # commits. Nothing here has a default credential.
 
 name: agent-stack
+# The release this file belongs to, the same number as STACK_VERSION in install.sh: a piped
+# install fetches the two in separate requests, and refuses a pair that are not one tree.
+# A top-level x- key is no part of any service, so it recreates no container.
+x-stack-version: "1.6.4"
 
 x-restart: &restart
   restart: unless-stopped

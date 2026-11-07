@@ -149,6 +149,10 @@ GATEWAY_IDENTITY_MAP=/etc/tokenfuse/identity/identity.json
 CONSOLE_DOMAIN='console.example.internal'
 EOF
 
+# A journal: status reads it, prints one line from it, and leaves it byte for byte.
+printf '2026-11-09T06:18:44Z good version=1.7.0 index=1 commit=abc1234\n' >"$SANDBOX/stack/.install-history"
+journal_before="$(cksum <"$SANDBOX/stack/.install-history")"
+
 fail=0
 report() { printf 'FAIL: %s\n' "$1"; fail=$((fail + 1)); }
 
@@ -201,6 +205,12 @@ bad="$(changes)"
 if [ -n "$bad" ]; then
 	report "status changed the stack or asked it for something it records:"
 	printf '%s\n' "$bad" | sed 's/^/        /' | head -20
+fi
+if ! grep -q '^   install journal: last good install 2026-11-09T06:18:44Z' "$out"; then
+	report "status printed no line from the install journal"
+fi
+if [ "$(cksum <"$SANDBOX/stack/.install-history")" != "$journal_before" ]; then
+	report "status changed the stack: the install journal is not what it was"
 fi
 # Install-only checks are named as skipped, so they cannot pass silently.
 if ! grep -q '   skip  client keys: a call with no key is refused' "$out"; then

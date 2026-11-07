@@ -676,6 +676,7 @@ die() { EXPLAINED=1; printf '%s\n' "$*" >&2; exit 1; }
 gateway_probe_resolve() { :; }
 status_facts() { :; }
 stack_checks() { fail="$CASE_FAIL"; unmeasured="$CASE_UNMEASURED"; }
+journal_status() { :; }
 # shellcheck disable=SC1090,SC1091
 . "$SANDBOX/lifted.sh"
 # shellcheck disable=SC1090,SC1091
