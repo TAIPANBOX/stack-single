@@ -8,7 +8,8 @@
 #   ./install.sh
 #
 # Once it is installed, `./install.sh status` runs the same checks again against the
-# running stack and changes nothing. See the README, "Checking an installed box again".
+# running stack, compares what Docker runs with the pins in compose.yaml (a drift check)
+# and changes nothing. See the README, "Checking an installed box again".
 #
 # What this is NOT: `stack-up`, which is the local sandbox. That one needs
 # Rust, Go and Node on your machine to build from source and stops when you
@@ -346,7 +347,10 @@ DC="${COMPOSE[*]}"
 # planes and both gateways are on `core` (or reach it), and the agents' network,
 # the browser's and the proxy's are not: so this is the planes' own view.
 NET="agent-stack_core"
-docker network inspect "$NET" >/dev/null 2>&1 || die "network $NET is missing: the stack did not start."
+if ! docker network inspect "$NET" >/dev/null 2>&1; then
+  [ "${STATUS:-0}" != 1 ] || cannot_measure "network $NET is missing, so there is no stack here to read. Nothing was changed."
+  die "network $NET is missing: the stack did not start."
+fi
 # Where the gateway is probed: the address the operator chose, not loopback.
 # With GATEWAY_BIND set to ONE address (a tailnet address is the shape an
 # appliance wants: reachable from the customer's clouds over a private mesh,
@@ -733,13 +737,362 @@ if compose_has vouchryx; then
   check "gateway resolves the delegation door" \
         "$DC exec -T tokenfuse-gateway printenv TOKENFUSE_DELEGATION_ISSUER"
 fi
+
+# Last, so no probe of the checks above is still on a network when it looks.
+running_images
 }
+
+# profile-table: begin
+# The compose profiles of this file, in the two kinds the installer treats differently (CLAUDE.md invariant 50).
+# PROFILES_INSTALLED: this installer starts these from its own flags. A run that turns one off stops and removes
+# its containers by name. PROFILES_OPERATOR: an operator starts these with `docker compose --profile P up -d`.
+# This installer never removes them; a RUNNING one is re-upped at this run's pinned image, so an upgrade leaves
+# no stale image behind (forge's costcrew stayed on v0.6.0 after 1.1.35 to 1.3.1). One place: a profile of
+# compose.yaml that is in neither list, or in both, is refused by scripts/profiles-off-are-removed.sh. It sits
+# above the status entry point because the drift check, which status runs, reads it too.
+PROFILES_INSTALLED="record typed typed-risk-signal delegation openai-door slo-signal"
+PROFILES_OPERATOR="egress egress-browser finops routines manual crew"
+# profile-table: end
+
+# running-images: begin
+# The drift check. For every container of this project it compares what Docker runs with
+# the pin compose.yaml names for that service, one line each. It finds drift: a container
+# left on an old image, an override nobody remembers, a stranger on the stack's networks.
+# That is all it finds. Its word is Docker's on this box and its pins are a file on this
+# box, so a person with root can change either side, and every run says so (CLAUDE.md
+# invariant 67).
+#
+# What it reads, and why that:
+#   .Image       what the container was created from. On the classic image store this is
+#                the config digest, which never equals a pin; on the containerd store it
+#                is the target digest, which does. So both are compared.
+#   RepoDigests  the manifest digests the image is known by, every one of them, in the
+#                pin's own repository.
+#   Never .Config.Image: that is the name the container was created with, the text compose
+#   wrote down, and it matches whatever the bytes are.
+#
+# Only reads, and only of this box: docker ps, inspect, image inspect, network ls, network
+# inspect, and one `compose config`. No registry and no cosign: status promises to read
+# and nothing else, and a signature needs the network. The pins are read once, for every
+# profile, and not through compose_image: that function is defined below the line where
+# status ends, costs one compose run per service, and swallows a failed read, which here
+# has to be a "could not measure".
+cannot_measure() { # WHY: status stops here. 2, not die's 1: nothing failed, nothing was read.
+  EXPLAINED=1
+  printf '\n\033[1;31m!! could not measure: %s\033[0m\n' "$1" >&2
+  exit 2
+}
+drift_tally() { # LABEL NAME STATE DETAIL: one line, and the counters that go with it
+  printf '   %-5s %-25s %-12s %s\n' "$1" "$2" "$3" "$4"
+  case "$1" in
+    ok) ;;
+    FAIL) drift_differ=$((drift_differ + 1)); fail=$((fail + 1)) ;;
+    skip) drift_skipped=$((drift_skipped + 1)) ;;
+    note) drift_noted=$((drift_noted + 1)) ;;
+  esac
+}
+drift_cannot() { # WHY: status ends 2 for it; an install has no third verdict, so there it is a failed check
+  printf '   %-5s %s\n' 'n/a' "drift check could not measure: $1"
+  if [ "${STATUS:-0}" = 1 ]; then unmeasured=$((unmeasured + 1)); else fail=$((fail + 1)); fi
+}
+drift_short() { # DIGEST: enough of it to read and to tell apart; every comparison uses all of it
+  local d="${1#sha256:}"
+  printf 'sha256:%s' "${d:0:12}"
+}
+drift_repo() { # IMAGE: its repository, with no tag and no digest
+  local r="${1%%@*}"
+  case "${r##*/}" in *:*) r="${r%:*}" ;; esac
+  r="${r#docker.io/}"
+  printf '%s' "${r#library/}"
+}
+drift_operator_only() { # PROFILES: whether every profile named is one an operator starts by hand
+  local p
+  [ -n "$1" ] || return 1
+  for p in $1; do
+    case " $PROFILES_OPERATOR " in *" $p "*) ;; *) return 1 ;; esac
+  done
+}
+# Sets drift_verdict, drift_runs (the digest to show as what runs) and drift_digest (the pin's).
+drift_compare() { # PIN IMAGE_ID
+  local pin="$1" id="$2" repo known r
+  drift_digest=""
+  drift_runs="$id"
+  case "$pin" in *@*) drift_digest="${pin##*@}" ;; esac
+  repo="$(drift_repo "$pin")"
+  if ! known="$(docker image inspect --format '{{range .RepoDigests}}{{.}} {{end}}' "$id" 2>&1)"; then
+    case "$known" in
+      *"No such image"*) drift_verdict=gone ;;
+      *) drift_verdict=unread ;;
+    esac
+    return 0
+  fi
+  if [ -z "$drift_digest" ]; then
+    # No digest to hold it to. An image nobody pulled was built here; one with a registry
+    # digest came from a registry, by a name that can move.
+    drift_verdict=built
+    [ -z "${known// /}" ] || drift_verdict=nodigest
+    return 0
+  fi
+  if [ "$id" = "$drift_digest" ]; then
+    drift_verdict=same
+    drift_runs="$id"
+    return 0
+  fi
+  drift_verdict=differs
+  [ -n "${known// /}" ] || drift_verdict=unregistered
+  for r in $known; do
+    [ "$(drift_repo "$r")" = "$repo" ] || continue
+    if [ "${r##*@}" = "$drift_digest" ]; then
+      drift_verdict=same
+      drift_runs="$drift_digest"
+      return 0
+    fi
+    [ "$drift_runs" != "$id" ] || drift_runs="${r##*@}"
+  done
+}
+# Sets drift_src and drift_default. The default is read from compose.yaml as written, so a
+# `*_IMAGE` in .env is shown as what it is: a value that has left the pins, and that the
+# resolved configuration would otherwise call the pin. images-are-digest-pinned.sh reads
+# these same defaults, and never what .env says.
+drift_source() { # SERVICE PIN
+  local row var
+  row="$(grep -- "^$1|" <<<"$drift_raw" || true)"
+  IFS='|' read -r _ var drift_default <<<"$row"
+  if [ "$2" = "$drift_default" ]; then
+    drift_src=compose
+  elif [ -n "$var" ] && grep -q -- "^$var=" .env 2>/dev/null; then
+    drift_src='.env override'
+  elif [ -f compose.override.yaml ]; then
+    drift_src=compose.override.yaml
+  else
+    drift_src='environment override'
+  fi
+}
+drift_judge() { # SERVICE PIN IMAGE_ID STATE RESTARTS
+  local svc="$1" pin="$2" id="$3" state="$4" restarts="$5" label detail
+  drift_compare "$pin" "$id"
+  drift_source "$svc" "$pin"
+  case "$drift_verdict" in
+    same)
+      label=ok
+      drift_matched=$((drift_matched + 1))
+      detail="$(drift_short "$drift_runs")  pin $(drift_short "$drift_digest")  $drift_src"
+      if [ "$drift_src" != compose ]; then
+        label=note
+        detail="$detail, compose.yaml pins $(drift_short "${drift_default##*@}")"
+      fi
+      ;;
+    differs)
+      label=FAIL
+      detail="$(drift_short "$drift_runs")  pin $(drift_short "$drift_digest")  $drift_src  (not the image the pin names)"
+      ;;
+    unregistered)
+      label=FAIL
+      detail="$(drift_short "$id")  pin $(drift_short "$drift_digest")  $drift_src  (no registry digest: built or loaded here, not the pin)"
+      ;;
+    built)
+      label=note
+      detail="$pin  built on this box, nothing to compare  $drift_src"
+      ;;
+    nodigest)
+      label=FAIL
+      detail="$pin  no digest pinned  $drift_src"
+      ;;
+    gone)
+      label=FAIL
+      detail="$(drift_short "$id")  image record gone  pin $(drift_short "$drift_digest")"
+      ;;
+    *)
+      drift_cannot "Docker would not say what image $svc runs"
+      return 0
+      ;;
+  esac
+  [ "$restarts" = 0 ] || detail="$detail  ($restarts restart(s))"
+  # The right image in a container that does not stay up is still a service that is down.
+  case "$state" in
+    running|exited\ 0) ;;
+    *) label=FAIL ;;
+  esac
+  drift_tally "$label" "$svc" "$state" "$detail"
+}
+drift_absent() { # SERVICE PROFILES RESTART: compose declares it and Docker has no container for it
+  case "$2" in
+    "")
+      if [ "$3" = no ]; then
+        drift_tally skip "$1" 'no container' "a one-shot with its record pruned, nothing runs"
+      else
+        drift_tally FAIL "$1" 'no container' "compose.yaml declares it and Docker has no container for it"
+      fi
+      ;;
+    *" "*) drift_tally skip "$1" '' "not started, profiles $2 are off" ;;
+    *) drift_tally skip "$1" '' "not started, profile $2 is off" ;;
+  esac
+}
+drift_stopped() { # SERVICE PIN PROFILES RESTART IMAGE_ID STATE CODE RESTARTS: no container of it runs
+  local shown="$6"
+  [ "$6" != exited ] || shown="exited $7"
+  if [ "$4" = no ]; then
+    if [ "$shown" = 'exited 0' ]; then
+      drift_judge "$1" "$2" "$5" 'exited 0' "$8"
+    else
+      drift_tally FAIL "$1" "$shown" "a one-shot, and it did not end 0"
+    fi
+  elif drift_operator_only "$3"; then
+    drift_tally skip "$1" "$shown" "stopped, in an operator-started profile ($3)"
+  else
+    drift_tally FAIL "$1" "$shown" "compose.yaml keeps this running, and it is not"
+  fi
+}
+drift_measure() {
+  local cfg pins project ids rows mine nets net out member strangers="" live
+  local svc pin profiles restart id oneoff name image state code restarts
+  drift_raw=""
+  if ! cfg="$("${COMPOSE[@]}" --profile '*' config 2>/dev/null)"; then
+    drift_cannot "compose could not resolve compose.yaml, so there is no pin to compare with"
+    return 0
+  fi
+  pins="$(awk '
+    function emit() { if (svc != "") print svc "|" img "|" prof "|" rst; svc = ""; img = ""; prof = ""; rst = "" }
+    /^services:/ { on = 1; next }
+    /^[^ ]/ { if (on) emit(); on = 0 }
+    !on { next }
+    /^  [^ ]/ { emit(); svc = $1; sub(/:$/, "", svc); inprof = 0; next }
+    /^    profiles:/ { inprof = 1; next }
+    /^      - / { if (inprof) prof = prof (prof == "" ? "" : " ") $2; next }
+    /^    [^ ]/ { inprof = 0 }
+    /^    image: / { if (img == "") img = $2 }
+    /^    restart: / { rst = $2; gsub(/["\047]/, "", rst) }
+    END { emit() }' <<<"$cfg")"
+  project="$(awk '/^name: / { print $2 }' <<<"$cfg")"
+  if [ -z "$pins" ] || [ -z "$project" ]; then
+    drift_cannot "compose gave no services or no project name, so there is no pin to compare with"
+    return 0
+  fi
+  [ ! -f compose.override.yaml ] || drift_tally note compose.override.yaml '' "on this box, and what it sets counts as the pin here"
+  # The file as written: "service|variable|default". A literal image has no variable.
+  drift_raw="$(awk '
+    /^services:/ { on = 1; next }
+    /^[^ #]/ { on = 0 }
+    on && /^  [a-z0-9-]+:[ ]*$/ { svc = $1; sub(/:$/, "", svc) }
+    on && /^    image: / {
+      v = $2; var = ""
+      if (match(v, /^[$][{][A-Za-z0-9_]+:-/)) {
+        var = substr(v, 3, RLENGTH - 4)
+        v = substr(v, RLENGTH + 1)
+        sub(/[}]$/, "", v)
+      }
+      print svc "|" var "|" v
+    }' compose.yaml 2>/dev/null || true)"
+  if ! ids="$(docker ps -a -q --no-trunc --filter "label=com.docker.compose.project=$project" 2>/dev/null)"; then
+    drift_cannot "Docker did not answer, so nothing here says what runs"
+    return 0
+  fi
+  if [ -z "$ids" ]; then
+    drift_cannot "Docker has no container of project $project"
+    return 0
+  fi
+  # shellcheck disable=SC2086  # one id per line, hex, and each has to be its own argument
+  if ! rows="$(docker inspect --format '{{.Id}}|{{index .Config.Labels "com.docker.compose.service"}}|{{index .Config.Labels "com.docker.compose.oneoff"}}|{{.Name}}|{{.Image}}|{{.State.Status}}|{{.State.ExitCode}}|{{.RestartCount}}' $ids 2>/dev/null)"; then
+    drift_cannot "Docker would not describe the containers of project $project"
+    return 0
+  fi
+  while IFS='|' read -r svc pin profiles restart; do
+    if [ -z "$pin" ]; then
+      drift_cannot "compose names no image for $svc"
+      continue
+    fi
+    mine="$(awk -F'|' -v s="$svc" '$2 == s && $3 != "True"' <<<"$rows")"
+    if [ -z "$mine" ]; then
+      drift_absent "$svc" "$profiles" "$restart"
+      continue
+    fi
+    # An interrupted recreate can leave a stopped copy beside the one that runs. The one that
+    # runs is what the service is judged by, and the copy is named so nobody mistakes it.
+    live=""
+    while IFS='|' read -r _ _ _ _ _ state _ _; do
+      case "$state" in running|restarting|paused) live=1 ;; esac
+    done <<<"$mine"
+    while IFS='|' read -r _ _ _ name image state code restarts; do
+      case "$state" in
+        running|restarting|paused) drift_judge "$svc" "$pin" "$image" "$state" "$restarts" ;;
+        *)
+          if [ -n "$live" ]; then
+            [ "$state" != exited ] || state="exited $code"
+            drift_tally note "$svc" "$state" "$(drift_short "$image")  a stopped copy beside the one that runs: ${name#/}"
+          else
+            drift_stopped "$svc" "$pin" "$profiles" "$restart" "$image" "$state" "$code" "$restarts"
+          fi
+          ;;
+      esac
+    done <<<"$mine"
+  done <<<"$pins"
+  # This project's containers compose.yaml does not declare, and the runs a person started by hand.
+  while IFS='|' read -r _ svc oneoff name _ state _ _; do
+    if [ "$oneoff" = True ]; then
+      drift_tally note "$svc" "$state" "a one-off run, not compared: ${name#/}"
+    elif ! grep -q -- "^$svc|" <<<"$pins"; then
+      if [ "$state" = running ]; then
+        drift_tally FAIL "${name#/}" "$state" "unknown container: of this project, and compose.yaml has no service $svc"
+      else
+        drift_tally note "${name#/}" "$state" "of this project, and compose.yaml has no service $svc"
+      fi
+    fi
+  done <<<"$rows"
+  # A container with no project label is on no list above: only the networks show it.
+  if ! nets="$(docker network ls -q --filter "label=com.docker.compose.project=$project" 2>/dev/null)"; then
+    drift_cannot "Docker would not list the networks of project $project"
+    return 0
+  fi
+  if [ -z "$nets" ]; then
+    drift_cannot "Docker has no network of project $project"
+    return 0
+  fi
+  for net in $nets; do
+    if ! out="$(docker network inspect --format '{{.Name}}|{{range $id, $c := .Containers}}{{$id}}={{$c.Name}} {{end}}' "$net" 2>/dev/null)"; then
+      drift_cannot "Docker would not describe network $net"
+      continue
+    fi
+    for member in ${out#*|}; do
+      grep -qxF -- "${member%%=*}" <<<"$ids" && continue
+      strangers="$strangers${member%%=*}|${member#*=}|${out%%|*}
+"
+    done
+  done
+  # Read twice, not filtered: a probe of a second status run or a person's debug shell look the
+  # same, and only the debug shell is still there a moment later. A filter on --rm or on the
+  # probes' image would hide exactly that shell.
+  if [ -n "$strangers" ]; then
+    sleep 2
+    while IFS='|' read -r id name net; do
+      [ -n "$id" ] || continue
+      state="$(docker inspect --format '{{.State.Status}}' "$id" 2>/dev/null || true)"
+      [ -n "$state" ] || continue
+      drift_tally FAIL "$name" "$state" "unknown container on $net"
+    done <<<"$strangers"
+  fi
+  if [ "$drift_matched" -eq 0 ] && [ "$drift_differ" -eq 0 ]; then
+    drift_cannot "no container could be held to a pin"
+  fi
+}
+running_images() {
+  drift_matched=0
+  drift_differ=0
+  drift_skipped=0
+  drift_noted=0
+  printf '\n   drift check: what runs, as the Docker on this box reports it, against the pins in %s/compose.yaml\n' "$PWD"
+  drift_measure
+  printf '   drift check: %s on their pin, %s failed, %s skipped, %s noted\n' "$drift_matched" "$drift_differ" "$drift_skipped" "$drift_noted"
+  printf '   this is a drift check: it compares what Docker on this box says with what compose.yaml on this box says, and a person with root on this box can change either side.\n'
+}
+# running-images: end
 
 # ---- status: the same checks, against the stack already installed -------------
 # `./install.sh status` changes nothing. It reads .env and the running stack, runs
 # stack_checks (the list section 8 runs, not a copy of it), and prints one line per
 # check. No package, image, container or file is touched; the checks that would write
-# are skipped and marked so. It runs as root or as a user in the docker group.
+# are skipped and marked so. It runs as root: .env is 0600. It ends 0 when every check
+# passed, 1 when a check failed or the drift check found a difference, and 2 when it
+# could not measure: no Docker, no pins, no stack, nothing to compare.
 status_facts() { # what the install decided, read back from .env and the running stack
   IDENTITY_KEYS_COUNT=0; IDENTITY_MAP_ON=0; IDENTITY_openai_KEYS_COUNT=0; IDENTITY_MINTED=0
   DOOR_ON=0; TYPED_PLANE=off; TYPED_RISK_ON=0
@@ -760,22 +1113,28 @@ status_facts() { # what the install decided, read back from .env and the running
 }
 status_main() {
   STATUS=1
-  [ -f "$STACK_DIR/.env" ] || die "nothing is installed in $STACK_DIR (there is no .env there), so there is no stack to check. Set STACK_DIR if it lives elsewhere. Nothing was changed."
+  [ -f "$STACK_DIR/.env" ] || cannot_measure "nothing is installed in $STACK_DIR (there is no .env there), so there is no stack to check. Set STACK_DIR if it lives elsewhere. Nothing was changed."
+  [ -r "$STACK_DIR/.env" ] || cannot_measure "$STACK_DIR/.env is not readable by this user: it holds the box's keys, mode 0600. Run status as root. Nothing was changed."
   cd "$STACK_DIR"
   # shellcheck disable=SC1091  # generated at install time, not in this repo
   . ./.env
   gateway_probe_resolve
   [ -n "${GATEWAY_CLIENT_KEYS:-}" ] \
-    || die "$STACK_DIR/.env holds no client keys: this box was installed before the gateway required them, and compose will not start it without them. Run ./install.sh once to mint them. Nothing was changed."
+    || cannot_measure "$STACK_DIR/.env holds no client keys: this box was installed before the gateway required them, and compose will not start it without them. Run ./install.sh once to mint them. Nothing was changed."
   if docker compose version >/dev/null 2>&1; then COMPOSE=(docker compose)
   elif command -v docker-compose >/dev/null 2>&1; then COMPOSE=(docker-compose)
-  else die "no docker compose on this machine, so the stack cannot be read. Nothing was changed."; fi
+  else cannot_measure "no docker compose on this machine, so the stack cannot be read. Nothing was changed."; fi
+  docker version --format '{{.Server.Version}}' >/dev/null 2>&1 \
+    || cannot_measure "Docker on this box did not answer, so nothing here says what runs. Nothing was changed."
   status_facts
   printf 'status of the stack in %s\n' "$STACK_DIR"
   fail=0
+  unmeasured=0
   stack_checks
   EXPLAINED=1
-  if [ "$fail" -eq 0 ]; then printf '\nevery check passed\n'; exit 0; fi
+  if [ "$fail" -eq 0 ] && [ "$unmeasured" -eq 0 ]; then printf '\nevery check passed\n'; exit 0; fi
+  # What was found outranks what was not: a failed check beside an empty reading is still 1.
+  if [ "$fail" -eq 0 ]; then printf '\n%s check(s) could not measure\n' "$unmeasured"; exit 2; fi
   printf '\n%s check(s) failed\n' "$fail"
   exit 1
 }
@@ -4425,16 +4784,6 @@ trailryx_pin_apply() { # writes TRAILRYX_KEYRYX_KID into .env once; a box with t
 
 trailryx_pin_apply
 "${COMPOSE[@]}" "${UP_PROFILES[@]}" up -d --remove-orphans
-# profile-table: begin
-# The compose profiles of this file, in the two kinds the installer treats differently (CLAUDE.md invariant 50).
-# PROFILES_INSTALLED: this installer starts these from its own flags. A run that turns one off stops and removes
-# its containers by name. PROFILES_OPERATOR: an operator starts these with `docker compose --profile P up -d`.
-# This installer never removes them; a RUNNING one is re-upped at this run's pinned image, so an upgrade leaves
-# no stale image behind (forge's costcrew stayed on v0.6.0 after 1.1.35 to 1.3.1). One place: a profile of
-# compose.yaml that is in neither list, or in both, is refused by scripts/profiles-off-are-removed.sh.
-PROFILES_INSTALLED="record typed typed-risk-signal delegation openai-door slo-signal"
-PROFILES_OPERATOR="egress egress-browser finops routines manual crew"
-# profile-table: end
 
 # `up --remove-orphans` does not remove a container whose profile this run does not name (measured 2026-10-04).
 # So an installer-managed profile this run turns off has its containers removed by name, under that profile.

@@ -8,7 +8,7 @@ Feature: status checks an installed stack and changes nothing
 
   An operator who has installed the stack runs `./install.sh status` to see whether
   it still holds together. The checks are the install's own, one line each, and the
-  run ends 0 when they all pass and 1 when one does not.
+  run ends 0 when they all pass, 1 when one does not, and 2 when it could not measure.
 
   Scenario: status runs the checks the install runs, one line each, and says how it ended
     Given an installed stack in its directory
@@ -24,6 +24,8 @@ Feature: status checks an installed stack and changes nothing
     # -> gates-have-teeth.sh "status-is-read-only: status brings the stack up first"
     # -> gates-have-teeth.sh "status-is-read-only: status runs the package step"
     # -> gates-have-teeth.sh "status-is-read-only: status issues the first device"
+    # -> gates-have-teeth.sh "status-is-read-only: status pulls an image"
+    # -> gates-have-teeth.sh "status-is-read-only: status runs cosign"
 
   Scenario: status never writes into the event bus or sends a request the stack records
     Given an installed stack with client keys and an identity map
@@ -35,8 +37,18 @@ Feature: status checks an installed stack and changes nothing
   Scenario: status on a box with nothing installed refuses and says so
     Given a directory with no .env in it
     When the operator runs status there
-    Then status ends 1, says that nothing is installed, and calls no tool at all
+    Then status ends 2, says that nothing is installed, and calls no tool at all
     # -> gates-have-teeth.sh "status-is-read-only: status runs on a directory with no .env"
+    # -> gates-have-teeth.sh "status-is-read-only: an empty directory ends 1"
+
+  Scenario: status that cannot read the stack ends 2 and prints no check
+    Given a Docker that does not answer, or a stack whose network is gone
+    When the operator runs status
+    Then status ends 2, says it could not measure, and prints no line about a box it could not read
+    # -> gates-have-teeth.sh "status-is-read-only: a Docker that does not answer ends 1"
+    # -> gates-have-teeth.sh "status-is-read-only: nobody asks whether Docker answers"
+    # -> gates-have-teeth.sh "status-is-read-only: a missing network ends 1"
+    # -> gates-have-teeth.sh "status-is-read-only: the drift check's reads are not reached"
 
   Scenario: rewording a comment does not change what status is allowed to do
     Given the status code with a comment reworded

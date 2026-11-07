@@ -96,6 +96,8 @@ jobs:
         run: ./scripts/features-are-bound.sh
       - name: status checks the installed stack and changes nothing
         run: ./scripts/status-is-read-only.sh
+      - name: the drift check says what Docker runs against the pins, and only reads (invariant 67)
+        run: ./scripts/status-reads-what-runs.sh
       - name: Docker watches every service with a health path, and no distroless one
         run: ./scripts/health-checks-are-declared.sh
       - name: the gateway every box runs requires client keys, minted when none are given

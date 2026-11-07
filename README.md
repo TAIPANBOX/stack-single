@@ -51,12 +51,68 @@ cd /opt/agent-stack     # any copy of install.sh works; STACK_DIR names the stac
 STACK_DIR=/opt/agent-stack ./install.sh status
 ```
 
-It exits 0 when every check passes and 1 when one fails. It installs nothing,
-pulls no image, starts, stops or restarts no container, issues no device and
-sends no mail. The checks that would write to the event bus, or send a call the
-stack records (a refused metered call, a typed question), are printed as `skip`
-and run only by the install. Run it as root, or as a user in the `docker` group.
-If the box has no `.env`, `status` says so and stops before it calls anything.
+It installs nothing, pulls no image, starts, stops or restarts no container,
+issues no device and sends no mail. The checks that would write to the event bus,
+or send a call the stack records (a refused metered call, a typed question), are
+printed as `skip` and run only by the install. Run it as root: `.env` holds the
+box's keys, mode 0600, and `status` reads it.
+
+| Exit | Means |
+|---|---|
+| 0 | every check passed, and what runs is what the pins name |
+| 1 | a check failed, or the drift check found a difference |
+| 2 | it could not measure: no `.env`, no Docker answering, no pins, no stack, nothing to compare |
+
+A 2 is never a pass and never a finding: nothing was read, so nothing was said about
+the box. If a check failed as well, the run ends 1.
+
+### The drift check
+
+The last thing `status` runs, and the last thing an install runs, is a drift check.
+For every container of the stack it compares what Docker runs with the pin in
+`compose.yaml`, one line each:
+
+```
+   drift check: what runs, as the Docker on this box reports it, against the pins in /opt/agent-stack/compose.yaml
+   note  compose.override.yaml                  on this box, and what it sets counts as the pin here
+   ok    wardryx                   running      sha256:2d3c0c9c0798  pin sha256:2d3c0c9c0798  compose
+   FAIL  console                   running      sha256:5d8392de11aa  pin sha256:f018407dba47  compose  (not the image the pin names)
+   ok    init-volumes              exited 0     sha256:73aaf090f3d8  pin sha256:73aaf090f3d8  compose
+   skip  scopyx                                 not started, profile egress is off
+   note  tokenfuse-gateway         running      stack/tokenfuse:dev  built on this box, nothing to compare  .env override
+   FAIL  wardryx-old               running      unknown container on agent-stack_core
+   drift check: 21 on their pin, 2 failed, 7 skipped, 2 noted
+   this is a drift check: it compares what Docker on this box says with what compose.yaml on this box says, and a person with root on this box can change either side.
+```
+
+It reads the image Docker holds for the container, not the name the container was
+given, so a container left behind by an upgrade shows up whatever its name says.
+Both of Docker's image stores give the same verdict for the same bytes.
+
+- **An image set in `.env`.** A `*_IMAGE` line replaces the pin for that service, and
+  nothing else in this repository reads it. The line says `note`, `.env override`, and
+  what `compose.yaml` pins. With no digest in it, and an image from a registry, it says
+  `FAIL no digest pinned`: a tag can move. `compose.override.yaml` counts the same way.
+- **An image built on the box** (`BUILD_FROM_SOURCE=1`) has no registry digest to compare
+  with, and the line says so. A service pinned by digest whose image has no registry
+  digest is not that case: it fails, because it cannot be the pin.
+- **A one-shot** (`init-volumes`, `costcrew-init`) is expected to have ended 0. Ending
+  otherwise fails.
+- **A service whose profile is off** is skipped and named. A stopped service of a profile
+  you start yourself (`egress`, `egress-browser`, `finops`, `routines`, `manual`, `crew`) is
+  skipped too. A service the stack keeps running that has stopped or keeps restarting
+  fails, and the line gives its state.
+- **A container compose does not know** fails: one with this project's label and no
+  service in the file, or one with no label at all that is attached to one of the stack's
+  networks. A throwaway that has left a moment later is not counted.
+
+It only reads: `docker ps`, `inspect`, `image inspect`, `network ls`, `network inspect` and
+`docker compose config`. It reaches no registry and runs no `cosign`.
+
+This is a drift check and it says what it is. It finds a box that has moved away from its
+pins by accident. Its word is Docker's on this box and the pins are a file on this box,
+so a person with root can change either side. The bytes on disk are not re-hashed, and
+what it reports is true of the moment it ran.
 
 ## This is not the sandbox
 
@@ -1608,6 +1664,9 @@ What this does not do:
   is signed or checked. It is your choice to make, and the installer says so.
 - A digest says which bytes a box runs. It does not say those bytes are safe.
   The signature says which release workflow built them.
+- A `*_IMAGE` line in `.env` replaces a pin for that service, and a pin in
+  `compose.yaml` is then not what the box runs. `./install.sh status` shows every such
+  line as an override, beside what `compose.yaml` pins (see "The drift check").
 
 To move a pin, change the tag and its digest together in `compose.yaml` and in
 `components.json`, and in the one place `install.sh` names the same image.

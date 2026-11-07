@@ -2961,7 +2961,7 @@ run_case "status-is-read-only: a refused metered call is sent by status" fail \
 
 run_case "status-is-read-only: status runs on a directory with no .env" fail \
 	'./scripts/status-is-read-only.sh' \
-	"$(py 'edit("install.sh", "  [ -f \"$STACK_DIR/.env\" ] || die \"nothing is installed", "  true || die \"nothing is installed")')" \
+	"$(py 'edit("install.sh", "  [ -f \"$STACK_DIR/.env\" ] || cannot_measure \"nothing is installed", "  true || cannot_measure \"nothing is installed")')" \
 	"did not say that nothing is installed"
 
 run_case "status-is-read-only: the status entry point is gone" fail \
@@ -2981,6 +2981,237 @@ run_case "status-is-read-only: a comment in the status block is reworded" pass \
 run_case "status-is-read-only: a comment in the shared check list is reworded" pass \
 	'./scripts/status-is-read-only.sh' \
 	"$(py 'edit("install.sh", "# every check the verification runs, in the order it runs them.", "# every check the verification runs, in the order they run.")')"
+
+run_case "status-is-read-only: status pulls an image" fail \
+	'./scripts/status-is-read-only.sh' \
+	"$(py 'edit("install.sh", "  status_facts\n  printf '"'"'status of the stack", "  status_facts\n  docker pull busybox:1.36 >/dev/null 2>&1 || true\n  printf '"'"'status of the stack")')" \
+	"changed the stack"
+
+run_case "status-is-read-only: status runs cosign" fail \
+	'./scripts/status-is-read-only.sh' \
+	"$(py 'edit("install.sh", "  status_facts\n  printf '"'"'status of the stack", "  status_facts\n  cosign verify busybox:1.36 >/dev/null 2>&1 || true\n  printf '"'"'status of the stack")')" \
+	"changed the stack"
+
+run_case "status-is-read-only: an empty directory ends 1" fail \
+	'./scripts/status-is-read-only.sh' \
+	"$(py 'edit("install.sh", "|| cannot_measure \"nothing is installed", "|| die \"nothing is installed")')" \
+	"status on an empty directory exited 1, not 2"
+
+run_case "status-is-read-only: a Docker that does not answer ends 1" fail \
+	'./scripts/status-is-read-only.sh' \
+	"$(py 'edit("install.sh", "|| cannot_measure \"Docker on this box did not answer", "|| die \"Docker on this box did not answer")')" \
+	"status with a Docker that does not answer exited 1, not 2"
+
+run_case "status-is-read-only: nobody asks whether Docker answers" fail \
+	'./scripts/status-is-read-only.sh' \
+	"$(py 'edit("install.sh", "  docker version --format '"'"'{{.Server.Version}}'"'"' >/dev/null 2>&1 \\\n", "  true \\\n")')" \
+	"printed a check line about a box it could not read"
+
+run_case "status-is-read-only: a missing network ends 1" fail \
+	'./scripts/status-is-read-only.sh' \
+	"$(py 'edit("install.sh", "  [ \"${STATUS:-0}\" != 1 ] || cannot_measure \"network $NET is missing", "  true || cannot_measure \"network $NET is missing")')" \
+	"status with the stack's network gone exited 1, not 2"
+
+run_case "status-is-read-only: the drift check's reads are not reached" fail \
+	'./scripts/status-is-read-only.sh' \
+	"$(py 'edit("install.sh", "when it looks.\nrunning_images\n", "when it looks.\n")')" \
+	"so the drift check was not measured here"
+
+# The drift check in status (scripts/status-reads-what-runs.sh, CLAUDE.md invariant 67). Each fault
+# is a way of reading green on a box that has moved, or of turning "could not read it" into a pass.
+run_case "status-reads-what-runs: the line no longer names the pin" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "      detail=\"$(drift_short \"$drift_runs\")  pin $(drift_short \"$drift_digest\")  $drift_src\"\n      if", "      detail=\"$(drift_short \"$drift_runs\")  $drift_src\"\n      if")')" \
+	"is not named with the digest it runs, the pin and where the pin came from"
+
+run_case "status-reads-what-runs: the install does not run the drift check" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "when it looks.\nrunning_images\n", "when it looks.\n")')" \
+	"stack_checks calls running_images 0 time(s)"
+
+run_case "status-reads-what-runs: the name of the container is read instead of its image" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "|{{.Name}}|{{.Image}}|", "|{{.Name}}|{{.Config.Image}}|")
+edit("install.sh", "  local pin=\"$1\" id=\"$2\" repo known r\n", "  local pin=\"$1\" id=\"$2\" repo known r\n  if [ \"$id\" = \"$pin\" ]; then drift_verdict=same; drift_digest=\"${pin##*@}\"; drift_runs=\"$drift_digest\"; return 0; fi\n")')" \
+	"a container off its pin does not fail with both digests named"
+
+run_case "status-reads-what-runs: a difference does not fail" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "    differs)\n      label=FAIL\n", "    differs)\n      label=ok\n")')" \
+	"a container off its pin does not fail with both digests named"
+
+run_case "status-reads-what-runs: a digest in any repository is taken for the pin" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "    [ \"$(drift_repo \"$r\")\" = \"$repo\" ] || continue\n", "")')" \
+	"a digest known only under another repository reads as the pin"
+
+run_case "status-reads-what-runs: an image whose record is gone reads as nothing wrong" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "    gone)\n      label=FAIL\n", "    gone)\n      label=ok\n")')" \
+	"a container whose image record is gone"
+
+run_case "status-reads-what-runs: only .Image is compared" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "  for r in $known; do\n    [ \"$(drift_repo \"$r\")\" = \"$repo\" ] || continue\n", "  for r in \"\"; do\n    continue\n")')" \
+	"a box on its pins failed"
+
+run_case "status-reads-what-runs: only RepoDigests is compared" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "  if [ \"$id\" = \"$drift_digest\" ]; then\n", "  if false; then\n")')" \
+	"a container whose .Image is the pin"
+
+run_case "status-reads-what-runs: only the first RepoDigest is compared" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "    [ \"$drift_runs\" != \"$id\" ] || drift_runs=\"${r##*@}\"\n  done\n", "    [ \"$drift_runs\" != \"$id\" ] || drift_runs=\"${r##*@}\"\n    break\n  done\n")')" \
+	"only the first RepoDigest was compared"
+
+run_case "status-reads-what-runs: an override reads as the pin" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "  if [ \"$2\" = \"$drift_default\" ]; then\n    drift_src=compose\n", "  if true; then\n    drift_src=compose\n")')" \
+	"an image set in .env is not shown as an override"
+
+run_case "status-reads-what-runs: an override with no digest passes" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "    nodigest)\n      label=FAIL\n", "    nodigest)\n      label=note\n")')" \
+	"an override with no digest, pulled from a registry, is not refused"
+
+run_case "status-reads-what-runs: an image built here fails" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "    built)\n      label=note\n", "    built)\n      label=FAIL\n")')" \
+	"an image built here is not named as built here"
+
+run_case "status-reads-what-runs: a local image under a digest pin reads as built here" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "|| drift_verdict=unregistered\n", "|| drift_verdict=built\n")')" \
+	"an image with no registry digest under a digest pin reads as built here and passes"
+
+run_case "status-reads-what-runs: a one-shot's exit code is ignored" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "  [ \"$6\" != exited ] || shown=\"exited $7\"\n", "  [ \"$6\" != exited ] || shown=\"exited 0\"\n")')" \
+	"a one-shot that ended 1 does not fail"
+
+run_case "status-reads-what-runs: a restarting container passes" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "    running|exited\\ 0) ;;\n    *) label=FAIL ;;\n", "    running|restarting|exited\\ 0) ;;\n    *) label=FAIL ;;\n")')" \
+	"a restarting container does not name its state and its digest"
+
+run_case "status-reads-what-runs: a stopped core service passes" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "drift_tally FAIL \"$1\" \"$shown\" \"compose.yaml keeps this running", "drift_tally skip \"$1\" \"$shown\" \"compose.yaml keeps this running")')" \
+	"a service compose keeps running reads as fine after it stopped"
+
+run_case "status-reads-what-runs: a profile that is off is not said" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "\"not started, profile $2 is off\"", "\"not started\"")')" \
+	"a service whose profile is off is not skipped and said so"
+
+run_case "status-reads-what-runs: a skipped service counts as a match" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "    skip) drift_skipped=$((drift_skipped + 1)) ;;\n", "    skip) drift_skipped=$((drift_skipped + 1)); drift_matched=$((drift_matched + 1)) ;;\n")')" \
+	"a run that compared nothing reads as a pass"
+
+run_case "status-reads-what-runs: an operator's stopped profile fails" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "  elif drift_operator_only \"$3\"; then\n", "  elif false; then\n")')" \
+	"a stopped service of an operator-started profile is not named as stopped"
+
+run_case "status-reads-what-runs: every profile reads as the operator's" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "    case \" $PROFILES_OPERATOR \" in *\" $p \"*) ;; *) return 1 ;; esac\n  done\n}\n# Sets drift_verdict", "    :\n  done\n}\n# Sets drift_verdict")')" \
+	"a stopped service of an installer-managed profile reads like an operator"
+
+run_case "status-reads-what-runs: the networks are not read" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "    for member in ${out#*|}; do\n", "    for member in ; do\n")')" \
+	"a container on the stack's network with no project label is not found"
+
+run_case "status-reads-what-runs: a labelled container compose does not declare passes" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "    elif ! grep -q -- \"^$svc|\" <<<\"$pins\"; then\n", "    elif false; then\n")')" \
+	"a container of this project that compose.yaml does not declare is not found"
+
+run_case "status-reads-what-runs: a throwaway is reported after it has left" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "      [ -n \"$state\" ] || continue\n      drift_tally FAIL \"$name\"", "      drift_tally FAIL \"$name\"")')" \
+	"a container gone by the second read is reported"
+
+run_case "status-reads-what-runs: a compose that will not render reads as nothing wrong" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "    drift_cannot \"compose could not resolve compose.yaml, so there is no pin to compare with\"\n    return 0\n", "    return 0\n")')" \
+	"a Docker that does not answer is not named"
+
+run_case "status-reads-what-runs: zero containers reads as nothing wrong" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "    drift_cannot \"Docker has no container of project $project\"\n    return 0\n", "    return 0\n")')" \
+	"zero containers is not named as nothing measured"
+
+run_case "status-reads-what-runs: could not measure ends 0" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "\"$unmeasured\"; exit 2; fi", "\"$unmeasured\"; exit 0; fi")')" \
+	"nothing failed, one check could not measure, and status ended 0, not 2"
+
+run_case "status-reads-what-runs: an install ignores could not measure" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "  if [ \"${STATUS:-0}\" = 1 ]; then unmeasured=$((unmeasured + 1)); else fail=$((fail + 1)); fi\n", "  unmeasured=$((unmeasured + 1))\n")')" \
+	"an install that could not measure counts it as a failed check"
+
+run_case "status-reads-what-runs: the limit line is gone" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "and a person with root on this box can change either side.", "and they agree.")')" \
+	"the run does not say in one line what this cannot tell"
+
+run_case "status-reads-what-runs: a line claims more than a drift check says" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "drift check: %s on their pin, %s failed", "drift check: %s verified, %s failed")')" \
+	"the output claims more than a drift check can say"
+
+run_case "status-reads-what-runs: the README claims more than a drift check says" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("README.md", "### The drift check\n", "### The drift check\n\nEvery image here is verified.\n")')" \
+	"the README's status section claims more than a drift check can say"
+
+run_case "status-reads-what-runs: the README does not name the drift check" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit_all("README.md", "drift check", "image report")')" \
+	"the README's status section does not name the drift check"
+
+run_case "status-reads-what-runs: the drift check pulls an image" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "  drift_raw=\"\"\n  if ! cfg=", "  drift_raw=\"\"\n  docker pull busybox:1.36 >/dev/null 2>&1 || true\n  if ! cfg=")')" \
+	"made a call that is not one of its reads"
+
+run_case "status-reads-what-runs: the drift check runs cosign" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "  drift_raw=\"\"\n  if ! cfg=", "  drift_raw=\"\"\n  cosign verify busybox:1.36 >/dev/null 2>&1 || true\n  if ! cfg=")')" \
+	"reached for the network"
+
+run_case "status-reads-what-runs: a comment in the block is reworded" pass \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "# That is all it finds. Its word is", "# Nothing more. Its word is")')"
+
+run_case "status-reads-what-runs: a column is widened" pass \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "%-25s %-12s %s", "%-27s %-14s %s")')"
+
+run_case "status-reads-what-runs: the block is gone" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "# running-images: begin\n", "# running images\n")')" \
+	"measured NOTHING"
+
+run_case "status-reads-what-runs: the function is gone" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "running_images() {\n", "running_images_now() {\n")')" \
+	"measured NOTHING"
+
+run_case "status-reads-what-runs: the profile table is gone" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "# profile-table: begin\n", "# profile table\n")')" \
+	"measured NOTHING"
+
+run_case "status-reads-what-runs: compose.yaml has no services" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("compose.yaml", "\nservices:\n", "\nservicez:\n")')" \
+	"measured NOTHING"
 
 # health-checks: Docker watches every service that exposes a health path, and no
 # distroless one (scripts/health-checks-are-declared.sh).
