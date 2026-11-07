@@ -721,6 +721,7 @@ gateway_probe_resolve() { :; }
 status_facts() { :; }
 stack_checks() { fail="$CASE_FAIL"; unmeasured="$CASE_UNMEASURED"; }
 journal_status() { :; }
+tool_hold_status() { :; }
 # shellcheck disable=SC1090,SC1091
 . "$SANDBOX/lifted.sh"
 # shellcheck disable=SC1090,SC1091

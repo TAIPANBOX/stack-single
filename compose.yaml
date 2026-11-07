@@ -411,7 +411,7 @@ services:
   wardryx:
     <<: [*restart, *baseline]
     pids_limit: 512
-    image: ${WARDRYX_IMAGE:-ghcr.io/taipanbox/wardryx:v2.5.1@sha256:2d3c0c9c0798156d3f05b82d0e63cf5b38ee4b9875d6bdbac1829f219c26abf7}
+    image: ${WARDRYX_IMAGE:-ghcr.io/taipanbox/wardryx:v2.6.0@sha256:26113779c4b830d6b27e626874965c722fd8b41dc5d7085d226a3d903927af7b}
     # Its own uid (CLAUDE.md invariant 41): wardryx.ndjson is its stream, and
     # no other plane's uid can write it. The GID stays the bus group, so it
     # reads the other streams. group_add 20001 is for the Keyryx socket
@@ -979,7 +979,7 @@ services:
     <<: [*restart, *baseline]
     pids_limit: 1024
     profiles: ["typed", "egress", "egress-browser"]
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.22.0@sha256:48bc2eff2d00e76036b6b4f3eb6bd09e29081a41468c7faf2093f8f46bc6c2ac}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.23.0@sha256:192cfc7138eea6911d3c563427cdb996dac52c77e7f04f6ae71f84b6a6dc4535}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20012:10001"
@@ -1330,7 +1330,7 @@ services:
   tokenfuse-cloud:
     <<: [*restart, *baseline]
     pids_limit: 1024
-    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v1.22.0@sha256:89b220a422a69d0ec4ab97bc05b4c6707da8f3387d34b8401343ad1d18c6a56a}
+    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v1.23.0@sha256:14971e0aa3a3bdaf81d31de67bd50e8bbbbe7c2c64bb45a7fa480d075ed5e016}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20013:10001"
@@ -1377,7 +1377,7 @@ services:
   tokenfuse-gateway:
     <<: [*restart, *baseline]
     pids_limit: 1024
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.22.0@sha256:48bc2eff2d00e76036b6b4f3eb6bd09e29081a41468c7faf2093f8f46bc6c2ac}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.23.0@sha256:192cfc7138eea6911d3c563427cdb996dac52c77e7f04f6ae71f84b6a6dc4535}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20010:10001"
@@ -1618,7 +1618,7 @@ services:
   tokenfuse-gateway-openai:
     <<: [*restart, *baseline]
     pids_limit: 1024
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.22.0@sha256:48bc2eff2d00e76036b6b4f3eb6bd09e29081a41468c7faf2093f8f46bc6c2ac}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.23.0@sha256:192cfc7138eea6911d3c563427cdb996dac52c77e7f04f6ae71f84b6a6dc4535}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20011:10001"
@@ -1778,7 +1778,7 @@ services:
     # `disk I/O error (6410)`, a warning that goes red nowhere (invariant 24).
     tmpfs:
       - /tmp:size=256m
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.8.4@sha256:f018407dba47800acf3be54bb24fb85117c8dd14477b4a4f4dd9bae99376eb30}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.8.6@sha256:ca99cc8be803a143643b6da56aa898af32d9bab22b9c03d6cc59b12203081549}
     networks:
       - core
       - agents
@@ -1802,7 +1802,7 @@ services:
       GENARYX_STATE_DIR: /var/lib/stack/genaryx
       # The Keyryx witness's findings, which are not on the bus (invariant 54):
       # a stream the console tails read only beside its events directory. The
-      # console pinned here (v1.8.4; v1.7.0, built from genaryx #134, reads it too) reads it; an older
+      # console pinned here (v1.8.6; v1.7.0, built from genaryx #134, reads it too) reads it; an older
       # console ignores it.
       GENARYX_EVENTS_EXTRA: /var/lib/keyryx-alerts/keyryx.ndjson
       GENARYX_SCAN_TARGET: /srv/ui
@@ -2085,7 +2085,7 @@ services:
     pids_limit: 128
     tmpfs:
       - /tmp:size=64m
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.22.0@sha256:48bc2eff2d00e76036b6b4f3eb6bd09e29081a41468c7faf2093f8f46bc6c2ac}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.23.0@sha256:192cfc7138eea6911d3c563427cdb996dac52c77e7f04f6ae71f84b6a6dc4535}
     networks:
       - core
     user: "10001:10001"
@@ -2194,7 +2194,7 @@ services:
     pids_limit: 128
     tmpfs:
       - /tmp:size=64m
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.8.4@sha256:f018407dba47800acf3be54bb24fb85117c8dd14477b4a4f4dd9bae99376eb30}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.8.6@sha256:ca99cc8be803a143643b6da56aa898af32d9bab22b9c03d6cc59b12203081549}
     networks:
       - core
     user: "10001:10001"
@@ -2243,7 +2243,7 @@ services:
   verdryx-slo:
     <<: [*restart, *baseline]
     pids_limit: 128
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.8.4@sha256:f018407dba47800acf3be54bb24fb85117c8dd14477b4a4f4dd9bae99376eb30}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.8.6@sha256:ca99cc8be803a143643b6da56aa898af32d9bab22b9c03d6cc59b12203081549}
     user: "20020:10001"
     profiles: ["slo-signal"]
     environment:
