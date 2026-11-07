@@ -3264,7 +3264,7 @@ edit("install.sh", "stack_checks                                 # the checks", 
 run_case "rollback-floor: the override needs no reason" fail \
 	'./scripts/rollback-floor.sh' \
 	"$(py 'edit("install.sh", "  rollback_reason_ok \"${ROLLBACK_REASON:-}\" \\\n", "  true \\\n")')" \
-	"the override with no reason passed"
+	"a blank reason passed"
 
 run_case "rollback-floor: the reason is not kept" fail \
 	'./scripts/rollback-floor.sh' \
@@ -3441,7 +3441,7 @@ edit("install.sh", "  journal_begin \"\"\n", "")')" \
 run_case "rollback-floor: the README section is gone" fail \
 	'./scripts/rollback-floor.sh' \
 	"$(py 'edit("README.md", "## Going backwards by mistake:", "## Rollback:")')" \
-	"measured NOTHING"
+	"measured against NOTHING"
 
 # scripts/version-is-one-number.sh. The numbers are read, not written here, so a release moves nothing below.
 run_case "version-is-one-number: compose.yaml says another number" fail \
