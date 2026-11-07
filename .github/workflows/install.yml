@@ -451,7 +451,7 @@ jobs:
           if [ "$owner" != "20020 640" ]; then echo "::error::verdryx.ndjson is $owner, want 20020 640"; exit 1; fi
           ready="$(sudo docker compose exec -T console python3 -c "import urllib.request as u; print(u.urlopen('http://wardryx:8090/readyz').read().decode())")"
           echo "$ready"
-          if ! grep -q '"signal_events":"ok"' <<<"$ready"; then echo "::error::wardryx does not believe the file"; exit 1; fi
+          if ! grep -Eq '"signal_events": *"ok"' <<<"$ready"; then echo "::error::wardryx does not believe the file"; exit 1; fi
           if ! grep -q '^- name: slo-burn-hold$' policy.yaml; then echo "::error::policy.yaml carries no slo-burn-hold rule"; exit 1; fi
 
       - name: "agents network: no direct internet, the gateway reachable"
