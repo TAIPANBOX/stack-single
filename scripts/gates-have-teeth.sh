@@ -791,7 +791,7 @@ run_case "typed-data-mode: the key directory is mounted writable" fail \
 
 run_case "typed-data-mode: typryx leaves its profile and is in every install" fail \
 	'./scripts/typed-data-mode.sh' \
-	"$(py 'edit("compose.yaml", "    <<: *restart\n    profiles: [\"typed\"]\n    image: ${TYPRYX_IMAGE", "    <<: *restart\n    image: ${TYPRYX_IMAGE")')" \
+	"$(py 'edit("compose.yaml", "    profiles: [\"typed\"]\n    image: ${TYPRYX_IMAGE", "    image: ${TYPRYX_IMAGE")')" \
 	"typryx is in the default set"
 
 # Invariant 2 for this block: a re-run that chose nothing must keep what the
@@ -1006,7 +1006,7 @@ run_case "firewall-is-enforce: the setting reads another variable" fail \
 # from the file, so a new gateway service that defaults to shadow is judged.
 run_case "firewall-is-enforce: a second gateway start defaults to shadow" fail \
 	'./scripts/firewall-is-enforce.sh' \
-	"$(py 'edit("compose.yaml", "  tokenfuse-gateway:\n    <<: *restart\n", "  tokenfuse-gateway-canary:\n    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.15.0}\n    command: [\"/usr/local/bin/tokenfuse\"]\n    environment:\n      TOKENFUSE_FIREWALL: ${TOKENFUSE_FIREWALL:-shadow}\n  tokenfuse-gateway:\n    <<: *restart\n")')" \
+	"$(py 'edit("compose.yaml", "  tokenfuse-gateway:\n    <<: [*restart, *baseline]\n", "  tokenfuse-gateway-canary:\n    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.15.0}\n    command: [\"/usr/local/bin/tokenfuse\"]\n    environment:\n      TOKENFUSE_FIREWALL: ${TOKENFUSE_FIREWALL:-shadow}\n  tokenfuse-gateway:\n    <<: *restart\n")')" \
 	"defaults the agent firewall to shadow"
 
 run_case "firewall-is-enforce: no gateway service left to judge" fail \
@@ -1097,7 +1097,7 @@ run_case "pii-is-shadow: the broker reads its own switch, not the one the gatewa
 # come from the file, so a new gateway that defaults to off is judged.
 run_case "pii-is-shadow: a second gateway start defaults to off" fail \
 	'./scripts/pii-is-shadow.sh' \
-	"$(py 'edit("compose.yaml", "  tokenfuse-gateway:\n    <<: *restart\n", "  tokenfuse-gateway-canary:\n    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.15.0}\n    command: [\"/usr/local/bin/tokenfuse\"]\n    environment:\n      TOKENFUSE_DLP_PII: ${TOKENFUSE_DLP_PII:-off}\n  tokenfuse-gateway:\n    <<: *restart\n")')" \
+	"$(py 'edit("compose.yaml", "  tokenfuse-gateway:\n    <<: [*restart, *baseline]\n", "  tokenfuse-gateway-canary:\n    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.15.0}\n    command: [\"/usr/local/bin/tokenfuse\"]\n    environment:\n      TOKENFUSE_DLP_PII: ${TOKENFUSE_DLP_PII:-off}\n  tokenfuse-gateway:\n    <<: *restart\n")')" \
 	"defaults PII detection to off"
 
 # Both subjects renamed away: nothing is judged, and the gate must say so.
@@ -1956,7 +1956,7 @@ run_case "typed-risk-signal: the broker fails open" fail \
 
 run_case "typed-risk-signal: no proxy service left to judge" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "  typryx-wardryx-proxy:\n    <<: *restart", "  typryx-wardryx-prox:\n    <<: *restart")')" \
+	"$(py 'edit("compose.yaml", "  typryx-wardryx-proxy:\n    <<: [*restart, *baseline]", "  typryx-wardryx-prox:\n    <<: [*restart, *baseline]")')" \
 	"so this measured nothing"
 
 run_case "typed-risk-signal: a plain re-run of the stub turns the signal off" fail \
@@ -2570,7 +2570,7 @@ open("install.sh", "w").write(s.replace("--profile typed", "--profile other"))')
 
 run_case "typed-data-mode: no typryx service left to read" fail \
 	'./scripts/typed-data-mode.sh' \
-	"$(py 'edit("compose.yaml", "  typryx:\n    <<: *restart", "  typryz:\n    <<: *restart")
+	"$(py 'edit("compose.yaml", "  typryx:\n    <<: [*restart, *baseline]", "  typryz:\n    <<: [*restart, *baseline]")
 edit("compose.yaml", "      typryx:\n        condition: service_started", "      typryz:\n        condition: service_started")')" \
 	"so this measured nothing"
 
@@ -3724,7 +3724,7 @@ open("compose.yaml", "w").write(s[:j] + "GET /status" + s[j + len("GET /healthz"
 
 run_case "health-checks-are-declared: a distroless service gets a healthcheck" fail \
 	'./scripts/health-checks-are-declared.sh' \
-	"$(py 'edit("compose.yaml", "  wardryx:\n    <<: *restart\n", "  wardryx:\n    <<: *restart\n    healthcheck:\n      test: [\"CMD\", \"/usr/local/bin/service\", \"version\"]\n      interval: 30s\n")')" \
+	"$(py 'edit("compose.yaml", "  wardryx:\n    <<: [*restart, *baseline]\n", "  wardryx:\n    <<: [*restart, *baseline]\n    healthcheck:\n      test: [\"CMD\", \"/usr/local/bin/service\", \"version\"]\n      interval: 30s\n")')" \
 	"wardryx is distroless"
 
 run_case "health-checks-are-declared: the installer stops asking for the gateway's health path" fail \
@@ -5158,8 +5158,8 @@ run_case "console-proofs: a reworded comment above the repair is not a fault" pa
 run_case "console-proofs: naming the console own account is not a fault" pass \
 	"$CP" \
 	"$(py 's = open("compose.yaml").read()
-i = s.index("  console:\n    <<: *restart\n")
-j = i + len("  console:\n    <<: *restart\n")
+i = s.index("  console:\n    <<: [*restart, *baseline]\n")
+j = i + len("  console:\n    <<: [*restart, *baseline]\n")
 open("compose.yaml", "w").write(s[:j] + "    user: \"10001:10001\"\n" + s[j:])')"
 
 # CLAUDE.md invariant 65. Under pipefail a pipe into grep -q fails when the writer is still writing, so a
