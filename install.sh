@@ -1218,6 +1218,8 @@ slo_policy_apply() { # sets SLO_POLICY_CHANGED
   local tmp="policy.yaml.slo-burn.$$"
   SLO_POLICY_CHANGED=0
   [ -f policy.yaml ] || die "policy.yaml is missing, so the error-budget hold has nowhere to go. Nothing was changed."
+  # The same rule as the risk hold's block: what is already right stays where it is.
+  if [ "$SLO_SIGNAL_ON" = 1 ] && [ "$SLO_HOLD_RULE_TARGET" != none ] && [ "$(sed -n '/^# slo-burn-hold: begin/,/^# slo-burn-hold: end/p' policy.yaml)" = "$(slo_policy_block)" ]; then return 0; fi
   awk '/^# slo-burn-hold: begin/ { skip = 1; next } /^# slo-burn-hold: end/ { skip = 0; next } !skip' policy.yaml >"$tmp" \
     || die "could not read policy.yaml to manage the error-budget hold"
   if [ "$SLO_SIGNAL_ON" = 1 ] && [ "$SLO_HOLD_RULE_TARGET" != none ]; then
@@ -4026,6 +4028,9 @@ typed_risk_policy_apply() { # reads TYPED_RISK_ON; sets TYPED_RISK_POLICY_CHANGE
   local tmp="policy.yaml.typed-risk.$$"
   TYPED_RISK_POLICY_CHANGED=0
   [ -f policy.yaml ] || die "policy.yaml is missing, so the typed risk hold has nowhere to go. Nothing was changed."
+  # A block that already says the right thing stays where it is. Taken out and put back, it would land
+  # below the error-budget block, and each run would rewrite the file and restart wardryx for nothing.
+  if [ "$TYPED_RISK_ON" = 1 ] && [ "$(sed -n '/^# typed-risk-hold: begin/,/^# typed-risk-hold: end/p' policy.yaml)" = "$(typed_risk_policy_block)" ]; then return 0; fi
   awk '/^# typed-risk-hold: begin/ { skip = 1; next } /^# typed-risk-hold: end/ { skip = 0; next } !skip' policy.yaml >"$tmp" \
     || die "could not read policy.yaml to manage the typed risk hold"
   if [ "$TYPED_RISK_ON" = 1 ]; then

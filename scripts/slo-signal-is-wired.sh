@@ -21,7 +21,8 @@
 #   D. the installer: lifted and run in scratch boxes. By default it writes the path
 #      and one managed rule; a second run changes nothing; SLO_HOLD_TARGET narrows
 #      the rule, `none` leaves it out and keeps the measuring; SLO_SIGNAL=0 removes
-#      both; a bad value is refused; the operator's lines stay byte for byte.
+#      both; a bad value is refused; the operator's lines stay byte for byte; and
+#      with the risk hold's block on the same box, a second run moves neither.
 #
 # It also holds the routine's sibling to the same shape: verdryx-drift ran the
 # console's image with no entrypoint, so the console server refused /bin/sh as an
@@ -236,6 +237,39 @@ for bad in 'SLO_SIGNAL=2' 'SLO_HOLD_TARGET=everything' 'SLO_HOLD_TARGET=agent://
 	[ "$(rc_of "$out")" != 0 ] || fail "D6: ${bad//$'\n'/\\n} was accepted"
 	cmp -s "$d/policy.yaml" "$starter_file" || fail "D6: a refused value changed policy.yaml"
 done
+
+# D7. Both managed blocks on one box: a second run moves neither. Each block took itself out and went
+# back at the end, so with two of them every run rewrote policy.yaml and restarted wardryx. Measured on
+# forge 2026-11-07, on the second run of 1.6.3; a box with one block never shows it.
+PBLOCK="$(sed -n '/^# typed-risk-policy: begin$/,/^# typed-risk-policy: end$/p' install.sh)"
+if [ -z "$PBLOCK" ]; then
+	fail "D7: install.sh has no typed-risk-policy block, so two blocks on one box were NOT measured"
+else
+	both() {
+		(
+			cd "$1" || exit 99
+			env -i PATH="$PATH" HOME="$1" STACK_DIR="$1" BLOCK="$BLOCK" PBLOCK="$PBLOCK" bash -c '
+				set -euo pipefail
+				note() { :; }
+				die() { printf "die: %s\n" "$*"; exit 1; }
+				typed_set_env() { :; }
+				eval "$PBLOCK"
+				eval "$BLOCK"
+				TYPED_RISK_ON=1
+				slo_resolve
+				typed_risk_policy_apply
+				slo_policy_apply
+				printf "typed=%s slo=%s\n" "$TYPED_RISK_POLICY_CHANGED" "$SLO_POLICY_CHANGED"'
+		) 2>&1
+	}
+	d="$(box)"
+	out="$(both "$d")"
+	grep -q 'typed=1 slo=1' <<<"$out" || fail "D7: the first run did not write both blocks: $out"
+	before="$(cat "$d/policy.yaml")"
+	out="$(both "$d")"
+	grep -q 'typed=0 slo=0' <<<"$out" || fail "D7: a second run with both blocks reports a change, so it restarts wardryx for nothing: $out"
+	[ "$before" = "$(cat "$d/policy.yaml")" ] || fail "D7: a second run with both blocks moved them"
+fi
 
 [ "$status" = 0 ] || exit 1
 echo "OK: the routine, the file, the reader and the rule are wired, on by default and off as a set"
