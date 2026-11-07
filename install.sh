@@ -22,7 +22,8 @@
 # an on-box chain verification, the record seal and an opt-in fire drill) run here
 # on any schedule; stack-k8s runs three of
 # the four safe ones as CronJobs, stack-up runs its six default ones as OS timers, and
-# this compose file runs none of them. See the README's "What this box does
+# this compose file runs none of them. The error budget is the one routine it
+# does run (verdryx-slo, invariant 66). See the README's "What this box does
 # not run" section for the rest of the comparison, including the memory
 # plane.
 #
@@ -53,6 +54,9 @@
 #     starts typryx's wardryx-proxy and points ONLY the MCP broker's policy
 #     client at it, so a tool call carries typryx's risk class to wardryx; it
 #     is off unless you ask, 0 turns it off. See section 0b and the README.
+#   SLO_SIGNAL=0 ./install.sh             # on unless you say so: an agent whose error
+#     budget is spent has its calls put to a person. SLO_HOLD_TARGET=agent://acme.example/*
+#     narrows the rule, =none measures and records without holding. See the README.
 #   RUN_BUDGET_CEILING_USD=2.50 ./install.sh   # the most a caller can make one
 #     run's budget (tokenfuse 1.5.0), 5.00 unless you say otherwise
 #   TOKENFUSE_FIREWALL=shadow ./install.sh     # the agent firewall: enforce (the
@@ -1144,7 +1148,98 @@ typed_apply() {
   esac
 }
 # typed-mode: end
+# slo-signal: begin
+# An agent whose error budget is spent is held for a person (CLAUDE.md invariant 66). Three things
+# go together, so one flag holds them: the verdryx-slo routine that measures the budget, wardryx's
+# WARDRYX_SIGNAL_EVENTS, and one rule in policy.yaml between two marker lines this block alone
+# writes. Every line outside the markers is the operator's, byte for byte. wardryx reads policy.yaml
+# at start, so a run that changes it restarts wardryx after `up` (section 5).
+#
+# On unless SLO_SIGNAL=0. SLO_HOLD_TARGET narrows the rule to one agent glob, and `none` leaves the
+# rule out: the budget is measured and every decision records it, and nothing is held. Both are
+# saved in .env and survive a re-run.
+#
+# The block is functions only, so scripts/slo-signal-is-wired.sh can run it on its own.
+SLO_EVENTS_FILE=/var/lib/stack/events/verdryx.ndjson
+SLO_SIGNAL_ON=1
+SLO_HOLD_RULE_TARGET='agent://*'
+slo_env_get() { # NAME: what .env holds for NAME, single quotes removed
+  local v
+  [ -f "$STACK_DIR/.env" ] || return 0
+  v="$(sed -n "/^$1=/{s///p;q;}" "$STACK_DIR/.env")"
+  v="${v#\'}"
+  v="${v%\'}"
+  printf '%s' "$v"
+}
+slo_resolve() { # reads SLO_SIGNAL and SLO_HOLD_TARGET, then .env; sets SLO_SIGNAL_ON and SLO_HOLD_RULE_TARGET
+  local on="${SLO_SIGNAL:-}" target="${SLO_HOLD_TARGET:-}"
+  [ -n "$on" ] || on="$(slo_env_get SLO_SIGNAL)"
+  [ -n "$target" ] || target="$(slo_env_get SLO_HOLD_TARGET)"
+  case "${on:-1}" in
+    1) SLO_SIGNAL_ON=1 ;;
+    0) SLO_SIGNAL_ON=0 ;;
+    *) die "SLO_SIGNAL must be 1 (on) or 0 (off). Nothing was installed." ;;
+  esac
+  case "${target:-agent://*}" in
+    none) SLO_HOLD_RULE_TARGET=none ;;
+    agent://*[!A-Za-z0-9._~:/*-]*) die "SLO_HOLD_TARGET must be an agent glob such as agent://acme.example/* or none. Nothing was installed." ;;
+    agent://*) SLO_HOLD_RULE_TARGET="${target:-agent://*}" ;;
+    *) die "SLO_HOLD_TARGET must be an agent glob such as agent://acme.example/* or none. Nothing was installed." ;;
+  esac
+}
+slo_env_drop() { # NAME: remove NAME from .env
+  local tmp
+  tmp="$(mktemp)" || die "could not make a temporary file to update .env"
+  { grep -v "^$1=" "$STACK_DIR/.env" || true; } >"$tmp"
+  cat "$tmp" >"$STACK_DIR/.env" || die "could not update $STACK_DIR/.env"
+  rm -f "$tmp"
+}
+slo_apply() { # writes the choice to .env; compose hands wardryx the path
+  typed_set_env SLO_SIGNAL "$SLO_SIGNAL_ON"
+  typed_set_env SLO_HOLD_TARGET "$SLO_HOLD_RULE_TARGET"
+  if [ "$SLO_SIGNAL_ON" = 1 ]; then
+    typed_set_env WARDRYX_SIGNAL_EVENTS "$SLO_EVENTS_FILE"
+  else
+    slo_env_drop WARDRYX_SIGNAL_EVENTS
+  fi
+}
+slo_policy_block() {
+  printf '%s\n' \
+    '# slo-burn-hold: begin (managed by install.sh; SLO_SIGNAL and SLO_HOLD_TARGET, invariant 66)' \
+    '- name: slo-burn-hold' \
+    "  target: \"$SLO_HOLD_RULE_TARGET\"" \
+    '  hold_if_signal:' \
+    '    name: slo_burn' \
+    '    values: [exhausted, fast_burn]' \
+    '    min_probability: 1' \
+    '# slo-burn-hold: end'
+}
+slo_policy_apply() { # sets SLO_POLICY_CHANGED
+  local tmp="policy.yaml.slo-burn.$$"
+  SLO_POLICY_CHANGED=0
+  [ -f policy.yaml ] || die "policy.yaml is missing, so the error-budget hold has nowhere to go. Nothing was changed."
+  awk '/^# slo-burn-hold: begin/ { skip = 1; next } /^# slo-burn-hold: end/ { skip = 0; next } !skip' policy.yaml >"$tmp" \
+    || die "could not read policy.yaml to manage the error-budget hold"
+  if [ "$SLO_SIGNAL_ON" = 1 ] && [ "$SLO_HOLD_RULE_TARGET" != none ]; then
+    if [ -s "$tmp" ] && [ "$(tail -c 1 "$tmp" | od -An -c | tr -d ' ')" != '\n' ]; then printf '\n' >>"$tmp"; fi
+    slo_policy_block >>"$tmp"
+  fi
+  if cmp -s policy.yaml "$tmp"; then
+    rm -f "$tmp"
+  else
+    { chmod 0644 "$tmp" && mv -f "$tmp" policy.yaml; } || die "could not write policy.yaml with the error-budget hold"
+    SLO_POLICY_CHANGED=1
+    if grep -q '^# slo-burn-hold: begin' policy.yaml; then
+      note "error budget: policy.yaml now holds $SLO_HOLD_RULE_TARGET for a person while its budget is spent (slo-burn-hold)"
+    else
+      note "error budget: policy.yaml no longer carries the hold"
+    fi
+  fi
+}
+# slo-signal: end
+
 typed_resolve
+slo_resolve
 
 # ---- 0c. the run-budget ceiling --------------------------------------------
 # tokenfuse 1.5.0 (invariant 73) can clamp the budget a caller declares for a
@@ -3324,6 +3419,7 @@ add_env_default TOKENFUSE_MCP_SECRET_SCOPES "$(sq_ 'typryx_key=tools:ask|ask_fre
 # into .env only when this run chose or changed it, and the key file, if any,
 # copied into ./typed. Refusals were made before anything was touched.
 typed_apply
+slo_apply
 # The ceiling on a run budget (section 0c): written only when this run set it.
 ceiling_apply
 costcrew_ceiling_apply
@@ -3810,6 +3906,8 @@ if [ -z "$BUILD_FROM_SOURCE" ]; then
   # `config --images` resolves the same set docker will run.
   if [ "$TYPED_PLANE" != off ] && [ "$TYPED_RISK_ON" = 1 ]; then profiles+=(--profile typed-risk-signal); fi
   if [ "${DELEGATION_ON:-0}" = 1 ]; then profiles+=(--profile delegation); fi
+  # The error-budget routine runs the console's image, so this adds nothing to pull.
+  if [ "$SLO_SIGNAL_ON" = 1 ]; then profiles+=(--profile slo-signal); fi
   # The OpenAI door runs the gateway's own image, so this adds nothing to pull;
   # named so that `config --images` resolves the same set docker will run.
   [ "$DOOR_ON" != 1 ] || profiles+=(--profile openai-door)
@@ -3977,6 +4075,7 @@ EOF
   note "wrote policy.yaml"
 fi
 typed_risk_policy_apply
+slo_policy_apply
 mkdir -p environments
 if [ ! -f environments/single.json ]; then
   cat > environments/single.json <<'EOF'
@@ -4113,6 +4212,7 @@ if [ "$RECORD_ON" = 1 ]; then UP_PROFILES+=(--profile record); fi
 # in section 0b, and a saved flag is inert while typed answers are off.
 if [ "$TYPED_PLANE" != off ] && [ "$TYPED_RISK_ON" = 1 ]; then UP_PROFILES+=(--profile typed-risk-signal); fi
 if [ "${DELEGATION_ON:-0}" = 1 ]; then UP_PROFILES+=(--profile delegation); fi
+if [ "$SLO_SIGNAL_ON" = 1 ]; then UP_PROFILES+=(--profile slo-signal); fi
 # The OpenAI door (OPENAI_DOOR=1, section 0g) is started like the typed plane, so
 # section 8 can ask it the questions it asks the gateway.
 [ "$DOOR_ON" != 1 ] || UP_PROFILES+=(--profile openai-door)
@@ -4329,7 +4429,7 @@ trailryx_pin_apply
 # This installer never removes them; a RUNNING one is re-upped at this run's pinned image, so an upgrade leaves
 # no stale image behind (forge's costcrew stayed on v0.6.0 after 1.1.35 to 1.3.1). One place: a profile of
 # compose.yaml that is in neither list, or in both, is refused by scripts/profiles-off-are-removed.sh.
-PROFILES_INSTALLED="record typed typed-risk-signal delegation openai-door"
+PROFILES_INSTALLED="record typed typed-risk-signal delegation openai-door slo-signal"
 PROFILES_OPERATOR="egress egress-browser finops routines manual crew"
 # profile-table: end
 
@@ -4447,7 +4547,7 @@ profile_reach_note() {
   fi
 }
 profiles_off_remove
-if [ "${TYPED_RISK_POLICY_CHANGED:-0}" = 1 ] && [ "$WARDRYX_WAS_RUNNING" = 1 ]; then
+if { [ "${TYPED_RISK_POLICY_CHANGED:-0}" = 1 ] || [ "${SLO_POLICY_CHANGED:-0}" = 1 ]; } && [ "$WARDRYX_WAS_RUNNING" = 1 ]; then
   "${COMPOSE[@]}" restart wardryx >/dev/null || die "could not restart wardryx to read the changed policy.yaml"
   note "wardryx restarted to read the changed policy.yaml"
 fi
@@ -4826,8 +4926,9 @@ $CONSOLE_ACCESS_NOTE
       cd $STACK_DIR && ${COMPOSE[*]} logs -f tokenfuse-gateway
       cd $STACK_DIR && ${COMPOSE[*]} down     # stop, keeping every volume
 
-  Nothing on this box runs the governance routines (FinOps export, crypto
-  trend, quality drift, identity sweep) on a schedule. Run one by hand with
+  The error budget is measured every six hours (verdryx-slo; SLO_SIGNAL=0 turns
+  it off). Nothing on this box runs the other governance routines (FinOps export,
+  crypto trend, quality drift, identity sweep) on a schedule. Run one by hand with
   ${COMPOSE[*]} exec, or see the README for how stack-up and stack-k8s do it.
 
 EOF
