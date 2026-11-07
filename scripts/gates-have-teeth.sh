@@ -3539,7 +3539,7 @@ run_case "containers-carry-the-baseline: the anchor loses cap_drop" fail \
 
 run_case "containers-carry-the-baseline: no-new-privileges is written false" fail \
 	'./scripts/containers-carry-the-baseline.sh' \
-	"$(py 'edit("compose.yaml", "  security_opt:\n    - no-new-privileges:true\n  ulimits:", "  security_opt:\n    - no-new-privileges:false\n  ulimits:")')" \
+	"$(py 'edit("compose.yaml", "  security_opt:\n    - no-new-privileges:true\n  # On one line", "  security_opt:\n    - no-new-privileges:false\n  # On one line")')" \
 	"no-new-privileges:false written out"
 
 run_case "containers-carry-the-baseline: a service is privileged" fail \
@@ -3650,7 +3650,7 @@ run_case "containers-carry-the-baseline: a process limit is above the ceiling" f
 
 run_case "containers-carry-the-baseline: core dumps are on" fail \
 	'./scripts/containers-carry-the-baseline.sh' \
-	"$(py 'edit("compose.yaml", "  ulimits:\n    core: 0\n", "  ulimits:\n    core: 1000\n")')" \
+	"$(py 'edit("compose.yaml", "  ulimits: { core: 0 }\n", "  ulimits: { core: 1000 }\n")')" \
 	"ulimits core is 1000"
 
 run_case "containers-carry-the-baseline: the browser loses init" fail \

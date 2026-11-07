@@ -241,6 +241,10 @@ for name, block in blocks.items():
     for vol, target, ro in volume_mounts(block):
         if ro or vol not in top_volumes:
             continue
+        # postgres's data directory is uid 70 in the image, and a named volume takes that owner on
+        # its first use, so nothing has to give it one (invariant 69; scripts/volumes-are-reowned.sh).
+        if vol == "pgdata":
+            continue
         judged += 1
         if vol not in init_mounts:
             note(f"{name} (user {user}) writes volume {vol} at {target}, and init-volumes never mounts it: a fresh named volume is root:root 0755, so the service cannot write")

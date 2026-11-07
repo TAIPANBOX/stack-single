@@ -45,8 +45,8 @@ x-baseline: &baseline
     - ALL
   security_opt:
     - no-new-privileges:true
-  ulimits:
-    core: 0
+  # On one line: several gates find services as two-space keys alone on a line.
+  ulimits: { core: 0 }
 
 services:
   # ---- one-shot: make the shared volumes writable --------------------------
