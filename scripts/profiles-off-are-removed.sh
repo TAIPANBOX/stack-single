@@ -97,6 +97,7 @@ svc_of() {
     record) echo record-seal ;;
     routines) echo "focus-export verdryx-drift" ;;
     manual) echo idryx-detect ;;
+    slo-signal) echo verdryx-slo ;;
     *) echo "" ;;
   esac
 }
@@ -106,7 +107,7 @@ state_of() {
 }
 case "${rest[*]:-}" in
   "config --profiles")
-    printf '%s\n' egress egress-browser typed typed-risk-signal delegation openai-door finops record routines manual ;;
+    printf '%s\n' egress egress-browser typed typed-risk-signal delegation openai-door finops record routines manual slo-signal ;;
   "config --services")
     printf '%s\n' $core_svcs
     for p in "${profiles[@]:-}"; do [ -n "$p" ] && svc_of "$p"; done ;;

@@ -101,6 +101,8 @@ TABLE = {
     "focus-export": {"core"},
     "idryx-detect": {"core"},
     "verdryx-drift": {"core"},
+    # the error-budget routine: reads traces, appends to its own stream, calls nothing
+    "verdryx-slo": set(),
     "costcrew-init": {"core"},
     "costcrew": {"agents", "core", "front"},
     # the CostCrew runner (invariant 60): on agents alone, no route out, so its model calls

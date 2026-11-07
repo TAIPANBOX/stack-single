@@ -1080,6 +1080,28 @@ recreated. Run `./install.sh` (not only `docker compose up`), or `docker compose
 stops at the missing root key file and names it. The `WARDRYX_APPROVAL_SECRET` and the
 old `signing.pem` are left in place and unused. Nothing is deleted.
 
+## An agent whose error budget is spent waits for a person
+
+On by default. Every six hours a routine (`verdryx-slo`) measures each agent's error budget over the last 28 days of traffic on both doors. When a budget is spent, wardryx puts that agent's calls to a person, and the console shows them like any other hold. A granted approval lets that one call through.
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `SLO_SIGNAL` | `1` | `0` removes the routine, wardryx's reading of the file and the rule, together |
+| `SLO_HOLD_TARGET` | `agent://*` | The agents the rule holds, as one glob. `none` measures and records the budget on every decision and holds nobody |
+| `ROUTINE_SLO_INTERVAL` | `21600` | Seconds between two measurements |
+| `ROUTINE_SLO_WINDOW` | `28d` | The window a budget is measured over: hours, days or weeks |
+| `WARDRYX_SIGNAL_EVENTS_MAX_AGE` | `48h` | How long an event keeps holding after its time. Keep it at least twice the interval |
+
+`SLO_SIGNAL` and `SLO_HOLD_TARGET` are saved in `.env` and survive a re-run. The rule is one block in `policy.yaml` between two marker lines that the installer alone writes, and every other line stays yours. Any hold of your own on the `slo_burn` signal goes outside the markers.
+
+**What spends a budget.** A run that something had to stop, and a run that cost more than three times the fleet's median. So an agent you attack on purpose spends its budget, and so does one that does far heavier work than the rest of the fleet. A rehearsal identity is an agent too. Narrow the rule with `SLO_HOLD_TARGET`, or use `none` while you learn what your fleet looks like. A hold itself spends nothing: an agent on hold can earn its budget back while it keeps working.
+
+**How it ends.** The routine writes a line while a budget is spent. wardryx lets the agent go once the newest line is older than `WARDRYX_SIGNAL_EVENTS_MAX_AGE`, so a recovered agent stays on hold for up to that long. A bad spell stops counting once the window has passed it.
+
+**What you can see.** `curl` wardryx's `/readyz` for `"signal_events": "ok"`, `"unreadable"` or `"broken"`. Every decision records the signal, whether or not it held anything, and heraldyx alerts on each `slo_burn` line. The routine shows as restarting in `docker compose ps` when it cannot measure, because a routine that cannot measure must not look like a fleet with nothing to report.
+
+**What guards the file.** It is `verdryx.ndjson` on the bus, owned by a uid nothing else runs as, in a directory no plane can write. Its hash chain says a line was not edited, and does not say who wrote it, so that ownership is the guard. A file that cannot be believed holds nobody, on purpose: this signal can only add a hold, and every other control stands without it. The file grows by a line per spent indicator per run, and wardryx stops believing it at 32 MiB; move it aside before then, and the next run starts a new chain.
+
 ## The record: what this box did, sealed
 
 On by default, from the pinned trailryx-node image, with no build (CLAUDE.md invariant 51). The
@@ -1553,7 +1575,7 @@ checks no signature, so it does not fetch cosign either.
 Every profile in `compose.yaml` is one of two kinds, and the installer treats each by its own rule. The
 two lists are one table in `install.sh` (`PROFILES_INSTALLED` and `PROFILES_OPERATOR`).
 
-- **Installer-managed** (`record`, `typed`, `typed-risk-signal`, `delegation`, `openai-door`): this installer
+- **Installer-managed** (`record`, `typed`, `typed-risk-signal`, `delegation`, `openai-door`, `slo-signal`): this installer
   starts them from its own flags. A run that turns one off stops and removes its containers, by name.
 - **Operator-started** (`egress`, `egress-browser`, `finops`, `routines`, `manual`): you start them with
   `docker compose --profile P up -d`, and the installer never removes them. A running container of one is

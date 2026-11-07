@@ -68,6 +68,7 @@
           "typryx",
           "typryx-wardryx-proxy",
           "verdryx-drift",
+          "verdryx-slo",
           "vouchryx",
           "wardryx",
           "wg"
@@ -95,6 +96,7 @@
           "openai-door",
           "record",
           "routines",
+          "slo-signal",
           "typed",
           "typed-risk-signal"
         ],

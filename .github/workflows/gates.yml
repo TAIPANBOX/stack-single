@@ -68,6 +68,8 @@ jobs:
         run: ./scripts/typed-data-mode.sh
       - name: the typed risk signal is off unless asked and its proxy is held by a network
         run: ./scripts/typed-risk-signal.sh
+      - name: an agent whose error budget is spent is held for a person (invariant 66)
+        run: ./scripts/slo-signal-is-wired.sh
       - name: the FinOps console is an optional add-on that leaves the core unchanged
         run: ./scripts/finops-is-opt-in.sh
       - name: closing a retained reservation is off by default, one secret for gateway and console

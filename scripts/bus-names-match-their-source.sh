@@ -90,6 +90,9 @@ CLAIMS = {
     # The optional FinOps console (profile finops). Its stream is named by a
     # command argument, `-stack-events`.
     "costcrew": "costcrew",
+    # The error-budget routine is the console's image running verdryx, whose
+    # lines claim `verdryx` (its events.py). The console server writes no stream.
+    "genaryx-console": "verdryx",
     # Custody and the witness are one image. Only the witness writes a stream
     # (its findings, KEYRYX_WITNESS_ALERTS), and its lines claim `keyryx`.
     "keyryx": "keyryx",

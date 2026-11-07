@@ -165,6 +165,13 @@ services:
         chown 20005:10001 /vol/events/typryx.ndjson && chmod 0640 /vol/events/typryx.ndjson
         [ -e /vol/events/vouchryx.ndjson ] || : > /vol/events/vouchryx.ndjson
         chown 20002:10001 /vol/events/vouchryx.ndjson && chmod 0640 /vol/events/vouchryx.ndjson
+        # The quality plane's stream (CLAUDE.md invariant 66): the error-budget routine's own file,
+        # under a uid nothing else runs as. wardryx reads the agent's budget from it, and the hash chain
+        # does not say who wrote a line and cannot see lines cut from its end, so the file is writable by
+        # the routine alone. The directory is root's: no plane can rename or remove it. Pre-created on
+        # every box, because an empty file is a file wardryx can believe, and a missing one is not.
+        [ -e /vol/events/verdryx.ndjson ] || : > /vol/events/verdryx.ndjson
+        chown 20020:10001 /vol/events/verdryx.ndjson && chmod 0640 /vol/events/verdryx.ndjson
         # wardryx's policy archive is a directory in the bus (WARDRYX_POLICY_ARCHIVE),
         # made here so that wardryx, which cannot create in the bus, owns it.
         mkdir -p /vol/events/wardryx-policy-archive && chown -R 20001:10001 /vol/events/wardryx-policy-archive && chmod 0750 /vol/events/wardryx-policy-archive
@@ -428,6 +435,11 @@ services:
       # The loss is one-way, which is why this is set now rather than when
       # somebody first wants a replay: it works forward from this day only.
       WARDRYX_POLICY_ARCHIVE: /var/lib/stack/events/wardryx-policy-archive
+      # An agent whose error budget is spent (CLAUDE.md invariant 66). install.sh writes the file's
+      # path while SLO_SIGNAL is on, and an empty value reads nothing (wardryx 2.5.0). What the signal
+      # is worth is the policy's to say: the slo-burn-hold rule in policy.yaml.
+      WARDRYX_SIGNAL_EVENTS: ${WARDRYX_SIGNAL_EVENTS:-}
+      WARDRYX_SIGNAL_EVENTS_MAX_AGE: ${WARDRYX_SIGNAL_EVENTS_MAX_AGE:-}
       # Agent tokens, verified here and not taken from the door's word (wardryx 2.3.0,
       # CLAUDE.md invariant 47). install.sh writes all of these when agent tokens are on
       # (the default) and none when WITH_AGENT_TOKENS=0. An empty value is unset to
@@ -2108,9 +2120,10 @@ services:
       # number nobody stands behind. stack-up's routine skips for the same
       # reason and says so.
       ROUTINE_VERDRYX_BASELINE: ${ROUTINE_VERDRYX_BASELINE:-}
+    # The console image's ENTRYPOINT is the console server, and `command` alone
+    # hands it /bin/sh as an argument, which it refuses (measured 2026-11-07).
+    entrypoint: ["/bin/sh", "-c"]
     command:
-      - /bin/sh
-      - -c
       - |
         set -u
         db=/var/lib/stack/.taipan/verdryx.db
@@ -2127,6 +2140,50 @@ services:
         done
     volumes:
       - consolestate:/var/lib/stack:ro
+    depends_on:
+      init-volumes:
+        condition: service_completed_successfully
+
+  # The error budget (CLAUDE.md invariant 66). verdryx lives in the console's image, so this is
+  # that image with its entrypoint replaced. Every six hours it measures each agent's budget over
+  # both doors' traces and appends an slo_burn line to its own stream when one is spent; wardryx
+  # reads that stream, and the policy's slo-burn-hold rule puts the agent's calls to a person. On by
+  # default, off with SLO_SIGNAL=0. It calls nothing and serves nothing, so it has no network.
+  #
+  # `--holds-spend-no-budget`: a held call is written to the trace, so without it the hold would spend
+  # the budget that caused it and an agent still working could never earn it back. No `|| true`: a
+  # routine that cannot measure must not look like a fleet with nothing to report, so a failure stops
+  # the container and `docker compose ps` shows it restarting.
+  verdryx-slo:
+    <<: *restart
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.8.1@sha256:5d8392de2fbd63cbb60493bb71bc278293c601f7b6c81a69d3dc691c68e45834}
+    user: "20020:10001"
+    profiles: ["slo-signal"]
+    environment:
+      VERDRYX_EVENTS_PATH: /var/lib/stack/events/verdryx.ndjson
+      ROUTINE_SLO_INTERVAL: ${ROUTINE_SLO_INTERVAL:-21600}
+      ROUTINE_SLO_WINDOW: ${ROUTINE_SLO_WINDOW:-28d}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        while :; do
+          for door in gateway gateway-openai; do
+            if [ -d "/var/lib/stack/traces/$$door" ]; then
+              verdryx slo --traces "/var/lib/stack/traces/$$door" --window "$$ROUTINE_SLO_WINDOW" --holds-spend-no-budget
+            fi
+          done
+          sleep "$$ROUTINE_SLO_INTERVAL"
+        done
+    volumes:
+      - events:/var/lib/stack/events
+      - traces:/var/lib/stack/traces:ro
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    network_mode: none
     depends_on:
       init-volumes:
         condition: service_completed_successfully

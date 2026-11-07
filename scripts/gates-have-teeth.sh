@@ -270,6 +270,64 @@ run_case "record-is-not-on-the-bus: a second service writes the record store" fa
      "      - keyryxalerts:/var/lib/keyryx-alerts:ro\n      - records:/var/lib/stack/records\n      - ./environments")')" \
 	"is also written by"
 
+# invariant 66: an agent whose error budget is spent is held for a person. Each half
+# is true on its own, so each one gone is a box that says `ok` and never holds anybody.
+run_case "slo-signal-is-wired: wardryx is not handed the file" fail \
+	'./scripts/slo-signal-is-wired.sh' \
+	"$(py 'edit("compose.yaml", "      WARDRYX_SIGNAL_EVENTS: ${WARDRYX_SIGNAL_EVENTS:-}\n", "")')" \
+	"nothing reads the budget"
+run_case "slo-signal-is-wired: a hold spends the budget that caused it" fail \
+	'./scripts/slo-signal-is-wired.sh' \
+	"$(py 'edit("compose.yaml", " --holds-spend-no-budget\n", "\n")')" \
+	"could never earn it back"
+run_case "slo-signal-is-wired: the routine keeps the console's entrypoint" fail \
+	'./scripts/slo-signal-is-wired.sh' \
+	"$(py 'edit("compose.yaml", "    profiles: [\"slo-signal\"]\n    environment:\n      VERDRYX_EVENTS_PATH: /var/lib/stack/events/verdryx.ndjson\n      ROUTINE_SLO_INTERVAL: ${ROUTINE_SLO_INTERVAL:-21600}\n      ROUTINE_SLO_WINDOW: ${ROUTINE_SLO_WINDOW:-28d}\n    entrypoint: [\"/bin/sh\", \"-c\"]\n", "    profiles: [\"slo-signal\"]\n    environment:\n      VERDRYX_EVENTS_PATH: /var/lib/stack/events/verdryx.ndjson\n      ROUTINE_SLO_INTERVAL: ${ROUTINE_SLO_INTERVAL:-21600}\n      ROUTINE_SLO_WINDOW: ${ROUTINE_SLO_WINDOW:-28d}\n")')" \
+	"refuses /bin/sh as an argument"
+run_case "slo-signal-is-wired: verdryx-drift keeps the console's entrypoint" fail \
+	'./scripts/slo-signal-is-wired.sh' \
+	"$(py 'edit("compose.yaml", "    entrypoint: [\"/bin/sh\", \"-c\"]\n    command:\n      - |\n        set -u\n        db=", "    command:\n      - |\n        set -u\n        db=")')" \
+	"verdryx-drift: it does not replace"
+run_case "slo-signal-is-wired: the routine shares a uid with another plane" fail \
+	'./scripts/slo-signal-is-wired.sh' \
+	"$(py 'edit("compose.yaml", "user: \"20020:10001\"", "user: \"20001:10001\"")')" \
+	"runs as the same uid"
+run_case "slo-signal-is-wired: the file is not pre-created under the routine's uid" fail \
+	'./scripts/slo-signal-is-wired.sh' \
+	"$(py 'edit("compose.yaml", "chown 20020:10001 /vol/events/verdryx.ndjson", "chown 10001:10001 /vol/events/verdryx.ndjson")')" \
+	"the routine alone does not hold it"
+run_case "slo-signal-is-wired: a failed measurement is swallowed" fail \
+	'./scripts/slo-signal-is-wired.sh' \
+	"$(py 'edit("compose.yaml", " --holds-spend-no-budget\n", " --holds-spend-no-budget || true\n")')" \
+	"a fleet with nothing to report"
+run_case "slo-signal-is-wired: the routine reads one door" fail \
+	'./scripts/slo-signal-is-wired.sh' \
+	"$(py 'edit("compose.yaml", "for door in gateway gateway-openai; do", "for door in gateway; do")')" \
+	"the Anthropic door alone"
+run_case "slo-signal-is-wired: the rule holds on a broken file" fail \
+	'./scripts/slo-signal-is-wired.sh' \
+	"$(py 'edit("install.sh", "    \x27    min_probability: 1\x27 \\\n", "    \x27    min_probability: 1\x27 \\\n    \x27    when_absent: hold\x27 \\\n")')" \
+	"a broken file would then hold every tool call"
+run_case "slo-signal-is-wired: the flag off leaves wardryx reading" fail \
+	'./scripts/slo-signal-is-wired.sh' \
+	"$(py 'edit("install.sh", "    slo_env_drop WARDRYX_SIGNAL_EVENTS\n", "    :\n")')" \
+	"with the flag off wardryx still reads the file"
+run_case "slo-signal-is-wired: a target is written into YAML unchecked" fail \
+	'./scripts/slo-signal-is-wired.sh' \
+	"$(py 'edit("install.sh", "    agent://*[!A-Za-z0-9._~:/*-]*) die \"SLO_HOLD_TARGET must be an agent glob such as agent://acme.example/* or none. Nothing was installed.\" ;;\n", "")')" \
+	"was accepted"
+run_case "slo-signal-is-wired: no starter policy measured nothing" fail \
+	'./scripts/slo-signal-is-wired.sh' \
+	"$(py 'edit("install.sh", "# slo-signal: begin\n", "# slo-signal: gone\n")')" \
+	"NOT measured"
+run_case "slo-signal-is-wired: the service is gone" fail \
+	'./scripts/slo-signal-is-wired.sh' \
+	"$(py 'edit("compose.yaml", "  verdryx-slo:\n", "  verdryx-slow:\n")')" \
+	"measured NOTHING"
+run_case "slo-signal-is-wired: a comment naming the switch is not a fault" pass \
+	'./scripts/slo-signal-is-wired.sh' \
+	"$(py 'edit("compose.yaml", "  verdryx-slo:\n", "  # holds nothing by itself, || true is not used here\n  verdryx-slo:\n")')"
+
 # invariant 10: the bus has a writer, and every volume a non-root service
 # writes has an owner. Both faults were live on every install until 2026-09-13.
 run_case "bus-has-a-writer: the gateway stops exporting events" fail \
