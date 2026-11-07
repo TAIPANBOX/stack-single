@@ -1377,7 +1377,7 @@ tool_hold_domain() { # the trust domain, as the identity block reads it
 tool_hold_web_wanted() {
   local running
   if [ "${WITH_AGENT_TOKENS:-}" = 0 ] || [ "$(tool_hold_env_get TOKENFUSE_AGENT_TOKENS)" = off ]; then return 1; fi
-  if [ -n "${WITH_EGRESS:-}" ] || [ -n "${WITH_BROWSER:-}" ]; then return 0; fi
+  if [ -n "${WITH_EGRESS:-}${WITH_BROWSER:-}" ]; then return 0; fi
   if [ -f "$STACK_DIR/policy.yaml" ] && grep -q '^- name: grant-operator-web$' "$STACK_DIR/policy.yaml"; then return 0; fi
   running="$(docker ps --filter "label=com.docker.compose.project=${NET%_core}" --format '{{.Label "com.docker.compose.service"}}' 2>/dev/null || true)"
   grep -qxE 'scopyx|scopyx-browser' <<<"$running"
@@ -1927,6 +1927,27 @@ esac
 # Before anything else that reads or asks, because this one refuses the whole tree.
 rollback_floor_check
 
+# smtp-tls: begin
+# heraldyx 0.8.0 sends mail only over TLS: STARTTLS by default, implicit TLS on port 465 on its own, and
+# plain only to a loopback host. SMTP_TLS is written into .env as HERALDYX_SMTP_TLS. Unset is heraldyx's
+# own default and writes nothing new. A value it does not read is refused here, before anything is installed,
+# because heraldyx itself refuses to start on one. The refusal never echoes the value.
+smtp_tls_valid() { # VALUE: one of the modes heraldyx reads, or empty for its default
+  case "$1" in ""|starttls|implicit|plain) return 0 ;; *) return 1 ;; esac
+}
+smtp_tls_loopback() { # HOST[:PORT]: true when the host is one plain may be used with
+  case "${1%:*}" in 127.*|localhost|'[::1]'|::1) return 0 ;; *) return 1 ;; esac
+}
+smtp_tls_resolve() {
+  smtp_tls_valid "${SMTP_TLS:-}" \
+    || die "SMTP_TLS must be starttls, implicit or plain, or unset for heraldyx's default (STARTTLS, or implicit on port 465). Nothing was installed."
+  if [ "${SMTP_TLS:-}" = plain ] && [ -n "${SMTP_HOST:-}" ] && ! smtp_tls_loopback "$SMTP_HOST"; then
+    die "SMTP_TLS=plain is for a loopback host only (127.0.0.0/8, ::1 or localhost), and SMTP_HOST is not one. Nothing was installed."
+  fi
+}
+smtp_tls_resolve
+# smtp-tls: end
+
 # image-verify: begin
 # CLAUDE.md invariant 44. The images this project publishes are signed keyless by
 # the release workflows of the TAIPANBOX repositories, by digest, with the job's
@@ -2004,27 +2025,6 @@ image_verify() {
   note "signature verified: $name"
 }
 # image-verify: end
-
-# smtp-tls: begin
-# heraldyx 0.8.0 sends mail only over TLS: STARTTLS by default, implicit TLS on port 465 on its own, and
-# plain only to a loopback host. SMTP_TLS is written into .env as HERALDYX_SMTP_TLS. Unset is heraldyx's
-# own default and writes nothing new. A value it does not read is refused here, before anything is installed,
-# because heraldyx itself refuses to start on one. The refusal never echoes the value.
-smtp_tls_valid() { # VALUE: one of the modes heraldyx reads, or empty for its default
-  case "$1" in ""|starttls|implicit|plain) return 0 ;; *) return 1 ;; esac
-}
-smtp_tls_loopback() { # HOST[:PORT]: true when the host is one plain may be used with
-  case "${1%:*}" in 127.*|localhost|'[::1]'|::1) return 0 ;; *) return 1 ;; esac
-}
-smtp_tls_resolve() {
-  smtp_tls_valid "${SMTP_TLS:-}" \
-    || die "SMTP_TLS must be starttls, implicit or plain, or unset for heraldyx's default (STARTTLS, or implicit on port 465). Nothing was installed."
-  if [ "${SMTP_TLS:-}" = plain ] && [ -n "${SMTP_HOST:-}" ] && ! smtp_tls_loopback "$SMTP_HOST"; then
-    die "SMTP_TLS=plain is for a loopback host only (127.0.0.0/8, ::1 or localhost), and SMTP_HOST is not one. Nothing was installed."
-  fi
-}
-smtp_tls_resolve
-# smtp-tls: end
 
 # ---- 0b. typed answers: where does the data go? ------------------------------
 # @decided 2026-09-30: an operator chooses where typed answers come from, one
