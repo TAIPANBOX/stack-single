@@ -117,7 +117,7 @@ case "${1:-}" in
     esac
     exit 0 ;;
   ps) printf 'c1\n'; exit 0 ;;
-  inspect) printf 'c1|wardryx|False|/agent-stack-wardryx-1|sha256:cc|running|0|0\n'; exit 0 ;;
+  inspect) printf 'c1|wardryx|False|/agent-stack-wardryx-1|sha256:cc|running|0|0|true|512|[ALL]|[no-new-privileges:true]\n'; exit 0 ;;
   image) printf 'ghcr.io/taipanbox/wardryx@sha256:aaaa \n'; exit 0 ;;
   port) printf '127.0.0.1:4100\n'; exit 0 ;;
   run) printf 'HTTP/1.0 200 OK\n'; exit 0 ;;

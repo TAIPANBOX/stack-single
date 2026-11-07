@@ -65,6 +65,7 @@ step "the OpenAI door is opt-in, a gateway like the first, on its own keys and m
 step "every scenario is bound to a test" "./scripts/features-are-bound.sh"
 step "status checks the installed stack and changes nothing" "./scripts/status-is-read-only.sh"
 step "the drift check says what Docker runs against the pins, and only reads (invariant 67)" "./scripts/status-reads-what-runs.sh"
+step "every container carries the baseline, or names why not (invariant 69)" "./scripts/containers-carry-the-baseline.sh"
 step "a tree below the box's rollback index is refused before anything changes (invariant 68)" "./scripts/rollback-floor.sh"
 step "the tree says one version everywhere (invariant 68)" "./scripts/version-is-one-number.sh"
 step "Docker watches every service with a health path, and no distroless one" "./scripts/health-checks-are-declared.sh"

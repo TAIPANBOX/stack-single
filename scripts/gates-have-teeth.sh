@@ -3511,6 +3511,192 @@ run_case "version-is-one-number: there are no release notes" fail \
 shutil.rmtree("docs/releases")')" \
 	"measured NOTHING"
 
+run_case "status-reads-what-runs: a container that lost its baseline passes" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "  [ \"$ro\" != true ] || [ \"$2\" = true ] || missing=\"$missing read_only\"\n", "")')" \
+	"a running container that lost read_only passes"
+
+run_case "status-reads-what-runs: the override is read as the file" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "    if ! file_cfg=\"$(\"${COMPOSE[@]}\" -f compose.yaml --profile '"'"'*'"'"' config 2>/dev/null)\"; then\n", "    if false; then\n")')" \
+	"an override that turns read_only off reads as what the file says"
+
+# The container baseline (scripts/containers-carry-the-baseline.sh, CLAUDE.md invariant 69).
+run_case "containers-carry-the-baseline: a new service has no baseline" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'edit("compose.yaml", "\nservices:\n", "\nservices:\n  lab-new:\n    image: busybox:1.36\n")')" \
+	"lab-new: no read_only"
+
+run_case "containers-carry-the-baseline: wardryx turns read_only off" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'edit("compose.yaml", "  wardryx:\n    <<: [*restart, *baseline]\n", "  wardryx:\n    <<: [*restart, *baseline]\n    read_only: false\n")')" \
+	"wardryx: no read_only"
+
+run_case "containers-carry-the-baseline: the anchor loses cap_drop" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'edit("compose.yaml", "x-baseline: &baseline\n  read_only: true\n  cap_drop:\n    - ALL\n", "x-baseline: &baseline\n  read_only: true\n")')" \
+	"cap_drop does not hold ALL"
+
+run_case "containers-carry-the-baseline: no-new-privileges is written false" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'edit("compose.yaml", "  security_opt:\n    - no-new-privileges:true\n  ulimits:", "  security_opt:\n    - no-new-privileges:false\n  ulimits:")')" \
+	"no-new-privileges:false written out"
+
+run_case "containers-carry-the-baseline: a service is privileged" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'edit("compose.yaml", "  wardryx:\n    <<: [*restart, *baseline]\n", "  wardryx:\n    <<: [*restart, *baseline]\n    privileged: true\n")')" \
+	"privileged: True is not allowed"
+
+run_case "containers-carry-the-baseline: a service joins the host's namespace" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'edit("compose.yaml", "  wardryx:\n    <<: [*restart, *baseline]\n", "  wardryx:\n    <<: [*restart, *baseline]\n    pid: host\n")')" \
+	"pid: host is not allowed"
+
+run_case "containers-carry-the-baseline: a service runs as root" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'edit("compose.yaml", "    user: \"70:70\"\n", "    user: \"0:0\"\n")')" \
+	"policy-db: runs as root"
+
+run_case "containers-carry-the-baseline: a tmpfs has no size" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'edit("compose.yaml", "      - /tmp:size=256m\n", "      - /tmp\n")')" \
+	"has no size"
+
+run_case "containers-carry-the-baseline: an exception has no reason" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'import json
+d = json.load(open("hardening-exceptions.json"))
+del d["exceptions"][0]["why"]
+json.dump(d, open("hardening-exceptions.json", "w"))')" \
+	"has no why"
+
+run_case "containers-carry-the-baseline: a reason says nothing" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'import json
+d = json.load(open("hardening-exceptions.json"))
+d["exceptions"][0]["why"] = "because"
+json.dump(d, open("hardening-exceptions.json", "w"))')" \
+	"the reason says nothing"
+
+run_case "containers-carry-the-baseline: an exception names a key outside the list" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'import json
+d = json.load(open("hardening-exceptions.json"))
+d["exceptions"][0]["key"] = "everything"
+json.dump(d, open("hardening-exceptions.json", "w"))')" \
+	"everything is not one of"
+
+run_case "containers-carry-the-baseline: an exception names no such service" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'import json
+d = json.load(open("hardening-exceptions.json"))
+d["exceptions"].append({"service": "lab-gone", "key": "pids", "value": "none", "why": "a service that does not exist any more", "until": "permanent"})
+json.dump(d, open("hardening-exceptions.json", "w"))')" \
+	"lab-gone is not a service"
+
+run_case "containers-carry-the-baseline: an exception excuses nothing" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'import json
+d = json.load(open("hardening-exceptions.json"))
+d["exceptions"].append({"service": "wardryx", "key": "pids", "value": "none", "why": "left behind by whoever fixed this service", "until": "permanent"})
+json.dump(d, open("hardening-exceptions.json", "w"))')" \
+	"the exception for wardryx pids excuses nothing"
+
+run_case "containers-carry-the-baseline: vouchryx takes the anchor and keeps its exception" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'import re
+s = open("compose.yaml").read()
+i = s.index("  vouchryx:\n")
+a = "    <<: *restart\n"
+j = s.index(a, i)
+s = s[:j] + "    <<: [*restart, *baseline]\n    pids_limit: 256\n" + s[j + len(a):]
+open("compose.yaml", "w").write(s)')" \
+	"the exception for vouchryx baseline excuses nothing"
+
+run_case "containers-carry-the-baseline: a capability has no exception" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'edit("compose.yaml", "  wardryx:\n    <<: [*restart, *baseline]\n", "  wardryx:\n    <<: [*restart, *baseline]\n    cap_add:\n      - SYS_ADMIN\n")')" \
+	"wardryx: cap_add ['"'"'SYS_ADMIN'"'"'] and no exception names it"
+
+run_case "containers-carry-the-baseline: a capability is wider than its exception" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'edit("compose.yaml", "      - NET_ADMIN\n      - CHOWN\n      - FSETID\n", "      - NET_ADMIN\n      - CHOWN\n      - FSETID\n      - SYS_ADMIN\n")')" \
+	"which its exception does not name"
+
+run_case "containers-carry-the-baseline: an exception is wider than its capability" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'edit("compose.yaml", "      - NET_ADMIN\n      - CHOWN\n      - FSETID\n", "      - NET_ADMIN\n      - CHOWN\n")')" \
+	"which cap_add does not hold"
+
+run_case "containers-carry-the-baseline: the installer's override takes the baseline back" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'edit("install.sh", "      echo \"  typryx:\"\n      echo \"    networks: [edge]\"\n", "      echo \"  typryx:\"\n      echo \"    networks: [edge]\"\n      read_only: false\n")')" \
+	"the override install.sh writes sets read_only"
+
+run_case "containers-carry-the-baseline: a service has no process limit" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'edit("compose.yaml", "    pids_limit: 512\n", "")')" \
+	"wardryx: no pids_limit"
+
+run_case "containers-carry-the-baseline: a process limit is minus one" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'edit("compose.yaml", "    pids_limit: 512\n", "    pids_limit: -1\n")')" \
+	"pids_limit -1 is no limit"
+
+run_case "containers-carry-the-baseline: a process limit is above the ceiling" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'edit("compose.yaml", "    pids_limit: 512\n", "    pids_limit: 99999\n")')" \
+	"is above the ceiling"
+
+run_case "containers-carry-the-baseline: core dumps are on" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'edit("compose.yaml", "  ulimits:\n    core: 0\n", "  ulimits:\n    core: 1000\n")')" \
+	"ulimits core is 1000"
+
+run_case "containers-carry-the-baseline: the browser loses init" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'edit("compose.yaml", "    init: true\n    shm_size: 512m\n", "    shm_size: 512m\n")')" \
+	"a pids_limit with no init: true"
+
+run_case "containers-carry-the-baseline: a second service is seccomp:unconfined" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'edit("compose.yaml", "  wardryx:\n    <<: [*restart, *baseline]\n", "  wardryx:\n    <<: [*restart, *baseline]\n    security_opt:\n      - seccomp:unconfined\n      - no-new-privileges:true\n")')" \
+	"wardryx: seccomp:unconfined, and no exception says why"
+
+run_case "containers-carry-the-baseline: keyryx's exception points nowhere" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'import json
+d = json.load(open("hardening-exceptions.json"))
+for e in d["exceptions"]:
+    if e["service"] == "keyryx" and e["key"] == "pids":
+        e["until"] = "permanent"
+json.dump(d, open("hardening-exceptions.json", "w"))')" \
+	"it stays out until G3.11 closes"
+
+run_case "containers-carry-the-baseline: a comment says privileged" pass \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'edit("compose.yaml", "  wardryx:\n    <<: [*restart, *baseline]\n", "  wardryx:\n    # never privileged: true, and never cap_add: ALL\n    <<: [*restart, *baseline]\n")')"
+
+run_case "containers-carry-the-baseline: a reason is reworded" pass \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'edit("hardening-exceptions.json", "which only root can do", "and nobody but root can")')"
+
+run_case "containers-carry-the-baseline: compose.yaml is empty" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'open("compose.yaml", "w").write("")')" \
+	"measured NOTHING"
+
+run_case "containers-carry-the-baseline: compose.yaml has no services" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'open("compose.yaml", "w").write("name: agent-stack\nservices: {}\n")')" \
+	"measured NOTHING"
+
+run_case "containers-carry-the-baseline: the exceptions file is gone" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'import os
+os.remove("hardening-exceptions.json")')" \
+	"measured NOTHING"
+
 # health-checks: Docker watches every service that exposes a health path, and no
 # distroless one (scripts/health-checks-are-declared.sh).
 run_case "health-checks-are-declared: the console has no healthcheck" fail \
