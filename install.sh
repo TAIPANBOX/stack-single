@@ -754,8 +754,8 @@ if compose_has vouchryx; then
         "$DC exec -T tokenfuse-gateway printenv TOKENFUSE_DELEGATION_ISSUER"
 fi
 
-# Read off the bus, not off the file: wardryx writes the floors it loaded at each start, so a box
-# whose file says on and whose running wardryx says otherwise fails here.
+# Read off wardryx's own start line, not off the file: wardryx says the floors it loaded at each
+# start, so a box whose file says on and whose running wardryx says otherwise fails here.
 if [ -f "$STACK_DIR/policy.yaml" ] && grep -q '^# tool-hold: begin' "$STACK_DIR/policy.yaml"; then
   check "policy plane: wardryx loaded the tool hold" "[ \"\$(tool_hold_loaded)\" = on ]"
 fi
@@ -1172,7 +1172,7 @@ running_images() {
 #
 # STACK_VERSION is what the journal records: the newest docs/releases/vX.Y.Z.md, the same
 # number as x-stack-version in compose.yaml (scripts/version-is-one-number.sh).
-STACK_VERSION="1.7.0"
+STACK_VERSION="1.7.1"
 # Raised only when an older tree has become unsafe to run on a box that ran this one, and
 # only with a line in that release's notes that starts `security:` or `irreversible:` and
 # names `rollback index N` (scripts/rollback-floor.sh).
@@ -1345,7 +1345,7 @@ journal_status() {
 # TOOL_HOLD=1 in the environment is the operator's decision to turn it on over that list. It
 # is read from the environment and never from .env, like ALLOW_ROLLBACK: a line left in a
 # file must not answer for a person.
-TOOL_HOLD_WARDRYX_IMAGE="ghcr.io/taipanbox/wardryx:v2.6.0@sha256:26113779c4b830d6b27e626874965c722fd8b41dc5d7085d226a3d903927af7b"
+TOOL_HOLD_WARDRYX_IMAGE="ghcr.io/taipanbox/wardryx:v2.6.1@sha256:2101d23bbe8ecb1b932a530611ffa02f1c7c9b82394c4fa8db238f7d0e7bd667"
 TOOL_HOLD_ON=1
 TOOL_HOLD_SAID=""
 NET="${NET:-agent-stack_core}"
@@ -1668,13 +1668,16 @@ tool_hold_upgrade_check() {
   if [ "$pulled" = 1 ]; then docker image rm "$TOOL_HOLD_WARDRYX_IMAGE" >/dev/null 2>&1 || true; fi
   die "$stop Nothing was changed."
 }
-# What wardryx said at its last start: it writes the names of the floors it loaded on the bus.
-# Prints on, off, or nothing for a wardryx that wrote no such line.
+# What wardryx said at its last start: from 2.6.1 it says the floors it loaded in one line of its own
+# log, `wardryx: policy set loaded ... no_grant_floors=[tool-hold] ...`, and no longer on the bus (SPEC
+# 6.2 lists no such type for it). The bus is not read: a line 2.6.0 left there would name an older
+# start. The container is compose's own name for the service. Prints on, off, or nothing for a
+# wardryx that said no such line.
 tool_hold_loaded() {
   local line
-  line="$(docker run --rm -v "${NET%_core}_events:/e:ro" busybox:1.36 grep -F '"policy_loaded"' /e/wardryx.ndjson 2>/dev/null | tail -n 1 || true)"
-  case "$line" in *'"policy_loaded"'*) ;; *) return 0 ;; esac
-  if grep -qE '"no_grant_floors":\[[^]]*"tool-hold"' <<<"$line"; then printf on; else printf off; fi
+  line="$(docker logs "${NET%_core}-wardryx-1" 2>&1 | grep -F 'wardryx: policy set loaded ' | tail -n 1 || true)"
+  [ -n "$line" ] || return 0
+  if grep -qE 'no_grant_floors=\[[^]]*tool-hold' <<<"$line"; then printf on; else printf off; fi
 }
 tool_hold_status() { # one line; it only reads
   local file="$STACK_DIR/policy.yaml" state loaded infile=0 instore="not read" stored

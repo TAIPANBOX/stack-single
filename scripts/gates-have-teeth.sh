@@ -431,6 +431,11 @@ run_case "tool-hold-is-seeded: the store is left out of the question" fail \
 	'./scripts/tool-hold-is-seeded.sh' \
 	"$(py 'edit("install.sh", "  [ -s \"$d/candidate/stored.json\" ] || rm -f \"$d/candidate/stored.json\"\n", "  rm -f \"$d/candidate/stored.json\"\n")')" \
 	"not in the question"
+run_case "tool-hold-is-seeded: what wardryx loaded is read off the bus again" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("install.sh", "docker logs \"${NET%_core}-wardryx-1\" 2>&1 | grep -F", "docker run --rm -v \"${NET%_core}_events:/e:ro\" busybox:1.36 cat /e/wardryx.ndjson 2>&1 | grep -F")')" \
+	"start record does not say the floor is on"
+
 run_case "tool-hold-is-seeded: an empty store breaks the question" fail \
 	'./scripts/tool-hold-is-seeded.sh' \
 	"$(py 'edit("install.sh", "  [ -z \"$TOOL_HOLD_BODY\" ] || printf \x27%s\\n\x27 \"$TOOL_HOLD_BODY\"\n", "  printf \x27%s\\n\x27 \"$TOOL_HOLD_BODY\"\n")')" \
@@ -465,11 +470,11 @@ run_case "tool-hold-is-seeded: nothing reads what wardryx loaded" fail \
 	"a file that says on is believed"
 run_case "tool-hold-is-seeded: the question runs another image" fail \
 	'./scripts/tool-hold-is-seeded.sh' \
-	"$(py 'edit("install.sh", "TOOL_HOLD_WARDRYX_IMAGE=\"ghcr.io/taipanbox/wardryx:v2.6.0@sha256:26113779", "TOOL_HOLD_WARDRYX_IMAGE=\"ghcr.io/taipanbox/wardryx:v2.6.0@sha256:00113779")')" \
+	"$(py 'edit("install.sh", "TOOL_HOLD_WARDRYX_IMAGE=\"ghcr.io/taipanbox/wardryx:v2.6.1@sha256:2101d23b", "TOOL_HOLD_WARDRYX_IMAGE=\"ghcr.io/taipanbox/wardryx:v2.6.1@sha256:0001d23b")')" \
 	"not the one compose.yaml pins"
 run_case "tool-hold-is-seeded: the pin goes below 2.6.0" fail \
 	'./scripts/tool-hold-is-seeded.sh' \
-	"$(py 'edit("compose.yaml", "wardryx:v2.6.0@", "wardryx:v2.5.1@")')" \
+	"$(py 'edit("compose.yaml", "wardryx:v2.6.1@", "wardryx:v2.5.1@")')" \
 	"older than 2.6.0"
 run_case "tool-hold-is-seeded: a wardryx that refuses the file gets it anyway" fail \
 	'./scripts/tool-hold-is-seeded.sh' \
@@ -793,7 +798,7 @@ run_case "manifest-is-true: a routine arrives and the manifest does not claim it
 # is one character in one tag, which is exactly how it would arrive.
 run_case "manifest-is-true: a pulled tag moves in compose and not in the manifest" fail \
 	'./scripts/manifest-is-true.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.6.0", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.6.1", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
 	"an image it pulls"
 
 # invariant 15: the delegation plane's default is byte-for-byte what it was
@@ -1632,7 +1637,7 @@ run_case "chain-verifier: its stream is given to another uid" fail \
 
 run_case "chain-verifier: its state volume has no owner" fail \
 	'./scripts/chain-verifier-is-contained.sh' \
-	"$(py 'edit("compose.yaml", "        chown -R 10002:10002 /vol/conform && chmod 0775 /vol/conform\n", "")')" \
+	"$(py 'edit("compose.yaml", "        chown -R 10002:10002 /vol/conform; chmod 0775 /vol/conform\n", "")')" \
 	"does not chown /vol/conform"
 
 run_case "chain-verifier: another plane is told to write its stream" fail \
@@ -1834,7 +1839,7 @@ run_case "approver-key-is-wired: the bare-key switch is set" fail \
 
 run_case "approver-key-is-wired: wardryx is pinned back to 2.3.0" fail \
 	'./scripts/approver-key-is-wired.sh' \
-	"$(py 'edit_all("compose.yaml", "wardryx:v2.6.0@sha256:26113779", "wardryx:v2.3.0@sha256:26113779")')" \
+	"$(py 'edit_all("compose.yaml", "wardryx:v2.6.1@sha256:2101d23b", "wardryx:v2.3.0@sha256:2101d23b")')" \
 	"older than v2.4.0"
 
 run_case "approver-key-is-wired: the console loses its key mount" fail \
@@ -2078,12 +2083,12 @@ run_case "typed-risk-signal: typryx is pinned before the proxy existed" fail \
 
 run_case "typed-risk-signal: wardryx is pinned before it read signals" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.6.0@sha256:26113779c4b830d6b27e626874965c722fd8b41dc5d7085d226a3d903927af7b}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.6.1@sha256:2101d23bbe8ecb1b932a530611ffa02f1c7c9b82394c4fa8db238f7d0e7bd667}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
 	"hold_if_signal and signals on /v1/decide do not exist before it"
 
 run_case "typed-risk-signal: wardryx is pinned before when_absent" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.6.0@sha256:26113779c4b830d6b27e626874965c722fd8b41dc5d7085d226a3d903927af7b}", "ghcr.io/taipanbox/wardryx:v1.3.2}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.6.1@sha256:2101d23bbe8ecb1b932a530611ffa02f1c7c9b82394c4fa8db238f7d0e7bd667}", "ghcr.io/taipanbox/wardryx:v1.3.2}")')" \
 	"needs v1.4.0 or later"
 
 run_case "typed-risk-signal: tokenfuse is pinned before it sent the tool call" fail \
@@ -2885,7 +2890,7 @@ run_case "finops: its stream cannot be read by the chain verifier" fail \
 
 run_case "finops: its data volume has no owner" fail \
 	'./scripts/finops-is-opt-in.sh' \
-	"$(py 'edit("compose.yaml", "        chown -R 10003:10003 /vol/costcrew && chmod 0750 /vol/costcrew\n", "")')" \
+	"$(py 'edit("compose.yaml", "        chown -R 10003:10003 /vol/costcrew; chmod 0750 /vol/costcrew\n", "")')" \
 	"does not chown /vol/costcrew"
 
 run_case "finops: the one-shot stops waiting for init-volumes" fail \
@@ -2936,7 +2941,7 @@ json.dump(d, open(p, "w"), indent=2)')" \
 # The bus gates see the add-on's preparer as a preparer, and still judge it.
 run_case "bus-has-a-writer: the add-on's data volume is prepared by nobody" fail \
 	'./scripts/bus-has-a-writer.sh' \
-	"$(py 'edit("compose.yaml", "        chown -R 10003:10003 /vol/costcrew && chmod 0750 /vol/costcrew\n", "")')" \
+	"$(py 'edit("compose.yaml", "        chown -R 10003:10003 /vol/costcrew; chmod 0750 /vol/costcrew\n", "")')" \
 	"no chown line there names /vol/costcrew"
 
 run_case "bus-has-a-writer: the add-on's stream is given to no one it runs as" fail \
@@ -3759,16 +3764,13 @@ d["exceptions"].append({"service": "wardryx", "key": "pids", "value": "none", "w
 json.dump(d, open("hardening-exceptions.json", "w"))')" \
 	"the exception for wardryx pids excuses nothing"
 
-run_case "containers-carry-the-baseline: vouchryx takes the anchor and keeps its exception" fail \
+run_case "containers-carry-the-baseline: vouchryx carries the anchor and an old line stays behind" fail \
 	'./scripts/containers-carry-the-baseline.sh' \
-	"$(py 'import re
-s = open("compose.yaml").read()
-i = s.index("  vouchryx:\n")
-a = "    <<: *restart\n"
-j = s.index(a, i)
-s = s[:j] + "    <<: [*restart, *baseline]\n    pids_limit: 256\n" + s[j + len(a):]
-open("compose.yaml", "w").write(s)')" \
-	"the exception for vouchryx baseline excuses nothing"
+	"$(py 'import json
+d = json.load(open("hardening-exceptions.json"))
+d["exceptions"].append({"service": "vouchryx", "key": "pids", "value": "none", "why": "left behind from before the three took the baseline", "until": "permanent"})
+json.dump(d, open("hardening-exceptions.json", "w"))')" \
+	"the exception for vouchryx pids excuses nothing"
 
 run_case "containers-carry-the-baseline: a capability has no exception" fail \
 	'./scripts/containers-carry-the-baseline.sh' \
@@ -3943,15 +3945,42 @@ run_case "browser-sandbox-is-measured: the block is gone" fail \
 	"$(py 'edit("install.sh", "# browser-apparmor: begin\n", "")')" \
 	"measured NOTHING"
 
-run_case "containers-carry-the-baseline: keyryx's exception points nowhere" fail \
+# The three a certified key hangs on (CLAUDE.md invariant 72).
+run_case "containers-carry-the-baseline: keyryx loses its process limit and waits on G3.11 again" fail \
 	'./scripts/containers-carry-the-baseline.sh' \
 	"$(py 'import json
+edit("compose.yaml", "  keyryx:\n    <<: [*restart, *baseline]\n    pids_limit: 128\n", "  keyryx:\n    <<: [*restart, *baseline]\n")
 d = json.load(open("hardening-exceptions.json"))
-for e in d["exceptions"]:
-    if e["service"] == "keyryx" and e["key"] == "pids":
-        e["until"] = "permanent"
+d["exceptions"].append({"service": "keyryx", "key": "pids", "value": "none", "why": "recreating keyryx recreates vouchryx on a Compose below 2.35", "until": "G3.11"})
 json.dump(d, open("hardening-exceptions.json", "w"))')" \
-	"it stays out until G3.11 closes"
+	"until says G3.11, and keyryx v0.1.4 closed it"
+
+run_case "containers-carry-the-baseline: vouchryx leaves the anchor under a permanent line" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'import json
+edit("compose.yaml", "  vouchryx:\n    <<: [*restart, *baseline]\n    pids_limit: 256\n", "  vouchryx:\n    <<: *restart\n")
+d = json.load(open("hardening-exceptions.json"))
+d["exceptions"].append({"service": "vouchryx", "key": "baseline", "value": "all", "why": "kept as it was, whatever the custody does", "until": "permanent"})
+json.dump(d, open("hardening-exceptions.json", "w"))')" \
+	"vouchryx: excused from the baseline (baseline)"
+
+run_case "containers-carry-the-baseline: keyryx is pinned back to v0.1.3" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'edit("compose.yaml", "keyryx:v0.1.4@sha256:659723319e28c6c8895f5c2af6baa616b2e46ed90a3cf26d1c208dafe6a1ca3f", "keyryx:v0.1.3@sha256:26d5d49cd4a67eb463f35895de96e628e2304183775bf031170e190c579c0147")')" \
+	"keyryx is pinned at v0.1.3, below v0.1.4"
+
+run_case "containers-carry-the-baseline: keyryx is pinned by no digest (measured nothing)" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'import re
+s = open("compose.yaml").read()
+s, n = re.subn(r"keyryx:v0\.1\.4@sha256:[0-9a-f]{64}", "keyryx:v0.1.4", s)
+assert n == 2
+open("compose.yaml", "w").write(s)')" \
+	"the custody under the three was measured against NOTHING"
+
+run_case "containers-carry-the-baseline: the comment above the keyryx pin is reworded (must pass)" pass \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'edit("compose.yaml", "    # The image'"'"'s own 65532 is replaced: custody runs under its own uid, and\n", "    # The image'"'"'s own uid 65532 is replaced: custody runs under its own uid, and\n")')"
 
 run_case "containers-carry-the-baseline: a comment says privileged" pass \
 	'./scripts/containers-carry-the-baseline.sh' \
@@ -4614,7 +4643,7 @@ run_case "agent-tokens-are-wired: a reworded comment is not a fault" pass \
 
 run_case "agent-tokens-are-wired: no vouchryx service left to judge" fail \
 	'./scripts/agent-tokens-are-wired.sh' \
-	"$(py 'edit("compose.yaml", "  vouchryx:\n    <<: *restart\n", "  vouchryx-moved:\n    <<: *restart\n")')" \
+	"$(py 'edit("compose.yaml", "  vouchryx:\n    <<: [*restart, *baseline]\n", "  vouchryx-moved:\n    <<: [*restart, *baseline]\n")')" \
 	"measured NOTHING"
 
 # invariant 41: no plane writes another plane's stream. Each case plants one
@@ -4626,12 +4655,12 @@ run_case "no-plane-writes: two producers run as one uid" fail \
 
 run_case "no-plane-writes: a stream is world-readable (0644)" fail \
 	'./scripts/no-plane-writes-another-planes-stream.sh' \
-	"$(py 'edit("compose.yaml", "chown 20001:10001 /vol/events/wardryx.ndjson && chmod 0640 /vol/events/wardryx.ndjson", "chown 20001:10001 /vol/events/wardryx.ndjson && chmod 0644 /vol/events/wardryx.ndjson")')" \
+	"$(py 'edit("compose.yaml", "chown 20001:10001 /vol/events/wardryx.ndjson; chmod 0640 /vol/events/wardryx.ndjson", "chown 20001:10001 /vol/events/wardryx.ndjson; chmod 0644 /vol/events/wardryx.ndjson")')" \
 	"want 0640"
 
 run_case "no-plane-writes: the bus directory is group-writable" fail \
 	'./scripts/no-plane-writes-another-planes-stream.sh' \
-	"$(py 'edit("compose.yaml", "chown 0:10001 /vol/events && chmod 0751 /vol/events", "chown 0:10001 /vol/events && chmod 2775 /vol/events")')" \
+	"$(py 'edit("compose.yaml", "chown 0:10001 /vol/events; chmod 0751 /vol/events", "chown 0:10001 /vol/events; chmod 2775 /vol/events")')" \
 	"bus directory"
 
 run_case "no-plane-writes: a reworded comment in init-volumes is not a fault" pass \
@@ -4717,7 +4746,7 @@ run_case "keyryx-alerts: the findings file is writable by the readers' group" fa
 
 run_case "keyryx-alerts: the witness owns its findings directory" fail \
 	'./scripts/keyryx-alerts-reach-readers.sh' \
-	"$(py 'edit("compose.yaml", "chown 0:10001 /vol/keyryxalerts && chmod 0750", "chown 20100:10001 /vol/keyryxalerts && chmod 0750")')" \
+	"$(py 'edit("compose.yaml", "chown 0:10001 /vol/keyryxalerts; chmod 0750", "chown 20100:10001 /vol/keyryxalerts; chmod 0750")')" \
 	"want root (0)"
 
 run_case "keyryx-alerts: a link planted at the findings file is not removed" fail \
@@ -5127,12 +5156,28 @@ run_case "volumes-are-reowned: the gateway's traces are re-owned without -R, so 
 
 run_case "volumes-are-reowned: typryx's ledger volume is never re-owned" fail \
 	'./scripts/volumes-are-reowned.sh' \
-	"$(py 'edit("compose.yaml", "        chown -R 20005:10001 /vol/typryx && chmod 0775 /vol/typryx\n", "        chmod 0775 /vol/typryx\n")')" \
+	"$(py 'edit("compose.yaml", "        chown -R 20005:10001 /vol/typryx; chmod 0775 /vol/typryx\n", "        chmod 0775 /vol/typryx\n")')" \
 	"typryx (uid 20005) writes typryxdata"
 
 run_case "volumes-are-reowned: a comment in init-volumes is not a fault" pass \
 	'./scripts/volumes-are-reowned.sh' \
-	"$(py 'edit("compose.yaml", "        chown -R 20013:10001 /vol/cloud && chmod 0775 /vol/cloud\n", "        # a comment about the cloud volume is not a fault\n        chown -R 20013:10001 /vol/cloud && chmod 0775 /vol/cloud\n")')" \
+	"$(py 'edit("compose.yaml", "        chown -R 20013:10001 /vol/cloud; chmod 0775 /vol/cloud\n", "        # a comment about the cloud volume is not a fault\n        chown -R 20013:10001 /vol/cloud; chmod 0775 /vol/cloud\n")')" \
+	""
+
+# A failed chown stops the one-shot (check F of volumes-are-reowned.sh, CLAUDE.md invariant 72).
+run_case "volumes-are-reowned: init-volumes goes on past a failed chown" fail \
+	'./scripts/volumes-are-reowned.sh' \
+	"$(py 'edit("compose.yaml", "        chown -R 20101 /vol/keyryx; chmod 0700 /vol/keyryx\n", "        chown -R 20101 /vol/keyryx && chmod 0700 /vol/keyryx\n")')" \
+	"init-volumes goes on past a failed chown (call"
+
+run_case "volumes-are-reowned: costcrew-init goes on past a failed chown" fail \
+	'./scripts/volumes-are-reowned.sh' \
+	"$(py 'edit("compose.yaml", "chown 10003:10001 /vol/events/costcrew.ndjson; chmod 0640 /vol/events/costcrew.ndjson", "chown 10003:10001 /vol/events/costcrew.ndjson && chmod 0640 /vol/events/costcrew.ndjson")')" \
+	"costcrew-init goes on past a failed chown (call"
+
+run_case "volumes-are-reowned: a chown and its chmod on two lines still stop the body (must pass)" pass \
+	'./scripts/volumes-are-reowned.sh' \
+	"$(py 'edit("compose.yaml", "        chown -R 20101 /vol/keyryx; chmod 0700 /vol/keyryx\n", "        chown -R 20101 /vol/keyryx\n        chmod 0700 /vol/keyryx\n")')" \
 	""
 
 run_case "record-plane-is-on-by-default: an unset WITH_RECORD turns the record plane off again" fail \
@@ -5157,7 +5202,7 @@ run_case "record-plane-is-on-by-default: a comment in the record block is not a 
 
 run_case "costcrew-can-reach-its-stream: the bus directory goes back to 0750, so costcrew cannot enter it" fail \
 	'./scripts/costcrew-can-reach-its-stream.sh' \
-	"$(py 'edit("compose.yaml", "chown 0:10001 /vol/events && chmod 0751 /vol/events", "chown 0:10001 /vol/events && chmod 0750 /vol/events")')" \
+	"$(py 'edit("compose.yaml", "chown 0:10001 /vol/events; chmod 0751 /vol/events", "chown 0:10001 /vol/events; chmod 0750 /vol/events")')" \
 	"others have no execute bit"
 
 run_case "costcrew-can-reach-its-stream: costcrew joins the bus group" fail \
@@ -5167,7 +5212,7 @@ run_case "costcrew-can-reach-its-stream: costcrew joins the bus group" fail \
 
 run_case "costcrew-can-reach-its-stream: a comment beside the bus directory is not a fault" pass \
 	'./scripts/costcrew-can-reach-its-stream.sh' \
-	"$(py 'edit("compose.yaml", "        chown 0:10001 /vol/events && chmod 0751 /vol/events\n", "        # a comment about the bus directory is not a fault\n        chown 0:10001 /vol/events && chmod 0751 /vol/events\n")')" \
+	"$(py 'edit("compose.yaml", "        chown 0:10001 /vol/events; chmod 0751 /vol/events\n", "        # a comment about the bus directory is not a fault\n        chown 0:10001 /vol/events; chmod 0751 /vol/events\n")')" \
 	""
 
 # ---- scopyx-reads-go-through-the-broker (CLAUDE.md invariant 55, G2.1) ----
@@ -5388,27 +5433,27 @@ run_case "console-proofs: wardryx runs in a group the console is not in" fail \
 
 run_case "console-proofs: the archive directory is group-writable" fail \
 	"$CP" \
-	"$(py 'edit("compose.yaml", "&& chmod 0750 /vol/events/wardryx-policy-archive\n", "&& chmod 0770 /vol/events/wardryx-policy-archive\n")')" \
+	"$(py 'edit("compose.yaml", "; chmod 0750 /vol/events/wardryx-policy-archive\n", "; chmod 0770 /vol/events/wardryx-policy-archive\n")')" \
 	"a group write bit"
 
 run_case "console-proofs: the archive directory is open to other" fail \
 	"$CP" \
-	"$(py 'edit("compose.yaml", "&& chmod 0750 /vol/events/wardryx-policy-archive\n", "&& chmod 0755 /vol/events/wardryx-policy-archive\n")')" \
+	"$(py 'edit("compose.yaml", "; chmod 0750 /vol/events/wardryx-policy-archive\n", "; chmod 0755 /vol/events/wardryx-policy-archive\n")')" \
 	"anything for other"
 
 run_case "console-proofs: the archive directory is owned by another plane" fail \
 	"$CP" \
-	"$(py 'edit("compose.yaml", "chown -R 20001:10001 /vol/events/wardryx-policy-archive &&", "chown -R 10002:10001 /vol/events/wardryx-policy-archive &&")')" \
+	"$(py 'edit("compose.yaml", "chown -R 20001:10001 /vol/events/wardryx-policy-archive;", "chown -R 10002:10001 /vol/events/wardryx-policy-archive;")')" \
 	"want wardryx's uid"
 
 run_case "console-proofs: the archive directory is in a group the console is not in" fail \
 	"$CP" \
-	"$(py 'edit("compose.yaml", "chown -R 20001:10001 /vol/events/wardryx-policy-archive &&", "chown -R 20001:20001 /vol/events/wardryx-policy-archive &&")')" \
+	"$(py 'edit("compose.yaml", "chown -R 20001:10001 /vol/events/wardryx-policy-archive;", "chown -R 20001:20001 /vol/events/wardryx-policy-archive;")')" \
 	"not a group the console runs in"
 
 run_case "console-proofs: the archive is given away without a recursive chown" fail \
 	"$CP" \
-	"$(py 'edit("compose.yaml", "chown -R 20001:10001 /vol/events/wardryx-policy-archive &&", "chown 20001:10001 /vol/events/wardryx-policy-archive &&")')" \
+	"$(py 'edit("compose.yaml", "chown -R 20001:10001 /vol/events/wardryx-policy-archive;", "chown 20001:10001 /vol/events/wardryx-policy-archive;")')" \
 	"a version in the archive is owned by"
 
 run_case "console-proofs: versions an earlier wardryx wrote stay 0600" fail \

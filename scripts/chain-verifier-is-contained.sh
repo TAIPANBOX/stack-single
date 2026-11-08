@@ -242,7 +242,7 @@ for name in sorted(subjects):
         else:
             d = re.escape(init_mounts[state_vol].rstrip("/"))
             # 1.4.0 (invariant 49): the state volume is re-owned by a recursive chown (`chown -R`), which this accepts.
-            chown = re.search(r"chown\s+(?:-R\s+)?([0-9]+):([0-9]+)\s+" + d + r"(?=[\s&]|$)", init_text)
+            chown = re.search(r"chown\s+(?:-R\s+)?([0-9]+):([0-9]+)\s+" + d + r"(?=[\s&;]|$)", init_text)
             if not chown:
                 note(f"init-volumes does not chown {init_mounts[state_vol]}, the verifier's state volume")
             elif uid is not None and (chown.group(1), chown.group(2)) != (uid, gid):

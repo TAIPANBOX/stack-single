@@ -23,6 +23,8 @@
 #      (CLAUDE.md invariants 10 and 41, gated by bus-has-a-writer.sh and
 #      no-plane-writes-another-planes-stream.sh). They are excluded here, and the exclusion is printed.
 #   E. MEASURED SOMETHING. The gate refuses to report OK when it found no writer, or no one-shot body.
+#   F. A FAILED CHOWN STOPS IT. Each chown of each one-shot, made to fail in turn, must stop the body
+#      with a non-zero status, since a one-shot that holds only some capabilities can be refused one.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -124,6 +126,31 @@ PRELUDE
   fi
 done
 
+# F. A FAILED CHOWN STOPS THE ONE-SHOT. compose runs each body under `sh -e`, and `sh -e` does not stop on
+#    a command before `&&`: with `chown A && chmod B`, a refused chown skips the chmod, the body goes on,
+#    prints "volumes ready" and ends 0, and the volume stays with the wrong uid. The one-shots hold only
+#    the capabilities their exceptions give back (CLAUDE.md invariants 69 and 72), so a refused chown is a
+#    real outcome: measured on forge 2026-11-07, init-volumes without CHOWN ended 0. So each chown the
+#    recorded run made is made to fail in turn, and the body must stop with a non-zero status every time.
+fails_tried=0
+for f in "$scratch"/bodies/*.sh; do
+  b="$(basename "$f" .sh)"
+  root="$scratch/root-$b"
+  calls="$(grep -c "^$b chown " "$LOG" || true)"
+  i=1
+  while [ "$i" -le "$calls" ]; do
+    { printf '__c=0\nchown() { __c=$((__c + 1)); [ "$__c" != %s ] || return 1; }\nchmod() { :; }\n' "$i"; cat "$root.body"; } >"$root.fail"
+    fails_tried=$((fails_tried + 1))
+    if sh -eu "$root.fail" >/dev/null 2>&1; then
+      fail "$b goes on past a failed chown (call $i: chown $(grep "^$b chown " "$LOG" | sed -n "${i}p" | cut -d' ' -f3- | sed "s#$root##g")) and ends 0: under sh -e a command before && does not stop the body"
+    fi
+    i=$((i + 1))
+  done
+done
+if [ "$fails_tried" -eq 0 ]; then
+  fail "no chown was recorded in any one-shot, so whether a failed one stops it was measured against nothing"
+fi
+
 python3 - "$scratch" "$LOG" <<'PY'
 import json, re, sys
 out, log = sys.argv[1], sys.argv[2]
@@ -138,8 +165,9 @@ for line in open(log).read().splitlines():
 SHARED = {"events", "checkpoints"}
 # A named volume takes the owner of the image's directory on its first use, and postgres's data
 # directory is uid 70 in the image; a volume from before invariant 69 was chowned to 70 by the image's
-# entrypoint. So nothing has to give pgdata an owner, and init-volumes cannot be asked to: it stays
-# untouched until G3.11. Measured on Compose 2.26.1, 2026-11-07: both volumes opened as 70:70.
+# entrypoint. So nothing has to give pgdata an owner, and init-volumes is not asked to: it stayed
+# untouched until G3.11 closed, and a volume that already opens as 70:70 needs no line of its own.
+# Measured on Compose 2.26.1, 2026-11-07: both volumes opened as 70:70.
 IMAGE_OWNED = {"pgdata"}
 checked, problems, excluded = 0, [], set()
 for name, s in sorted(services.items()):

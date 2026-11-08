@@ -1,0 +1,122 @@
+
+=== 21:40:06 old tree up: init-volumes and keyryx (v1.7.0 compose.yaml)
+ Container g312lab-init-volumes-1  Exited
+ Container g312lab-keyryx-1  Starting
+ Container g312lab-keyryx-1  Started
+21:40:09 root pin taken from the lab's keyryx: 1 kids
+ghcr.io/taipanbox/keyryx:v0.1.3@sha256:26d5d49cd4a67eb463f35895de96e628e2304183775bf031170e190c579c0147
+
+=== 21:40:09 vouchryx start 1
+ Container g312lab-vouchryx-1  Started
+keys start1: vouchryx 1 in all, 1 live: N1ZFkFH5 active nb-1s
+
+=== 21:40:11 vouchryx start 2
+keys start2: vouchryx 2 in all, 2 live: N1ZFkFH5 active nb-2s, DM0m8wnG pending nb+120s
+
+=== 21:40:12 vouchryx start 3
+keys start3: vouchryx 3 in all, 3 live: N1ZFkFH5 active nb-4s, DM0m8wnG pending nb+118s, O4noqS69 pending nb+119s
+
+=== 21:40:14 vouchryx start 4
+keys start4: vouchryx 4 in all, 4 live: N1ZFkFH5 active nb-5s, DM0m8wnG pending nb+117s, O4noqS69 pending nb+118s, lCokc-BU pending nb+119s
+21:42:17 four starts done; healthz after the fourth: 122s
+21:42:45 waiting 590s, until the second oldest key has signed for the overlap
+
+=== 21:52:35 control: a fifth start under the old custody (v0.1.3), past the overlap
+keys before-control: vouchryx 4 in all, 4 live: N1ZFkFH5 active nb-745s, DM0m8wnG active nb-623s, O4noqS69 active nb-622s, lCokc-BU active nb-621s
+21:53:16 vouchryx /healthz 40s after the fifth start: 503
+2026/11/07 21:52:35 keyryx: refused delegate: reason=too_many_live_keys consumer="vouchryx" key="vouchryx"
+2026/11/07 21:52:35 vouchryx: re-reading the key set file of 1 issuer(s) every 30s
+2026/11/07 21:52:35 vouchryx: signer: keyclient: custody refused /v1/keys/vouchryx/delegate with status 409
+2026/11/07 21:53:16 vouchryx: refused (temporarily_unavailable): no_certified_signing_key [detail=signer: no certified signing key is valid now: keyclient: no delegated key is valid now]
+keys after-control: vouchryx 4 in all, 4 live: N1ZFkFH5 active nb-786s, DM0m8wnG active nb-664s, O4noqS69 active nb-663s, lCokc-BU active nb-662s
+
+=== 21:53:16 upgrade: this tree's compose.yaml (keyryx v0.1.4, the three take the baseline)
+init-volumes 248da3081368520b76399711215c05e08d94d15777ed0f82570df424a0ec0020	init-volumes 2f4ecf60890a3596c8b072eb49af955a780a8dfe7146d00c850d1d97c3f7cf3d
+keyryx 09e0ffcb0216781302b7e827ac57bb45ac2143621e0229b999598c808530a42b	keyryx f32ff460e3810401e42e9801c3dc08b567c8cf13a33c1414992d25b1642462d1
+vouchryx 3f347bce04820b17812fdc69fc6ebba2b4da8239d2037f264cade3f98e78799e	vouchryx 27fde175a0f4abc37903b01c1299b2a48bc93b84f1794c871ab57a841463ac5b
+keys before-upgrade: vouchryx 4 in all, 4 live: N1ZFkFH5 active nb-787s, DM0m8wnG active nb-665s, O4noqS69 active nb-664s, lCokc-BU active nb-663s
+ Container g312lab-init-volumes-1  Recreate
+ Container g312lab-init-volumes-1  Recreated
+ Container g312lab-keyryx-1  Recreate
+ Container g312lab-keyryx-1  Recreated
+ Container g312lab-vouchryx-1  Recreate
+ Container g312lab-vouchryx-1  Recreated
+ Container g312lab-init-volumes-1  Starting
+ Container g312lab-init-volumes-1  Started
+ Container g312lab-init-volumes-1  Waiting
+ Container g312lab-init-volumes-1  Exited
+ Container g312lab-keyryx-1  Starting
+ Container g312lab-keyryx-1  Started
+ Container g312lab-init-volumes-1  Waiting
+ Container g312lab-init-volumes-1  Exited
+ Container g312lab-vouchryx-1  Starting
+ Container g312lab-vouchryx-1  Started
+21:53:19 up returned after 2s; recreated: 6
+ghcr.io/taipanbox/keyryx:v0.1.4@sha256:659723319e28c6c8895f5c2af6baa616b2e46ed90a3cf26d1c208dafe6a1ca3f
+21:55:23 vouchryx /healthz 200 124s after the upgrade's up returned
+keys after-upgrade: vouchryx 5 in all, 4 live: N1ZFkFH5 retired nb-914s, DM0m8wnG active nb-792s, O4noqS69 active nb-791s, lCokc-BU active nb-790s, GhLLEZvI active nb-5s
+2026/11/07 21:53:19 keyryx: retired delegated key N1ZFkFH5rWpYjDwEn7m_OHnWBPyMtnE76xEQHODzIhs of vouchryx: a new key of its owner took its place at the bound
+
+=== 21:55:24 second up: recreates nothing, spends no key
+ Container g312lab-init-volumes-1  Created
+ Container g312lab-keyryx-1  Running
+ Container g312lab-vouchryx-1  Running
+ Container g312lab-init-volumes-1  Starting
+ Container g312lab-init-volumes-1  Started
+ Container g312lab-init-volumes-1  Waiting
+ Container g312lab-init-volumes-1  Exited
+ Container g312lab-init-volumes-1  Waiting
+ Container g312lab-init-volumes-1  Exited
+21:55:26 recreated by the second up: 0; vouchryx keys 5 before, 5 after
+init-volumes recreated
+keyryx recreated
+vouchryx recreated
+
+=== 21:55:26 what Docker runs for the three
+init-volumes ro=true drop=[ALL] add=[CHOWN DAC_OVERRIDE FOWNER] sec=[no-new-privileges:true] pids=32 ulimits=[core=0:0] user=0:0 exit=0 status=exited
+keyryx ro=true drop=[ALL] add=[] sec=[no-new-privileges:true] pids=128 ulimits=[core=0:0] user=20101:20101 exit=0 status=running
+vouchryx ro=true drop=[ALL] add=[] sec=[no-new-privileges:true] pids=256 ulimits=[core=0:0] user=20002:10001 exit=0 status=running
+volumes ready
+volumes ready
+21:55:26 keyryx read-only errors in its log: 0
+21:55:26 vouchryx read-only errors in its log: 0
+
+=== 21:55:26 load: 6 rounds of 360 parallel requests at keyryx and vouchryx
+21:55:29 keyryx pids.peak 10 pids.max 128 memory.peak 11MiB restarts 0
+21:55:29 vouchryx pids.peak 7 pids.max 256 memory.peak 10MiB restarts 0
+21:55:30 vouchryx /healthz after the load: 200
+
+=== 21:55:30 init-volumes: each capability taken out, on volumes the services have written
+21:55:30 as written (CHOWN DAC_OVERRIDE FOWNER, read_only, pids 32): exit 0: volumes ready
+21:55:31 without CHOWN: exit 0: volumes ready
+21:55:31 without DAC_OVERRIDE: exit 1: find: /vol/events/wardryx-policy-archive: Permission denied
+21:55:32 without FOWNER: exit 1: chmod: /vol/traces: Operation not permitted
+21:55:33 with pids_limit 4: exit 0: volumes ready
+
+=== 21:56:37 init-volumes on fresh volumes, then on its own volumes
+21:56:40 as written (CHOWN DAC_OVERRIDE FOWNER): first run on fresh volumes exit 0: volumes ready | a later run exit 0: volumes ready
+21:56:43 without CHOWN: first run on fresh volumes exit 0: volumes ready | a later run exit 0: volumes ready
+21:56:47 without DAC_OVERRIDE: first run on fresh volumes exit 1: mkdir: can't create directory '/vol/traces/gateway-openai': Permission denied | a later run exit 1: find: /vol/events/wardryx-policy-archive: Permission denied
+21:56:51 without FOWNER: first run on fresh volumes exit 1: chmod: /vol/traces: Operation not permitted | a later run exit 1: chmod: /vol/traces: Operation not permitted
+21:56:54 with pids_limit 4: first run on fresh volumes exit 0: volumes ready | a later run exit 0: volumes ready
+21:56:56 g312cap volumes left: 0
+
+=== 22:00:55 an up where only init-volumes changed
+keys before-body: vouchryx 5 in all, 4 live: N1ZFkFH5 retired nb-1245s, DM0m8wnG active nb-1123s, O4noqS69 active nb-1122s, lCokc-BU active nb-1121s, GhLLEZvI active nb-336s
+ Container g312lab-init-volumes-1  Recreate
+ Container g312lab-keyryx-1  Recreate
+ Container g312lab-vouchryx-1  Recreate
+ Container g312lab-init-volumes-1  Started
+ Container g312lab-keyryx-1  Started
+ Container g312lab-vouchryx-1  Started
+22:03:01 vouchryx /healthz 200 after 123s
+keys after-body: vouchryx 6 in all, 4 live: N1ZFkFH5 retired nb-1372s, DM0m8wnG retired nb-1250s, O4noqS69 active nb-1249s, lCokc-BU active nb-1248s, GhLLEZvI active nb-463s, fUS526iF active nb-4s
+2026/11/07 22:00:58 keyryx: retired delegated key DM0m8wnGN27itZ3GrcgWLtQaV5xbSE7bY8ugVwq5Uwg of vouchryx: a new key of its owner took its place at the bound
+
+=== 22:03:18 init-volumes on fresh volumes, then on its own volumes
+22:03:21 as written (CHOWN DAC_OVERRIDE FOWNER): first run on fresh volumes exit 0: volumes ready | a later run exit 0: volumes ready
+22:03:24 without CHOWN: first run on fresh volumes exit 1: chown: /vol/events: Operation not permitted | a later run exit 1: chown: /vol/traces: Operation not permitted
+22:03:28 without DAC_OVERRIDE: first run on fresh volumes exit 1: mkdir: can't create directory '/vol/traces/gateway-openai': Permission denied | a later run exit 1: chown: /vol/events/wardryx-policy-archive: Permission denied
+22:03:32 without FOWNER: first run on fresh volumes exit 1: chmod: /vol/traces: Operation not permitted | a later run exit 1: chmod: /vol/traces: Operation not permitted
+22:03:35 with pids_limit 4: first run on fresh volumes exit 0: volumes ready | a later run exit 0: volumes ready
+22:03:37 g312cap volumes left: 0

@@ -204,7 +204,8 @@ changes() {
 	grep -E 'issue-device|--test-mail' "$LOG" || true
 	grep -E '^(apt-get|systemctl|ufw|sysctl|cosign) ' "$LOG" || true
 	# Everything else docker can do is a list of what status may ask, not a list of what it may not.
-	grep -E '^docker ' "$LOG" | grep -vE '^docker (compose|run|port|version|ps|inspect|network (inspect|ls)|image inspect)( |$)' || true
+	# `docker logs` reads what a container printed: wardryx 2.6.1 says the floors it loaded there.
+	grep -E '^docker ' "$LOG" | grep -vE '^docker (compose|run|port|version|ps|inspect|logs|network (inspect|ls)|image inspect)( |$)' || true
 	grep -E '^docker run .*(>>|[^-]> )' "$LOG" || true
 	# A POST is refused, except the broker's read-only tools/list (the typed plane's one probe).
 	grep -E '^docker run .*--post-data' "$LOG" | grep -v '"method":"tools/list"' || true

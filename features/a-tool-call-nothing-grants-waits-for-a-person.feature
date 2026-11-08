@@ -126,6 +126,7 @@ Feature: A tool call nothing grants waits for a person
     Then one line says it, read from the file, the store and what wardryx loaded
     # -> gates-have-teeth.sh "tool-hold-is-seeded: status prints no line"
     # -> gates-have-teeth.sh "tool-hold-is-seeded: nothing reads what wardryx loaded"
+    # -> gates-have-teeth.sh "tool-hold-is-seeded: what wardryx loaded is read off the bus again"
 
   Scenario: The pin is one pin
     Given the image install.sh asks with and the image compose.yaml runs

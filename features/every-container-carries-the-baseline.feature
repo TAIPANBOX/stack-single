@@ -43,7 +43,7 @@ Feature: every container carries the baseline, or names why not
     When the gate reads it
     Then it fails, so whoever fixes a service takes its line out
     # -> gates-have-teeth.sh "containers-carry-the-baseline: an exception excuses nothing"
-    # -> gates-have-teeth.sh "containers-carry-the-baseline: vouchryx takes the anchor and keeps its exception"
+    # -> gates-have-teeth.sh "containers-carry-the-baseline: vouchryx carries the anchor and an old line stays behind"
 
   Scenario: a capability added back is named and limited to its service
     Given a cap_add in compose.yaml
@@ -75,11 +75,15 @@ Feature: every container carries the baseline, or names why not
     # -> gates-have-teeth.sh "containers-carry-the-baseline: the browser loses init"
     # -> gates-have-teeth.sh "containers-carry-the-baseline: a second service is seccomp:unconfined"
 
-  Scenario: the three services a certified key hangs on stay as they were, by name
-    Given init-volumes, keyryx and vouchryx
-    When the gate reads the exceptions
-    Then each is excused until G3.11, and an exception pointing elsewhere fails
-    # -> gates-have-teeth.sh "containers-carry-the-baseline: keyryx's exception points nowhere"
+  Scenario: the three services a certified key hangs on carry the baseline, under a custody that retires the oldest key
+    Given init-volumes, keyryx and vouchryx, and keyryx pinned at v0.1.4, which retires an owner's oldest key at the bound
+    When the gate reads them
+    Then each carries the baseline, no exception waits on G3.11, and a keyryx pinned below v0.1.4 fails
+    # -> gates-have-teeth.sh "containers-carry-the-baseline: keyryx loses its process limit and waits on G3.11 again"
+    # -> gates-have-teeth.sh "containers-carry-the-baseline: vouchryx leaves the anchor under a permanent line"
+    # -> gates-have-teeth.sh "containers-carry-the-baseline: keyryx is pinned back to v0.1.3"
+    # -> gates-have-teeth.sh "containers-carry-the-baseline: keyryx is pinned by no digest (measured nothing)"
+    # -> gates-have-teeth.sh "containers-carry-the-baseline: the comment above the keyryx pin is reworded (must pass)"
 
   Scenario: the running containers match the file, not only the file
     Given a running container without what compose.yaml gives it, even with an override that agrees
