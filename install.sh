@@ -4216,7 +4216,9 @@ else
   mkdir -p "$STACK_DIR/${BROWSER_SECCOMP%/*}"
   curl -fsSL "${REPO_SINGLE_RAW:-https://raw.githubusercontent.com/TAIPANBOX/stack-single/main}/$BROWSER_SECCOMP" \
     -o "$STACK_DIR/$BROWSER_SECCOMP" || die "could not fetch $BROWSER_SECCOMP, which compose.yaml names for the browser"
-  # install.sh loads this one into the host's AppArmor, so it is fetched beside the rest.
+  # install.sh loads this one into the host's AppArmor, so it is fetched beside the rest. The name
+  # is set in the browser-apparmor block above, and a slice of this section run alone has not read it.
+  BROWSER_AA_FILE="${BROWSER_AA_FILE:-apparmor/scopyx-browser}"
   mkdir -p "$STACK_DIR/${BROWSER_AA_FILE%/*}"
   curl -fsSL "${REPO_SINGLE_RAW:-https://raw.githubusercontent.com/TAIPANBOX/stack-single/main}/$BROWSER_AA_FILE" \
     -o "$STACK_DIR/$BROWSER_AA_FILE" || die "could not fetch $BROWSER_AA_FILE, which the installer loads for the browser"

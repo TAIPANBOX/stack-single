@@ -123,7 +123,8 @@ if ! grep -q '^browser_profile_status()' <<<"$profile_block"; then
 	echo "FAIL: install.sh has no browser_profile_status between its '# browser-profile:' lines, so status reads nothing of the browser's profile."
 	exit 1
 fi
-if ! awk '/^status_main\(\) \{$/,/^\}$/' install.sh | grep -q '^  browser_profile_status$'; then
+status_body="$(awk '/^status_main\(\) \{$/,/^\}$/' install.sh)"
+if ! grep -q '^  browser_profile_status$' <<<"$status_body"; then
 	echo "FAIL: status_main never calls browser_profile_status, so a browser under the wrong profile is a green status."
 	exit 1
 fi
