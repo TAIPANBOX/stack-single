@@ -165,6 +165,8 @@ jobs:
         run: ./scripts/trailryx-root-is-pinned.sh
       - name: each door names its own addresses and wardryx the union (invariant 64)
         run: ./scripts/door-origins-are-named.sh
+      - name: the fire drills reach the MCP broker with a key of its own (invariant 74)
+        run: ./scripts/drills-reach-the-broker.sh
 
       # Last, because it mutates tracked files and restores them. It needs a
       # clean tree and says so plainly, so it also reports any earlier step

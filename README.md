@@ -250,10 +250,39 @@ was not a documented choice before now; it is simply what the installer and
 the compose file do, and it is worth knowing before you pick this shape over
 the other two.
 
+**The fire drills for the MCP broker** take the same shape. mockryx's broker drills
+send this box's own broker three hostile tool calls: a raw secret in the arguments,
+personal data in the arguments, and a call to a tool nothing grants, which the
+tool hold must keep for a person. A person runs them:
+
+```bash
+docker compose run --rm mockryx-drill
+```
+
+The drill presents a key of the broker's own, never the gateway's: `drills-broker`
+in the broker's key list and on its static list, the same secret in
+`drills/broker.key` (uid 65532, mode 0400). `install.sh` mints it on every box,
+keeps it on a re-run and never prints it, and checks the drill's image signature
+before it pulls it. The broker runs only with `WITH_TYPED`, `WITH_EGRESS` or
+`WITH_BROWSER`, so on a box without it the drill stops with exit 2. Read the result
+by its table: `passed` means the guardrail held, `skipped_not_configured` means it
+is off on this box (personal data is recorded in shadow by default), and a
+Finding names what got through. mockryx's own tool-hold drill asks its second call
+for an answer from an MCP server, and this box has none that answers it, so the box
+runs its own copy, `drill-scenarios/mcp-ungranted-tool-held.yaml`, mounted over the
+image's: its second call, from a drill identity, gets past the hold and is refused
+by the broker's vault (-32008), because the secret handle it carries is scoped to
+other tools, so nothing reaches a server and a held drill identity still shows as a
+Finding. CI runs both, the box's copy as shipped and mockryx's original with a
+stand-in server, and requires every drill to hold. The first call leaves one pending
+approval on wardryx, for an agent id under `ungranted.invalid` that no grant can
+name; nobody needs to answer it, and later runs reuse it.
+
 **The memory plane, `engram`, is not a separate service here**, the same way
-`verdryx`, `qryx` and `mockryx` are not: `compose.yaml` names no `engram`,
-`verdryx`, `qryx` or `mockryx` container, because none of the four is meant
-to be one. `stack-k8s`'s own README explains why (its "Fact 2"): the console
+`verdryx` and `qryx` are not, and `mockryx` is not for the console: `compose.yaml`
+names no `engram`, `verdryx` or `qryx` container, and the console runs its own
+copy of `mockryx`, because none of them is meant to be a service the console
+calls (the `mockryx-drill` above is a separate job a person runs). `stack-k8s`'s own README explains why (its "Fact 2"): the console
 reaches each of them by EXECUTING it, or, for `engram-mcp` specifically, by
 speaking MCP over stdio to a child process, and "a sidecar container cannot
 be another container's stdin." So all four have to live inside the console's
@@ -2153,7 +2182,7 @@ into `./closure/secret`, readable only by the console. Nothing prints it, and a
 re-run keeps it. To turn closing off again, remove `CLOSURE_SECRET` and
 `CLOSURE_SECRET_FILE` from `.env` and run `docker compose up -d`.
 
-It needs tokenfuse v1.9.0 or later and console v1.1.34 or later. The images pinned here are tokenfuse v1.23.0 and
+It needs tokenfuse v1.9.0 or later and console v1.1.34 or later. The images pinned here are tokenfuse v1.24.0 and
 console v1.8.8; an older image ignores the setting.
 
 ## Approvals and the console's approver key

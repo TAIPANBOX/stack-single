@@ -655,7 +655,7 @@ if compose_has tokenfuse-mcp-broker && compose_has typryx; then
       [ "$status" = 401 ] && grep -q -E 'agent_token_required|unauthorized' <<<"$out"
     fi
   }
-  MCP_BROKER_KEY="$(sed -n 's/^TOKENFUSE_MCP_KEYS=\([^:]*\):.*/\1/p' .env 2>/dev/null | head -1)"
+  MCP_BROKER_KEY="$(sed -n "s/^TOKENFUSE_MCP_KEYS='\{0,1\}\([^:']*\):.*/\1/p" .env 2>/dev/null | head -1)"
   # Named "reaches typryx", not "answers": the MCP wire reports an upstream
   # refusal as a JSON-RPC error object over HTTP 200, so this proves only that
   # the broker is up, authenticated the caller and forwarded to typryx.
@@ -3881,6 +3881,69 @@ scopyx_broker_keys_apply() {
 }
 # scopyx-broker-keys: end
 
+# ---- the fire drills' key at the MCP broker (CLAUDE.md invariant 74) ---------------------------------------------------
+# drills-broker-key: begin
+# mockryx 0.5.0 sends the MCP broker a key of the broker's own (its invariant 19), never the gateway's client key. The
+# drills' key is one entry of the broker's key list, `<secret>:drills-broker` in TOKENFUSE_MCP_KEYS, and the same
+# secret in drills/broker.key (uid 65532, the mockryx-drill service's, mode 0400), the one file that service mounts.
+# The id is not `drills`: that is the gateway's key for the drills, another secret in another key set, which the
+# installer keeps off both static lists (invariant 53). Minted on every box, because compose mounts the file whether
+# or not the broker runs. A re-run keeps the secret: the .env entry first, then the file, then a new one. Every other
+# entry of the list stays byte for byte. Nothing here prints the secret.
+DRILLS_BROKER_ID="drills-broker"
+DRILLS_BROKER_UID=65532
+drills_broker_key_apply() {
+  local keys secret="" item items n=0 f="$STACK_DIR/drills/broker.key" tmp
+  keys="$(identity_env_get TOKENFUSE_MCP_KEYS)"
+  IFS=',' read -r -a items <<<"$keys"
+  for item in ${items[@]+"${items[@]}"}; do
+    case "$item" in
+      *":$DRILLS_BROKER_ID") n=$((n + 1)); secret="${item%":$DRILLS_BROKER_ID"}" ;;
+    esac
+  done
+  [ "$n" -le 1 ] \
+    || die "TOKENFUSE_MCP_KEYS in .env holds more than one entry for $DRILLS_BROKER_ID, so the drills' key at the broker is not clear. Keep one. Nothing was started."
+  if [ -z "$secret" ] && [ -s "$f" ]; then
+    secret="$(head -c 256 "$f")" || die "could not read $f"
+  fi
+  [ -n "$secret" ] || secret="$(gen 40)"
+  [[ "$secret" =~ ^[A-Za-z0-9]{24,128}$ ]] \
+    || die "the fire drills' key at the broker ($DRILLS_BROKER_ID in TOKENFUSE_MCP_KEYS, or $f) is not 24 to 128 letters and digits. Remove that entry and that file, and the installer mints one. Nothing was started."
+  for item in ${items[@]+"${items[@]}"}; do
+    case "$item" in
+      *":$DRILLS_BROKER_ID") ;;
+      "$secret:"*) die "the fire drills' key at the broker is also the secret of another entry of TOKENFUSE_MCP_KEYS, so a drill could speak as that caller. Remove the $DRILLS_BROKER_ID entry and $f, and the installer mints one. Nothing was started." ;;
+    esac
+  done
+  case ",$(identity_env_get GATEWAY_CLIENT_KEYS)," in
+    *",$secret:"*) die "the fire drills' key at the broker is also a gateway client key, which mockryx refuses to send to the broker. Remove the $DRILLS_BROKER_ID entry of TOKENFUSE_MCP_KEYS and $f, and the installer mints one. Nothing was started." ;;
+  esac
+  if [ "$n" = 0 ]; then
+    # In the form the line has: add_env_default writes it bare, and readers take its first key with sed.
+    if grep -q "^TOKENFUSE_MCP_KEYS='" "$STACK_DIR/.env" 2>/dev/null; then
+      identity_env_set TOKENFUSE_MCP_KEYS "${keys:+$keys,}$secret:$DRILLS_BROKER_ID"
+    else
+      tmp="$(mktemp)" || die "could not make a temporary file to update .env"
+      { grep -v "^TOKENFUSE_MCP_KEYS=" "$STACK_DIR/.env" || true; } >"$tmp"
+      printf 'TOKENFUSE_MCP_KEYS=%s\n' "${keys:+$keys,}$secret:$DRILLS_BROKER_ID" >>"$tmp"
+      cat "$tmp" >"$STACK_DIR/.env" || die "could not update $STACK_DIR/.env"
+      rm -f "$tmp"
+    fi
+  fi
+  mkdir -p "$STACK_DIR/drills" || die "could not make $STACK_DIR/drills for the drills' broker key"
+  chmod 0755 "$STACK_DIR/drills" || die "could not set the mode of $STACK_DIR/drills"
+  if [ ! -f "$f" ] || [ "$(head -c 256 "$f")" != "$secret" ]; then
+    tmp="$STACK_DIR/drills/.broker.key.tmp"
+    ( umask 077; printf '%s' "$secret" >"$tmp" ) || die "could not write the drills' broker key into $STACK_DIR/drills"
+    mv -f "$tmp" "$f" || die "could not put the drills' broker key in place at $f"
+  fi
+  { chown "$DRILLS_BROKER_UID:10001" "$f" && chmod 0400 "$f"; } \
+    || die "could not give $f to uid $DRILLS_BROKER_UID (mode 0400)"
+  secret=""
+  note "fire drills: their key at the MCP broker is $DRILLS_BROKER_ID, in $f (0400, uid $DRILLS_BROKER_UID, never printed); run them with: docker compose run --rm mockryx-drill"
+}
+# drills-broker-key: end
+
 # Section 3e, after mint_apply, when every client key is in .env: the static allow-lists the two doors
 # read under require (CLAUDE.md invariant 47). A key id is a static key only when it is NAMED here: felyx,
 # broker and costcrew, which cannot sign a proof and are in use on every box that has them; the operator's
@@ -3921,9 +3984,10 @@ agent_static_keys_apply() {
   STATIC_GATEWAY_LIST="$(printf '%s' "$gw" | tr ' ' ',')"
   identity_env_set TOKENFUSE_AGENT_TOKENS_STATIC_KEYS "$STATIC_GATEWAY_LIST"
   # The broker's own list, the same rule: its own held keys only, the operator's STATIC_KEY_IDS on either door,
-  # and the installer's own check key (stack-single) by design.
+  # the installer's own check key (stack-single) by design, and the fire drills' key at the broker (invariant 74),
+  # which mockryx sends as a static key because it cannot sign a proof.
   have_mcp=" $(client_key_ids "$(identity_env_get TOKENFUSE_MCP_KEYS)" | tr '\n' ' ')"
-  for id in stack-single $EXISTING_MCP_IDS $STATIC_KEY_IDS_LIST; do
+  for id in stack-single "$DRILLS_BROKER_ID" $EXISTING_MCP_IDS $STATIC_KEY_IDS_LIST; do
     case "$have_mcp" in *" $id "*) ;; *) continue ;; esac
     if ! static_keep_ok "$id"; then
       REMOVED_STATIC_IDS="$REMOVED_STATIC_IDS $id"
@@ -4248,6 +4312,10 @@ else
   mkdir -p "$STACK_DIR/${BROWSER_AA_FILE%/*}"
   curl -fsSL "${REPO_SINGLE_RAW:-https://raw.githubusercontent.com/TAIPANBOX/stack-single/main}/$BROWSER_AA_FILE" \
     -o "$STACK_DIR/$BROWSER_AA_FILE" || die "could not fetch $BROWSER_AA_FILE, which the installer loads for the browser"
+  # The fire drills' own tool-hold drill (invariant 74), which compose.yaml mounts by a relative path.
+  mkdir -p "$STACK_DIR/drill-scenarios"
+  curl -fsSL "${REPO_SINGLE_RAW:-https://raw.githubusercontent.com/TAIPANBOX/stack-single/main}/drill-scenarios/mcp-ungranted-tool-held.yaml" \
+    -o "$STACK_DIR/drill-scenarios/mcp-ungranted-tool-held.yaml" || die "could not fetch drill-scenarios/mcp-ungranted-tool-held.yaml, which compose.yaml mounts for the fire drills"
 fi
 cd "$STACK_DIR"
 
@@ -4832,6 +4900,8 @@ door_apply
 # built from them for section 3e to check and install.
 agent_tokens_apply
 scopyx_broker_keys_apply
+# The fire drills' key at the MCP broker (invariant 74): before section 3e names it on the broker's static list.
+drills_broker_key_apply
 mint_prepare
 # The provider keys the gateway and the OpenAI door hold (section 0h, invariant 39): the
 # directories compose mounts, the files written from what the operator gave, and the
@@ -5247,6 +5317,20 @@ if [ -z "$BUILD_FROM_SOURCE" ]; then
         ;;
     esac
   done < <(GATEWAY_CLIENT_KEYS="${GATEWAY_CLIENT_KEYS:-not-written-before-section-3e:none}" "${COMPOSE[@]}" "${profiles[@]}" config --images 2>/dev/null | sort -u)
+  # The fire drills' image (invariant 74). mockryx-drill is a template a person runs, behind a profile no install
+  # passes, so the list above never names it, and `docker compose run --rm mockryx-drill` would pull an image nobody
+  # checked. Named on its own, compose resolves its image without its profile (measured on Compose 2.26.1 and 5.6.1,
+  # 2026-11-08), so it is checked and pulled here like every other image of ours, and nothing is started.
+  drill_img="$(GATEWAY_CLIENT_KEYS="${GATEWAY_CLIENT_KEYS:-not-written-before-section-3e:none}" "${COMPOSE[@]}" config --images mockryx-drill 2>/dev/null | head -1)"
+  [ -n "$drill_img" ] || die "compose resolved no image for mockryx-drill. Is compose.yaml the one this installer shipped?"
+  if [[ "$drill_img" == ghcr.io/* ]]; then
+    image_verify "$drill_img"
+    note "pulling $drill_img (the fire drills, run by a person)"
+    docker pull -q "$drill_img" >/dev/null || die "could not pull $drill_img"
+    pulled=$((pulled + 1))
+  else
+    note "mockryx-drill runs $drill_img, which is not one of ours, so its signature is not checked (MOCKRYX_IMAGE in .env)"
+  fi
   # A pull loop that pulled nothing is the failure this catches, and it is not
   # hypothetical: `config --images` printing an empty list, or every line
   # missing the `ghcr.io/` prefix after a rename, both leave every plane absent

@@ -100,6 +100,8 @@ TABLE = {
     "record-seal": {"core"},
     "focus-export": {"core"},
     "idryx-detect": {"core"},
+    # the broker drills, run by a person: they reach the broker and the gateway by name, and nothing else
+    "mockryx-drill": {"core"},
     "verdryx-drift": {"core"},
     # the error-budget routine: reads traces, appends to its own stream, calls nothing
     "verdryx-slo": set(),

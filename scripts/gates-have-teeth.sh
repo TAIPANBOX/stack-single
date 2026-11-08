@@ -1801,6 +1801,108 @@ run_case "door-origins-are-named: agent tokens off leaves the lists" fail \
 	"WITH_AGENT_TOKENS=0 leaves"
 
 
+# ---- drills-reach-the-broker (CLAUDE.md invariant 74) ---------------------
+DRB='./scripts/drills-reach-the-broker.sh'
+run_case "drills-broker: the drill leaves the manual profile" fail \
+	"$DRB" \
+	"$(py 'edit("compose.yaml", "    profiles: [\"manual\"]\n    environment:\n      MOCKRYX_MCP_BROKER:", "    environment:\n      MOCKRYX_MCP_BROKER:")')" \
+	"not behind the manual profile"
+
+run_case "drills-broker: the drill is handed the gateway's client key" fail \
+	"$DRB" \
+	"$(py 'edit("compose.yaml", "      MOCKRYX_MCP_BROKER_KEY_FILE: /run/drills/broker.key\n", "      MOCKRYX_MCP_BROKER_KEY_FILE: /run/drills/broker.key\n      MOCKRYX_CLIENT_KEY: ${GATEWAY_DRILLS_KEY:-}\n")')" \
+	"the gateway's client key"
+
+run_case "drills-broker: the drill runs the gateway drills too" fail \
+	"$DRB" \
+	"$(py 'edit("compose.yaml", "\"http://tokenfuse-gateway:4100\", \"/scenarios/mcp\"]", "\"http://tokenfuse-gateway:4100\", \"/scenarios\"]")')" \
+	"does not run the broker drills"
+
+run_case "drills-broker: the drill pins a mockryx that sends the broker no key" fail \
+	"$DRB" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/mockryx:v0.5.0@", "ghcr.io/taipanbox/mockryx:v0.4.0@")')" \
+	"older than v0.5.0"
+
+run_case "drills-broker: a newer mockryx pin still passes" pass \
+	"$DRB" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/mockryx:v0.5.0@", "ghcr.io/taipanbox/mockryx:v0.6.0@")')"
+
+run_case "drills-broker: the drill's image is pulled unchecked" fail \
+	"$DRB" \
+	"$(py 'edit("install.sh", "    image_verify \"$drill_img\"\n", "")')" \
+	"before it pulls the image"
+
+run_case "drills-broker: the key is not on the broker's list" fail \
+	"$DRB" \
+	"$(py 'edit("install.sh", "  for id in stack-single \"$DRILLS_BROKER_ID\" ", "  for id in stack-single ")')" \
+	"does not name the drills' key on the broker's list"
+
+run_case "drills-broker: a re-run mints the key again" fail \
+	"$DRB" \
+	"$(py 'edit("install.sh", "      *\":$DRILLS_BROKER_ID\") n=$((n + 1)); secret=\"${item%\":$DRILLS_BROKER_ID\"}\" ;;\n", "")')" \
+	"a second run rewrote .env"
+
+run_case "drills-broker: the key file is left readable" fail \
+	"$DRB" \
+	"$(py 'edit("install.sh", "{ chown \"$DRILLS_BROKER_UID:10001\" \"$f\" && chmod 0400 \"$f\"; }", "{ chown \"$DRILLS_BROKER_UID:10001\" \"$f\" && chmod 0644 \"$f\"; }")')" \
+	"is not mode 0400"
+
+run_case "drills-broker: the secret is printed" fail \
+	"$DRB" \
+	"$(py 'edit("install.sh", "  secret=\"\"\n  note \"fire drills:", "  note \"key $secret\"\n  secret=\"\"\n  note \"fire drills:")')" \
+	"printed the drills' secret"
+
+run_case "drills-broker: a secret the gateway holds is accepted" fail \
+	"$DRB" \
+	"$(py 'edit("install.sh", "  case \",$(identity_env_get GATEWAY_CLIENT_KEYS),\" in\n", "  case \",nothing,\" in\n")')" \
+	"a secret the gateway holds was not refused"
+
+run_case "drills-broker: this box's tool-hold drill is not mounted" fail \
+	"$DRB" \
+	"$(py 'edit("compose.yaml", "      - ./drill-scenarios/mcp-ungranted-tool-held.yaml:/scenarios/mcp/mcp-ungranted-tool-held.yaml:ro\n", "")')" \
+	"does not mount this box's tool-hold drill over the image's"
+
+run_case "drills-broker: this box's drill asks for a result again" fail \
+	"$DRB" \
+	"$(py 'edit("drill-scenarios/mcp-ungranted-tool-held.yaml", "      error_code: -32008\n      error_contains: not scoped to agent\n", "      result: true\n")')" \
+	"does not expect the vault's refusal"
+
+run_case "drills-broker: this box's drill takes mockryx's own name" fail \
+	"$DRB" \
+	"$(py 'edit("drill-scenarios/mcp-ungranted-tool-held.yaml", "name: mcp-ungranted-tool-held-on-this-box\n", "name: mcp-ungranted-tool-held\n")')" \
+	"carries mockryx's own scenario name"
+
+run_case "drills-broker: the first call of this box's drill is not read as the hold" fail \
+	"$DRB" \
+	"$(py 'edit("drill-scenarios/mcp-ungranted-tool-held.yaml", "      error_contains: when_no_grant\n", "      error_contains: requires approval\n")')" \
+	"does not read when_no_grant"
+
+run_case "drills-broker: the broker's scopes admit search_notes" fail \
+	"$DRB" \
+	"$(py 'edit("compose.yaml", "${TOKENFUSE_MCP_SECRET_SCOPES:-typryx_key=tools:ask|ask_freeform|list_questions}", "${TOKENFUSE_MCP_SECRET_SCOPES:-typryx_key=tools:ask|ask_freeform|list_questions|search_notes}")')" \
+	"admit search_notes"
+
+run_case "drills-broker: a piped install does not fetch this box's drill" fail \
+	"$DRB" \
+	"$(py 'edit("install.sh", "/drill-scenarios/mcp-ungranted-tool-held.yaml\" \\\n", "/drill-scenarios/elsewhere.yaml\" \\\n")')" \
+	"a piped install does not fetch"
+
+run_case "drills-broker: a bare .env line comes back quoted" fail \
+	"$DRB" \
+	"$(py 'edit("install.sh", "    if grep -q \"^TOKENFUSE_MCP_KEYS=" + chr(39) + "\" \"$STACK_DIR/.env\" 2>/dev/null; then\n", "    if true; then\n")')" \
+	"rewritten in another form"
+
+run_case "drills-broker: the drill service is gone" fail \
+	"$DRB" \
+	"$(py 'edit("compose.yaml", "  mockryx-drill:\n    <<: *baseline\n", "  mockryx-drills:\n    <<: *baseline\n")')" \
+	"so the drills' wiring measured nothing"
+
+run_case "drills-broker: the key block is gone" fail \
+	"$DRB" \
+	"$(py 'edit("install.sh", "# drills-broker-key: begin\n", "")')" \
+	"so the key measured nothing"
+
+
 # ---- approver-key-is-wired (CLAUDE.md invariant 61) -----------------------
 run_case "approver-key-is-wired: the approver key is not PKCS#8" fail \
 	'./scripts/approver-key-is-wired.sh' \
@@ -2093,7 +2195,7 @@ run_case "typed-risk-signal: wardryx is pinned before when_absent" fail \
 
 run_case "typed-risk-signal: tokenfuse is pinned before it sent the tool call" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/tokenfuse:v1.23.0@sha256:192cfc7138eea6911d3c563427cdb996dac52c77e7f04f6ae71f84b6a6dc4535}", "ghcr.io/taipanbox/tokenfuse:v1.4.1}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/tokenfuse:v1.24.0@sha256:bc9ee4b657bbb332f7c8a345beeaaa1e071f05f6af2ce46882d0601a153eb7c5}", "ghcr.io/taipanbox/tokenfuse:v1.4.1}")')" \
 	"the broker sends no tool_call to the policy plane before it"
 
 run_case "typed-risk-signal: install.sh starts the proxy profile unconditionally" fail \
