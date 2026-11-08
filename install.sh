@@ -655,7 +655,7 @@ if compose_has tokenfuse-mcp-broker && compose_has typryx; then
       [ "$status" = 401 ] && grep -q -E 'agent_token_required|unauthorized' <<<"$out"
     fi
   }
-  MCP_BROKER_KEY="$(sed -n 's/^TOKENFUSE_MCP_KEYS=\([^:]*\):.*/\1/p' .env 2>/dev/null | head -1)"
+  MCP_BROKER_KEY="$(sed -n "s/^TOKENFUSE_MCP_KEYS='\{0,1\}\([^:']*\):.*/\1/p" .env 2>/dev/null | head -1)"
   # Named "reaches typryx", not "answers": the MCP wire reports an upstream
   # refusal as a JSON-RPC error object over HTTP 200, so this proves only that
   # the broker is up, authenticated the caller and forwarded to typryx.
@@ -3919,7 +3919,16 @@ drills_broker_key_apply() {
     *",$secret:"*) die "the fire drills' key at the broker is also a gateway client key, which mockryx refuses to send to the broker. Remove the $DRILLS_BROKER_ID entry of TOKENFUSE_MCP_KEYS and $f, and the installer mints one. Nothing was started." ;;
   esac
   if [ "$n" = 0 ]; then
-    identity_env_set TOKENFUSE_MCP_KEYS "${keys:+$keys,}$secret:$DRILLS_BROKER_ID"
+    # In the form the line has: add_env_default writes it bare, and readers take its first key with sed.
+    if grep -q "^TOKENFUSE_MCP_KEYS='" "$STACK_DIR/.env" 2>/dev/null; then
+      identity_env_set TOKENFUSE_MCP_KEYS "${keys:+$keys,}$secret:$DRILLS_BROKER_ID"
+    else
+      tmp="$(mktemp)" || die "could not make a temporary file to update .env"
+      { grep -v "^TOKENFUSE_MCP_KEYS=" "$STACK_DIR/.env" || true; } >"$tmp"
+      printf 'TOKENFUSE_MCP_KEYS=%s\n' "${keys:+$keys,}$secret:$DRILLS_BROKER_ID" >>"$tmp"
+      cat "$tmp" >"$STACK_DIR/.env" || die "could not update $STACK_DIR/.env"
+      rm -f "$tmp"
+    fi
   fi
   mkdir -p "$STACK_DIR/drills" || die "could not make $STACK_DIR/drills for the drills' broker key"
   chmod 0755 "$STACK_DIR/drills" || die "could not set the mode of $STACK_DIR/drills"
@@ -4303,6 +4312,10 @@ else
   mkdir -p "$STACK_DIR/${BROWSER_AA_FILE%/*}"
   curl -fsSL "${REPO_SINGLE_RAW:-https://raw.githubusercontent.com/TAIPANBOX/stack-single/main}/$BROWSER_AA_FILE" \
     -o "$STACK_DIR/$BROWSER_AA_FILE" || die "could not fetch $BROWSER_AA_FILE, which the installer loads for the browser"
+  # The fire drills' own tool-hold drill (invariant 74), which compose.yaml mounts by a relative path.
+  mkdir -p "$STACK_DIR/drill-scenarios"
+  curl -fsSL "${REPO_SINGLE_RAW:-https://raw.githubusercontent.com/TAIPANBOX/stack-single/main}/drill-scenarios/mcp-ungranted-tool-held.yaml" \
+    -o "$STACK_DIR/drill-scenarios/mcp-ungranted-tool-held.yaml" || die "could not fetch drill-scenarios/mcp-ungranted-tool-held.yaml, which compose.yaml mounts for the fire drills"
 fi
 cd "$STACK_DIR"
 

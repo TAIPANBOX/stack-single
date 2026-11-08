@@ -994,7 +994,7 @@ services:
     <<: [*restart, *baseline]
     pids_limit: 1024
     profiles: ["typed", "egress", "egress-browser"]
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.23.0@sha256:192cfc7138eea6911d3c563427cdb996dac52c77e7f04f6ae71f84b6a6dc4535}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.24.0@sha256:bc9ee4b657bbb332f7c8a345beeaaa1e071f05f6af2ce46882d0601a153eb7c5}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20012:10001"
@@ -1346,7 +1346,7 @@ services:
   tokenfuse-cloud:
     <<: [*restart, *baseline]
     pids_limit: 1024
-    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v1.23.0@sha256:14971e0aa3a3bdaf81d31de67bd50e8bbbbe7c2c64bb45a7fa480d075ed5e016}
+    image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v1.24.0@sha256:b05d3d12c61289006308cf94f3ab4edba958faf6575420eb50c93f973fc4a29a}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20013:10001"
@@ -1393,7 +1393,7 @@ services:
   tokenfuse-gateway:
     <<: [*restart, *baseline]
     pids_limit: 1024
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.23.0@sha256:192cfc7138eea6911d3c563427cdb996dac52c77e7f04f6ae71f84b6a6dc4535}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.24.0@sha256:bc9ee4b657bbb332f7c8a345beeaaa1e071f05f6af2ce46882d0601a153eb7c5}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20010:10001"
@@ -1634,7 +1634,7 @@ services:
   tokenfuse-gateway-openai:
     <<: [*restart, *baseline]
     pids_limit: 1024
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.23.0@sha256:192cfc7138eea6911d3c563427cdb996dac52c77e7f04f6ae71f84b6a6dc4535}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.24.0@sha256:bc9ee4b657bbb332f7c8a345beeaaa1e071f05f6af2ce46882d0601a153eb7c5}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20011:10001"
@@ -2101,7 +2101,7 @@ services:
     pids_limit: 128
     tmpfs:
       - /tmp:size=64m
-    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.23.0@sha256:192cfc7138eea6911d3c563427cdb996dac52c77e7f04f6ae71f84b6a6dc4535}
+    image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.24.0@sha256:bc9ee4b657bbb332f7c8a345beeaaa1e071f05f6af2ce46882d0601a153eb7c5}
     networks:
       - core
     user: "10001:10001"
@@ -2226,9 +2226,14 @@ services:
   # gateway admits without a token, and the installer keeps the drills' gateway
   # key off that list (invariant 53). The broker runs only with WITH_TYPED,
   # WITH_EGRESS or WITH_BROWSER; without it mockryx refuses the run with exit 2.
-  # The tool-hold drill's second step needs an MCP server behind the broker that
-  # answers `search_notes`; this box has none, so on a box that step reports a
-  # Finding, and CI proves the whole drill with a stand-in server.
+  #
+  # mockryx's own tool-hold drill asks its second call for a result, which needs
+  # an MCP server behind the broker that answers `search_notes`, and this box has
+  # none, so that step would be red on every box. This box's own copy,
+  # drill-scenarios/mcp-ungranted-tool-held.yaml, is mounted over the image's:
+  # its second call gets past the hold and is refused by the broker's vault, so
+  # nothing needs a server. The other two drills run as mockryx ships them. CI
+  # runs mockryx's original as well, with a stand-in server.
   mockryx-drill:
     <<: *baseline
     pids_limit: 64
@@ -2244,6 +2249,7 @@ services:
     command: ["run", "--gateway", "http://tokenfuse-gateway:4100", "/scenarios/mcp"]
     volumes:
       - ./drills/broker.key:/run/drills/broker.key:ro
+      - ./drill-scenarios/mcp-ungranted-tool-held.yaml:/scenarios/mcp/mcp-ungranted-tool-held.yaml:ro
 
   verdryx-drift:
     <<: [*restart, *baseline]

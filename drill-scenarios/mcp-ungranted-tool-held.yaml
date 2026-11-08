@@ -1,0 +1,78 @@
+# mcp-ungranted-tool-held, as this box runs it: a fire drill for the tool hold, the rule that a tool call nothing
+# grants waits for a person (stack-single CLAUDE.md invariant 74). (OWASP Top 10 for LLM Applications 2025:
+# LLM06:2025 Excessive Agency.)
+#
+# Defensive intent: this sends this box's OWN MCP broker the same harmless tools/call twice, as two identities, to
+# confirm that a call from an agent nobody has given the tool waits for a person, and that the same call from an
+# identity with a grant gets past the hold. It never targets any system other than the broker the mockryx-drill
+# service names, and it reaches no MCP server at all: both calls stop inside the broker.
+#
+# WHY THIS BOX CARRIES ITS OWN COPY
+#
+# mockryx's own drill of this name asks its second call for a JSON-RPC RESULT, so the MCP server behind the broker
+# must answer `search_notes`. No server of this box does, so on a box that step would always report a Finding, and
+# a drill that is red by design teaches a reader to skip red. compose.yaml mounts this file over the image's own, so
+# `docker compose run --rm mockryx-drill` runs mockryx's other two broker drills as they ship and this one in place
+# of the original. CI runs the original too, against the installed box with a stand-in server, so both shapes are
+# proven; scripts/drills-reach-the-broker.sh holds this file to the original's first step and its two identities.
+#
+# HOW THE SECOND CALL TELLS "HELD" FROM "PASSED"
+#
+# Both calls carry `{{secret:typryx_key}}`, the handle of the typed plane's key in this broker's vault, whose rule
+# lets it resolve only for typryx's three tools (TOKENFUSE_MCP_SECRET_SCOPES). The broker asks wardryx first and
+# resolves secrets after, so:
+#
+#   the ungranted id     wardryx holds the call: -32004 naming when_no_grant, before any secret is read.
+#   the drill identity   grant-drills lets it through wardryx, and the vault then refuses the handle for a tool
+#                        outside its rule: -32008 "not scoped to agent ... and tool search_notes". Nothing is
+#                        forwarded, and the secret is never resolved.
+#
+# A broker that held every call would answer the second call -32004 as well, which is a Finding, exactly as the
+# original's second step is there to catch.
+#
+# HOW IT READS
+#
+#   passed   held, and only the ungranted id.
+#   failed   the drill identity was held too (grant-drills is missing from the policy), or another guardrail spoke
+#            first, or the hold is off on this box (TOOL_HOLD=0): then the first call is not held and meets the vault
+#            instead. The hold is this launcher's default, so a box that turned it off is shown that it did.
+#
+# A RUN LEAVES ONE ROW FOR A PERSON: the first call opens an approval on this box's wardryx. Nobody needs to answer
+# it, it asks nothing of an agent, and later runs ask the same question with the same digest, so wardryx keeps one
+# pending row for it.
+name: mcp-ungranted-tool-held-on-this-box
+requires: tool-hold
+description: >
+  An agent nothing grants calls an MCP tool through this box's broker. The broker should hold the call for a
+  person, with JSON-RPC error -32004 naming when_no_grant. The same call from a drill identity, which grant-drills
+  grants, should get past the hold and be refused by the broker's vault (-32008), because the secret handle it
+  carries is scoped to other tools; nothing reaches an MCP server.
+steps:
+  - name: an-id-no-grant-can-name-is-held
+    mcp:
+      method: tools/call
+      params:
+        name: search_notes
+        arguments:
+          query: "fire drill: nothing to find"
+        _meta:
+          typryx/key: "{{secret:typryx_key}}"
+    headers:
+      agent_id: agent://ungranted.invalid/rehearsal/no-grant
+    expect:
+      error_code: -32004
+      error_contains: when_no_grant
+  - name: a-drill-identity-under-grant-drills-gets-past-the-hold
+    mcp:
+      method: tools/call
+      params:
+        name: search_notes
+        arguments:
+          query: "fire drill: nothing to find"
+        _meta:
+          typryx/key: "{{secret:typryx_key}}"
+    headers:
+      agent_id: agent://mockryx.local/rehearsal/tool-hold
+    expect:
+      error_code: -32008
+      error_contains: not scoped to agent

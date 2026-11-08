@@ -17,6 +17,13 @@
 #      digest as 65532:10001, is on `core` alone, mounts drills/broker.key read only at the path
 #      MOCKRYX_MCP_BROKER_KEY_FILE names, names the broker by its service name, carries no gateway client key, and
 #      runs /scenarios/mcp, the broker drills, and nothing else.
+#   A2. THIS BOX'S TOOL-HOLD DRILL. mockryx's own asks its second call for a result, which needs an MCP server that
+#      answers `search_notes`, and this box has none, so it would be red on every box. The service mounts
+#      drill-scenarios/mcp-ungranted-tool-held.yaml over it: a name of its own, the same first step (an id under
+#      ungranted.invalid held, -32004 naming when_no_grant), and a second step as a drill identity carrying the
+#      typed plane's secret handle, which gets past the hold and is refused by the vault (-32008), so it reaches no
+#      server. The broker's default scopes must keep that handle off search_notes, and a piped install must fetch
+#      the file.
 #   B. THE IMAGE. Section 3c of install.sh resolves mockryx-drill's image by naming the service (never by passing
 #      its profile) and checks its signature before it pulls it.
 #   C. THE LIST. agent_static_keys_apply names the drills' key on the broker's static list.
@@ -71,6 +78,49 @@ fi
 grep -qE '^    command: \["run", "--gateway", "http://tokenfuse-gateway:4100", "/scenarios/mcp"\]$' <<<"$DRILL" \
   || fail "mockryx-drill does not run the broker drills (/scenarios/mcp) against this box"
 
+# ---- A2. this box's own tool-hold drill, mounted over the image's -----------------------
+grep -qE '^      - \./drill-scenarios/mcp-ungranted-tool-held\.yaml:/scenarios/mcp/mcp-ungranted-tool-held\.yaml:ro$' <<<"$DRILL" \
+  || fail "mockryx-drill does not mount this box's tool-hold drill over the image's, so its second step asks for a result no server of this box gives and is red on every box"
+SCN=drill-scenarios/mcp-ungranted-tool-held.yaml
+[ -f "$SCN" ] || fail "$SCN is not in the tree, so this box's tool-hold drill measured nothing"
+python3 - "$SCN" <<'PY' || exit 1
+import re, sys
+text = open(sys.argv[1]).read()
+code = "\n".join(l for l in text.split("\n") if not l.lstrip().startswith("#"))
+def no(msg):
+    print("FAIL: " + msg); sys.exit(1)
+m = re.search(r"^name:\s*(\S+)\s*$", code, re.M)
+if not m: no(f"{sys.argv[1]} names no scenario")
+if m.group(1) == "mcp-ungranted-tool-held":
+    no("this box's tool-hold drill carries mockryx's own scenario name; a report could not tell which of the two ran")
+if not re.search(r"^requires:\s*tool-hold\s*$", code, re.M): no("this box's tool-hold drill does not declare requires: tool-hold")
+steps = re.split(r"^  - name:", code, flags=re.M)[1:]
+if len(steps) != 2: no(f"this box's tool-hold drill has {len(steps)} steps, not the two that tell 'an ungranted id is held' from 'everything is held'")
+first, second = steps
+def want(step, label, pattern, msg):
+    if not re.search(pattern, step, re.M): no(f"{label}: {msg}")
+for label, step in (("step 1", first), ("step 2", second)):
+    want(step, label, r"^      method: tools/call\s*$", "is not a tools/call")
+    want(step, label, r"^        name: search_notes\s*$", "does not call search_notes, a tool no secret rule of this box admits")
+    want(step, label, r'^          typryx/key: "\{\{secret:typryx_key\}\}"\s*$', "does not carry the {{secret:typryx_key}} handle the vault refuses for this tool")
+want(first, "step 1", r"^      agent_id: agent://ungranted\.invalid/", "does not speak as an id under ungranted.invalid, which no grant can name")
+want(first, "step 1", r"^      error_code: -32004\s*$", "does not expect the hold, -32004")
+want(first, "step 1", r"^      error_contains: when_no_grant\s*$", "does not read when_no_grant, so a deny or another hold would pass")
+want(second, "step 2", r"^      agent_id: agent://mockryx\.local/", "does not speak as a drill identity, which grant-drills reaches")
+want(second, "step 2", r"^      error_code: -32008\s*$", "does not expect the vault's refusal, -32008, after the hold let it through")
+want(second, "step 2", r"^      error_contains: not scoped to agent\s*$", "does not read the vault's own words, so another -32008 would pass")
+PY
+scopes="$(sed -nE 's/^      TOKENFUSE_MCP_SECRET_SCOPES: \$\{TOKENFUSE_MCP_SECRET_SCOPES:-(.*)\}$/\1/p' compose.yaml | head -1)"
+[ -n "$scopes" ] || fail "compose.yaml gives the broker no default secret scopes, so the tool-hold drill's second step measured nothing"
+case "$scopes" in
+  *typryx_key=tools:*) ;;
+  *) fail "the broker's default scopes give typryx_key no tool rule, so the vault would resolve it for search_notes and the drill's second call would reach an upstream" ;;
+esac
+grep -qE '(^|[|:])search_notes([|;,]|$)' <<<"$scopes" \
+  && fail "the broker's default scopes admit search_notes, so the drill's second call would reach an upstream"
+grep -qF 'drill-scenarios/mcp-ungranted-tool-held.yaml" \' install.sh \
+  || fail "a piped install does not fetch drill-scenarios/mcp-ungranted-tool-held.yaml, so compose would mount a directory where the drill should be"
+
 # ---- B. the image is checked before it is pulled ---------------------------------------
 grep -qE 'config --images mockryx-drill' install.sh \
   || fail "install.sh does not resolve mockryx-drill's image, so its signature is never checked and 'docker compose run' pulls it unchecked"
@@ -116,7 +166,7 @@ OLD='Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1:stack-single'
 GW='Ggggggggggggggggggggggggggggggggggggggg1:felyx'
 box() { rm -rf "$scratch/s"; mkdir -p "$scratch/s"; printf "TOKENFUSE_MCP_KEYS='%s'\nGATEWAY_CLIENT_KEYS='%s'\n" "$1" "$2" >"$scratch/s/.env"; : >"$scratch/chown.log"; }
 run() { STACK_DIR="$scratch/s" bash "$scratch/run.sh" 2>&1; }
-entry() { sed -n "s/^TOKENFUSE_MCP_KEYS='\\(.*\\)'\$/\\1/p" "$scratch/s/.env"; }
+entry() { sed -n -e "s/^TOKENFUSE_MCP_KEYS='\\(.*\\)'\$/\\1/p" -e "t" -e "s/^TOKENFUSE_MCP_KEYS=\\([^']*\\)\$/\\1/p" "$scratch/s/.env"; }
 
 # D1. a fresh box
 box "$OLD" "$GW"
@@ -149,6 +199,14 @@ printf "TOKENFUSE_MCP_KEYS='%s'\nGATEWAY_CLIENT_KEYS='%s'\n" "$OLD" "$GW" >"$scr
 run >/dev/null || fail "D4: a box that lost its drills-broker entry was refused"
 [ "$(entry)" = "$OLD,$(cat "$scratch/key1"):drills-broker" ] || fail "D4: the entry came back with a secret that is not the file's"
 
+# D6. a .env whose line is bare, as add_env_default writes it, keeps its line bare: the installer's own check and
+# CI read the broker's first key with sed, and a quote in front of it is a wrong key.
+rm -rf "$scratch/s"; mkdir -p "$scratch/s"; : >"$scratch/chown.log"
+printf "TOKENFUSE_MCP_KEYS=%s\nGATEWAY_CLIENT_KEYS='%s'\n" "$OLD" "$GW" >"$scratch/s/.env"
+run >/dev/null || fail "D6: a box whose TOKENFUSE_MCP_KEYS line is bare was refused"
+grep -qE "^TOKENFUSE_MCP_KEYS=${OLD},[A-Za-z0-9]{40}:drills-broker\$" "$scratch/s/.env" \
+  || fail "D6: a bare TOKENFUSE_MCP_KEYS line was rewritten in another form, or lost its first entry; the first key a reader takes with sed would carry a quote"
+
 # D5. the refusals
 refused() { # LABEL KEYS GW NEEDLE
   box "$2" "$3"
@@ -162,4 +220,4 @@ refused "a secret that is not letters and digits" "$OLD,Bbbbbbbbbbbbbbbbbbbbbbbb
 refused "a secret another broker key holds" "Bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb1:stack-single,Bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb1:drills-broker" "$GW" "secret of another entry"
 refused "a secret the gateway holds" "$OLD,Bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb1:drills-broker" "Bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb1:drills" "also a gateway client key"
 
-echo "OK: the fire drills reach the MCP broker with a key of its own: the service (manual, pinned, 65532, core, key file, /scenarios/mcp), the image checked before its pull, the static list, and the key minted, kept and refused in 8 scratch runs"
+echo "OK: the fire drills reach the MCP broker with a key of its own: the service (manual, pinned, 65532, core, key file, /scenarios/mcp, this box's tool-hold drill over the image's), the image checked before its pull, the static list, and the key minted, kept and refused in 9 scratch runs"

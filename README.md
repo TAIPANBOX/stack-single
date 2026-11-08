@@ -267,10 +267,14 @@ before it pulls it. The broker runs only with `WITH_TYPED`, `WITH_EGRESS` or
 `WITH_BROWSER`, so on a box without it the drill stops with exit 2. Read the result
 by its table: `passed` means the guardrail held, `skipped_not_configured` means it
 is off on this box (personal data is recorded in shadow by default), and a
-Finding names what got through. The tool-hold drill's second call needs an MCP
-server behind the broker that answers `search_notes`, and this box has none, so on
-a box that step reports a Finding; CI runs the drills against an installed box with
-a stand-in server and requires all three to hold. The first call leaves one pending
+Finding names what got through. mockryx's own tool-hold drill asks its second call
+for an answer from an MCP server, and this box has none that answers it, so the box
+runs its own copy, `drill-scenarios/mcp-ungranted-tool-held.yaml`, mounted over the
+image's: its second call, from a drill identity, gets past the hold and is refused
+by the broker's vault (-32008), because the secret handle it carries is scoped to
+other tools, so nothing reaches a server and a held drill identity still shows as a
+Finding. CI runs both, the box's copy as shipped and mockryx's original with a
+stand-in server, and requires every drill to hold. The first call leaves one pending
 approval on wardryx, for an agent id under `ungranted.invalid` that no grant can
 name; nobody needs to answer it, and later runs reuse it.
 
@@ -2178,7 +2182,7 @@ into `./closure/secret`, readable only by the console. Nothing prints it, and a
 re-run keeps it. To turn closing off again, remove `CLOSURE_SECRET` and
 `CLOSURE_SECRET_FILE` from `.env` and run `docker compose up -d`.
 
-It needs tokenfuse v1.9.0 or later and console v1.1.34 or later. The images pinned here are tokenfuse v1.23.0 and
+It needs tokenfuse v1.9.0 or later and console v1.1.34 or later. The images pinned here are tokenfuse v1.24.0 and
 console v1.8.8; an older image ignores the setting.
 
 ## Approvals and the console's approver key

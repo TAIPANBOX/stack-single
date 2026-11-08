@@ -1857,6 +1857,41 @@ run_case "drills-broker: a secret the gateway holds is accepted" fail \
 	"$(py 'edit("install.sh", "  case \",$(identity_env_get GATEWAY_CLIENT_KEYS),\" in\n", "  case \",nothing,\" in\n")')" \
 	"a secret the gateway holds was not refused"
 
+run_case "drills-broker: this box's tool-hold drill is not mounted" fail \
+	"$DRB" \
+	"$(py 'edit("compose.yaml", "      - ./drill-scenarios/mcp-ungranted-tool-held.yaml:/scenarios/mcp/mcp-ungranted-tool-held.yaml:ro\n", "")')" \
+	"does not mount this box's tool-hold drill over the image's"
+
+run_case "drills-broker: this box's drill asks for a result again" fail \
+	"$DRB" \
+	"$(py 'edit("drill-scenarios/mcp-ungranted-tool-held.yaml", "      error_code: -32008\n      error_contains: not scoped to agent\n", "      result: true\n")')" \
+	"does not expect the vault's refusal"
+
+run_case "drills-broker: this box's drill takes mockryx's own name" fail \
+	"$DRB" \
+	"$(py 'edit("drill-scenarios/mcp-ungranted-tool-held.yaml", "name: mcp-ungranted-tool-held-on-this-box\n", "name: mcp-ungranted-tool-held\n")')" \
+	"carries mockryx's own scenario name"
+
+run_case "drills-broker: the first call of this box's drill is not read as the hold" fail \
+	"$DRB" \
+	"$(py 'edit("drill-scenarios/mcp-ungranted-tool-held.yaml", "      error_contains: when_no_grant\n", "      error_contains: requires approval\n")')" \
+	"does not read when_no_grant"
+
+run_case "drills-broker: the broker's scopes admit search_notes" fail \
+	"$DRB" \
+	"$(py 'edit("compose.yaml", "${TOKENFUSE_MCP_SECRET_SCOPES:-typryx_key=tools:ask|ask_freeform|list_questions}", "${TOKENFUSE_MCP_SECRET_SCOPES:-typryx_key=tools:ask|ask_freeform|list_questions|search_notes}")')" \
+	"admit search_notes"
+
+run_case "drills-broker: a piped install does not fetch this box's drill" fail \
+	"$DRB" \
+	"$(py 'edit("install.sh", "/drill-scenarios/mcp-ungranted-tool-held.yaml\" \\\n", "/drill-scenarios/elsewhere.yaml\" \\\n")')" \
+	"a piped install does not fetch"
+
+run_case "drills-broker: a bare .env line comes back quoted" fail \
+	"$DRB" \
+	"$(py 'edit("install.sh", "    if grep -q \"^TOKENFUSE_MCP_KEYS='\"'\"'\" \"$STACK_DIR/.env\" 2>/dev/null; then\n", "    if true; then\n")')" \
+	"rewritten in another form"
+
 run_case "drills-broker: the drill service is gone" fail \
 	"$DRB" \
 	"$(py 'edit("compose.yaml", "  mockryx-drill:\n    <<: *baseline\n", "  mockryx-drills:\n    <<: *baseline\n")')" \
@@ -2160,7 +2195,7 @@ run_case "typed-risk-signal: wardryx is pinned before when_absent" fail \
 
 run_case "typed-risk-signal: tokenfuse is pinned before it sent the tool call" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/tokenfuse:v1.23.0@sha256:192cfc7138eea6911d3c563427cdb996dac52c77e7f04f6ae71f84b6a6dc4535}", "ghcr.io/taipanbox/tokenfuse:v1.4.1}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/tokenfuse:v1.24.0@sha256:bc9ee4b657bbb332f7c8a345beeaaa1e071f05f6af2ce46882d0601a153eb7c5}", "ghcr.io/taipanbox/tokenfuse:v1.4.1}")')" \
 	"the broker sends no tool_call to the policy plane before it"
 
 run_case "typed-risk-signal: install.sh starts the proxy profile unconditionally" fail \

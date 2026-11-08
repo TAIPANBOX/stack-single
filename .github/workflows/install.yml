@@ -404,7 +404,7 @@ jobs:
         run: |
           set -euo pipefail
           cd /opt/agent-stack
-          mkey="$(sudo sed -n 's/^TOKENFUSE_MCP_KEYS=\([^:]*\):.*/\1/p' .env | head -1)"
+          mkey="$(sudo sed -n "s/^TOKENFUSE_MCP_KEYS='\{0,1\}\([^:']*\):.*/\1/p" .env | head -1)"
           td="$(sudo sed -n "s/^RECORD_TRUST_DOMAIN='\(.*\)'\$/\1/p" .env)"; td="${td:-local}"
           ask='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ask","arguments":{"template":"eval.outcome_met","state":{"task":"2+2","final_answer":"4"}},"_meta":{"typryx/key":"{{secret:typryx_key}}"}}}'
           who=agent://ci.example/tool-user
@@ -557,7 +557,7 @@ jobs:
           for _ in $(seq 1 30); do sudo docker run --rm --network agent-stack_core busybox:1.36 wget -q -T2 -O /dev/null http://wardryx:8090/readyz && break; sleep 1; done
           [ "$(sudo docker compose exec -T tokenfuse-mcp-broker printenv TOKENFUSE_WARDRYX_URL)" = http://wardryx:8090 ] \
             || { echo "::error::without the risk signal the broker does not ask wardryx directly"; exit 1; }
-          mkey="$(sudo sed -n 's/^TOKENFUSE_MCP_KEYS=\([^:]*\):.*/\1/p' .env | head -1)"
+          mkey="$(sudo sed -n "s/^TOKENFUSE_MCP_KEYS='\{0,1\}\([^:']*\):.*/\1/p" .env | head -1)"
           mcp() {
             curl -s -w ' %{http_code}' -X POST http://127.0.0.1:4200/mcp -H 'content-type: application/json' \
               -H 'X-Fuse-Mcp-Upstream: typryx' -H "x-fuse-key: $mkey" "$@"
@@ -575,12 +575,14 @@ jobs:
           grep -q '"code":-32002' <<<"$c" || { echo "::error::a raw secret in tool arguments was not refused -32002: $c"; exit 1; }
           grep -q '"code":-32004' <<<"$d" || { echo "::error::a tool the starter policy denies was not refused -32004: $d"; exit 1; }
 
-      # CLAUDE.md invariant 74: mockryx's broker drills, run by this box's own mockryx-drill service with the drills'
-      # key at the broker, against this box's broker, wardryx and policy (the tool-hold floor and grant-drills). The
-      # drills call `search_notes` and name no upstream, and no MCP server of this box serves that tool, so for this
-      # step alone the broker's default upstream is a stand-in server on the core network that answers it: a test
-      # fixture, never in compose.yaml. The broker is put back after, and the stand-in removed. A second run with a
-      # key the broker does not hold is the control: every drill must then come back failed.
+      # CLAUDE.md invariant 74: the fire drills for the MCP broker, three ways, against this box's broker, wardryx and
+      # policy (the tool-hold floor and grant-drills), with the drills' key at the broker.
+      #   1. As the box ships them: `docker compose run --rm mockryx-drill`, mockryx's two scan drills and this box's
+      #      own tool-hold drill, which reaches no MCP server. Every one must hold, with nothing standing in.
+      #   2. The control: the same run with a key the broker does not hold must fail every drill.
+      #   3. mockryx's own tool-hold drill, whose second call asks for a result: no MCP server of this box serves
+      #      `search_notes`, so for this run alone the broker's default upstream is a stand-in server on the core
+      #      network that answers it (a test fixture, never in compose.yaml). The broker is put back after.
       - name: the fire drills pass against this box's MCP broker
         if: matrix.profile == 'typed-risk'
         run: |
@@ -589,6 +591,27 @@ jobs:
           [ "$(sudo stat -c '%u %a' drills/broker.key)" = "65532 400" ] || { echo "::error::drills/broker.key is not uid 65532, mode 0400"; exit 1; }
           sudo grep -q "^TOKENFUSE_MCP_KEYS=.*:drills-broker" .env || { echo "::error::the broker holds no drills-broker key"; exit 1; }
           sudo grep -q "^TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS=.*drills-broker" .env || { echo "::error::drills-broker is not on the broker's static list"; exit 1; }
+          img="$(sudo docker compose config --images mockryx-drill)"
+          # 1. as shipped
+          rc=0
+          sudo docker compose run --rm mockryx-drill >"$RUNNER_TEMP/drills.log" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/drills.log"
+          [ "$rc" = 0 ] || { echo "::error::the fire drills, as this box ships them, exited $rc"; exit 1; }
+          grep -qE '^passed +mcp-secret-in-arguments ' "$RUNNER_TEMP/drills.log" || { echo "::error::the raw-secret drill did not pass"; exit 1; }
+          grep -qE '^passed +mcp-ungranted-tool-held-on-this-box ' "$RUNNER_TEMP/drills.log" || { echo "::error::this box's tool-hold drill did not pass"; exit 1; }
+          grep -qE '^(passed|skipped_not_configured) +mcp-pii-in-arguments ' "$RUNNER_TEMP/drills.log" || { echo "::error::the PII drill neither passed nor read as not configured"; exit 1; }
+          if grep -qE '^passed +mcp-ungranted-tool-held ' "$RUNNER_TEMP/drills.log"; then echo "::error::mockryx's own tool-hold drill ran, so this box's copy was not mounted over it"; exit 1; fi
+          # 2. the control
+          crc=0
+          printf '%s' "controlkeythebrokerneverheld0123456789ab" | sudo tee "$RUNNER_TEMP/wrong.key" >/dev/null
+          sudo chown 65532:10001 "$RUNNER_TEMP/wrong.key"; sudo chmod 0400 "$RUNNER_TEMP/wrong.key"
+          sudo docker compose run --rm -v "$RUNNER_TEMP/wrong.key:/run/drills/wrong.key:ro" \
+            -e MOCKRYX_MCP_BROKER_KEY_FILE=/run/drills/wrong.key mockryx-drill >"$RUNNER_TEMP/control.log" 2>&1 || crc=$?
+          sed 's/^/control: /' "$RUNNER_TEMP/control.log"
+          sudo rm -f "$RUNNER_TEMP/wrong.key"
+          [ "$crc" = 1 ] || { echo "::error::with a key the broker does not hold the drills exited $crc, not 1 (findings)"; exit 1; }
+          if grep -qE '^passed ' "$RUNNER_TEMP/control.log"; then echo "::error::a drill passed with a key the broker does not hold"; exit 1; fi
+          # 3. mockryx's own drill, with a stand-in server behind the broker
           stub="$RUNNER_TEMP/mcp-stub.py"
           cat >"$stub" <<'PY'
           import json
@@ -631,26 +654,17 @@ jobs:
             return 1
           }
           broker_up "${files[@]}" -f "$over" || { echo "::error::the broker did not come back with the stand-in upstream"; exit 1; }
-          rc=0
-          sudo docker compose run --rm mockryx-drill >"$RUNNER_TEMP/drills.log" 2>&1 || rc=$?
-          cat "$RUNNER_TEMP/drills.log"
-          # The control: the same drills with a key the broker does not hold are refused at its door.
-          crc=0
-          printf '%s' "controlkeythebrokerneverheld0123456789ab" | sudo tee "$RUNNER_TEMP/wrong.key" >/dev/null
-          sudo chown 65532:10001 "$RUNNER_TEMP/wrong.key"; sudo chmod 0400 "$RUNNER_TEMP/wrong.key"
-          sudo docker compose run --rm -v "$RUNNER_TEMP/wrong.key:/run/drills/wrong.key:ro" \
-            -e MOCKRYX_MCP_BROKER_KEY_FILE=/run/drills/wrong.key mockryx-drill >"$RUNNER_TEMP/control.log" 2>&1 || crc=$?
-          sed 's/^/control: /' "$RUNNER_TEMP/control.log"
+          orc=0
+          sudo docker run --rm --network agent-stack_core --user 65532:10001 --read-only --cap-drop ALL \
+            -v /opt/agent-stack/drills/broker.key:/run/drills/broker.key:ro \
+            -e MOCKRYX_MCP_BROKER=http://tokenfuse-mcp-broker:4200/mcp -e MOCKRYX_MCP_BROKER_KEY_FILE=/run/drills/broker.key \
+            "$img" run --gateway http://tokenfuse-gateway:4100 /scenarios/mcp >"$RUNNER_TEMP/original.log" 2>&1 || orc=$?
+          sed 's/^/original: /' "$RUNNER_TEMP/original.log"
           sudo docker logs drill-mcp-stand-in 2>&1 | tail -n 20
           broker_up "${files[@]}" || { echo "::error::the broker did not come back without the stand-in upstream"; exit 1; }
           sudo docker rm -f drill-mcp-stand-in >/dev/null
-          sudo rm -f "$RUNNER_TEMP/wrong.key"
-          [ "$rc" = 0 ] || { echo "::error::the fire drills exited $rc against this box's broker"; exit 1; }
-          grep -qE '^passed +mcp-secret-in-arguments ' "$RUNNER_TEMP/drills.log" || { echo "::error::the raw-secret drill did not pass"; exit 1; }
-          grep -qE '^passed +mcp-ungranted-tool-held ' "$RUNNER_TEMP/drills.log" || { echo "::error::the tool-hold drill did not pass"; exit 1; }
-          grep -qE '^(passed|skipped_not_configured) +mcp-pii-in-arguments ' "$RUNNER_TEMP/drills.log" || { echo "::error::the PII drill neither passed nor read as not configured"; exit 1; }
-          [ "$crc" = 1 ] || { echo "::error::with a key the broker does not hold the drills exited $crc, not 1 (findings)"; exit 1; }
-          if grep -qE '^passed ' "$RUNNER_TEMP/control.log"; then echo "::error::a drill passed with a key the broker does not hold"; exit 1; fi
+          [ "$orc" = 0 ] || { echo "::error::mockryx's own broker drills exited $orc with a stand-in server behind the broker"; exit 1; }
+          grep -qE '^passed +mcp-ungranted-tool-held ' "$RUNNER_TEMP/original.log" || { echo "::error::mockryx's own tool-hold drill did not pass with a stand-in server"; exit 1; }
 
       - name: turning the OpenAI door off removes it and keeps its lines
         if: matrix.profile == 'openai-door'
@@ -828,7 +842,7 @@ jobs:
           (cd "$RUNNER_TEMP/prev" && sudo env STACK_DIR=/opt/agent-stack WITH_TYPED=1 ./install.sh 2>&1) | tee "$RUNNER_TEMP/prev.log"
           grep -q "every check passed" "$RUNNER_TEMP/prev.log" || { echo "::error::the previous tag did not install"; exit 1; }
           cat >"$RUNNER_TEMP/call.sh" <<'SH'
-          mkey="$(sudo sed -n 's/^TOKENFUSE_MCP_KEYS=\([^:]*\):.*/\1/p' /opt/agent-stack/.env | head -1)"
+          mkey="$(sudo sed -n "s/^TOKENFUSE_MCP_KEYS='\{0,1\}\([^:']*\):.*/\1/p" /opt/agent-stack/.env | head -1)"
           curl -s -X POST http://127.0.0.1:4200/mcp -H 'content-type: application/json' -H 'X-Fuse-Mcp-Upstream: typryx' -H "x-fuse-key: $mkey" -H "x-fuse-agent-id: $1" \
             -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ask","arguments":{"template":"eval.outcome_met","state":{"task":"2+2","final_answer":"4"}},"_meta":{"typryx/key":"{{secret:typryx_key}}"}}}'
           SH
