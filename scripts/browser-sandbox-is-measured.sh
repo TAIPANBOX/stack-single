@@ -154,6 +154,11 @@ hostdir() { # a directory name with no space and no colon: it goes on a PATH
 	printf '%s\n' "$2" >"$h/sys/module/apparmor/parameters/enabled"
 	: >"$h/sys/kernel/security/apparmor/profiles"
 	cp "$work/bin/docker" "$h/bin/docker"
+	# dockerd as the host shows it: a pid from pgrep, and the label the kernel keeps for it
+	mkdir -p "$h/proc/4242/attr/apparmor"
+	printf '#!/usr/bin/env bash\necho 4242\n' >"$h/bin/pgrep"
+	chmod +x "$h/bin/pgrep"
+	[ "${DOCKERD_LABEL:-unconfined}" = UNREADABLE ] || printf '%s\n' "${DOCKERD_LABEL:-unconfined}" >"$h/proc/4242/attr/apparmor/current"
 	[ "$3" != 1 ] || cp "$work/bin/apparmor_parser" "$h/bin/apparmor_parser"
 	printf '%s' "$h"
 }
@@ -167,7 +172,7 @@ aa_host() { # NAME ENABLED PARSER PARSER_FAIL OWN DEFAULT UNCONFINED WANT SAYS L
 	before=$fail
 	out="$(
 		PATH="$h/bin:/usr/bin:/bin" CONTROL=0 DEFAULT="$6" UNCONFINED="$7" OWN="$5" PARSER_FAIL="$4" ASKED="$h/asked" PARSERLOG="$h/parser.log" \
-			SYS="$h/sys" BROWSER_AA_SYS="$h/sys" BROWSER_AA_DIR="$h/aa.d" STACK_DIR="$h/stack" BROWSER_SECCOMP=x CHANGE="$change" bash -c '
+			SYS="$h/sys" BROWSER_AA_SYS="$h/sys" BROWSER_AA_PROC="$h/proc" BROWSER_AA_DIR="$h/aa.d" STACK_DIR="$h/stack" BROWSER_SECCOMP=x CHANGE="$change" bash -c '
 			set -euo pipefail
 			note() { printf "%s\n" "$*"; }
 			env_set_if_changed() { printf "%s" "$2" >"$STACK_DIR/picked"; }
@@ -214,10 +219,13 @@ aa_host "AppArmor on, no parser"                      Y  0      0    0   1   0  
 aa_host "a parser that refuses the file"              Y  1      1    0   1   0  unconfined        "would not load"                      2     0    "scopyx-browser"
 aa_host "loaded, and the host still refuses it"       Y  1      0    1   0   1  docker-default    "apparmor=docker-default"             1     1
 aa_host "the profile changed between two runs"        Y  1      0    0   1   0  scopyx-browser    "apparmor=scopyx-browser"             2     1    ""          1
+DOCKERD_LABEL="snap.docker.dockerd (enforce)" aa_host "dockerd runs under a profile of its own" Y  1      0    0   0   1  docker-default    "dockerd runs under AppArmor profile snap.docker.dockerd" 0 0 "scopyx-browser"
+DOCKERD_LABEL=UNREADABLE aa_host "dockerd's label cannot be read"              Y  1      0    0   0   1  docker-default    "unreadable"                          0     0    "scopyx-browser"
+DOCKERD_LABEL=unconfined aa_host "dockerd is unconfined, as on Debian 13"        Y  1      0    0   1   0  scopyx-browser    "apparmor=scopyx-browser"             1     1    "unconfined "
 
 # ---- what status says of the running browser --------------------------------------------------
-status_host() { # NAME GOT WANT ENABLED PARSER COPY(same|differs|none) LOADED(0|1) RUNS(1|0) EXPECT(ok|FAIL|skip)
-	local name="$1" got="$2" want="$3" copy="$6" runs="$8" expect="$9" h out line
+status_host() { # NAME GOT WANT ENABLED PARSER COPY(same|differs|none) LOADED(0|1) RUNS(1|0) EXPECT(ok|FAIL|skip) [SAYS]
+	local name="$1" got="$2" want="$3" copy="$6" runs="$8" expect="$9" says="${10:-}" h out line
 	h="$(hostdir "st-$name" "$4" "$5")"
 	case "$copy" in
 		same) cp "$h/stack/apparmor/scopyx-browser" "$h/aa.d/scopyx-browser" ;;
@@ -234,7 +242,7 @@ exit 0
 FAKE
 	chmod +x "$h/bin/docker"
 	out="$(
-		PATH="$h/bin:/usr/bin:/bin" SCOPYX_BROWSER_APPARMOR="$want" NET=agent-stack_core BROWSER_AA_SYS="$h/sys" BROWSER_AA_DIR="$h/aa.d" STACK_DIR="$h/stack" bash -c '
+		PATH="$h/bin:/usr/bin:/bin" SCOPYX_BROWSER_APPARMOR="$want" NET=agent-stack_core BROWSER_AA_SYS="$h/sys" BROWSER_AA_PROC="$h/proc" BROWSER_AA_DIR="$h/aa.d" STACK_DIR="$h/stack" bash -c '
 			set -euo pipefail
 			fail=0
 			'"$block"'
@@ -249,6 +257,7 @@ FAKE
 		FAIL) grep -q '^   FAIL  browser AppArmor profile' <<<"$line" && grep -q '^fail=1$' <<<"$out" || { printf 'FAIL: %s: status said %s, and it had to be red and count one failure\n' "$name" "$line"; fail=1; } ;;
 		skip) grep -q '^   skip ' <<<"$line" && grep -q '^fail=0$' <<<"$out" || { printf 'FAIL: %s: status said %s, skip was right\n' "$name" "$line"; fail=1; } ;;
 	esac
+	if [ -n "$says" ] && ! grep -qF -- "$says" <<<"$line"; then printf 'FAIL: %s: status did not say %s: %s\n' "$name" "$says" "$line"; fail=1; fi
 }
 #          NAME                                          GOT              WANT             EN PARSER COPY     LOADED RUNS EXPECT
 status_host "under our profile"                          scopyx-browser   scopyx-browser   Y  1      same     1      1    ok
@@ -259,7 +268,8 @@ status_host "our profile, but not what .env names"       scopyx-browser   docker
 status_host "docker-default, as .env says"               docker-default   docker-default   Y  0      none     0      1    ok
 status_host "no profile at all, AppArmor off"            ""               docker-default   N  0      none     0      1    ok
 status_host "no profile, AppArmor on"                    ""               docker-default   Y  1      none     0      1    FAIL
+DOCKERD_LABEL="snap.docker.dockerd (enforce)" status_host "unconfined, and dockerd is confined" unconfined unconfined Y 1 none 0 1 ok "dockerd runs under AppArmor profile snap.docker.dockerd"
 status_host "no browser runs"                            unconfined       unconfined       Y  1      none     0      0    skip
 
 [ "$fail" = 0 ] || exit 1
-echo "OK: five kinds of host asked and seven with the profile of our own, nine status readings, the narrowest line that works is what reached .env."
+echo "OK: five kinds of host asked and ten with the profile of our own, ten status readings, the narrowest line that works is what reached .env."

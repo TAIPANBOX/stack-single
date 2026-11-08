@@ -3996,6 +3996,21 @@ run_case "browser-sandbox-is-measured: status never reads the browser's profile"
 	"$(py 'edit("install.sh", "  stack_checks\n  browser_profile_status\n  journal_status\n", "  stack_checks\n  journal_status\n")')" \
 	"never calls browser_profile_status"
 
+run_case "browser-sandbox-is-measured: the profile is offered under a confined dockerd" fail \
+	'./scripts/browser-sandbox-is-measured.sh' \
+	"$(py 'edit("install.sh", "  if [ \"$label\" != unconfined ]; then\n", "  if false; then\n")')" \
+	"dockerd runs under a profile of its own: wrote scopyx-browser to .env where docker-default was right"
+
+run_case "browser-sandbox-is-measured: an unreadable dockerd label is read as unconfined" fail \
+	'./scripts/browser-sandbox-is-measured.sh' \
+	"$(py 'edit("install.sh", "  printf unreadable\n}", "  printf unconfined\n}")')" \
+	"dockerd'"'"'s label cannot be read: wrote scopyx-browser to .env where docker-default was right"
+
+run_case "browser-sandbox-is-measured: status is red for unconfined under a confined dockerd" fail \
+	'./scripts/browser-sandbox-is-measured.sh' \
+	"$(py 'edit("install.sh", "        if [ \"$dl\" = unconfined ]; then\n", "        if true; then\n")')" \
+	"unconfined, and dockerd is confined: status said"
+
 run_case "browser-sandbox-is-measured: a comment in the profile loader is reworded" pass \
 	'./scripts/browser-sandbox-is-measured.sh' \
 	"$(py 'edit("install.sh", "  # A second run changes nothing: the same file in place, and the kernel holding it.", "  # A second run loads nothing: the same file in place, and the kernel holding it.")')"

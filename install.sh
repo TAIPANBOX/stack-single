@@ -1190,13 +1190,34 @@ browser_aa_enabled() { # AppArmor is on in this kernel, and there is a parser to
   [ "$(cat "${BROWSER_AA_SYS:-/sys}/module/apparmor/parameters/enabled" 2>/dev/null || true)" = Y ] \
     && command -v apparmor_parser >/dev/null 2>&1
 }
+browser_aa_dockerd_label() { # dockerd's AppArmor profile as the kernel names it, or "unreadable"
+  # apparmor/scopyx-browser lets signals in from unconfined, runc and crun, as docker-default does when
+  # dockerd is unconfined. A dockerd under a profile of its own (snap's) signals from that profile, so
+  # `docker stop` would not reach a browser under ours.
+  local pid f label proc="${BROWSER_AA_PROC:-/proc}"
+  pid="$(pgrep -xo dockerd 2>/dev/null || true)"
+  if [ -n "$pid" ]; then
+    for f in "$proc/$pid/attr/apparmor/current" "$proc/$pid/attr/current"; do
+      if [ -r "$f" ] && label="$(head -n1 "$f" 2>/dev/null)" && [ -n "$label" ]; then
+        printf '%s' "${label% (*)}"
+        return 0
+      fi
+    done
+  fi
+  printf unreadable
+}
 browser_aa_loaded() { # the kernel holds the profile, read from where the kernel lists them
   grep -q '^scopyx-browser (enforce)$' "${BROWSER_AA_SYS:-/sys}/kernel/security/apparmor/profiles" 2>/dev/null
 }
 browser_aa_load() { # 0 when the profile is loaded and kept for the next boot; 1 and the host as it was when not
-  local src="$STACK_DIR/$BROWSER_AA_FILE" dst="${BROWSER_AA_DIR:-/etc/apparmor.d}/scopyx-browser"
+  local src="$STACK_DIR/$BROWSER_AA_FILE" dst="${BROWSER_AA_DIR:-/etc/apparmor.d}/scopyx-browser" label
   [ -f "$src" ] || return 1
   browser_aa_enabled || return 1
+  label="$(browser_aa_dockerd_label)"
+  if [ "$label" != unconfined ]; then
+    note "browser sandbox: dockerd runs under AppArmor profile $label, and signals from it are not allowed by apparmor/scopyx-browser, so it is not offered"
+    return 1
+  fi
   # A second run changes nothing: the same file in place, and the kernel holding it.
   if cmp -s "$src" "$dst" && browser_aa_loaded; then return 0; fi
   if ! apparmor_parser -r "$src" >/dev/null 2>&1; then
@@ -1237,7 +1258,7 @@ browser_apparmor_apply() { # writes SCOPYX_BROWSER_APPARMOR to .env, on every ru
 # .env names and to what the host loads (CLAUDE.md invariant 73). A browser under unconfined on a
 # host that could give it apparmor/scopyx-browser is a FAIL: it is the state 1.7.1 left Debian 13 in.
 browser_profile_status() {
-  local id got want src dst why=""
+  local id got want src dst why="" dl why_not=""
   id="$(docker ps -q --filter "label=com.docker.compose.project=${NET%_core}" \
     --filter "label=com.docker.compose.service=scopyx-browser" 2>/dev/null | head -n1 || true)"
   if [ -z "$id" ]; then
@@ -1256,7 +1277,12 @@ browser_profile_status() {
   case "$got" in
     unconfined|none)
       if [ -f "$src" ] && browser_aa_enabled; then
-        why="the browser runs under $got, and this host could confine it by scopyx-browser: run ./install.sh, then recreate the browser"
+        dl="$(browser_aa_dockerd_label)"
+        if [ "$dl" = unconfined ]; then
+          why="the browser runs under $got, and this host could confine it by scopyx-browser: run ./install.sh, then recreate the browser"
+        else
+          why_not=" (not scopyx-browser: dockerd runs under AppArmor profile $dl)"
+        fi
       fi
       ;;
     scopyx-browser)
@@ -1274,7 +1300,7 @@ browser_profile_status() {
     printf '   FAIL  %s: %s. %s\n' "browser AppArmor profile" "$got" "$why"
     fail=$((fail+1))
   else
-    printf '   ok    %s: %s\n' "browser AppArmor profile" "$got"
+    printf '   ok    %s: %s%s\n' "browser AppArmor profile" "$got" "$why_not"
   fi
 }
 # browser-profile: end

@@ -61,3 +61,11 @@ Feature: the browser has a profile of its own, and the installer stops choosing 
     # -> gates-have-teeth.sh "browser-sandbox-is-measured: status passes a host copy that is not the stack's"
     # -> gates-have-teeth.sh "browser-sandbox-is-measured: status passes a browser that is not under what .env names"
     # -> gates-have-teeth.sh "browser-sandbox-is-measured: status never reads the browser's profile"
+
+  Scenario: a dockerd under an AppArmor profile of its own is not offered ours
+    Given the profile lets signals in from unconfined, runc and crun, and a confined dockerd signals from its own profile
+    When dockerd's label is not unconfined, or cannot be read though AppArmor is on
+    Then scopyx-browser is not offered, docker-default and unconfined are asked as before, and status says why instead of going red
+    # -> gates-have-teeth.sh "browser-sandbox-is-measured: the profile is offered under a confined dockerd"
+    # -> gates-have-teeth.sh "browser-sandbox-is-measured: an unreadable dockerd label is read as unconfined"
+    # -> gates-have-teeth.sh "browser-sandbox-is-measured: status is red for unconfined under a confined dockerd"
