@@ -1889,7 +1889,7 @@ run_case "drills-broker: a piped install does not fetch this box's drill" fail \
 
 run_case "drills-broker: a bare .env line comes back quoted" fail \
 	"$DRB" \
-	"$(py 'edit("install.sh", "    if grep -q \"^TOKENFUSE_MCP_KEYS='\"'\"'\" \"$STACK_DIR/.env\" 2>/dev/null; then\n", "    if true; then\n")')" \
+	"$(py 'edit("install.sh", "    if grep -q \"^TOKENFUSE_MCP_KEYS=" + chr(39) + "\" \"$STACK_DIR/.env\" 2>/dev/null; then\n", "    if true; then\n")')" \
 	"rewritten in another form"
 
 run_case "drills-broker: the drill service is gone" fail \

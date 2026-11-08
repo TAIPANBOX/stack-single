@@ -83,3 +83,30 @@ Feature: the fire drills reach this box's MCP broker with a key of its own
     Then drills-reach-the-broker.sh says it measured nothing, rather than OK
     # -> gates-have-teeth.sh "drills-broker: the drill service is gone"
     # -> gates-have-teeth.sh "drills-broker: the key block is gone"
+
+  Scenario: the tool-hold drill asks a server this box does not have
+    Given mockryx's own tool-hold drill asks its second call for an answer from an MCP server, and no server of this box answers it
+    When the box runs that drill as it ships, or its own copy asks for a result again
+    Then drills-reach-the-broker.sh fails, because a drill that is red on every box teaches a reader to skip red
+    # -> gates-have-teeth.sh "drills-broker: this box's tool-hold drill is not mounted"
+    # -> gates-have-teeth.sh "drills-broker: this box's drill asks for a result again"
+
+  Scenario: the box's copy passes where the hold does not hold
+    Given the box's copy tells the hold by when_no_grant, by a name of its own, and by a vault rule that keeps its handle off search_notes
+    When it reads a hold of another rule as the hold, takes mockryx's name, or the broker's scopes admit search_notes
+    Then drills-reach-the-broker.sh fails
+    # -> gates-have-teeth.sh "drills-broker: the first call of this box's drill is not read as the hold"
+    # -> gates-have-teeth.sh "drills-broker: this box's drill takes mockryx's own name"
+    # -> gates-have-teeth.sh "drills-broker: the broker's scopes admit search_notes"
+
+  Scenario: a piped install has no copy to mount
+    Given a piped install has no tree to copy the box's drill from
+    When it does not fetch the file
+    Then drills-reach-the-broker.sh fails, because compose would mount a directory where the drill should be
+    # -> gates-have-teeth.sh "drills-broker: a piped install does not fetch this box's drill"
+
+  Scenario: the broker's key line changes its form
+    Given the installer's check and CI read the broker's first key from its .env line with sed
+    When the line add_env_default wrote bare comes back in quotes
+    Then drills-reach-the-broker.sh fails, because the key read with a quote in front of it is refused 401
+    # -> gates-have-teeth.sh "drills-broker: a bare .env line comes back quoted"
