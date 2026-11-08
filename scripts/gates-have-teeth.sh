@@ -3372,7 +3372,7 @@ run_case "status-reads-what-runs: compose.yaml has no services" fail \
 
 run_case "status-is-read-only: status prints no line from the journal" fail \
 	'./scripts/status-is-read-only.sh' \
-	"$(py 'edit("install.sh", "  stack_checks\n  journal_status\n", "  stack_checks\n")')" \
+	"$(py 'edit("install.sh", "  browser_profile_status\n  journal_status\n", "  browser_profile_status\n")')" \
 	"status printed no line from the install journal"
 
 # The install journal and the rollback index (scripts/rollback-floor.sh, CLAUDE.md invariant 68).
