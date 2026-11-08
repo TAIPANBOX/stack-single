@@ -8,8 +8,10 @@
 #
 #   ./lab.sh <a checkout of this repository> [page]     RENDERS=10 fetches after the first
 #
-# Needs Docker and python3, and a route to the page. It uses test values only, publishes no port,
-# and touches no project but its own. It leaves nothing behind.
+# Needs Docker, python3 and root, and a route to the page. Root because the installer's block loads
+# apparmor/scopyx-browser into the host's AppArmor and keeps it in /etc/apparmor.d, as it does on a
+# real install; that profile stays, and applies to nothing until a container asks for it. It uses
+# test values only, publishes no port, and touches no project but its own. Nothing else is left.
 set -euo pipefail
 tree="$(cd "${1:?a checkout of this repository}" && pwd)"
 page="${2:-https://en.wikipedia.org/wiki/Sandbox_(computer_security)}"
@@ -22,6 +24,7 @@ wardryx="$(sed -n 's/^    image: \${WARDRYX_IMAGE:-\(.*\)}$/\1/p' "$tree/compose
 cd "$lab"
 cp "$tree/compose.yaml" .
 cp -R "$tree/seccomp" .
+cp -R "$tree/apparmor" .
 python3 - <<'PY'
 import re
 src = open("compose.yaml").read()

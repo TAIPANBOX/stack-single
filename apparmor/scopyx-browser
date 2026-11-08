@@ -1,0 +1,60 @@
+# The AppArmor profile of scopyx-browser: Docker's default profile (docker-default, Docker 26.1.5's
+# profiles/apparmor/template.go, with its own name) plus the one rule Chrome's sandbox adds.
+#
+# WHY IT EXISTS. Chrome starts its sandbox by creating a user namespace for itself. On Debian 13
+# docker-default has no `userns` rule, so the kernel refuses the creation
+# (apparmor="DENIED" operation="userns_create" profile="docker-default"), and until this file the
+# installer fell back to apparmor=unconfined there, which drops every rule below with it.
+#
+# WHAT IS ADDED, and nothing else (CLAUDE.md invariant 73): `userns,`. Every other line is
+# docker-default's, so the denials stay: no write under /proc/sys beyond kernel.shm*, no
+# /proc/sysrq-trigger or /proc/kcore, no mount, no write under /sys beyond cgroups, nothing of
+# /sys/firmware or /sys/kernel/security. The ptrace rule is docker-default's: a peer of this
+# profile only, never a process of the host or of another container.
+#
+# A change to this file is a new name (scopyx-browser-v2), because Compose hashes the line that
+# names a profile and never the profile; scripts/containers-carry-the-baseline.sh pins the digest.
+# install.sh puts the file in /etc/apparmor.d, so the host loads it again at boot, before Docker
+# restarts the container, and loads it with apparmor_parser -r.
+#include <tunables/global>
+
+profile scopyx-browser flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+
+  network,
+  capability,
+  file,
+  umount,
+  # Chrome's sandbox: a user namespace of its own, which it then maps itself into and chroots in.
+  userns,
+  # Host (privileged) processes may send signals to container processes.
+  signal (receive) peer=unconfined,
+  # runc may send signals to container processes (for "docker stop").
+  signal (receive) peer=runc,
+  # crun may send signals to container processes (for "docker stop" when used with crun).
+  signal (receive) peer=crun,
+  # Container processes may send signals amongst themselves.
+  signal (send,receive) peer=scopyx-browser,
+
+  deny @{PROC}/* w,   # deny write for all files directly in /proc (not in a subdir)
+  # deny write to files not in /proc/<number>/** or /proc/sys/**
+  deny @{PROC}/{[^1-9],[^1-9][^0-9],[^1-9s][^0-9y][^0-9s],[^1-9][^0-9][^0-9][^0-9/]*}/** w,
+  deny @{PROC}/sys/[^k]** w,  # deny /proc/sys except /proc/sys/k* (effectively /proc/sys/kernel)
+  deny @{PROC}/sys/kernel/{?,??,[^s][^h][^m]**} w,  # deny everything except shm* in /proc/sys/kernel/
+  deny @{PROC}/sysrq-trigger rwklx,
+  deny @{PROC}/kcore rwklx,
+
+  deny mount,
+
+  deny /sys/[^f]*/** wklx,
+  deny /sys/f[^s]*/** wklx,
+  deny /sys/fs/[^c]*/** wklx,
+  deny /sys/fs/c[^g]*/** wklx,
+  deny /sys/fs/cg[^r]*/** wklx,
+  deny /sys/firmware/** rwklx,
+  deny /sys/devices/virtual/powercap/** rwklx,
+  deny /sys/kernel/security/** rwklx,
+
+  # suppress ptrace denials when using 'docker ps' or using 'ps' inside a container
+  ptrace (trace,read,tracedby,readby) peer=scopyx-browser,
+}

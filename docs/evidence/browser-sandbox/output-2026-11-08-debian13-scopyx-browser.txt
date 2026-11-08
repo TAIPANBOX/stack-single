@@ -1,0 +1,68 @@
+# 2026-11-08T05:47:43Z forge, Debian 13, kernel 6.12.107+deb13-amd64, apparmor_parser AppArmor parser version 4.1.0
+# profile before the run: scopyx-browser (enforce); /etc/apparmor.d copy: ls: cannot access '/etc/apparmor.d/scopyx-browser': No such file or directory
+Debian GNU/Linux 13 (trixie), Docker 26.1.5+dfsg1, Compose 2.26.1-4
+   browser sandbox: loaded AppArmor profile scopyx-browser from apparmor/scopyx-browser, kept as /etc/apparmor.d/scopyx-browser
+   browser sandbox: apparmor=scopyx-browser is the narrowest line Chrome's sandbox starts under on this host (measured, saved in .env)
+
+== as shipped: the profile, the baseline, the line the installer picked
+PASS  Docker holds the profile file for this container, byte for byte
+      options: seccomp=<the file> no-new-privileges:true apparmor=scopyx-browser
+      AppArmor: scopyx-browser
+PASS  the container's filter is on: NoNewPrivs: 1 Seccomp: 2 
+PASS  browse rendered https://en.wikipedia.org/wiki/Sandbox_(computer_security): 197480 characters of HTML
+      renderer: NSpid: 227 14 1;Seccomp: 2;Seccomp_filters: 2; uid_map: 65532 65532 1;
+PASS  the renderer is in a PID namespace of its own
+PASS  the renderer runs under Chrome's own filter on top of Docker's
+PASS  the renderer is in a user namespace of its own
+   10 of 10 more fetches rendered
+
+== the file's refusals, from inside the same container
+   unshare -Ur   allowed
+   unshare -Urm  refused
+   unshare -Urn  refused
+   unshare -Uri  refused
+   unshare -Uru  refused
+
+== a second run recreates nothing
+   same container
+
+== control: the other AppArmor line
+   apparmor=docker-default: refused: cdp: Target.createTarget: the browser closed the connection. The browser said: [17:17:1108/054804.011361:FATAL:sandbox/linux/services/credentials.cc:137] Check failed: . : Permission denied (13). This is the browser's sandbox, not scopyx. Run the container as 
+
+== control: Docker's default filter, without the profile
+   default filter: refused: cdp: Target.createTarget: the browser closed the connection. The browser said: [17:17:1108/054805.900172:ERROR:content/browser/zygote_host/zygote_host_impl_linux.cc:130] No usable sandbox! If this is a Debian system, please install the chromium-sandbox package
+
+== control: each rule taken out of the profile
+   without chroot:  refused: cdp: Target.createTarget: the browser closed the connection. The browser said: Check failed: sys_chroot("/proc/self/fdinfo/") == 0 | [16:16:1108/054807.779379:FATAL:content/browser/zygote_host/zygote_host_impl_linux.cc:251] Zygote process exited prematurely wi
+   without clone:   refused: cdp: Target.createTarget: the browser closed the connection. The browser said: [17:17:1108/054809.580182:ERROR:content/browser/zygote_host/zygote_host_impl_linux.cc:130] No usable sandbox! If this is a Debian system, please install the chromium-sandbox package
+   without unshare: refused: cdp: Target.createTarget: the browser closed the connection. The browser said: [17:17:1108/054811.373384:ERROR:content/browser/zygote_host/zygote_host_impl_linux.cc:130] No usable sandbox! If this is a Debian system, please install the chromium-sandbox package
+
+== control: Chrome's sandbox off, so measure.sh has to go red
+PASS  Docker holds the profile file for this container, byte for byte
+      options: seccomp=<the file> no-new-privileges:true apparmor=scopyx-browser
+      AppArmor: scopyx-browser
+PASS  the container's filter is on: NoNewPrivs: 1 Seccomp: 2 
+PASS  browse rendered https://en.wikipedia.org/wiki/Sandbox_(computer_security): 198207 characters of HTML
+      renderer: NSpid: 24;Seccomp: 2;Seccomp_filters: 1; uid_map: 0 0 4294967295;
+FAIL  the renderer is in the container's PID namespace
+FAIL  the renderer has one seccomp filter, Docker's: Chrome's own is not on
+FAIL  the renderer is in the container's user namespace
+   measure.sh went red, as it must
+
+== what the profile still denies (denials.sh)
+== apparmor=scopyx-browser
+   denied   mount -t tmpfs none /mnt/t -> Permission denied
+   denied   sh -c cat /proc/sys/vm/swappiness > /proc/sys/vm/swappiness -> Permission denied
+   denied   sh -c cat /proc/sys/kernel/printk > /proc/sys/kernel/printk -> Permission denied
+   denied   sh -c echo h > /proc/sysrq-trigger -> Permission denied
+== apparmor=docker-default
+   denied   mount -t tmpfs none /mnt/t -> Permission denied
+   denied   sh -c cat /proc/sys/vm/swappiness > /proc/sys/vm/swappiness -> Permission denied
+   denied   sh -c cat /proc/sys/kernel/printk > /proc/sys/kernel/printk -> Permission denied
+   denied   sh -c echo h > /proc/sysrq-trigger -> Permission denied
+== apparmor=unconfined
+   allowed  mount -t tmpfs none /mnt/t
+   allowed  sh -c cat /proc/sys/vm/swappiness > /proc/sys/vm/swappiness
+   allowed  sh -c cat /proc/sys/kernel/printk > /proc/sys/kernel/printk
+   allowed  sh -c echo h > /proc/sysrq-trigger
+# after: scopyx-browser (enforce); copy: identical; containers left: 0

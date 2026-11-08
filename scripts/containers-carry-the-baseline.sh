@@ -333,8 +333,10 @@ if browser is not None:
         for flag in ("--cap-drop ALL", "--read-only", "no-new-privileges:true", f"--user {browser.get('user')}"):
             if flag not in body:
                 problems.append(f"the installer's throwaway has no {flag}, so it does not ask what the browser would be told")
-        if "for one in docker-default unconfined;" not in body:
-            problems.append("the installer does not try docker-default first, so a host could lose AppArmor it does not need to lose")
+        if 'order="docker-default unconfined"' not in body or 'for one in $order;' not in body:
+            problems.append("the installer does not try docker-default before unconfined, so a host could lose AppArmor it does not need to lose")
+        if 'order="scopyx-browser $order"' not in body:
+            problems.append("the installer does not offer apparmor/scopyx-browser first, so a host that can confine the browser by it runs it under a wider line")
 
 # The installer writes one override of its own. It may not take the baseline back.
 block = re.search(r"^# egress-override: begin$(.*?)^# egress-override: end$", install, re.M | re.S)
