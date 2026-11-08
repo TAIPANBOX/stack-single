@@ -57,6 +57,7 @@
           "init-volumes",
           "keyryx",
           "keyryx-witness",
+          "mockryx-drill",
           "policy-db",
           "record-seal",
           "scopyx",
@@ -80,7 +81,8 @@
           "record-seal": "trailryx-seal"
         },
         "manual_jobs": {
-          "idryx-detect": "A TEMPLATE a person runs, not a schedule, and not by preference. Measured 2026-09-01 on the published image: `go-service.Dockerfile` builds on distroless, so there is no /bin/sh for a loop, the binary is `/usr/local/bin/service` rather than `idryx`, and `detect` has no --interval or --watch. A loop is impossible here rather than unwanted. Publishing a shell-bearing idryx would put a shell back into a governance plane to buy a scheduler, which is a security property traded for a convenience.\\n\\nSo it takes the shape the estate already has for exactly this: stack-k8s keeps its `drills` CronJob suspended until a person runs it, and this is the compose equivalent, behind a profile no install enables. Run it with `docker compose run --rm idryx-detect`.\\n\\nVerified rather than asserted: manifest-is-true.sh requires the service to exist, to sit behind a profile, and requires install.sh never to pass that profile. That is this file's answer to the `suspend: true` stack-k8s's own gate checks."
+          "idryx-detect": "A TEMPLATE a person runs, not a schedule, and not by preference. Measured 2026-09-01 on the published image: `go-service.Dockerfile` builds on distroless, so there is no /bin/sh for a loop, the binary is `/usr/local/bin/service` rather than `idryx`, and `detect` has no --interval or --watch. A loop is impossible here rather than unwanted. Publishing a shell-bearing idryx would put a shell back into a governance plane to buy a scheduler, which is a security property traded for a convenience.\\n\\nSo it takes the shape the estate already has for exactly this: stack-k8s keeps its `drills` CronJob suspended until a person runs it, and this is the compose equivalent, behind a profile no install enables. Run it with `docker compose run --rm idryx-detect`.\\n\\nVerified rather than asserted: manifest-is-true.sh requires the service to exist, to sit behind a profile, and requires install.sh never to pass that profile. That is this file's answer to the `suspend: true` stack-k8s's own gate checks.",
+          "mockryx-drill": "A TEMPLATE a person runs: `docker compose run --rm mockryx-drill`, behind the `manual` profile no install passes, the shape stack-k8s gives its suspended `drills` CronJob. It sends mockryx's broker drills (/scenarios/mcp in the image, which carries its scenarios since mockryx v0.1.1) to this box's own MCP broker, with the drills' key at the broker (`drills-broker` in TOKENFUSE_MCP_KEYS and on the broker's static list, the same secret in drills/broker.key, uid 65532, 0400), minted by install.sh (CLAUDE.md invariant 74). Only the broker drills: the gateway drills need a client key the gateway admits without a token, and the installer keeps the drills' gateway key off that list (invariant 53). The broker runs only with WITH_TYPED, WITH_EGRESS or WITH_BROWSER; without it mockryx refuses the run with exit 2. The tool-hold drill's second step needs an MCP server behind the broker that answers `search_notes`, which this box does not have, so on a box that step reports a Finding; CI proves the whole drill with a stand-in server."
         },
         "optional_addons": {
           "costcrew": "The FinOps console (CostCrew), an optional add-on in the `finops` profile. Started only by hand, `docker compose --profile finops up -d costcrew`; install.sh never passes that profile and never names the service. As shipped it cannot spend: no gateway is wired to it.",
@@ -120,6 +122,7 @@
           "ghcr.io/taipanbox/heraldyx:v0.9.0@sha256:0b22664f56dbcffa71568a5b593cf8cad2995d1649c68464880d4c51e96b6f31",
           "ghcr.io/taipanbox/idryx:v1.4.0@sha256:2c80d101a01b2d3ac300abd57d397f38d8ff5515e34c5f851849244029ba6d15",
           "ghcr.io/taipanbox/keyryx:v0.1.4@sha256:659723319e28c6c8895f5c2af6baa616b2e46ed90a3cf26d1c208dafe6a1ca3f",
+          "ghcr.io/taipanbox/mockryx:v0.5.0@sha256:32e4e79cd3bf95d23aa240f925ca139726faf8a13cdcd3a1728ea3df633f08be",
           "ghcr.io/taipanbox/scopyx:v1.3.0@sha256:a1e640a7965273750bd95d245316059046da203924e7ad5048c06a51d3fa555d",
           "ghcr.io/taipanbox/scopyx:v1.3.0-chromium@sha256:3e5c28024deb462c06d5440414b2f453bfbb70ebd944d087888397367f4d9f99",
           "ghcr.io/taipanbox/stack-caddy:v1.8.1@sha256:d9376051cc5ac9bb83de557bf3e7e861e26f6f6ae4556cd6ed5a32d1ce352c0a",
@@ -143,7 +146,7 @@
         },
         "three_of_the_five_and_the_other_two_are_named": {
           "value": "--profile routines",
-          "why": "This deployment installed NO scheduler of any kind until 2026-08-28: the planes came up and the work that keeps them producing did not happen. estate-gates recorded six divergences from 2026-08-06, on the single-box install, the one most likely to be somebody's first look at the estate.\\n\\nThree run now, as loops rather than timers, because compose has no cron. The other two are not included and the reasons are facts rather than effort:\\n  qryx-trend scans a SOURCE TREE, and there is none in these containers; mounting the operator's disk into a governance plane to look for crypto is a bigger decision than a missing routine.\\n  mockryx-drill needs scenario files that live in the mockryx repository and are not in this image, and it is opt-in in both other deployments anyway.\\n\\nThe sixth, trailryx-seal, is the `record` profile."
+          "why": "This deployment installed NO scheduler of any kind until 2026-08-28: the planes came up and the work that keeps them producing did not happen. estate-gates recorded six divergences from 2026-08-06, on the single-box install, the one most likely to be somebody's first look at the estate.\\n\\nThree run now, as loops rather than timers, because compose has no cron. qryx-trend is not included, and the reason is a fact rather than effort: it scans a SOURCE TREE, and there is none in these containers; mounting the operator's disk into a governance plane to look for crypto is a bigger decision than a missing routine. mockryx-drill and idryx-detect are here as templates a person runs (`manual_jobs`).\\n\\nThe sixth, trailryx-seal, is the `record` profile."
         },
         "trailryx_seal_runs_under_a_local_name": {
           "value": "record-seal",

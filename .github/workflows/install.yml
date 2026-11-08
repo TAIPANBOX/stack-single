@@ -575,6 +575,83 @@ jobs:
           grep -q '"code":-32002' <<<"$c" || { echo "::error::a raw secret in tool arguments was not refused -32002: $c"; exit 1; }
           grep -q '"code":-32004' <<<"$d" || { echo "::error::a tool the starter policy denies was not refused -32004: $d"; exit 1; }
 
+      # CLAUDE.md invariant 74: mockryx's broker drills, run by this box's own mockryx-drill service with the drills'
+      # key at the broker, against this box's broker, wardryx and policy (the tool-hold floor and grant-drills). The
+      # drills call `search_notes` and name no upstream, and no MCP server of this box serves that tool, so for this
+      # step alone the broker's default upstream is a stand-in server on the core network that answers it: a test
+      # fixture, never in compose.yaml. The broker is put back after, and the stand-in removed. A second run with a
+      # key the broker does not hold is the control: every drill must then come back failed.
+      - name: the fire drills pass against this box's MCP broker
+        if: matrix.profile == 'typed-risk'
+        run: |
+          set -o pipefail
+          cd /opt/agent-stack
+          [ "$(sudo stat -c '%u %a' drills/broker.key)" = "65532 400" ] || { echo "::error::drills/broker.key is not uid 65532, mode 0400"; exit 1; }
+          sudo grep -q "^TOKENFUSE_MCP_KEYS=.*:drills-broker" .env || { echo "::error::the broker holds no drills-broker key"; exit 1; }
+          sudo grep -q "^TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS=.*drills-broker" .env || { echo "::error::drills-broker is not on the broker's static list"; exit 1; }
+          stub="$RUNNER_TEMP/mcp-stub.py"
+          cat >"$stub" <<'PY'
+          import json
+          from http.server import BaseHTTPRequestHandler, HTTPServer
+          class H(BaseHTTPRequestHandler):
+              def do_POST(self):
+                  n = int(self.headers.get("content-length") or 0)
+                  req = json.loads(self.rfile.read(n) or b"{}")
+                  m = req.get("method")
+                  if m == "tools/call":
+                      res = {"content": [{"type": "text", "text": "fire drill: nothing found"}], "isError": False}
+                  elif m == "tools/list":
+                      res = {"tools": [{"name": "search_notes", "description": "Search notes.", "inputSchema": {"type": "object"}}]}
+                  elif m == "initialize":
+                      res = {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}}, "serverInfo": {"name": "drill-stand-in", "version": "1"}}
+                  else:
+                      res = {}
+                  if "id" not in req:
+                      self.send_response(202); self.end_headers(); return
+                  body = json.dumps({"jsonrpc": "2.0", "id": req["id"], "result": res}).encode()
+                  self.send_response(200)
+                  self.send_header("content-type", "application/json")
+                  self.send_header("content-length", str(len(body)))
+                  self.end_headers()
+                  self.wfile.write(body)
+              def log_message(self, *a):
+                  print("stand-in:", self.command, self.path, flush=True)
+          HTTPServer(("0.0.0.0", 8080), H).serve_forever()
+          PY
+          sudo docker run -d --name drill-mcp-stand-in --network agent-stack_core --network-alias drill-mcp-stand-in \
+            -v "$stub:/stand-in.py:ro" python:3.13-alpine@sha256:1e1f6334529d1fb26a2ef619d7cffb30a7c7d7cc1cc7338ebee283a58d1aeaca \
+            python /stand-in.py >/dev/null
+          over="$RUNNER_TEMP/drill-upstream.yaml"
+          printf 'services:\n  tokenfuse-mcp-broker:\n    environment:\n      TOKENFUSE_MCP_UPSTREAM: http://drill-mcp-stand-in:8080/mcp\n' >"$over"
+          files=(-f compose.yaml)
+          if [ -f compose.override.yaml ]; then files+=(-f compose.override.yaml); fi
+          broker_up() {
+            sudo docker compose "$@" up -d --no-deps tokenfuse-mcp-broker >/dev/null
+            for _ in $(seq 1 30); do curl -fsS -m2 -o /dev/null http://127.0.0.1:4200/healthz && return 0; sleep 1; done
+            return 1
+          }
+          broker_up "${files[@]}" -f "$over" || { echo "::error::the broker did not come back with the stand-in upstream"; exit 1; }
+          rc=0
+          sudo docker compose run --rm mockryx-drill >"$RUNNER_TEMP/drills.log" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/drills.log"
+          # The control: the same drills with a key the broker does not hold are refused at its door.
+          crc=0
+          printf '%s' "controlkeythebrokerneverheld0123456789ab" | sudo tee "$RUNNER_TEMP/wrong.key" >/dev/null
+          sudo chown 65532:10001 "$RUNNER_TEMP/wrong.key"; sudo chmod 0400 "$RUNNER_TEMP/wrong.key"
+          sudo docker compose run --rm -v "$RUNNER_TEMP/wrong.key:/run/drills/wrong.key:ro" \
+            -e MOCKRYX_MCP_BROKER_KEY_FILE=/run/drills/wrong.key mockryx-drill >"$RUNNER_TEMP/control.log" 2>&1 || crc=$?
+          sed 's/^/control: /' "$RUNNER_TEMP/control.log"
+          sudo docker logs drill-mcp-stand-in 2>&1 | tail -n 20
+          broker_up "${files[@]}" || { echo "::error::the broker did not come back without the stand-in upstream"; exit 1; }
+          sudo docker rm -f drill-mcp-stand-in >/dev/null
+          sudo rm -f "$RUNNER_TEMP/wrong.key"
+          [ "$rc" = 0 ] || { echo "::error::the fire drills exited $rc against this box's broker"; exit 1; }
+          grep -qE '^passed +mcp-secret-in-arguments ' "$RUNNER_TEMP/drills.log" || { echo "::error::the raw-secret drill did not pass"; exit 1; }
+          grep -qE '^passed +mcp-ungranted-tool-held ' "$RUNNER_TEMP/drills.log" || { echo "::error::the tool-hold drill did not pass"; exit 1; }
+          grep -qE '^(passed|skipped_not_configured) +mcp-pii-in-arguments ' "$RUNNER_TEMP/drills.log" || { echo "::error::the PII drill neither passed nor read as not configured"; exit 1; }
+          [ "$crc" = 1 ] || { echo "::error::with a key the broker does not hold the drills exited $crc, not 1 (findings)"; exit 1; }
+          if grep -qE '^passed ' "$RUNNER_TEMP/control.log"; then echo "::error::a drill passed with a key the broker does not hold"; exit 1; fi
+
       - name: turning the OpenAI door off removes it and keeps its lines
         if: matrix.profile == 'openai-door'
         run: |

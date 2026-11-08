@@ -96,7 +96,7 @@ svc_of() {
     finops) echo "costcrew-init costcrew" ;;
     record) echo record-seal ;;
     routines) echo "focus-export verdryx-drift" ;;
-    manual) echo idryx-detect ;;
+    manual) echo "idryx-detect mockryx-drill" ;;
     slo-signal) echo verdryx-slo ;;
     *) echo "" ;;
   esac
@@ -180,7 +180,7 @@ grep -q -E -- '--profile finops up -d( .*)? costcrew( |$)' <<<"$up_a" \
   || fail "B. the running costcrew of profile finops is not re-upped at this run's pins, so an upgrade would leave its old image running"
 grep -q -E -- '--profile egress up -d( .*)? scopyx( |$)' <<<"$up_a" \
   || fail "B. the running scopyx of profile egress is not re-upped at this run's pins, so an upgrade would leave its old image running"
-for s in focus-export verdryx-drift idryx-detect; do
+for s in focus-export verdryx-drift idryx-detect mockryx-drill; do
   grep -q -E -- " $s( |\$)" <<<"$removed_a $up_a" \
     && fail "B. $s is an operator-started service that is not running, and the installer removed or started it"
 done

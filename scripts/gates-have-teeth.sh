@@ -1801,6 +1801,73 @@ run_case "door-origins-are-named: agent tokens off leaves the lists" fail \
 	"WITH_AGENT_TOKENS=0 leaves"
 
 
+# ---- drills-reach-the-broker (CLAUDE.md invariant 74) ---------------------
+DRB='./scripts/drills-reach-the-broker.sh'
+run_case "drills-broker: the drill leaves the manual profile" fail \
+	"$DRB" \
+	"$(py 'edit("compose.yaml", "    profiles: [\"manual\"]\n    environment:\n      MOCKRYX_MCP_BROKER:", "    environment:\n      MOCKRYX_MCP_BROKER:")')" \
+	"not behind the manual profile"
+
+run_case "drills-broker: the drill is handed the gateway's client key" fail \
+	"$DRB" \
+	"$(py 'edit("compose.yaml", "      MOCKRYX_MCP_BROKER_KEY_FILE: /run/drills/broker.key\n", "      MOCKRYX_MCP_BROKER_KEY_FILE: /run/drills/broker.key\n      MOCKRYX_CLIENT_KEY: ${GATEWAY_DRILLS_KEY:-}\n")')" \
+	"the gateway's client key"
+
+run_case "drills-broker: the drill runs the gateway drills too" fail \
+	"$DRB" \
+	"$(py 'edit("compose.yaml", "\"http://tokenfuse-gateway:4100\", \"/scenarios/mcp\"]", "\"http://tokenfuse-gateway:4100\", \"/scenarios\"]")')" \
+	"does not run the broker drills"
+
+run_case "drills-broker: the drill pins a mockryx that sends the broker no key" fail \
+	"$DRB" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/mockryx:v0.5.0@", "ghcr.io/taipanbox/mockryx:v0.4.0@")')" \
+	"older than v0.5.0"
+
+run_case "drills-broker: a newer mockryx pin still passes" pass \
+	"$DRB" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/mockryx:v0.5.0@", "ghcr.io/taipanbox/mockryx:v0.6.0@")')"
+
+run_case "drills-broker: the drill's image is pulled unchecked" fail \
+	"$DRB" \
+	"$(py 'edit("install.sh", "      image_verify \"$drill_img\"\n", "")')" \
+	"before it pulls the image"
+
+run_case "drills-broker: the key is not on the broker's list" fail \
+	"$DRB" \
+	"$(py 'edit("install.sh", "  for id in stack-single \"$DRILLS_BROKER_ID\" ", "  for id in stack-single ")')" \
+	"does not name the drills' key on the broker's list"
+
+run_case "drills-broker: a re-run mints the key again" fail \
+	"$DRB" \
+	"$(py 'edit("install.sh", "      *\":$DRILLS_BROKER_ID\") n=$((n + 1)); secret=\"${item%\":$DRILLS_BROKER_ID\"}\" ;;\n", "")')" \
+	"a second run rewrote .env"
+
+run_case "drills-broker: the key file is left readable" fail \
+	"$DRB" \
+	"$(py 'edit("install.sh", "{ chown \"$DRILLS_BROKER_UID:10001\" \"$f\" && chmod 0400 \"$f\"; }", "{ chown \"$DRILLS_BROKER_UID:10001\" \"$f\" && chmod 0644 \"$f\"; }")')" \
+	"is not mode 0400"
+
+run_case "drills-broker: the secret is printed" fail \
+	"$DRB" \
+	"$(py 'edit("install.sh", "  secret=\"\"\n  note \"fire drills:", "  note \"key $secret\"\n  secret=\"\"\n  note \"fire drills:")')" \
+	"printed the drills' secret"
+
+run_case "drills-broker: a secret the gateway holds is accepted" fail \
+	"$DRB" \
+	"$(py 'edit("install.sh", "  case \",$(identity_env_get GATEWAY_CLIENT_KEYS),\" in\n", "  case \",nothing,\" in\n")')" \
+	"a secret the gateway holds was not refused"
+
+run_case "drills-broker: the drill service is gone" fail \
+	"$DRB" \
+	"$(py 'edit("compose.yaml", "  mockryx-drill:\n    <<: *baseline\n", "  mockryx-drills:\n    <<: *baseline\n")')" \
+	"so the drills' wiring measured nothing"
+
+run_case "drills-broker: the key block is gone" fail \
+	"$DRB" \
+	"$(py 'edit("install.sh", "# drills-broker-key: begin\n", "")')" \
+	"so the key measured nothing"
+
+
 # ---- approver-key-is-wired (CLAUDE.md invariant 61) -----------------------
 run_case "approver-key-is-wired: the approver key is not PKCS#8" fail \
 	'./scripts/approver-key-is-wired.sh' \

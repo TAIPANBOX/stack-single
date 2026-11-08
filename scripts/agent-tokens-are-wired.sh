@@ -281,6 +281,11 @@ fi
 # 1.19.0 refuses a listed id the gateway does not hold); felyx and broker are named when held;
 # an id this box had before stays named on a re-run; STATIC_KEY_IDS naming a key it does not
 # hold is refused, not silently dropped.
+# The fire drills' key at the broker (CLAUDE.md invariant 74) is named on the broker's list by its id, which
+# install.sh defines once; the lifted function reads it from the environment, as it reads it from the script.
+DRILLS_BROKER_ID="$(sed -n 's/^DRILLS_BROKER_ID=//p' install.sh | head -1)"
+[ -n "$DRILLS_BROKER_ID" ] || fail "H. install.sh defines no DRILLS_BROKER_ID, so the drills' key on the broker's list was not measured"
+export DRILLS_BROKER_ID
 lib="$scratch/allowlist.sh"
 for fn in client_key_ids identity_env_get identity_env_set static_keep_ok agent_static_keys_apply; do
   awk -v n="$fn" 'index($0, n "() {") == 1 { p = 1 } p { print } p && /^}$/ { exit }' install.sh
@@ -338,6 +343,12 @@ else
     'S1:felyx,S3:agents' '' '' 'S9:stack-single' '' 'felyx' 'stack-single'
   allow_case "STATIC_KEY_IDS naming a key the box does not hold is refused" \
     'S1:felyx,S3:agents' 'ghost' '' 'S9:stack-single' '' '' DIE
+  # CLAUDE.md invariant 74: the fire drills' key at the broker is named when the broker holds it, on a fresh box and on a
+  # re-run, and it is not the gateway's drills key, which stays off both lists.
+  allow_case "the drills' key at the broker is named when the broker holds it, and the gateway's drills key is not" \
+    'S1:felyx,S2:broker,S3:agents,S4:drills' '' '' 'S9:stack-single,S8:drills-broker' '' 'felyx,broker' 'stack-single,drills-broker'
+  allow_case "a re-run keeps the drills' key at the broker named" \
+    'S1:felyx,S2:broker,S3:agents,S4:drills' '' 'felyx broker' 'S9:stack-single,S8:drills-broker' 'stack-single drills-broker' 'felyx,broker' 'stack-single,drills-broker' 1
 fi
 
 # I. TWO RUNS ON ONE BOX (CLAUDE.md invariant 53, 1.4.0). The installer runs twice against one .env: the
