@@ -5322,16 +5322,15 @@ if [ -z "$BUILD_FROM_SOURCE" ]; then
   # checked. Named on its own, compose resolves its image without its profile (measured on Compose 2.26.1 and 5.6.1,
   # 2026-11-08), so it is checked and pulled here like every other image of ours, and nothing is started.
   drill_img="$(GATEWAY_CLIENT_KEYS="${GATEWAY_CLIENT_KEYS:-not-written-before-section-3e:none}" "${COMPOSE[@]}" config --images mockryx-drill 2>/dev/null | head -1)"
-  case "$drill_img" in
-    ghcr.io/*)
-      image_verify "$drill_img"
-      note "pulling $drill_img (the fire drills, run by a person)"
-      docker pull -q "$drill_img" >/dev/null || die "could not pull $drill_img"
-      pulled=$((pulled + 1))
-      ;;
-    "") die "compose resolved no image for mockryx-drill. Is compose.yaml the one this installer shipped?" ;;
-    *) note "mockryx-drill runs $drill_img, which is not one of ours, so its signature is not checked (MOCKRYX_IMAGE in .env)" ;;
-  esac
+  [ -n "$drill_img" ] || die "compose resolved no image for mockryx-drill. Is compose.yaml the one this installer shipped?"
+  if [[ "$drill_img" == ghcr.io/* ]]; then
+    image_verify "$drill_img"
+    note "pulling $drill_img (the fire drills, run by a person)"
+    docker pull -q "$drill_img" >/dev/null || die "could not pull $drill_img"
+    pulled=$((pulled + 1))
+  else
+    note "mockryx-drill runs $drill_img, which is not one of ours, so its signature is not checked (MOCKRYX_IMAGE in .env)"
+  fi
   # A pull loop that pulled nothing is the failure this catches, and it is not
   # hypothetical: `config --images` printing an empty list, or every line
   # missing the `ghcr.io/` prefix after a rename, both leave every plane absent
