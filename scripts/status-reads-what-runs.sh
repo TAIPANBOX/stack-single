@@ -742,6 +742,7 @@ die() { EXPLAINED=1; printf '%s\n' "$*" >&2; exit 1; }
 gateway_probe_resolve() { :; }
 status_facts() { :; }
 stack_checks() { fail="$CASE_FAIL"; unmeasured="$CASE_UNMEASURED"; }
+browser_profile_status() { :; }
 journal_status() { :; }
 tool_hold_status() { :; }
 # shellcheck disable=SC1090,SC1091
