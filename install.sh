@@ -1318,7 +1318,7 @@ browser_profile_status() {
 #
 # STACK_VERSION is what the journal records: the newest docs/releases/vX.Y.Z.md, the same
 # number as x-stack-version in compose.yaml (scripts/version-is-one-number.sh).
-STACK_VERSION="1.7.1"
+STACK_VERSION="1.7.2"
 # Raised only when an older tree has become unsafe to run on a box that ran this one, and
 # only with a line in that release's notes that starts `security:` or `irreversible:` and
 # names `rollback index N` (scripts/rollback-floor.sh).
