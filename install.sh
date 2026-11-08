@@ -3890,7 +3890,7 @@ scopyx_broker_keys_apply() {
 # installer keeps off both static lists (invariant 53). Minted on every box, because compose mounts the file whether
 # or not the broker runs. A re-run keeps the secret: the .env entry first, then the file, then a new one. Every other
 # entry of the list stays byte for byte. Nothing here prints the secret.
-DRILLS_BROKER_ID=drills-broker
+DRILLS_BROKER_ID="drills-broker"
 DRILLS_BROKER_UID=65532
 drills_broker_key_apply() {
   local keys secret="" item items n=0 f="$STACK_DIR/drills/broker.key" tmp

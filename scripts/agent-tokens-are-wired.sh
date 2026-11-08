@@ -283,7 +283,7 @@ fi
 # hold is refused, not silently dropped.
 # The fire drills' key at the broker (CLAUDE.md invariant 74) is named on the broker's list by its id, which
 # install.sh defines once; the lifted function reads it from the environment, as it reads it from the script.
-DRILLS_BROKER_ID="$(sed -n 's/^DRILLS_BROKER_ID=//p' install.sh | head -1)"
+DRILLS_BROKER_ID="$(sed -n 's/^DRILLS_BROKER_ID="\([A-Za-z0-9._-]*\)"$/\1/p' install.sh | head -1)"
 [ -n "$DRILLS_BROKER_ID" ] || fail "H. install.sh defines no DRILLS_BROKER_ID, so the drills' key on the broker's list was not measured"
 export DRILLS_BROKER_ID
 lib="$scratch/allowlist.sh"
