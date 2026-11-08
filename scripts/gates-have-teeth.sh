@@ -4004,7 +4004,7 @@ run_case "browser-sandbox-is-measured: the profile is offered under a confined d
 run_case "browser-sandbox-is-measured: an unreadable dockerd label is read as unconfined" fail \
 	'./scripts/browser-sandbox-is-measured.sh' \
 	"$(py 'edit("install.sh", "  printf unreadable\n}", "  printf unconfined\n}")')" \
-	"dockerd'"'"'s label cannot be read: wrote scopyx-browser to .env where docker-default was right"
+	"label cannot be read: wrote scopyx-browser to .env where docker-default was right"
 
 run_case "browser-sandbox-is-measured: status is red for unconfined under a confined dockerd" fail \
 	'./scripts/browser-sandbox-is-measured.sh' \
