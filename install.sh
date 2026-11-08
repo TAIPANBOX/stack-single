@@ -1159,6 +1159,126 @@ running_images() {
 }
 # running-images: end
 
+# ---- the browser's sandbox, as this host answers for it (CLAUDE.md invariants 71 and 73) -----
+# browser-apparmor: begin
+# Chrome's sandbox needs a user namespace it can map itself into and chroot inside, and AppArmor
+# answers differently per host. On Debian 13 docker-default has no userns rule, so the kernel
+# refuses userns_create. On Ubuntu 24.04 kernel.apparmor_restrict_unprivileged_userns is 1, so an
+# unconfined process gets the namespace and loses its capabilities in it, and docker-default is
+# what keeps them. So compose.yaml cannot name one value, and a person should not have to.
+#
+# The profile of our own, apparmor/scopyx-browser, is docker-default plus `userns,`, and it is the
+# first thing asked: where AppArmor is on and apparmor_parser is there, it is put in
+# /etc/apparmor.d (the host loads it again at boot, before Docker restarts the container) and
+# loaded with apparmor_parser -r. Nothing else changes on a host with no AppArmor, an old parser
+# that cannot read the rule, or a failed load: the throwaway then asks docker-default, then
+# unconfined, as before.
+#
+# This asks the host. A throwaway under the browser's own flags takes the same steps Chrome takes
+# (a new user namespace, a map, a chroot) under the narrowest profile first. busybox, because the
+# browser's image is a gigabyte that most boxes never pull, and the answer is the host's.
+# Measured to agree with Chrome itself on both hosts: docs/evidence/browser-sandbox/.
+BROWSER_AA_FILE=apparmor/scopyx-browser
+browser_probe() { # APPARMOR COMMAND...
+  local aa="$1"
+  shift
+  docker run --rm --user 65532:65532 --cap-drop ALL --read-only --network none \
+    --security-opt no-new-privileges:true --security-opt "seccomp=$STACK_DIR/$BROWSER_SECCOMP" \
+    --security-opt "apparmor=$aa" busybox:1.36 "$@" >/dev/null 2>&1
+}
+browser_aa_enabled() { # AppArmor is on in this kernel, and there is a parser to load with
+  [ "$(cat "${BROWSER_AA_SYS:-/sys}/module/apparmor/parameters/enabled" 2>/dev/null || true)" = Y ] \
+    && command -v apparmor_parser >/dev/null 2>&1
+}
+browser_aa_loaded() { # the kernel holds the profile, read from where the kernel lists them
+  grep -q '^scopyx-browser (enforce)$' "${BROWSER_AA_SYS:-/sys}/kernel/security/apparmor/profiles" 2>/dev/null
+}
+browser_aa_load() { # 0 when the profile is loaded and kept for the next boot; 1 and the host as it was when not
+  local src="$STACK_DIR/$BROWSER_AA_FILE" dst="${BROWSER_AA_DIR:-/etc/apparmor.d}/scopyx-browser"
+  [ -f "$src" ] || return 1
+  browser_aa_enabled || return 1
+  # A second run changes nothing: the same file in place, and the kernel holding it.
+  if cmp -s "$src" "$dst" && browser_aa_loaded; then return 0; fi
+  if ! apparmor_parser -r "$src" >/dev/null 2>&1; then
+    note "browser sandbox: this host's apparmor_parser would not load apparmor/scopyx-browser (an older parser does not know the userns rule, and a run that is not root cannot load anything), so it is not offered"
+    return 1
+  fi
+  if ! install -m 0644 "$src" "$dst" 2>/dev/null; then
+    note "browser sandbox: apparmor/scopyx-browser loaded but could not be kept in ${dst%/*}, so it would be gone at the next boot and it is not offered"
+    return 1
+  fi
+  note "browser sandbox: loaded AppArmor profile scopyx-browser from apparmor/scopyx-browser, kept as $dst"
+}
+browser_apparmor_apply() { # writes SCOPYX_BROWSER_APPARMOR to .env, on every run: a host can change
+  local one pick="" order="docker-default unconfined"
+  # A throwaway that cannot start at all says nothing about the sandbox, so that is asked first.
+  if ! browser_probe docker-default true; then
+    note "browser sandbox: not measured, a throwaway would not start here, so SCOPYX_BROWSER_APPARMOR stays as it was"
+    return 0
+  fi
+  if browser_aa_load; then order="scopyx-browser $order"; fi
+  for one in $order; do
+    if browser_probe "$one" unshare -Ur chroot / /bin/true; then
+      pick="$one"
+      break
+    fi
+  done
+  if [ -z "$pick" ]; then
+    note "browser sandbox: this host gives it no user namespace under any AppArmor line, so scopyx-browser answers browse with the error and fetches nothing. The README, \"About the sandbox\", has the ways out"
+    return 0
+  fi
+  env_set_if_changed SCOPYX_BROWSER_APPARMOR "$pick"
+  note "browser sandbox: apparmor=$pick is the narrowest line Chrome's sandbox starts under on this host (measured, saved in .env)"
+}
+# browser-apparmor: end
+
+# browser-profile: begin
+# What the running browser is confined by, one line in `status`, read from Docker and held to what
+# .env names and to what the host loads (CLAUDE.md invariant 73). A browser under unconfined on a
+# host that could give it apparmor/scopyx-browser is a FAIL: it is the state 1.7.1 left Debian 13 in.
+browser_profile_status() {
+  local id got want src dst why=""
+  id="$(docker ps -q --filter "label=com.docker.compose.project=${NET%_core}" \
+    --filter "label=com.docker.compose.service=scopyx-browser" 2>/dev/null | head -n1 || true)"
+  if [ -z "$id" ]; then
+    printf '   skip  %s  (no scopyx-browser runs here)\n' "browser AppArmor profile"
+    return 0
+  fi
+  got="$(docker inspect --format '{{.AppArmorProfile}}' "$id" 2>/dev/null || true)"
+  want="${SCOPYX_BROWSER_APPARMOR:-docker-default}"
+  src="$STACK_DIR/$BROWSER_AA_FILE"
+  dst="${BROWSER_AA_DIR:-/etc/apparmor.d}/scopyx-browser"
+  if [ -z "$got" ] && [ "$(cat "${BROWSER_AA_SYS:-/sys}/module/apparmor/parameters/enabled" 2>/dev/null || true)" != Y ]; then
+    printf '   ok    %s: none, this host has no AppArmor\n' "browser AppArmor profile"
+    return 0
+  fi
+  [ -n "$got" ] || got="none"
+  case "$got" in
+    unconfined|none)
+      if [ -f "$src" ] && browser_aa_enabled; then
+        why="the browser runs under $got, and this host could confine it by scopyx-browser: run ./install.sh, then recreate the browser"
+      fi
+      ;;
+    scopyx-browser)
+      if ! cmp -s "$src" "$dst"; then
+        why="the host's $dst is not the stack's $BROWSER_AA_FILE"
+      elif ! browser_aa_loaded; then
+        why="the kernel does not list scopyx-browser as loaded"
+      fi
+      ;;
+  esac
+  if [ -z "$why" ] && [ "$got" != "$want" ] && [ "$got" != none ]; then
+    why=".env names $want and the browser runs under $got: recreate it"
+  fi
+  if [ -n "$why" ]; then
+    printf '   FAIL  %s: %s. %s\n' "browser AppArmor profile" "$got" "$why"
+    fail=$((fail+1))
+  else
+    printf '   ok    %s: %s\n' "browser AppArmor profile" "$got"
+  fi
+}
+# browser-profile: end
+
 # install-journal: begin
 # The install journal and the rollback index (CLAUDE.md invariant 68). A guard against
 # running the wrong tree by mistake: a stale clone, the wrong tag, an old path in a script.
@@ -1913,6 +2033,7 @@ status_main() {
   fail=0
   unmeasured=0
   stack_checks
+  browser_profile_status
   journal_status
   tool_hold_status
   EXPLAINED=1
@@ -4066,46 +4187,6 @@ fi
 note "docker $(docker --version | awk '{print $3}' | tr -d ,), compose present"
 
 
-# ---- the browser's sandbox, as this host answers for it (CLAUDE.md invariant 71) ------------
-# browser-apparmor: begin
-# Chrome's sandbox needs a user namespace it can map itself into and chroot inside, and AppArmor
-# answers differently per host. On Debian 13 docker-default has no userns rule, so the kernel
-# refuses userns_create. On Ubuntu 24.04 kernel.apparmor_restrict_unprivileged_userns is 1, so an
-# unconfined process gets the namespace and loses its capabilities in it, and docker-default is
-# what keeps them. So compose.yaml cannot name one value, and a person should not have to.
-#
-# This asks the host. A throwaway under the browser's own flags takes the same steps Chrome takes
-# (a new user namespace, a map, a chroot) under the narrowest profile first. busybox, because the
-# browser's image is a gigabyte that most boxes never pull, and the answer is the host's.
-# Measured to agree with Chrome itself on both hosts: docs/evidence/browser-sandbox/.
-browser_probe() { # APPARMOR COMMAND...
-  local aa="$1"
-  shift
-  docker run --rm --user 65532:65532 --cap-drop ALL --read-only --network none \
-    --security-opt no-new-privileges:true --security-opt "seccomp=$STACK_DIR/$BROWSER_SECCOMP" \
-    --security-opt "apparmor=$aa" busybox:1.36 "$@" >/dev/null 2>&1
-}
-browser_apparmor_apply() { # writes SCOPYX_BROWSER_APPARMOR to .env, on every run: a host can change
-  local one pick=""
-  # A throwaway that cannot start at all says nothing about the sandbox, so that is asked first.
-  if ! browser_probe docker-default true; then
-    note "browser sandbox: not measured, a throwaway would not start here, so SCOPYX_BROWSER_APPARMOR stays as it was"
-    return 0
-  fi
-  for one in docker-default unconfined; do
-    if browser_probe "$one" unshare -Ur chroot / /bin/true; then
-      pick="$one"
-      break
-    fi
-  done
-  if [ -z "$pick" ]; then
-    note "browser sandbox: this host gives it no user namespace under any AppArmor line, so scopyx-browser answers browse with the error and fetches nothing. The README, \"About the sandbox\", has the ways out"
-    return 0
-  fi
-  env_set_if_changed SCOPYX_BROWSER_APPARMOR "$pick"
-  note "browser sandbox: apparmor=$pick is the narrowest line Chrome's sandbox starts under on this host (measured, saved in .env)"
-}
-# browser-apparmor: end
 
 # ---- 1. this repo, whether cloned or piped ----------------------------------
 # The browser's profile, which compose.yaml names by a path beside itself.
@@ -4135,6 +4216,10 @@ else
   mkdir -p "$STACK_DIR/${BROWSER_SECCOMP%/*}"
   curl -fsSL "${REPO_SINGLE_RAW:-https://raw.githubusercontent.com/TAIPANBOX/stack-single/main}/$BROWSER_SECCOMP" \
     -o "$STACK_DIR/$BROWSER_SECCOMP" || die "could not fetch $BROWSER_SECCOMP, which compose.yaml names for the browser"
+  # install.sh loads this one into the host's AppArmor, so it is fetched beside the rest.
+  mkdir -p "$STACK_DIR/${BROWSER_AA_FILE%/*}"
+  curl -fsSL "${REPO_SINGLE_RAW:-https://raw.githubusercontent.com/TAIPANBOX/stack-single/main}/$BROWSER_AA_FILE" \
+    -o "$STACK_DIR/$BROWSER_AA_FILE" || die "could not fetch $BROWSER_AA_FILE, which the installer loads for the browser"
 fi
 cd "$STACK_DIR"
 

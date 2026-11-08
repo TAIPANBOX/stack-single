@@ -3913,12 +3913,12 @@ run_case "containers-carry-the-baseline: a comment says seccomp:unconfined" pass
 # The installer's pick (scripts/browser-sandbox-is-measured.sh, CLAUDE.md invariant 71).
 run_case "browser-sandbox-is-measured: the wider line is tried first" fail \
 	'./scripts/browser-sandbox-is-measured.sh' \
-	"$(py 'edit("install.sh", "for one in docker-default unconfined;", "for one in unconfined docker-default;")')" \
+	"$(py 'edit("install.sh", "order=\"docker-default unconfined\"\n  # A throwaway", "order=\"unconfined docker-default\"\n  # A throwaway")')" \
 	"wrote unconfined to .env where docker-default was right"
 
 run_case "browser-sandbox-is-measured: docker-default is never left" fail \
 	'./scripts/browser-sandbox-is-measured.sh' \
-	"$(py 'edit("install.sh", "for one in docker-default unconfined;", "for one in docker-default;")')" \
+	"$(py 'edit("install.sh", "order=\"docker-default unconfined\"\n  # A throwaway", "order=\"docker-default\"\n  # A throwaway")')" \
 	"where unconfined was right"
 
 run_case "browser-sandbox-is-measured: a throwaway that never started reads as a refusal" fail \
@@ -3944,6 +3944,111 @@ run_case "browser-sandbox-is-measured: the block is gone" fail \
 	'./scripts/browser-sandbox-is-measured.sh' \
 	"$(py 'edit("install.sh", "# browser-apparmor: begin\n", "")')" \
 	"measured NOTHING"
+
+# The browser's profile of its own (CLAUDE.md invariant 73).
+run_case "browser-sandbox-is-measured: the profile of our own is offered last" fail \
+	'./scripts/browser-sandbox-is-measured.sh' \
+	"$(py 'edit("install.sh", "order=\"scopyx-browser $order\"", "order=\"$order scopyx-browser\"")')" \
+	"where scopyx-browser was right"
+
+run_case "browser-sandbox-is-measured: the profile is loaded again on every run" fail \
+	'./scripts/browser-sandbox-is-measured.sh' \
+	"$(py 'edit("install.sh", "  if cmp -s \"$src\" \"$dst\" && browser_aa_loaded; then return 0; fi\n", "")')" \
+	"ran 2 time(s) over two runs, 1 was right"
+
+run_case "browser-sandbox-is-measured: an edited profile is never loaded again" fail \
+	'./scripts/browser-sandbox-is-measured.sh' \
+	"$(py 'edit("install.sh", "  if cmp -s \"$src\" \"$dst\" && browser_aa_loaded; then return 0; fi\n", "  if [ -e \"$dst\" ] && browser_aa_loaded; then return 0; fi\n")')" \
+	"the profile changed between two runs: apparmor_parser -r ran 1 time(s)"
+
+run_case "browser-sandbox-is-measured: a loaded profile is kept nowhere for the next boot" fail \
+	'./scripts/browser-sandbox-is-measured.sh' \
+	"$(py 'edit("install.sh", "  if ! install -m 0644 \"$src\" \"$dst\" 2>/dev/null; then\n", "  if false; then\n")')" \
+	"so a reboot loses it"
+
+run_case "browser-sandbox-is-measured: a parser that refuses the file is read as a load" fail \
+	'./scripts/browser-sandbox-is-measured.sh' \
+	"$(py 'edit("install.sh", "  if ! apparmor_parser -r \"$src\" >/dev/null 2>&1; then\n", "  if ! { apparmor_parser -r \"$src\" >/dev/null 2>&1 || true; }; then\n")')" \
+	"a parser that refuses the file: wrote scopyx-browser to .env where unconfined was right"
+
+run_case "browser-sandbox-is-measured: a kernel with no AppArmor is asked to load it" fail \
+	'./scripts/browser-sandbox-is-measured.sh' \
+	"$(py 'edit("install.sh", "/parameters/enabled\" 2>/dev/null || true)\" = Y ] \\\n", "/parameters/enabled\" 2>/dev/null || true)\" != zz ] \\\n")')" \
+	"AppArmor is off in the kernel: apparmor_parser -r ran 1 time(s)"
+
+run_case "browser-sandbox-is-measured: status passes an unconfined browser where ours could be loaded" fail \
+	'./scripts/browser-sandbox-is-measured.sh' \
+	"$(py 'edit("install.sh", "      if [ -f \"$src\" ] && browser_aa_enabled; then\n", "      if false; then\n")')" \
+	"unconfined where ours could be loaded: status said"
+
+run_case "browser-sandbox-is-measured: status passes a host copy that is not the stack's" fail \
+	'./scripts/browser-sandbox-is-measured.sh' \
+	"$(py 'edit("install.sh", "      if ! cmp -s \"$src\" \"$dst\"; then\n        why=", "      if false; then\n        why=")')" \
+	"the host's copy differs: status said"
+
+run_case "browser-sandbox-is-measured: status passes a browser that is not under what .env names" fail \
+	'./scripts/browser-sandbox-is-measured.sh' \
+	"$(py 'edit("install.sh", "  if [ -z \"$why\" ] && [ \"$got\" != \"$want\" ] && [ \"$got\" != none ]; then\n", "  if false; then\n")')" \
+	"our profile, but not what .env names: status said"
+
+run_case "browser-sandbox-is-measured: status never reads the browser's profile" fail \
+	'./scripts/browser-sandbox-is-measured.sh' \
+	"$(py 'edit("install.sh", "  stack_checks\n  browser_profile_status\n  journal_status\n", "  stack_checks\n  journal_status\n")')" \
+	"never calls browser_profile_status"
+
+run_case "browser-sandbox-is-measured: a comment in the profile loader is reworded" pass \
+	'./scripts/browser-sandbox-is-measured.sh' \
+	"$(py 'edit("install.sh", "  # A second run changes nothing: the same file in place, and the kernel holding it.", "  # A second run loads nothing: the same file in place, and the kernel holding it.")')"
+
+run_case "containers-carry-the-baseline: the installer stops offering the profile of our own" fail \
+	'./scripts/containers-carry-the-baseline.sh' \
+	"$(py 'edit("install.sh", "order=\"scopyx-browser $order\"", "order=\"$order\"")')" \
+	"does not offer apparmor/scopyx-browser first"
+
+run_case "browser-profile-is-docker-default-plus-userns: a rule is added after a denial" fail \
+	'./scripts/browser-profile-is-docker-default-plus-userns.sh' \
+	"$(py 'edit("apparmor/scopyx-browser", "  umount,\n", "  umount,\n  ptrace,\n")')" \
+	"a rule docker-default does not have: ptrace,"
+
+run_case "browser-profile-is-docker-default-plus-userns: deny mount is dropped" fail \
+	'./scripts/browser-profile-is-docker-default-plus-userns.sh' \
+	"$(py 'edit("apparmor/scopyx-browser", "  deny mount,\n", "")')" \
+	"docker-default's rule is gone: deny mount,"
+
+run_case "browser-profile-is-docker-default-plus-userns: a write under /proc/sys is allowed" fail \
+	'./scripts/browser-profile-is-docker-default-plus-userns.sh' \
+	"$(py 'edit("apparmor/scopyx-browser", "  deny @{PROC}/sys/[^k]** w,", "  @{PROC}/sys/[^k]** w,")')" \
+	"docker-default's rule is gone: deny @{PROC}/sys/[^k]** w,"
+
+run_case "browser-profile-is-docker-default-plus-userns: a denial loses a letter" fail \
+	'./scripts/browser-profile-is-docker-default-plus-userns.sh' \
+	"$(py 'edit("apparmor/scopyx-browser", "deny @{PROC}/sysrq-trigger rwklx,", "deny @{PROC}/sysrq-trigger rwkl,")')" \
+	"docker-default's rule is gone: deny @{PROC}/sysrq-trigger rwklx,"
+
+run_case "browser-profile-is-docker-default-plus-userns: the userns rule is dropped" fail \
+	'./scripts/browser-profile-is-docker-default-plus-userns.sh' \
+	"$(py 'edit("apparmor/scopyx-browser", "  userns,\n", "")')" \
+	"the one rule this profile exists for is missing: userns,"
+
+run_case "browser-profile-is-docker-default-plus-userns: the profile is renamed under its file" fail \
+	'./scripts/browser-profile-is-docker-default-plus-userns.sh' \
+	"$(py 'edit("apparmor/scopyx-browser", "profile scopyx-browser flags", "profile scopyx-browser-v2 flags")')" \
+	"the profile is not named scopyx-browser"
+
+run_case "browser-profile-is-docker-default-plus-userns: the installer stops offering it" fail \
+	'./scripts/browser-profile-is-docker-default-plus-userns.sh' \
+	"$(py 'edit("install.sh", "order=\"scopyx-browser $order\"", "order=\"$order\"")')" \
+	"install.sh does not offer scopyx-browser first"
+
+run_case "browser-profile-is-docker-default-plus-userns: there is no profile file" fail \
+	'./scripts/browser-profile-is-docker-default-plus-userns.sh' \
+	"$(py 'import os
+os.remove("apparmor/scopyx-browser")')" \
+	"measured NOTHING"
+
+run_case "browser-profile-is-docker-default-plus-userns: a comment in the profile is reworded" pass \
+	'./scripts/browser-profile-is-docker-default-plus-userns.sh' \
+	"$(py 'edit("apparmor/scopyx-browser", "# The AppArmor profile of scopyx-browser:", "# The AppArmor profile of the browser, scopyx-browser:")')"
 
 # The three a certified key hangs on (CLAUDE.md invariant 72).
 run_case "containers-carry-the-baseline: keyryx loses its process limit and waits on G3.11 again" fail \

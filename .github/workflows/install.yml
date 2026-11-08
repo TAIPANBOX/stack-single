@@ -680,15 +680,17 @@ jobs:
       - name: the browser's sandbox in a project of its own, with its controls
         run: |
           set -euo pipefail
-          ./docs/evidence/browser-sandbox/lab.sh "$GITHUB_WORKSPACE" https://example.com/ 2>&1 | tee lab.log
-          grep -q 'apparmor=docker-default is the narrowest line' lab.log || { echo "::error::the installer's block did not pick docker-default on Ubuntu 24.04"; exit 1; }
+          sudo ./docs/evidence/browser-sandbox/lab.sh "$GITHUB_WORKSPACE" https://example.com/ 2>&1 | tee lab.log
+          grep -q 'apparmor=scopyx-browser is the narrowest line' lab.log || { echo "::error::the installer's block did not pick the profile of our own on Ubuntu 24.04"; exit 1; }
 
       - name: install with the browser, as an operator does
         run: |
           set -euo pipefail
           sudo env STACK_DIR=/opt/agent-stack WITH_BROWSER=1 ./install.sh 2>&1 | tee install-1.log
           grep -q "every check passed" install-1.log || { echo "::error::the install did not pass every check"; exit 1; }
-          sudo grep -qx "SCOPYX_BROWSER_APPARMOR='docker-default'" /opt/agent-stack/.env || { echo "::error::.env does not hold what this host measured"; sudo grep '^SCOPYX_BROWSER_APPARMOR=' /opt/agent-stack/.env; exit 1; }
+          sudo grep -qx "SCOPYX_BROWSER_APPARMOR='scopyx-browser'" /opt/agent-stack/.env || { echo "::error::.env does not hold what this host measured"; sudo grep '^SCOPYX_BROWSER_APPARMOR=' /opt/agent-stack/.env; exit 1; }
+          cmp /opt/agent-stack/apparmor/scopyx-browser /etc/apparmor.d/scopyx-browser || { echo "::error::the profile is not kept in /etc/apparmor.d for the next boot"; exit 1; }
+          sudo grep -qx 'scopyx-browser (enforce)' /sys/kernel/security/apparmor/profiles || { echo "::error::the kernel does not list the profile"; exit 1; }
           [ -s /opt/agent-stack/seccomp/chromium-v1.json ] || { echo "::error::the profile did not reach the box"; exit 1; }
 
       - name: start it with the README's command, and read a real page through the policy plane
@@ -719,6 +721,8 @@ jobs:
           [ "$now" = "$BROWSER_CONTAINER" ] || { echo "::error::the re-run recreated the browser"; exit 1; }
           sudo env STACK_DIR=/opt/agent-stack "$GITHUB_WORKSPACE/install.sh" status | tee "$GITHUB_WORKSPACE/status.log"
           grep -q 'scopyx-browser' "$GITHUB_WORKSPACE/status.log" || { echo "::error::status does not read the browser"; exit 1; }
+          grep -q '^   ok    browser AppArmor profile: scopyx-browser$' "$GITHUB_WORKSPACE/status.log" || { echo "::error::status does not say the browser runs under scopyx-browser"; exit 1; }
+          [ "$(sudo docker inspect -f '{{.AppArmorProfile}}' "$BROWSER_CONTAINER")" = scopyx-browser ] || { echo "::error::Docker does not say the browser runs under scopyx-browser"; exit 1; }
 
       - name: state on failure
         if: failure()

@@ -31,7 +31,7 @@
      "why": "Docker's default plus the three calls Chrome's sandbox makes, each measured by taking it out: chroot, clone into a user, pid and net namespace, unshare into a user namespace",
      "until": "permanent"},
     {"service": "scopyx-browser", "key": "apparmor", "value": "${SCOPYX_BROWSER_APPARMOR:-docker-default}",
-     "why": "docker-default refuses Chrome's user namespace on Debian 13 and is the one that allows it on Ubuntu 24.04, so install.sh measures the host and writes the value",
-     "until": "docker-default-allows-userns"}
+     "why": "docker-default refuses Chrome's user namespace on Debian 13, so install.sh loads apparmor/scopyx-browser (docker-default plus userns) and measures the host: scopyx-browser first, docker-default, and unconfined only where AppArmor cannot load the profile; compose.yaml keeps docker-default for a box that never ran install.sh",
+     "until": "permanent"}
   ]
 }

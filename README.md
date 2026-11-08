@@ -1876,22 +1876,26 @@ custody for a new key. Your own
 `compose.override.yaml` can hold a mount or a port this baseline does not know about: a
 service that writes outside its volumes now gets `Read-only file system`.
 
-AppArmor decides whether `scopyx-browser` can start Chrome's sandbox, and the two hosts this
-installer supports disagree, each measured with this whole baseline on:
+AppArmor decides whether `scopyx-browser` can start Chrome's sandbox, and Docker's own profile,
+`docker-default`, has no `userns` rule: on Debian 13 the kernel refuses the user namespace Chrome
+starts in (`credentials.cc`, `Permission denied`, `userns_create` denied in the kernel log), and
+until 1.7.1 the installer fell back to `apparmor=unconfined` there, which drops every denial the
+profile has. So the stack ships a profile of its own, `apparmor/scopyx-browser`: `docker-default`,
+rule by rule, plus `userns,` and nothing else. It still denies writes under `/proc/sys`,
+`/proc/sysrq-trigger`, `mount`, and the parts of `/sys` the kernel keeps for itself, and a gate
+holds the file to exactly that.
 
-| Host | Docker's default profile | `apparmor=unconfined` | The installer writes |
-|---|---|---|---|
-| Ubuntu 24.04, Docker 28.0.4 | renders a page | `No usable sandbox`, because `kernel.apparmor_restrict_unprivileged_userns` is 1 | `docker-default` |
-| Debian 13, Docker 26.1.5 | `credentials.cc`, `Permission denied`: the kernel logs `userns_create` denied, because `docker-default` has no `userns` rule | renders a page | `unconfined` |
-
-So `compose.yaml` reads the line from `.env`, and `install.sh` measures it on every run: a
-throwaway with the browser's own user, filter and capabilities takes the steps Chrome takes
-(a new user namespace, a map, a chroot) under `docker-default` and then under `unconfined`, and
-the first that works becomes `SCOPYX_BROWSER_APPARMOR`. The run says which. There is nothing for
-you to do on either host. On the second row the browser has no AppArmor profile, and the rest of
-the baseline holds: the filter still refuses `mount`, `setns` and a mount namespace, in a
-container with no capabilities and a read-only root. A profile of your own goes in
-`compose.override.yaml`, and the installer leaves that file alone.
+`install.sh` measures the line on every run. Where AppArmor is on and `apparmor_parser` is there,
+it loads the profile (`apparmor_parser -r`) and keeps the file in `/etc/apparmor.d`, so the host
+loads it again at boot, before Docker restarts the container. Then a throwaway with the browser's
+own user, filter and capabilities takes the steps Chrome takes (a new user namespace, a map, a
+chroot) under `scopyx-browser`, then `docker-default`, then `unconfined`, and the first that works
+becomes `SCOPYX_BROWSER_APPARMOR`. The run says which. A host with no AppArmor, no parser, or a
+parser that does not know the `userns` rule loads nothing and asks the last two, as
+before. A second run loads nothing again, and `./install.sh status` says which profile the running
+browser is under and goes red when it is `unconfined` on a host that could have given it ours. There
+is nothing for you to do. A profile of your own goes in `compose.override.yaml`, and the installer
+leaves that file alone.
 
 ## What the installer will not do quietly
 
