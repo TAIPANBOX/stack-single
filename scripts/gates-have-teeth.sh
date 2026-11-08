@@ -1829,7 +1829,7 @@ run_case "drills-broker: a newer mockryx pin still passes" pass \
 
 run_case "drills-broker: the drill's image is pulled unchecked" fail \
 	"$DRB" \
-	"$(py 'edit("install.sh", "      image_verify \"$drill_img\"\n", "")')" \
+	"$(py 'edit("install.sh", "    image_verify \"$drill_img\"\n", "")')" \
 	"before it pulls the image"
 
 run_case "drills-broker: the key is not on the broker's list" fail \
