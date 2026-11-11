@@ -135,9 +135,9 @@ write_env() { printf "TOKENFUSE_MCP_KEYS='%s:stack-single,%s:drills-broker'\n" "
 CALLER_BINDS='{"key_id":"stack-single","unit":"install-check","agents":["agent://local.invalid/install-check"]},{"key_id":"drills-broker","unit":"drills","agents":["agent://mockryx.local/*"]}'
 MAP_BINDS='{"units":[{"id":"console"},{"id":"agents"},{"id":"drills"},{"id":"install-check"}],"keys":[{"key_id":"agents","unit":"agents","agents":["agent://local/agents/*"]},{"key_id":"broker","unit":"console","agents":["agent://local/agents/*"]},'"$CALLER_BINDS"']}'
 # Binds unit agents, but no broker.
-MAP_AGENTS_NO_BROKER='{"units":[{"id":"console"},{"id":"agents"}],"keys":[{"key_id":"agents","unit":"agents","agents":["agent://local/agents/*"]}]}'
+MAP_AGENTS_NO_BROKER='{"units":[{"id":"console"},{"id":"agents"},{"id":"drills"},{"id":"install-check"}],"keys":[{"key_id":"agents","unit":"agents","agents":["agent://local/agents/*"]},'"$CALLER_BINDS"']}'
 # Binds broker, but nothing in unit agents, the unit the installer enrols the operator agent in at vouchryx.
-MAP_NO_AGENTS_UNIT='{"units":[{"id":"console"}],"keys":[{"key_id":"broker","unit":"console","agents":["agent://local/agents/*"]}]}'
+MAP_NO_AGENTS_UNIT='{"units":[{"id":"console"},{"id":"drills"},{"id":"install-check"}],"keys":[{"key_id":"broker","unit":"console","agents":["agent://local/agents/*"]},'"$CALLER_BINDS"']}'
 MAP_NO_BROKER='{"units":[{"id":"console"}],"keys":[{"key_id":"felyx","unit":"console","agents":["agent://local/genaryx/felyx"]}]}'
 
 # A. the keys file has the broker line
@@ -202,6 +202,7 @@ d="$(mktemp -d "$scratch/d.XXXXXX")"
 printf '%s:felyx\n' "$SECRET_A" >"$d/keys.txt"; chmod 0640 "$d/keys.txt"
 # The map binds unit agents (case G's check passes), so only the broker check can refuse it.
 printf '%s\n' "$MAP_AGENTS_NO_BROKER" >"$d/map.json"
+write_env "$d"
 before="$(cat "$d/keys.txt")"
 run_case "D" "$d" "$d/keys.txt" "$d/map.json" "1"
 if [ "$RC" -eq 0 ]; then
@@ -215,8 +216,9 @@ fi
 # gateway would refuse that agent's token as unit_contradicts_map (measured on forge 2026-10-25: 403 for a valid
 # token). Refused before anything is written, naming unit agents, and the keys file is untouched.
 d="$(mktemp -d "$scratch/g.XXXXXX")"
-printf '%s:felyx\n%s:broker\n' "$SECRET_A" "$SECRET_BROKER" >"$d/keys.txt"; chmod 0640 "$d/keys.txt"
+printf '%s:felyx\n%s:broker\n%s:stack-single\n%s:drills-broker\n' "$SECRET_A" "$SECRET_BROKER" "$SECRET_SS" "$SECRET_DB" >"$d/keys.txt"; chmod 0640 "$d/keys.txt"
 printf '%s\n' "$MAP_NO_AGENTS_UNIT" >"$d/map.json"
+write_env "$d"
 before="$(cat "$d/keys.txt")"
 run_case "G" "$d" "$d/keys.txt" "$d/map.json" ""
 if [ "$RC" -eq 0 ]; then

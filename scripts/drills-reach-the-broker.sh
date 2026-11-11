@@ -128,8 +128,10 @@ awk '/config --images mockryx-drill/{r=NR} r&&/image_verify "\$drill_img"/&&!v{v
   || fail "install.sh does not check mockryx-drill's signature before it pulls the image"
 
 # ---- C. the drills' key is on the broker's static list ----------------------------------
-grep -qE '^  for id in stack-single "\$DRILLS_BROKER_ID" ' install.sh \
-  || fail "agent_static_keys_apply does not name the drills' key on the broker's list, so under require the broker refuses it 401"
+awk '/^broker_static_ids\(\) \{/{p=1} p{print} p&&/^}$/{exit}' install.sh | grep -qE '^  for id in stack-single "\$DRILLS_BROKER_ID" ' \
+  || fail "agent_static_keys_apply does not name the drills' key on the broker's list (broker_static_ids, the one copy of the rule), so under require the broker refuses it 401"
+awk '/^agent_static_keys_apply\(\) \{/{p=1} p{print} p&&/^}$/{exit}' install.sh | grep -q 'broker_static_ids' \
+  || fail "agent_static_keys_apply does not take the broker's list from broker_static_ids, so the list it writes is not the one the keys are minted for"
 awk '/^drills_broker_key_apply$/{d=NR} /^agent_static_keys_apply$/{s=NR} END{exit !(d&&s&&d<s)}' install.sh \
   || fail "drills_broker_key_apply is not called before agent_static_keys_apply, so the first run lists a key the broker does not hold yet"
 

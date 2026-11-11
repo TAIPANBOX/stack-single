@@ -1834,7 +1834,7 @@ run_case "drills-broker: the drill's image is pulled unchecked" fail \
 
 run_case "drills-broker: the key is not on the broker's list" fail \
 	"$DRB" \
-	"$(py 'edit("install.sh", "  for id in stack-single \"$DRILLS_BROKER_ID\" ", "  for id in stack-single ")')" \
+	"$(py 'edit_all("install.sh", "  for id in stack-single \"$DRILLS_BROKER_ID\" ", "  for id in stack-single ")')" \
 	"does not name the drills' key on the broker's list"
 
 run_case "drills-broker: a re-run mints the key again" fail \
@@ -1854,7 +1854,7 @@ run_case "drills-broker: the secret is printed" fail \
 
 run_case "drills-broker: a secret the gateway holds is accepted" fail \
 	"$DRB" \
-	"$(py 'edit("install.sh", "  case \",$(identity_env_get GATEWAY_CLIENT_KEYS),\" in\n", "  case \",nothing,\" in\n")')" \
+	"$(py 'edit("install.sh", "  case \"$gwkeys\" in\n", "  case \",nothing,\" in\n")')" \
 	"a secret the gateway holds was not refused"
 
 run_case "drills-broker: this box's tool-hold drill is not mounted" fail \
