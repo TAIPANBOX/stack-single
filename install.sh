@@ -676,6 +676,10 @@ if compose_has tokenfuse-mcp-broker && compose_has typryx; then
     # the check names an agent. The tool hold's seed grants this id `ask` and nothing else, under
     # the broker's static key, which is how this check comes.
     hdrs+="x-fuse-agent-id: agent://local.invalid/install-check"$'\r\n'
+    # And the run it belongs to: the broker's tool-call check fails closed (invariant 75), so a tools/call that
+    # names no run is refused ("the taint gate needs x-fuse-run-id"). A run of this check's own, never the
+    # gateway checks' install-check, whose owner would be another key.
+    hdrs+="x-fuse-run-id: install-check-broker"$'\r\n'
     grep -q '"isError":false' <<<"$(http_request POST "$1" "$hdrs" \
         '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ask","arguments":{"template":"eval.outcome_met","state":{"task":"2+2","final_answer":"4"}},"_meta":{"typryx/key":"{{secret:typryx_key}}"}}}')"
   }
@@ -732,6 +736,39 @@ if compose_has tokenfuse-mcp-broker && compose_has typryx; then
   # agent_token_required; with them off it is a plain 401 or 403.
   install_only check "typed plane: a tools/call with no broker key is refused" \
         "mcp_refused_without_key http://tokenfuse-mcp-broker:4200/mcp"
+fi
+
+# The broker's tool-call check fails closed, and every static key it admits is a gateway key too (CLAUDE.md
+# invariant 75). The first is read off the running broker, not off the file; the second is read from the lines
+# this box carries, and a key the broker admits that the gateway does not hold with the same secret and name
+# on its static list is a FAIL that names the id, never a secret: a call from that caller is refused by the
+# closed check, with "the taint gate answered 401".
+# shellcheck disable=SC2329,SC2317  # invoked from stack_checks below
+broker_callers_status() {
+  local id bl gk gl bk missing="" unlisted="" other=""
+  [ "$(identity_env_get TOKENFUSE_AGENT_TOKENS)" = require ] || return 0
+  bl="$(identity_env_get TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS)"
+  gk="$(identity_env_get GATEWAY_CLIENT_KEYS)"
+  gl=",$(identity_env_get TOKENFUSE_AGENT_TOKENS_STATIC_KEYS),"
+  bk="$(identity_env_get TOKENFUSE_MCP_KEYS)"
+  for id in ${bl//,/ }; do
+    if [ -z "$(client_key_secret "$gk" "$id")" ]; then missing="$missing $id"; continue; fi
+    [ "$(client_key_secret "$gk" "$id")" = "$(client_key_secret "$bk" "$id")" ] || other="$other $id"
+    case "$gl" in *",$id,"*) ;; *) unlisted="$unlisted $id" ;; esac
+  done
+  if [ -z "$missing$other$unlisted" ]; then
+    printf '   ok    MCP broker: every static key it admits (%s) is a gateway key of the same id and secret, on the gateway'"'"'s static list\n' "${bl:-none}"
+    return 0
+  fi
+  [ -z "$missing" ] || { printf '   FAIL  MCP broker: admits the static key(s)%s that the gateway does not hold, so every call from them is refused by the closed tool-call check\n' "$missing"; fail=$((fail+1)); }
+  [ -z "$other" ] || { printf '   FAIL  MCP broker: the gateway holds the key(s)%s with another secret than the broker does, so the check is refused 401\n' "$other"; fail=$((fail+1)); }
+  [ -z "$unlisted" ] || { printf '   FAIL  MCP broker: the gateway holds the key(s)%s but its static list does not name them, so under require it refuses them\n' "$unlisted"; fail=$((fail+1)); }
+  return 0
+}
+if compose_has tokenfuse-mcp-broker; then
+  check "MCP broker: the tool-call check fails closed (TOKENFUSE_MCP_TAINT_FAILMODE=closed)" \
+        "[ \"\$($DC exec -T tokenfuse-mcp-broker printenv TOKENFUSE_MCP_TAINT_FAILMODE)\" = closed ]"
+  broker_callers_status
 fi
 
 # The delegation plane's own checks, only when WITH_DELEGATION actually
@@ -3319,7 +3356,7 @@ mint_env_secret() {
 # Section 3, once .env exists: the secrets, the spec and the map, handed to section
 # 3e as if they were the operator's files.
 mint_prepare() {
-  local felyx agents drills costcrew broker why seen s
+  local felyx agents drills costcrew broker why seen s bid bsecret bbind bc_spec="" bc_units="" bc_keys=""
   [ "$MINT_ON" = 1 ] || return 0
   mint_env_secret GENARYX_COPILOT_FUSE_KEY
   mint_env_secret GATEWAY_AGENT_KEY
@@ -3359,10 +3396,34 @@ mint_prepare() {
     esac
     seen="$seen $s"
   done
+  # The broker's static callers (invariant 75): each key the broker admits without a token is also a gateway key of
+  # the same id and secret, bound as narrowly as its caller. The secrets are the broker's own, from TOKENFUSE_MCP_KEYS
+  # (written before this runs), so a re-run builds the same spec and the same map.
+  if [ "${AGENT_TOKENS_ON:-0}" = 1 ]; then
+    for bid in $(broker_static_ids); do
+      bbind="$(broker_caller_binding "$bid")"
+      if [ -z "$bbind" ] && broker_caller_covered "$bid" "$felyx:felyx,$agents:agents,$drills:drills${costcrew:+,$costcrew:costcrew}${broker:+,$broker:broker}"; then continue; fi
+      [ -n "$bbind" ] || die "the MCP broker admits the static key $bid, which this installer did not mint, so it cannot say which agent ids the gateway's key for it may speak as. The broker asks the gateway with that caller's own key, and a key the gateway does not hold is refused there. Give CLIENT_KEYS_FILE with IDENTITY_MAP_FILE (your keys file holds a line '<secret>:$bid' with the broker's secret, and your map binds it), or take $bid out of TOKENFUSE_MCP_KEYS in $STACK_DIR/.env. Nothing was started."
+      bsecret="$(client_key_secret "$(identity_env_get TOKENFUSE_MCP_KEYS)" "$bid")"
+      why="$(identity_entry_why "$bsecret:$bid")"
+      [ -z "$why" ] || die "the MCP broker's key $bid in TOKENFUSE_MCP_KEYS (.env), $why. Remove that entry and the installer mints one. Nothing was started."
+      case " $seen " in
+        *" $bsecret "*) die "the MCP broker's key $bid holds the same secret as a gateway client key, so one caller could speak as another. Remove that entry of TOKENFUSE_MCP_KEYS and the installer mints a new one. Nothing was started." ;;
+      esac
+      seen="$seen $bsecret"
+      bc_spec="$bc_spec,$bsecret:$bid"
+      case "${bbind%%|*}" in
+        drills) ;;
+        *) bc_units="$bc_units"$',\n    '"{\"id\": \"${bbind%%|*}\", \"name\": \"The installer's own checks of the MCP broker\"}" ;;
+      esac
+      bc_keys="$bc_keys"$',\n    '"{\"key_id\": \"$bid\", \"unit\": \"${bbind%%|*}\", \"agents\": [\"${bbind#*|}\"]}"
+    done
+  fi
   MINT_MAP="$(mktemp)" || die "could not make a temporary file for the minted identity map"
   {
     printf '{\n  "units": [\n    {"id": "console", "name": "Felyx, the console copilot"},\n    {"id": "agents", "name": "The operator agents"},\n    {"id": "drills", "name": "The fire drills"}'
     [ -z "$broker" ] || printf ',\n    {"id": "broker", "name": "The MCP broker, relaying tool-call checks"}'
+    printf '%s' "$bc_units"
     if [ "$costcrew_on" = 1 ]; then
       printf ',\n    {"id": "costcrew", "name": "The CostCrew runner, through the gateway"}'
     fi
@@ -3371,9 +3432,10 @@ mint_prepare() {
     if [ "$costcrew_on" = 1 ]; then
       printf ',\n    {"key_id": "costcrew", "unit": "costcrew", "agents": ["agent://%s/costcrew/*"]}' "$MINT_DOMAIN"
     fi
+    printf '%s' "$bc_keys"
     printf '\n  ]\n}\n'
   } >"$MINT_MAP" || die "could not write the minted identity map"
-  IDENTITY_KEYS_NEW="$felyx:felyx,$agents:agents,$drills:drills${costcrew:+,$costcrew:costcrew}${broker:+,$broker:broker}"
+  IDENTITY_KEYS_NEW="$felyx:felyx,$agents:agents,$drills:drills${costcrew:+,$costcrew:costcrew}${broker:+,$broker:broker}$bc_spec"
   IDENTITY_KEYS_GIVEN=1
   IDENTITY_MAP_SRC="$MINT_MAP"
 }
@@ -3684,7 +3746,7 @@ agent_tokens_resolve() {
     local nbl
     case "${ADD_BROKER_KEY:-}" in
       ""|0|1) ;;
-      *) die "ADD_BROKER_KEY is 1 (mint the broker's key and append it to your keys file) or unset, not what it was given. Nothing was installed." ;;
+      *) die "ADD_BROKER_KEY is 1 (mint the broker's key and append it and the broker's static callers' keys to your keys file) or unset, not what it was given. Nothing was installed." ;;
     esac
     # A re-run need not name the keys file again: the keys an earlier run took from it are kept in .env.
     # The broker's line belongs in that file, so with no file this run can neither read the line nor add
@@ -3711,6 +3773,27 @@ agent_tokens_resolve() {
     # binding agent://<td>/agents/* only to the broker's unit answered 403 to a valid token.
     if [ -n "${IDENTITY_MAP_FILE:-}" ] && ! identity_map_has_agents_unit "$IDENTITY_MAP_FILE"; then
       die "your identity map binds no key in unit agents, the unit this installer enrols agent://$td/agents/operator in at vouchryx, so the gateway would refuse that agent's token (unit_contradicts_map). Add a unit with id agents, a keys[] entry with key_id agents, unit agents and agents agent://$td/agents/*, and a matching '<secret>:agents' line in your keys file (the installer keeps that key off the static allow-list), then run again. Nothing was installed."
+    fi
+  fi
+  # The broker's static callers are gateway keys too (CLAUDE.md invariant 75). Refused here, before anything is
+  # installed, what can be told without the secrets: a minted box cannot bind an id this installer did not mint, and
+  # a box with its own files needs a line and a map binding for each static key the broker admits, or
+  # ADD_BROKER_KEY=1 for the lines. The secrets are compared in section 3, when the broker's keys exist.
+  local bid bmissing=""
+  if [ "$MINT_ON" = 1 ]; then
+    for bid in $(broker_static_ids); do
+      [ -n "$(broker_caller_binding "$bid")" ] || broker_caller_covered "$bid" "$(identity_env_get GATEWAY_CLIENT_KEYS)" \
+        || die "the MCP broker admits the static key $bid, which this installer did not mint, so it cannot say which agent ids the gateway's key for it may speak as. The broker asks the gateway with that caller's own key, and a key the gateway does not hold is refused there. Give CLIENT_KEYS_FILE with IDENTITY_MAP_FILE (your keys file holds a line '<secret>:$bid' with the broker's secret, and your map binds it), or take $bid out of TOKENFUSE_MCP_KEYS in $STACK_DIR/.env. Nothing was installed."
+    done
+  else
+    for bid in $(broker_static_ids future); do
+      if [ -n "${IDENTITY_MAP_FILE:-}" ] && ! identity_map_binds_id "$IDENTITY_MAP_FILE" "$bid"; then
+        die "your identity map does not bind key_id $bid, a static key the MCP broker admits. The broker asks the gateway's tool-call check with that caller's own key, so the gateway must hold it and bind it. Add $(broker_caller_hint "$bid") to the file named by IDENTITY_MAP_FILE, and a line '<secret>:$bid' to your keys file (the secret the broker holds for it, in TOKENFUSE_MCP_KEYS of $STACK_DIR/.env; ADD_BROKER_KEY=1 appends the lines), then run again. Nothing was installed."
+      fi
+      [ -n "$(keys_file_id_secrets "$CLIENT_KEYS_FILE" "$bid")" ] || bmissing="$bmissing $bid"
+    done
+    if [ -n "$bmissing" ] && [ "${ADD_BROKER_KEY:-}" != 1 ]; then
+      die "the MCP broker admits the static key(s)${bmissing}, and your keys file holds no line for them. The broker asks the gateway's tool-call check with that caller's own key, so the gateway must hold each one too, or every tool call from it is refused (the check fails closed). Add a line '<secret>:<id>' for each to your keys file, with the secret the broker holds (TOKENFUSE_MCP_KEYS in $STACK_DIR/.env), and bind each in your identity map, or run again with ADD_BROKER_KEY=1 and the installer appends the lines to your file, keeping its mode. Or WITH_AGENT_TOKENS=0 keeps static keys only (the weaker way out). Nothing was installed."
     fi
   fi
 }
@@ -3893,7 +3976,7 @@ scopyx_broker_keys_apply() {
 DRILLS_BROKER_ID="drills-broker"
 DRILLS_BROKER_UID=65532
 drills_broker_key_apply() {
-  local keys secret="" item items n=0 f="$STACK_DIR/drills/broker.key" tmp
+  local keys secret="" item items n=0 f="$STACK_DIR/drills/broker.key" tmp gwkeys
   keys="$(identity_env_get TOKENFUSE_MCP_KEYS)"
   IFS=',' read -r -a items <<<"$keys"
   for item in ${items[@]+"${items[@]}"}; do
@@ -3915,7 +3998,11 @@ drills_broker_key_apply() {
       "$secret:"*) die "the fire drills' key at the broker is also the secret of another entry of TOKENFUSE_MCP_KEYS, so a drill could speak as that caller. Remove the $DRILLS_BROKER_ID entry and $f, and the installer mints one. Nothing was started." ;;
     esac
   done
-  case ",$(identity_env_get GATEWAY_CLIENT_KEYS)," in
+  # The gateway holds this very secret under this very id since 1.7.3 (the broker asks the gateway's check with the
+  # drills' own key, invariant 75), so its own entry is not another key: every other entry is held to the rule.
+  gwkeys=",$(identity_env_get GATEWAY_CLIENT_KEYS),"
+  gwkeys="${gwkeys//,$secret:$DRILLS_BROKER_ID,/,}"
+  case "$gwkeys" in
     *",$secret:"*) die "the fire drills' key at the broker is also a gateway client key, which mockryx refuses to send to the broker. Remove the $DRILLS_BROKER_ID entry of TOKENFUSE_MCP_KEYS and $f, and the installer mints one. Nothing was started." ;;
   esac
   if [ "$n" = 0 ]; then
@@ -3959,6 +4046,123 @@ static_keep_ok() {
   esac
 }
 
+# ---- the broker's static callers are gateway keys too (CLAUDE.md invariant 75) ---------------------------------------
+# The broker asks the gateway's tool-call check before every tools/call, and for a static caller it asks with THAT
+# caller's own key (tokenfuse invariant 118). The gateway answers only a key it holds and, under require, lists, so a
+# static key only the broker knows gets a 401 there, which is "no answer", and TOKENFUSE_MCP_TAINT_FAILMODE=closed
+# refuses the call. So every static key the broker admits is also a gateway key of the same id and secret: held in
+# GATEWAY_CLIENT_KEYS, bound in the identity map, and named on the gateway's static list. The installer does this
+# itself for the keys it mints; for a box with its own keys file it checks, and it adds the lines only under
+# ADD_BROKER_KEY=1, because it never edits a file it did not write (invariant 48).
+
+# ID: "unit|agent id" the gateway key of a broker static caller is bound to, nothing for an id this installer did not
+# mint. As narrow as the caller: the installer's own check speaks as one id, the drills as their own domain.
+broker_caller_binding() {
+  case "$1" in
+    stack-single) printf 'install-check|agent://local.invalid/install-check' ;;
+    "$DRILLS_BROKER_ID") printf 'drills|agent://mockryx.local/*' ;;
+  esac
+}
+
+# ID: what a map and a keys file must hold for ID, in words, for a refusal.
+broker_caller_hint() {
+  local b
+  b="$(broker_caller_binding "$1")"
+  if [ -n "$b" ]; then
+    printf 'a keys[] entry with key_id %s, unit %s and agents ["%s"]' "$1" "${b%%|*}" "${b#*|}"
+  else
+    printf 'a keys[] entry with key_id %s and the agent ids it speaks as' "$1"
+  fi
+}
+
+# SPEC ID: the secret of the entry for key id ID in a secret:key_id,... list, nothing when there is none.
+client_key_secret() {
+  local IFS=',' e
+  for e in $1; do
+    if [ "${e##*:}" = "$2" ]; then printf '%s' "${e%:*}"; return 0; fi
+  done
+  return 0
+}
+
+# ID SPEC: SPEC (a secret:key_id,... list) already holds the key id ID with the secret the broker holds for it, so the
+# gateway has that caller's key and nothing needs binding or adding.
+broker_caller_covered() {
+  local b g
+  b="$(client_key_secret "$(identity_env_get TOKENFUSE_MCP_KEYS)" "$1")"
+  g="$(client_key_secret "$2" "$1")"
+  [ -n "$b" ] && [ "$b" = "$g" ]
+}
+
+# FILE ID: the secret of every line of a keys file whose key id is ID, one per line (comments and blanks skipped).
+keys_file_id_secrets() {
+  awk -v id="$2" '
+    { sub(/\r$/, ""); gsub(/^[ \t]+|[ \t]+$/, "") }
+    $0 == "" || substr($0, 1, 1) == "#" { next }
+    { i = length($0) - length(id); if (i > 1 && substr($0, i, 1) == ":" && substr($0, i + 1) == id) print substr($0, 1, i - 1) }
+  ' "$1"
+}
+
+# FILE ID: the identity map binds a key id ID (a keys[] entry with that key_id).
+identity_map_binds_id() {
+  grep -q -E "\"key_id\"[[:space:]]*:[[:space:]]*\"$2\"" "$1"
+}
+
+# [future]: the key ids the broker's static list names this run: the installer's own check key, the drills' key,
+# the ids the last run named and the operator's STATIC_KEY_IDS, each only when the broker holds it, and never the
+# installer's agents and drills keys unless named (invariant 53). With `future` the two keys this installer mints
+# count as held, for the checks that run before .env exists. One copy: agent_static_keys_apply writes this list,
+# the minted map and the keys-file check read it.
+broker_static_ids() {
+  local have_mcp id out=""
+  have_mcp=" $(client_key_ids "$(identity_env_get TOKENFUSE_MCP_KEYS)" | tr '\n' ' ')"
+  [ "${1:-}" != future ] || have_mcp="$have_mcp stack-single $DRILLS_BROKER_ID "
+  for id in stack-single "$DRILLS_BROKER_ID" $EXISTING_MCP_IDS $STATIC_KEY_IDS_LIST; do
+    case "$have_mcp" in *" $id "*) ;; *) continue ;; esac
+    static_keep_ok "$id" || continue
+    case " $out " in *" $id "*) ;; *) out="$out $id" ;; esac
+  done
+  printf '%s' "${out# }"
+}
+
+# Section 3, after the broker's keys exist and before mint_prepare: a box given its own keys file. Each static key
+# the broker admits must be a line of that file with the broker's own secret. A missing line is added only when the
+# run says ADD_BROKER_KEY=1, in the file's own mode; a line with another secret stops the run, because rewriting
+# either side would refuse whoever holds it now. Nothing here prints a secret.
+broker_callers_apply() {
+  local id s n added=""
+  [ "$AGENT_TOKENS_ON" = 1 ] || return 0
+  [ "$MINT_ON" != 1 ] || return 0
+  [ "$IDENTITY_DOOR" = main ] || die "internal: the broker's callers were checked while the ${IDENTITY_DOOR:-no} door was selected"
+  for id in $(broker_static_ids); do
+    s="$(client_key_secret "$(identity_env_get TOKENFUSE_MCP_KEYS)" "$id")"
+    [ -n "$s" ] || die "internal: the broker holds no secret for $id. Nothing was started."
+    n="$(keys_file_id_secrets "$CLIENT_KEYS_FILE" "$id" | grep -c . || true)"
+    if [ "$n" -gt 1 ]; then
+      die "your keys file holds more than one line for the key id $id, so the gateway's key for the broker's caller $id is not clear. Keep one. Nothing was started."
+    elif [ "$n" = 1 ]; then
+      [ "$(keys_file_id_secrets "$CLIENT_KEYS_FILE" "$id")" = "$s" ] \
+        || die "your keys file holds a line for the key id $id with a different secret than the MCP broker holds for it (TOKENFUSE_MCP_KEYS in $STACK_DIR/.env). The broker asks the gateway with that caller's own key, so both doors must hold one secret. Put the broker's secret in your file, or run again with ADD_BROKER_KEY=1 after removing your line. Nothing was started."
+    else
+      added="$added $id"
+    fi
+  done
+  [ -n "$added" ] || return 0
+  [ "${ADD_BROKER_KEY:-}" = 1 ] \
+    || die "the MCP broker admits the static key(s)${added}, and your keys file holds no line for them. The broker asks the gateway's tool-call check with that caller's own key, so the gateway must hold it too, or every tool call from it is refused. Add a line '<secret>:<id>' for each to your keys file with the secret the broker holds (TOKENFUSE_MCP_KEYS in $STACK_DIR/.env), bind each in your identity map, or run again with ADD_BROKER_KEY=1 and the installer appends the lines, keeping the file's mode. Nothing was started."
+  if [ -s "$CLIENT_KEYS_FILE" ] && [ -n "$(tail -c1 "$CLIENT_KEYS_FILE")" ]; then
+    printf '\n' >>"$CLIENT_KEYS_FILE" || die "could not add to the file named by CLIENT_KEYS_FILE. Nothing was started."
+  fi
+  for id in $added; do
+    s="$(client_key_secret "$(identity_env_get TOKENFUSE_MCP_KEYS)" "$id")"
+    [ -z "$(identity_entry_why "$s:$id")" ] || die "the broker's key $id, $(identity_entry_why "$s:$id"). Nothing was started."
+    case ",$IDENTITY_KEYS_NEW," in *"$s:"*) die "the broker's key $id has the secret of a key already in your keys file. Remove the broker's entry from TOKENFUSE_MCP_KEYS and the installer mints one. Nothing was started." ;; esac
+    printf '%s:%s\n' "$s" "$id" >>"$CLIENT_KEYS_FILE" \
+      || die "could not append the line for the broker's caller $id to the file named by CLIENT_KEYS_FILE. Nothing was started."
+    IDENTITY_KEYS_NEW="${IDENTITY_KEYS_NEW:+$IDENTITY_KEYS_NEW,}$s:$id"
+  done
+  note "ADD_BROKER_KEY=1: appended the gateway keys of the broker's static callers (${added# }) to the file named by CLIENT_KEYS_FILE (its mode is kept, the secrets are never printed); bind them in your identity map"
+}
+
 agent_static_keys_apply() {
   local have id gw="" mcp="" have_mcp named
   [ "$AGENT_TOKENS_ON" = 1 ] || return 0
@@ -3966,6 +4170,19 @@ agent_static_keys_apply() {
   for id in $STATIC_KEY_IDS_LIST; do
     case "$have" in *" $id "*) ;; *) die "STATIC_KEY_IDS names $id, which is not a client key this box holds. Nothing was started." ;; esac
   done
+  # The broker's own list first, the same rule: its own held keys only, the operator's STATIC_KEY_IDS on either door,
+  # the installer's own check key (stack-single) by design, and the fire drills' key at the broker (invariant 74),
+  # which mockryx sends as a static key because it cannot sign a proof. One copy of the rule: broker_static_ids.
+  have_mcp=" $(client_key_ids "$(identity_env_get TOKENFUSE_MCP_KEYS)" | tr '\n' ' ')"
+  for id in stack-single "$DRILLS_BROKER_ID" $EXISTING_MCP_IDS $STATIC_KEY_IDS_LIST; do
+    case "$have_mcp" in *" $id "*) ;; *) continue ;; esac
+    if ! static_keep_ok "$id"; then
+      REMOVED_STATIC_IDS="$REMOVED_STATIC_IDS $id"
+    fi
+  done
+  mcp="$(broker_static_ids)"
+  STATIC_MCP_LIST="$(printf '%s' "$mcp" | tr ' ' ',')"
+  identity_env_set TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS "$STATIC_MCP_LIST"
   # felyx and the broker are named on every run the box holds them (1.4.0, supervisor review of f39c64b): a
   # list written empty by a box that held neither must not refuse a key added later. A re-run names what the
   # last run named (EXISTING_GATEWAY_IDS, read from .env), and the operator's STATIC_KEY_IDS, and nothing else.
@@ -3980,24 +4197,17 @@ agent_static_keys_apply() {
     fi
     case " $gw " in *" $id "*) ;; *) gw="$gw $id" ;; esac
   done
+  # Every static key the broker admits is a gateway key of the same id and is named here too (invariant 75): the
+  # broker asks the gateway's check with the caller's own key, and under require the gateway answers a static key
+  # only when its list names it. A broker key the gateway does not hold stays off this list, because a listed id
+  # the gateway does not hold stops it from starting; status reads that gap and says so.
+  for id in $mcp; do
+    case "$have" in *" $id "*) ;; *) continue ;; esac
+    case " $gw " in *" $id "*) ;; *) gw="$gw $id" ;; esac
+  done
   gw="${gw# }"
   STATIC_GATEWAY_LIST="$(printf '%s' "$gw" | tr ' ' ',')"
   identity_env_set TOKENFUSE_AGENT_TOKENS_STATIC_KEYS "$STATIC_GATEWAY_LIST"
-  # The broker's own list, the same rule: its own held keys only, the operator's STATIC_KEY_IDS on either door,
-  # the installer's own check key (stack-single) by design, and the fire drills' key at the broker (invariant 74),
-  # which mockryx sends as a static key because it cannot sign a proof.
-  have_mcp=" $(client_key_ids "$(identity_env_get TOKENFUSE_MCP_KEYS)" | tr '\n' ' ')"
-  for id in stack-single "$DRILLS_BROKER_ID" $EXISTING_MCP_IDS $STATIC_KEY_IDS_LIST; do
-    case "$have_mcp" in *" $id "*) ;; *) continue ;; esac
-    if ! static_keep_ok "$id"; then
-      REMOVED_STATIC_IDS="$REMOVED_STATIC_IDS $id"
-      continue
-    fi
-    case " $mcp " in *" $id "*) ;; *) mcp="$mcp $id" ;; esac
-  done
-  mcp="${mcp# }"
-  STATIC_MCP_LIST="$(printf '%s' "$mcp" | tr ' ' ',')"
-  identity_env_set TOKENFUSE_MCP_AGENT_TOKENS_STATIC_KEYS "$STATIC_MCP_LIST"
 }
 
 agent_tokens_reach_note() {
@@ -4024,6 +4234,9 @@ agent_tokens_reach_note() {
     printf '  fire drills (a re-run does not keep them). To keep one, name it in STATIC_KEY_IDS, for example\n'
     printf '  STATIC_KEY_IDS=agents ./install.sh.\n'
   fi
+  printf '  The MCP broker'"'"'s tool-call check fails closed (CLAUDE.md invariant 75): a tools/call the gateway'"'"'s check does not answer,\n'
+  printf '  or that names no x-fuse-run-id, is refused. Each static key the broker admits is also a gateway key of the same id and\n'
+  printf '  secret, bound to the one agent it speaks as, and named on the gateway'"'"'s static list below.\n'
   printf '  Static keys still admitted at the gateway: %s\n' "${STATIC_GATEWAY_LIST:-none}"
   printf '  Static keys still admitted at the MCP broker: %s (stack-single is the installer'"'"'s own check key there; felyx and broker at the gateway are the console and the broker'"'"'s taint relay)\n' "${STATIC_MCP_LIST:-none}"
   printf '  static keys still admitted; move these agents to tokens, or name each one in STATIC_KEY_IDS on purpose.'
@@ -4902,6 +5115,9 @@ agent_tokens_apply
 scopyx_broker_keys_apply
 # The fire drills' key at the MCP broker (invariant 74): before section 3e names it on the broker's static list.
 drills_broker_key_apply
+# Every static key the broker admits is a gateway key too (invariant 75): a box with its own keys file is checked here,
+# a minted box has them written by mint_prepare, which is next.
+broker_callers_apply
 mint_prepare
 # The provider keys the gateway and the OpenAI door hold (section 0h, invariant 39): the
 # directories compose mounts, the files written from what the operator gave, and the

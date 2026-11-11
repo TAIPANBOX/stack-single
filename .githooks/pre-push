@@ -100,6 +100,7 @@ step "the record seal signs through keyryx and the witness attests (invariant 62
 step "the record seal pins custody's trailryx-root kid at install (invariant 63)" "./scripts/trailryx-root-is-pinned.sh"
 step "each door names its own addresses and wardryx the union (invariant 64)" "./scripts/door-origins-are-named.sh"
 step "the fire drills reach the MCP broker with a key of its own (invariant 74)" "./scripts/drills-reach-the-broker.sh"
+step "the broker's tool-call check fails closed and its static callers are gateway keys (invariant 75)" "./scripts/broker-callers-are-gateway-keys.sh"
 # Reaches the network (a tarball from the sibling repo), which is why it is
 # last: everything that can be judged offline has already spoken by here.
 step "every image has the files it copies" "./scripts/build-context-complete.sh"

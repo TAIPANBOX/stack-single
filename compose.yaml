@@ -1116,6 +1116,14 @@ services:
       # the default, and the broker asks no gateway, as it did before.
       TOKENFUSE_MCP_TAINT_GATEWAY: ${BROKER_TAINT_GATEWAY:-}
       TOKENFUSE_MCP_TAINT_GATEWAY_KEY_FILE: ${BROKER_GATEWAY_KEY_FILE:-}
+      # closed, like TOKENFUSE_WARDRYX_FAILMODE above: a tool call the gateway's check
+      # cannot answer (no answer, a 401, no x-fuse-run-id) is refused, not forwarded
+      # with nothing judging it. Unset, tokenfuse reads open and the only trace of a
+      # call let through is a dependency_failed event. A literal on purpose, with no
+      # operator switch (CLAUDE.md invariant 75). A static caller is asked with its OWN
+      # key, so every static key the broker admits is also a gateway key of the same
+      # id and secret; install.sh writes both and `status` reads them.
+      TOKENFUSE_MCP_TAINT_FAILMODE: closed
     ports:
       - "${GATEWAY_BIND:-127.0.0.1}:4200:4200"
     volumes:

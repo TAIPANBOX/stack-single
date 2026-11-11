@@ -85,7 +85,8 @@ expect "broker, tampered token: refused as an agent token (401)" "$(has 401 agen
 echo "== 7. the broker asks typryx with the agent's own token: a tools/call answered, not refused by the agent-token door"
 # The D3(b) path: the door asks wardryx with the token and its proof (wardryx 2.3.0). typryx's stub answers.
 ASK='{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"ask","arguments":{"template":"eval.outcome_met","state":{"task":"2+2","final_answer":"4"}},"_meta":{"typryx/key":"{{secret:typryx_key}}"}}}'
-XH="X-Fuse-Mcp-Upstream: typryx"$'\n'"x-fuse-agent-id: $agent"
+# A run too: the broker's tool-call check fails closed, so a tools/call that names no run is refused (invariant 75).
+XH="X-Fuse-Mcp-Upstream: typryx"$'\n'"x-fuse-agent-id: $agent"$'\n'"x-fuse-run-id: measure-broker-ask"
 out="$(XHDR="$XH" python3 admit.py "$BROKER_URL/mcp" POST "$WORK/token" "$WORK/dpop.pem" "$ASK")"
 echo "$out"
 answered() { python3 -c 'import json,sys;d=json.load(sys.stdin);b=d["body"];print("yes" if d["status"]==200 and "jsonrpc" in b and not any(x in b for x in ("agent_token_proof_invalid","agent_token_invalid","agent_token_required")) else "no")' <<<"$1"; }

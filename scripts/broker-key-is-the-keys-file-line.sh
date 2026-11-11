@@ -28,6 +28,16 @@
 #      variable, saying the keys are kept in .env and naming CLIENT_KEYS_FILE and
 #      WITH_AGENT_TOKENS=0 as the ways out, and .env is unchanged.
 #
+#   H. (invariant 75) every static key the broker admits (stack-single, drills-broker) is a gateway key of
+#      the same id and secret, so the same box with its own keys file carries those lines too:
+#        H1. no line for them and no ADD_BROKER_KEY: refused before anything is written, naming each id
+#            and ADD_BROKER_KEY=1, and the keys file is byte for byte unchanged;
+#        H2. ADD_BROKER_KEY=1: both lines are appended with the secrets the broker holds, the mode is
+#            kept, and the keys section 3e checks carry them;
+#        H3. a line for one of them with another secret than the broker's: refused, nothing rewritten;
+#        H4. a map that does not bind one of them: refused before the keys file is touched;
+#        H5. a second run over the file H2 left changes nothing.
+#
 # IT REFUSES TO REPORT OK ON NOTHING: no install.sh, no `# agent-tokens:` block, or no
 # agent_tokens_resolve in it is reported and fails.
 
@@ -86,6 +96,7 @@ run_case() {
     set -euo pipefail
     STACK_DIR="$1"; MINT_ON=0; CLIENT_KEYS_FILE="$2"; IDENTITY_MAP_FILE="$3"; ADD_BROKER_KEY="$4"
     GATEWAY_PROBE=127.0.0.1; WITH_AGENT_TOKENS=""; WITH_DELEGATION=""; STATIC_KEY_IDS=""
+    DRILLS_BROKER_ID=drills-broker
     # What identity_resolve read from the keys file, before this block runs: section 3e checks the map
     # against exactly this, so a line the block adds to the file must reach it too.
     IDENTITY_DOOR=main; IDENTITY_KEYS_GIVEN=1
@@ -94,6 +105,7 @@ run_case() {
     . "$5/block.sh"
     agent_tokens_resolve
     agent_tokens_apply
+    broker_callers_apply
     echo "APPLIED"
     printf "SPEC_IDS=%s\n" "$(printf "%s" "$IDENTITY_KEYS_NEW" | tr "," "\n" | sed -e "s/.*://" | paste -s -d, -)"
     want="$(grep -v -E "^[[:space:]]*(#|$)" "$2" | paste -s -d, -)"
@@ -114,7 +126,14 @@ fixture_secret() {
 }
 SECRET_A="$(fixture_secret)"
 SECRET_BROKER="$(fixture_secret)"
-MAP_BINDS='{"units":[{"id":"console"},{"id":"agents"}],"keys":[{"key_id":"agents","unit":"agents","agents":["agent://local/agents/*"]},{"key_id":"broker","unit":"console","agents":["agent://local/agents/*"]}]}'
+# The secrets the MCP broker holds for its two static callers (TOKENFUSE_MCP_KEYS), the ones the gateway's keys must repeat.
+SECRET_SS="$(fixture_secret)"
+SECRET_DB="$(fixture_secret)"
+# A box's .env as the broker's keys section leaves it: the broker's two callers, bare as add_env_default writes them
+# (the stub reads the quoted form, so this one is quoted).
+write_env() { printf "TOKENFUSE_MCP_KEYS='%s:stack-single,%s:drills-broker'\n" "$SECRET_SS" "$SECRET_DB" >"$1/.env"; }
+CALLER_BINDS='{"key_id":"stack-single","unit":"install-check","agents":["agent://local.invalid/install-check"]},{"key_id":"drills-broker","unit":"drills","agents":["agent://mockryx.local/*"]}'
+MAP_BINDS='{"units":[{"id":"console"},{"id":"agents"},{"id":"drills"},{"id":"install-check"}],"keys":[{"key_id":"agents","unit":"agents","agents":["agent://local/agents/*"]},{"key_id":"broker","unit":"console","agents":["agent://local/agents/*"]},'"$CALLER_BINDS"']}'
 # Binds unit agents, but no broker.
 MAP_AGENTS_NO_BROKER='{"units":[{"id":"console"},{"id":"agents"}],"keys":[{"key_id":"agents","unit":"agents","agents":["agent://local/agents/*"]}]}'
 # Binds broker, but nothing in unit agents, the unit the installer enrols the operator agent in at vouchryx.
@@ -123,8 +142,9 @@ MAP_NO_BROKER='{"units":[{"id":"console"}],"keys":[{"key_id":"felyx","unit":"con
 
 # A. the keys file has the broker line
 d="$(mktemp -d "$scratch/a.XXXXXX")"; mkdir -p "$d/keys"
-printf '%s:felyx\n%s:broker\n' "$SECRET_A" "$SECRET_BROKER" >"$d/keys.txt"; chmod 0640 "$d/keys.txt"
+printf '%s:felyx\n%s:broker\n%s:stack-single\n%s:drills-broker\n' "$SECRET_A" "$SECRET_BROKER" "$SECRET_SS" "$SECRET_DB" >"$d/keys.txt"; chmod 0640 "$d/keys.txt"
 printf '%s\n' "$MAP_BINDS" >"$d/map.json"
+write_env "$d"
 before="$(cat "$d/keys.txt")"
 run_case "A" "$d" "$d/keys.txt" "$d/map.json" ""
 if [ "$RC" -ne 0 ] || ! grep -qx APPLIED <<<"$OUT"; then
@@ -155,13 +175,17 @@ fi
 d="$(mktemp -d "$scratch/c.XXXXXX")"
 printf '%s:felyx\n' "$SECRET_A" >"$d/keys.txt"; chmod 0640 "$d/keys.txt"
 printf '%s\n' "$MAP_BINDS" >"$d/map.json"
+write_env "$d"
 run_case "C" "$d" "$d/keys.txt" "$d/map.json" "1"
 if [ "$RC" -ne 0 ] || ! grep -qx APPLIED <<<"$OUT"; then
   fail "C. ADD_BROKER_KEY=1 with a binding map was refused: $OUT"
 else
-  last="$(tail -1 "$d/keys.txt")"
-  case "$last" in *:broker) ;; *) fail "C. the keys file does not end in a ':broker' line after ADD_BROKER_KEY=1" ;; esac
-  [ "$(wc -l <"$d/keys.txt" | tr -d ' ')" = 2 ] || fail "C. the keys file does not hold exactly the felyx line and the appended broker line"
+  last="$(sed -n 2p "$d/keys.txt")"
+  case "$last" in *:broker) ;; *) fail "C. the keys file's second line is not the appended ':broker' line after ADD_BROKER_KEY=1" ;; esac
+  # And the lines of the broker's two static callers (invariant 75), after it, with the broker's own secrets.
+  [ "$(sed -n 3p "$d/keys.txt")" = "$SECRET_SS:stack-single" ] && [ "$(sed -n 4p "$d/keys.txt")" = "$SECRET_DB:drills-broker" ] \
+    || fail "C. the keys file does not end with the lines of the broker's static callers, in the broker's secrets"
+  [ "$(wc -l <"$d/keys.txt" | tr -d ' ')" = 4 ] || fail "C. the keys file does not hold exactly the felyx line, the appended broker line and the two callers' lines"
   [ "$(mode_of "$d/keys.txt")" = 640 ] || fail "C. the keys file's mode changed from 640 to $(mode_of "$d/keys.txt")"
   appended="${last%:broker}"
   got="$(cat "$d/broker/key" 2>/dev/null || true)"
@@ -241,6 +265,69 @@ for add in "" 1; do
   fi
   [ "$(cat "$d/.env")" = "$before" ] || fail "$label. .env changed on a refusal"
 done
+
+# H. CLAUDE.md invariant 75: every static key the broker admits is a gateway key of the same id and secret.
+# H1. the file has the broker line and nothing for the two callers, and no ADD_BROKER_KEY: refused, naming both ids
+# and the way out, with the file and .env as they were.
+d="$(mktemp -d "$scratch/h1.XXXXXX")"
+printf '%s:felyx\n%s:broker\n' "$SECRET_A" "$SECRET_BROKER" >"$d/keys.txt"; chmod 0640 "$d/keys.txt"
+printf '%s\n' "$MAP_BINDS" >"$d/map.json"
+write_env "$d"
+before="$(cat "$d/keys.txt")"; before_env="$(cat "$d/.env")"
+run_case "H1" "$d" "$d/keys.txt" "$d/map.json" ""
+if [ "$RC" -eq 0 ]; then
+  fail "H1. a keys file with no line for the broker's static callers was accepted with no ADD_BROKER_KEY"
+else
+  grep -q 'stack-single' <<<"$OUT" && grep -q 'drills-broker' <<<"$OUT" || fail "H1. the refusal does not name both ids: $OUT"
+  grep -q 'ADD_BROKER_KEY=1' <<<"$OUT" || fail "H1. the refusal does not name ADD_BROKER_KEY=1: $OUT"
+  [ "$(cat "$d/keys.txt")" = "$before" ] || fail "H1. the keys file changed on a refusal"
+  [ "$(cat "$d/.env")" = "$before_env" ] || fail "H1. .env changed on a refusal"
+fi
+# H2. ADD_BROKER_KEY=1: both lines appended with the broker's secrets, the mode kept; H5: a second run changes nothing.
+d="$(mktemp -d "$scratch/h2.XXXXXX")"
+printf '%s:felyx\n%s:broker\n' "$SECRET_A" "$SECRET_BROKER" >"$d/keys.txt"; chmod 0640 "$d/keys.txt"
+printf '%s\n' "$MAP_BINDS" >"$d/map.json"
+write_env "$d"
+run_case "H2" "$d" "$d/keys.txt" "$d/map.json" "1"
+if [ "$RC" -ne 0 ] || ! grep -qx APPLIED <<<"$OUT"; then
+  fail "H2. ADD_BROKER_KEY=1 did not add the callers' lines: $OUT"
+else
+  [ "$(tail -2 "$d/keys.txt" | head -1)" = "$SECRET_SS:stack-single" ] && [ "$(tail -1 "$d/keys.txt")" = "$SECRET_DB:drills-broker" ] \
+    || fail "H2. the appended lines are not the broker's own secrets for stack-single and drills-broker"
+  [ "$(mode_of "$d/keys.txt")" = 640 ] || fail "H2. the keys file's mode changed from 640 to $(mode_of "$d/keys.txt")"
+  grep -qx 'SPEC_IS_THE_FILE=yes' <<<"$OUT" || fail "H2. the keys section 3e checks lack the appended lines"
+  if grep -qF -- "$SECRET_SS" <<<"$OUT" || grep -qF -- "$SECRET_DB" <<<"$OUT"; then fail "H2. a secret was printed"; fi
+  cp "$d/keys.txt" "$d/keys.after1"
+  run_case "H5" "$d" "$d/keys.txt" "$d/map.json" "1"
+  if [ "$RC" -ne 0 ]; then fail "H5. a second run over the file ADD_BROKER_KEY=1 left was refused: $OUT"
+  else cmp -s "$d/keys.txt" "$d/keys.after1" || fail "H5. a second run changed the keys file (it added the lines twice or rewrote them)"; fi
+fi
+# H3. a line for stack-single with another secret than the broker's: refused, nothing rewritten.
+d="$(mktemp -d "$scratch/h3.XXXXXX")"
+printf '%s:felyx\n%s:broker\n%s:stack-single\n%s:drills-broker\n' "$SECRET_A" "$SECRET_BROKER" "$(fixture_secret)" "$SECRET_DB" >"$d/keys.txt"; chmod 0640 "$d/keys.txt"
+printf '%s\n' "$MAP_BINDS" >"$d/map.json"
+write_env "$d"
+before="$(cat "$d/keys.txt")"
+run_case "H3" "$d" "$d/keys.txt" "$d/map.json" "1"
+if [ "$RC" -eq 0 ]; then
+  fail "H3. a keys file whose stack-single line holds another secret than the broker's was accepted"
+else
+  grep -q 'different secret' <<<"$OUT" && grep -q 'stack-single' <<<"$OUT" || fail "H3. the refusal does not name the id and the different secret: $OUT"
+  [ "$(cat "$d/keys.txt")" = "$before" ] || fail "H3. the keys file was rewritten"
+fi
+# H4. a map that binds broker and agents but not stack-single: refused before the keys file is touched.
+d="$(mktemp -d "$scratch/h4.XXXXXX")"
+printf '%s:felyx\n' "$SECRET_A" >"$d/keys.txt"; chmod 0640 "$d/keys.txt"
+printf '%s\n' '{"units":[{"id":"console"},{"id":"agents"},{"id":"drills"}],"keys":[{"key_id":"agents","unit":"agents","agents":["agent://local/agents/*"]},{"key_id":"broker","unit":"console","agents":["agent://local/agents/*"]},{"key_id":"drills-broker","unit":"drills","agents":["agent://mockryx.local/*"]}]}' >"$d/map.json"
+write_env "$d"
+before="$(cat "$d/keys.txt")"
+run_case "H4" "$d" "$d/keys.txt" "$d/map.json" "1"
+if [ "$RC" -eq 0 ]; then
+  fail "H4. ADD_BROKER_KEY=1 was accepted with a map that does not bind stack-single"
+else
+  grep -q 'does not bind key_id stack-single' <<<"$OUT" || fail "H4. the refusal does not say the map does not bind stack-single: $OUT"
+  [ "$(cat "$d/keys.txt")" = "$before" ] || fail "H4. the keys file was appended although the map does not bind stack-single"
+fi
 
 # E. the docs and the refusal text name the same form the installer reads
 if grep -q 'broker:<secret>' README.md; then

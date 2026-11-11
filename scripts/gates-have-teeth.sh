@@ -5800,6 +5800,93 @@ run_case "no-reader-leaves-a-pipe-early: no workflow step is read" fail \
 	"$(py 'edit("scripts/no-reader-leaves-a-pipe-early.sh", "elif path.startswith(\".github/workflows/\") and", "elif path.startswith(\".github/flows/\") and")')" \
 	'measured NOTHING'
 
+# ---- broker-callers-are-gateway-keys (CLAUDE.md invariant 75) ------------------
+BCK='./scripts/broker-callers-are-gateway-keys.sh'
+run_case "broker-callers: the closed word is taken out" fail \
+	"$BCK" \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_MCP_TAINT_FAILMODE: closed\n", "")')" \
+	"not exactly once"
+
+run_case "broker-callers: the failmode reads open" fail \
+	"$BCK" \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_MCP_TAINT_FAILMODE: closed\n", "      TOKENFUSE_MCP_TAINT_FAILMODE: open\n")')" \
+	"not the literal closed"
+
+run_case "broker-callers: the failmode becomes an operator switch" fail \
+	"$BCK" \
+	"$(py 'edit("compose.yaml", "      TOKENFUSE_MCP_TAINT_FAILMODE: closed\n", "      TOKENFUSE_MCP_TAINT_FAILMODE: ${BROKER_TAINT_FAILMODE:-closed}\n")')" \
+	"not the literal closed"
+
+run_case "broker-callers: the broker admits a key only it holds" fail \
+	"$BCK" \
+	"$(py 'edit("install.sh", "${broker:+,$broker:broker}$bc_spec\"", "${broker:+,$broker:broker}\"")')" \
+	"gateway holds no key of that id"
+
+run_case "broker-callers: the map binds none of the broker's callers" fail \
+	"$BCK" \
+	"$(py 'edit("install.sh", "printf \x27%s\x27 \"$bc_keys\"", "printf \x27%s\x27 \"\"")')" \
+	"does not bind"
+
+run_case "broker-callers: the gateway's static list leaves them out" fail \
+	"$BCK" \
+	"$(py 'edit("install.sh", "  for id in $mcp; do\n", "  for id in; do\n")')" \
+	"does not name it"
+
+run_case "broker-callers: the installer's check key may speak as the operator's agents" fail \
+	"$BCK" \
+	"$(py 'edit("install.sh", "stack-single) printf \x27install-check|agent://local.invalid/install-check\x27 ;;", "stack-single) printf \x27install-check|agent://local.invalid/agents/*\x27 ;;")')" \
+	"not exactly"
+
+run_case "broker-callers: the gateway's key has another secret than the broker's" fail \
+	"$BCK" \
+	"$(py 'edit("install.sh", "bc_spec=\"$bc_spec,$bsecret:$bid\"", "bc_spec=\"$bc_spec,${bsecret}x:$bid\"")')" \
+	"another secret"
+
+run_case "broker-callers: a broker key nobody minted is listed with no gateway key" fail \
+	"$BCK" \
+	"$(py 'edit("install.sh", "[ -n \"$bbind\" ] || die \"the MCP", "[ -n \"$bbind\" ] || continue; : \"the MCP")')" \
+	"static key (ops)"
+
+run_case "broker-callers: the mint block is gone (measured nothing)" fail \
+	"$BCK" \
+	"$(py 'edit("install.sh", "# identity-mint: begin", "# identity-mint: start")')" \
+	"measured NOTHING"
+
+run_case "broker-callers: no service runs the broker command (measured nothing)" fail \
+	"$BCK" \
+	"$(py 'edit("compose.yaml", "command: [\"mcp-broker\"]", "command: [\"mcp-brokerx\"]")')" \
+	"measured NOTHING"
+
+run_case "broker-callers: a box's own keys file is never checked" fail \
+	"$BCK" \
+	"$(py 'edit("install.sh", "\nbroker_callers_apply\nmint_prepare\n", "\nmint_prepare\n")')" \
+	"the order"
+
+run_case "broker-callers: status stops reading the callers" fail \
+	"$BCK" \
+	"$(py 'edit("install.sh", "  broker_callers_status\nfi\n", "fi\n")')" \
+	"never calls broker_callers_status"
+
+BKL='./scripts/broker-key-is-the-keys-file-line.sh'
+run_case "broker-key-line: the callers lines are appended but never reach the checks" fail \
+	"$BKL" \
+	"$(py 'edit("install.sh", "    IDENTITY_KEYS_NEW=\"${IDENTITY_KEYS_NEW:+$IDENTITY_KEYS_NEW,}$s:$id\"\n  done\n  note \"ADD_BROKER_KEY=1: appended the gateway keys", "  done\n  note \"ADD_BROKER_KEY=1: appended the gateway keys")')" \
+	"lack the appended"
+
+run_case "broker-key-line: a map that binds none of the callers is not noticed" fail \
+	"$BKL" \
+	"$(py 'edit("install.sh", "if [ -n \"${IDENTITY_MAP_FILE:-}\" ] && ! identity_map_binds_id \"$IDENTITY_MAP_FILE\" \"$bid\"; then", "if false; then")')" \
+	"H4"
+
+run_case "broker-key-line: a callers line with another secret is accepted" fail \
+	"$BKL" \
+	"$(py 'edit("install.sh", "      [ \"$(keys_file_id_secrets \"$CLIENT_KEYS_FILE\" \"$id\")\" = \"$s\" ] \\\n", "      true \\\n")')" \
+	"H3"
+
+run_case "broker-callers: a comment is reworded (must pass)" pass \
+	"$BCK" \
+	"$(py 'edit("install.sh", "# SPEC ID: the secret of the entry for key id ID in a secret:key_id,... list, nothing when there is none.", "# SPEC ID: the secret of the entry for the key id ID in a secret:key_id list, or nothing.")')"
+
 echo
 if [ -n "$(git status --porcelain)" ]; then
 	printf 'FAIL: this script left the tree dirty, so it cannot be trusted about anything above\n'
