@@ -142,8 +142,8 @@ jobs:
         run: |
           cd /opt/agent-stack
           sudo grep -qx "TOKENFUSE_AGENT_TOKENS='require'" .env || { echo "::error::.env does not set the gateway to require agent tokens"; exit 1; }
-          sudo grep -qx "TOKENFUSE_AGENT_TOKENS_STATIC_KEYS='felyx,broker'" .env \
-            || { echo "::error::the gateway's static-key list on a fresh box is not felyx,broker"; sudo grep '^TOKENFUSE_AGENT_TOKENS_STATIC_KEYS=' .env; exit 1; }
+          sudo grep -qx "TOKENFUSE_AGENT_TOKENS_STATIC_KEYS='felyx,broker,stack-single,drills-broker'" .env \
+            || { echo "::error::the gateway's static-key list on a fresh box is not felyx,broker,stack-single,drills-broker (the broker's own callers are gateway keys too, invariant 75)"; sudo grep '^TOKENFUSE_AGENT_TOKENS_STATIC_KEYS=' .env; exit 1; }
           akey="$(sudo cat agent-key)"
           fkey="$(sudo sed -n "s/^GENARYX_COPILOT_FUSE_KEY='\(.*\)'\$/\1/p" .env)"
           call() {
@@ -348,9 +348,9 @@ jobs:
           [ "${{ matrix.profile }}" = typed-risk ] && extra="WITH_TYPED=1"
           sudo env STACK_DIR=/opt/agent-stack STATIC_KEY_IDS=agents $extra ./install.sh 2>&1 | tee "$GITHUB_WORKSPACE/install-3.log"
           grep -q "every check passed" "$GITHUB_WORKSPACE/install-3.log" || { echo "::error::the STATIC_KEY_IDS=agents run did not pass every check"; exit 1; }
-          sudo grep -qx "TOKENFUSE_AGENT_TOKENS_STATIC_KEYS='felyx,broker,agents'" .env \
-            || { echo "::error::the gateway's list is not felyx,broker,agents after STATIC_KEY_IDS=agents"; sudo grep '^TOKENFUSE_AGENT_TOKENS_STATIC_KEYS=' .env; exit 1; }
-          grep -qF "Static keys still admitted at the gateway: felyx,broker,agents" "$GITHUB_WORKSPACE/install-3.log" \
+          sudo grep -qx "TOKENFUSE_AGENT_TOKENS_STATIC_KEYS='felyx,broker,stack-single,drills-broker,agents'" .env \
+            || { echo "::error::the gateway's list is not felyx,broker,stack-single,drills-broker,agents after STATIC_KEY_IDS=agents"; sudo grep '^TOKENFUSE_AGENT_TOKENS_STATIC_KEYS=' .env; exit 1; }
+          grep -qF "Static keys still admitted at the gateway: felyx,broker,stack-single,drills-broker,agents" "$GITHUB_WORKSPACE/install-3.log" \
             || { echo "::error::the closing report does not name agents as kept"; exit 1; }
           if grep -qF "Removed from the static allow-lists" "$GITHUB_WORKSPACE/install-3.log"; then
             echo "::error::the run removed a key it was asked to keep"; exit 1
