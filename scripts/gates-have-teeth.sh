@@ -5887,6 +5887,67 @@ run_case "broker-callers: a comment is reworded (must pass)" pass \
 	"$BCK" \
 	"$(py 'edit("install.sh", "# SPEC ID: the secret of the entry for key id ID in a secret:key_id,... list, nothing when there is none.", "# SPEC ID: the secret of the entry for the key id ID in a secret:key_id list, or nothing.")')"
 
+# ---- no-unverified-download-outside-build (CLAUDE.md invariant 76) -------------
+NUD='./scripts/no-unverified-download-outside-build.sh'
+BRANCH_OPEN='if [ -n \"$BUILD_FROM_SOURCE\" ]; then\n  say \"fetching the image definitions\"'
+run_case "no-download-outside-build: the stack-k8s tarball is fetched on every run again" fail \
+	"$NUD" \
+	"$(py 'edit("install.sh", "'"$BRANCH_OPEN"'", "curl -fsSL \"$REPO_TARBALL\" | tar -xz -C \"$STACK_DIR/x\" --strip-components=1\n'"$BRANCH_OPEN"'")')" \
+	"piped into an archiver"
+
+run_case "no-download-outside-build: a script is piped into bash" fail \
+	"$NUD" \
+	"$(py 'edit("install.sh", "'"$BRANCH_OPEN"'", "curl -fsSL https://example.invalid/x.sh | bash\n'"$BRANCH_OPEN"'")')" \
+	"piped into an archiver"
+
+run_case "no-download-outside-build: a file is downloaded and kept with no check" fail \
+	"$NUD" \
+	"$(py 'edit("install.sh", "'"$BRANCH_OPEN"'", "curl -fsSL https://example.invalid/x -o \"$STACK_DIR/x\"\n'"$BRANCH_OPEN"'")')" \
+	"not one of the two named exceptions"
+
+run_case "no-download-outside-build: a repository is cloned outside the build" fail \
+	"$NUD" \
+	"$(py 'edit("install.sh", "'"$BRANCH_OPEN"'", "git clone --depth 1 -q https://github.com/TAIPANBOX/tokenfuse.git \"$STACK_DIR/x\"\n'"$BRANCH_OPEN"'")')" \
+	"git clone"
+
+run_case "no-download-outside-build: cosign is installed without its SHA-256 check" fail \
+	"$NUD" \
+	"$(py 'edit("install.sh", "sha256sum -c --status; then\n    rm -f \"$dest.download\"\n    die \"the cosign binary from", "true; then\n    rm -f \"$dest.download\"\n    die \"the cosign binary from")')" \
+	"cosign download is not checked"
+
+run_case "no-download-outside-build: the installer reads the stack-k8s tree outside the build" fail \
+	"$NUD" \
+	"$(py 'edit("install.sh", "'"$BRANCH_OPEN"'", "[ -f \"$SRC_DIR/stack-k8s/images/wg.Dockerfile\" ] || true\n'"$BRANCH_OPEN"'")')" \
+	"reads the stack-k8s tree"
+
+run_case "no-download-outside-build: REPO_RAW comes back" fail \
+	"$NUD" \
+	"$(py 'edit("install.sh", "REPO_TARBALL=\"${REPO_TARBALL:-", "REPO_RAW=\"${REPO_RAW:-https://raw.githubusercontent.com/TAIPANBOX/stack-k8s/main}\"\nREPO_TARBALL=\"${REPO_TARBALL:-")')" \
+	"REPO_RAW"
+
+run_case "no-download-outside-build: a piped install fetches its files from another URL" fail \
+	"$NUD" \
+	"$(py 'edit_all("install.sh", "${REPO_SINGLE_RAW:-https://raw.githubusercontent.com/TAIPANBOX/stack-single/main}", "${REPO_ELSE_RAW:-https://raw.githubusercontent.com/TAIPANBOX/stack-single/main}")')" \
+	"not one of the two named exceptions"
+
+run_case "no-download-outside-build: the build block is gone (measured nothing)" fail \
+	"$NUD" \
+	"$(py 'edit_all("install.sh", "if [ -n \"$BUILD_FROM_SOURCE\" ]; then", "if [ -n \"$BUILD_FROM_SOURCES\" ]; then")')" \
+	"measured NOTHING"
+
+run_case "no-download-outside-build: the cosign exception matches nothing (measured nothing)" fail \
+	"$NUD" \
+	"$(py 'edit_all("install.sh", "\"$dest.download\"", "\"$dest.fetched\"")')" \
+	"measured NOTHING"
+
+run_case "no-download-outside-build: a piped install fetches another file of this repository (must pass)" pass \
+	"$NUD" \
+	"$(py 'edit("install.sh", "'"$BRANCH_OPEN"'", "curl -fsSL \"${REPO_SINGLE_RAW:-https://raw.githubusercontent.com/TAIPANBOX/stack-single/main}/x.yaml\" -o \"$STACK_DIR/x.yaml\" || die \"could not fetch x\"\n'"$BRANCH_OPEN"'")')"
+
+run_case "no-download-outside-build: the build block fetches as before (must pass)" pass \
+	"$NUD" \
+	"$(py 'edit("install.sh", "say \"fetching the image definitions\"\n  mkdir -p", "say \"fetching the image definitions now\"\n  mkdir -p")')"
+
 echo
 if [ -n "$(git status --porcelain)" ]; then
 	printf 'FAIL: this script left the tree dirty, so it cannot be trusted about anything above\n'

@@ -169,6 +169,8 @@ jobs:
         run: ./scripts/drills-reach-the-broker.sh
       - name: the broker's tool-call check fails closed and its static callers are gateway keys (invariant 75)
         run: ./scripts/broker-callers-are-gateway-keys.sh
+      - name: the installer fetches no tree of stack-k8s unless it builds from source (invariant 76)
+        run: ./scripts/no-unverified-download-outside-build.sh
 
       # Last, because it mutates tracked files and restores them. It needs a
       # clean tree and says so plainly, so it also reports any earlier step

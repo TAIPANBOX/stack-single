@@ -134,9 +134,10 @@
 # of disk and a long wait, most of it Rust.
 set -euo pipefail
 
-REPO_RAW="${REPO_RAW:-https://raw.githubusercontent.com/TAIPANBOX/stack-k8s/main}"
 # The image definitions come from stack-k8s as a whole, because some of them
-# need files beside the Dockerfile (see the fetch below).
+# need files beside the Dockerfile (see the fetch below). Only BUILD_FROM_SOURCE
+# reads them: every image the stack runs is pulled, pinned by digest and
+# verified (CLAUDE.md invariant 44).
 REPO_TARBALL="${REPO_TARBALL:-https://api.github.com/repos/TAIPANBOX/stack-k8s/tarball/main}"
 STACK_DIR="${STACK_DIR:-/opt/agent-stack}"
 SRC_DIR="${SRC_DIR:-$STACK_DIR/src}"
@@ -4715,11 +4716,12 @@ fi
 # stack-k8s/cloud/*/deploy-*.sh carries.
 BUILD_FROM_SOURCE="${BUILD_FROM_SOURCE:-}"
 
-# The image definitions. Needed only by the build path now that every image
-# this launcher runs is published, and fetched unconditionally anyway: it is one
-# tarball, it is what `build-context-complete.sh` checks against, and a build
-# that discovers its Dockerfiles are missing ten minutes in is the failure that
-# put this fetch here in the first place.
+# The image definitions, fetched ONLY on the build path (CLAUDE.md invariant 76). Every image this
+# launcher runs is published, so the ordinary path reads nothing of stack-k8s, and a tarball of its
+# main branch, unpacked as root with no pin and no check of what came, is a download the box does not
+# need. It used to be fetched on every run, "because a build that discovers its Dockerfiles are
+# missing ten minutes in is the failure that put this fetch here": that failure is the build path's,
+# so the fetch is its first step, and a build still dies before it compiles anything.
 #
 # The whole of stack-k8s, not five URLs. This used to fetch exactly five
 # `.Dockerfile` files by raw URL. It worked until `wg.Dockerfile` in that
@@ -4728,17 +4730,17 @@ BUILD_FROM_SOURCE="${BUILD_FROM_SOURCE:-}"
 # in with "failed to compute cache key: /images/uapi-proxy: not found", and
 # neither repository's CI could have seen it: the break is in the seam between
 # them, and this side had not changed. One tarball cannot drift file by file.
-say "fetching the image definitions"
-mkdir -p "$SRC_DIR"
-rm -rf "$SRC_DIR/stack-k8s"
-mkdir -p "$SRC_DIR/stack-k8s"
-curl -fsSL "$REPO_TARBALL" | tar -xz -C "$SRC_DIR/stack-k8s" --strip-components=1 \
-  || die "could not fetch the image definitions from stack-k8s"
-[ -f "$SRC_DIR/stack-k8s/images/wg.Dockerfile" ] \
-  || die "the stack-k8s tarball has no images/wg.Dockerfile; the layout changed"
-cd "$SRC_DIR"
-
+# (gate: scripts/no-unverified-download-outside-build.sh)
 if [ -n "$BUILD_FROM_SOURCE" ]; then
+  say "fetching the image definitions"
+  mkdir -p "$SRC_DIR"
+  rm -rf "$SRC_DIR/stack-k8s"
+  mkdir -p "$SRC_DIR/stack-k8s"
+  curl -fsSL "$REPO_TARBALL" | tar -xz -C "$SRC_DIR/stack-k8s" --strip-components=1 \
+    || die "could not fetch the image definitions from stack-k8s"
+  [ -f "$SRC_DIR/stack-k8s/images/wg.Dockerfile" ] \
+    || die "the stack-k8s tarball has no images/wg.Dockerfile; the layout changed"
+  cd "$SRC_DIR"
   note "BUILD_FROM_SOURCE is set: cloning every plane and compiling here"
   repos=(tokenfuse wardryx idryx qryx mockryx heraldyx scopyx verdryx engram)
   repos+=(trailryx)

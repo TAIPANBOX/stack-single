@@ -1826,7 +1826,7 @@ names the host and what cosign or curl reported.
 | `github.com`, `release-assets.githubusercontent.com` | the pinned cosign v3.1.3 binary. github.com redirects the file to the release-assets host, so both are needed | each install and re-run, until the binary in `/opt/agent-stack/bin/cosign` matches its pinned SHA-256 |
 | `tuf-repo-cdn.sigstore.dev` | the Sigstore trust root that cosign checks each signature against | before each signature check |
 | `ghcr.io` (and the blob host it redirects to) | the image manifests, the signatures, and the pulls | as before this release |
-| `raw.githubusercontent.com`, `api.github.com`, `api.ipify.org` | the compose file, the stack-k8s tarball, and the box's public address | as before this release |
+| `raw.githubusercontent.com`, `api.ipify.org` | the compose file and the files beside it (a piped install only), and the box's public address | no longer `api.github.com`: the stack-k8s tarball is fetched only with `BUILD_FROM_SOURCE=1` |
 
 Checked on 2026-10-19 with cosign v3.1.3: a signature check does not contact the
 Rekor transparency log or Fulcio, because the inclusion proof travels with the
