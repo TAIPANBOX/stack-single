@@ -287,7 +287,7 @@ DRILLS_BROKER_ID="$(sed -n 's/^DRILLS_BROKER_ID="\([A-Za-z0-9._-]*\)"$/\1/p' ins
 [ -n "$DRILLS_BROKER_ID" ] || fail "H. install.sh defines no DRILLS_BROKER_ID, so the drills' key on the broker's list was not measured"
 export DRILLS_BROKER_ID
 lib="$scratch/allowlist.sh"
-for fn in client_key_ids identity_env_get identity_env_set static_keep_ok agent_static_keys_apply; do
+for fn in client_key_ids client_key_secret identity_env_get identity_env_set static_keep_ok broker_static_ids agent_static_keys_apply; do
   awk -v n="$fn" 'index($0, n "() {") == 1 { p = 1 } p { print } p && /^}$/ { exit }' install.sh
 done >"$lib"
 if ! grep -q '^agent_static_keys_apply() {' "$lib"; then
@@ -349,6 +349,15 @@ else
     'S1:felyx,S2:broker,S3:agents,S4:drills' '' '' 'S9:stack-single,S8:drills-broker' '' 'felyx,broker' 'stack-single,drills-broker'
   allow_case "a re-run keeps the drills' key at the broker named" \
     'S1:felyx,S2:broker,S3:agents,S4:drills' '' 'felyx broker' 'S9:stack-single,S8:drills-broker' 'stack-single drills-broker' 'felyx,broker' 'stack-single,drills-broker' 1
+  # CLAUDE.md invariant 75 (1.7.3): every static key the broker admits is a gateway key of the same id, and the gateway's
+  # list names it, because the broker asks the gateway's check with the caller's own key and the gateway answers a
+  # static key under require only when its list names it. A broker key the gateway does not hold stays off the list.
+  allow_case "the broker's static callers that the gateway holds are named on the gateway's list too" \
+    'S1:felyx,S2:broker,S3:agents,S4:drills,S9:stack-single,S8:drills-broker' '' '' 'S9:stack-single,S8:drills-broker' '' 'felyx,broker,stack-single,drills-broker' 'stack-single,drills-broker'
+  allow_case "a re-run names the same callers on both lists, in the same order" \
+    'S1:felyx,S2:broker,S3:agents,S4:drills,S9:stack-single,S8:drills-broker' '' 'felyx broker stack-single drills-broker' 'S9:stack-single,S8:drills-broker' 'stack-single drills-broker' 'felyx,broker,stack-single,drills-broker' 'stack-single,drills-broker' 1
+  allow_case "a broker key the gateway does not hold is not named on the gateway's list" \
+    'S1:felyx,S2:broker,S3:agents,S4:drills,S9:stack-single' '' '' 'S9:stack-single,S8:drills-broker' '' 'felyx,broker,stack-single' 'stack-single,drills-broker'
 fi
 
 # I. TWO RUNS ON ONE BOX (CLAUDE.md invariant 53, 1.4.0). The installer runs twice against one .env: the
@@ -356,7 +365,7 @@ fi
 # and must write the same one. A run that widens the list on its second pass admits, without a token, the
 # keys the installer minted for the agents and the fire drills: the defect this section exists to catch.
 lib2="$scratch/tworuns.sh"
-for fn in client_key_ids identity_env_get identity_env_set identity_env_has static_keep_ok agent_tokens_resolve agent_static_keys_apply; do
+for fn in client_key_ids client_key_secret identity_env_get identity_env_set identity_env_has static_keep_ok broker_static_ids broker_caller_binding broker_caller_hint broker_caller_covered keys_file_id_secrets identity_map_binds_id agent_tokens_resolve agent_static_keys_apply; do
   awk -v n="$fn" 'index($0, n "() {") == 1 { p = 1 } p { print } p && /^}$/ { exit }' install.sh
 done >"$lib2"
 if ! grep -q '^agent_tokens_resolve() {' "$lib2" || ! grep -q '^agent_static_keys_apply() {' "$lib2"; then

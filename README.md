@@ -735,6 +735,31 @@ broker's line for you. The installer keeps both keys off the static allow-list, 
 its own. Without these entries the installer refuses before it writes anything and says which one is
 missing. `WITH_AGENT_TOKENS=0` keeps static keys only, which is the weaker way out.
 
+The MCP broker also admits two static keys of its own, and its tool-call check is closed (see "Reaching it
+through tokenfuse's MCP broker"), so the gateway must hold both too, with the broker's secret: `stack-single`
+(the installer's own check, which speaks as `agent://local.invalid/install-check`) and `drills-broker` (the
+fire drills, `agent://mockryx.local/*`). A box given its own files adds two more lines and two more map
+entries; the secrets are the ones the broker holds, in `TOKENFUSE_MCP_KEYS` in `.env`:
+
+```text
+# keys.txt, two more lines, with the secrets from TOKENFUSE_MCP_KEYS in .env
+<the broker's secret for stack-single>:stack-single
+<the broker's secret for drills-broker>:drills-broker
+```
+
+```json
+{"id": "install-check"}, {"id": "drills"}
+
+{"key_id": "stack-single", "unit": "install-check", "agents": ["agent://local.invalid/install-check"]},
+{"key_id": "drills-broker", "unit": "drills", "agents": ["agent://mockryx.local/*"]}
+```
+
+`ADD_BROKER_KEY=1` appends both lines with the broker's secrets, keeping the file's mode, and the installer
+checks the map first, so it never appends to a file it would then refuse. The installer never edits your map
+or rewrites a line of yours: a line with another secret than the broker's stops the run, and so does a map
+that does not bind the id. Any other static key you added to the broker by hand needs the same two entries,
+or take it out of `TOKENFUSE_MCP_KEYS`.
+
 What an agent then sends, besides its provider key, on every call:
 
 | Header | Value |
@@ -869,6 +894,11 @@ way to take it off the list.
   the word broker), bound in its identity map. Or set `ADD_BROKER_KEY=1`, and the installer mints the
   secret and appends that line, keeping the file's mode. Or run with `WITH_AGENT_TOKENS=0`. Without one
   of those, the installer refuses before it installs anything.
+- A box given its own `CLIENT_KEYS_FILE` also needs `stack-single` and `drills-broker` lines, and map entries
+  for them, because the broker's tool-call check is closed and asks the gateway with the caller's own key
+  (the lines and the entries are in "Client keys and the identity map", above). `ADD_BROKER_KEY=1` appends
+  the lines. The installer stops before it installs anything, naming the id, when one is missing.
+  A caller that sends no `x-fuse-run-id` to the broker is refused: the broker's check needs the run.
 - A re-run need not name the keys file again, because the keys an earlier run took from it are kept in
   `.env`. With agent tokens on, though, the broker's line has to come from that file, so a box that once
   gave `CLIENT_KEYS_FILE` and re-runs without it is refused: name the file and the map again
@@ -1447,6 +1477,18 @@ v0.4.1, wardryx v1.5.0): typryx's tools listed under the blocking scan, an `ask`
 with an agent id answered, without one refused 400, a raw AWS example key id
 refused, a denied tool refused, and every call refused while wardryx was stopped.
 
+**The broker's tool-call check is closed, too.** Before every `tools/call` the broker asks the gateway's
+`/v1/fuse/check-tool-call` whether the run may use the tool. A call the gateway cannot answer is refused,
+`blocked: the taint gate ...`, instead of being forwarded with nothing judging it, and so is a call that
+names no run: send `x-fuse-run-id` on every `tools/call`, as you do at the gateway. A caller with a static
+key is asked with its own key, and the gateway answers only a key it holds, so every static key the broker
+admits (`stack-single`, the installer's own check key; `drills-broker`, the fire drills'; any id you name in
+`STATIC_KEY_IDS`) is also a gateway key of the same id and secret, bound to the one agent it speaks as, and
+named on the gateway's static list. The installer writes all of that for the keys it mints, on every run,
+and a re-run changes nothing. `./install.sh status` shows the mode and goes red, naming the id, when a key
+the broker admits is not a key the gateway holds. The setting is a literal in `compose.yaml`
+(`TOKENFUSE_MCP_TAINT_FAILMODE: closed`); there is no switch for it.
+
 `install.sh` prints the URL and the header names at the end of a run with
 `WITH_TYPED=1`; it never prints a key's value.
 
@@ -1784,7 +1826,7 @@ names the host and what cosign or curl reported.
 | `github.com`, `release-assets.githubusercontent.com` | the pinned cosign v3.1.3 binary. github.com redirects the file to the release-assets host, so both are needed | each install and re-run, until the binary in `/opt/agent-stack/bin/cosign` matches its pinned SHA-256 |
 | `tuf-repo-cdn.sigstore.dev` | the Sigstore trust root that cosign checks each signature against | before each signature check |
 | `ghcr.io` (and the blob host it redirects to) | the image manifests, the signatures, and the pulls | as before this release |
-| `raw.githubusercontent.com`, `api.github.com`, `api.ipify.org` | the compose file, the stack-k8s tarball, and the box's public address | as before this release |
+| `raw.githubusercontent.com`, `api.ipify.org` | the compose file and the files beside it (a piped install only), and the box's public address | no longer `api.github.com`: the stack-k8s tarball is fetched only with `BUILD_FROM_SOURCE=1` |
 
 Checked on 2026-10-19 with cosign v3.1.3: a signature check does not contact the
 Rekor transparency log or Fulcio, because the inclusion proof travels with the
