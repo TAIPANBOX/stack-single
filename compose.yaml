@@ -1151,13 +1151,15 @@ services:
     # the risk-signal network reaches the proxy and wardryx; browser-broker
     # reaches scopyx-browser, which shares no other network with the broker;
     # front publishes port 4200 (a published port needs a network with a route to
-    # the host; see the networks block at the end of this file).
+    # the host; see the networks block at the end of this file); guests is where a
+    # declared container of another project reaches it (invariant 77).
     networks:
       - agents
       - core
       - risk-signal
       - browser-broker
       - front
+      - guests
     depends_on:
       init-volumes:
         condition: service_completed_successfully
@@ -1284,8 +1286,11 @@ services:
     pids_limit: 256
     profiles: ["delegation"]
     image: ${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.8.0@sha256:2e1848151118de3dd69d2d68918fd50eee29859fdc47fb6fd3092914fe73022a}
+    # guests: a declared container of another project gets its tokens here, and
+    # never needs core for it (invariant 77).
     networks:
       - core
+      - guests
     # Group 10001, the same pair typryx and the money plane's writers use: its
     # journal (VOUCHRYX_EVENTS_PATH) lands on the shared `events` volume,
     # root:10001 2775, and this is how it can append there.
@@ -1424,6 +1429,7 @@ services:
       - edge
       - agents
       - core
+      - guests
     command: ["/usr/local/bin/tokenfuse"]
     healthcheck:
       # bash, not curl: these images ship bash and no HTTP client. The probe is the same
@@ -2694,4 +2700,13 @@ networks:
   # proxy is on no other network and publishes no port. Only a service listed
   # here can address it, and `typed-risk-signal.sh` holds that list.
   risk-signal:
+    internal: true
+  # The door for containers of other projects on this box (invariant 77): a
+  # lab's gateway, an IdP bridge. It holds exactly vouchryx, the gateway and the
+  # MCP broker, so a guest gets tokens, model calls and tool calls through the
+  # same doors an agent uses and reaches no plane, no database and no key. A
+  # guest's own compose file names it `agent-stack_guests`, and a guest is named
+  # in guests.txt beside this file, or `status` calls it an unknown container.
+  # Internal: no route out.
+  guests:
     internal: true

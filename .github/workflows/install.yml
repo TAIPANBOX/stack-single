@@ -531,6 +531,48 @@ jobs:
             echo "::error::a container on the agents network cannot reach the gateway"; exit 1
           fi
 
+      # CLAUDE.md invariant 77. The guests network is the door for containers of other projects
+      # on the box: vouchryx and the gateway answer there (and the broker, when it runs), and no
+      # plane, no database, no key and no route out does. A name answers only on a shared network,
+      # so ping by name is the reach test, with the gateway as its positive control.
+      - name: "guests network: vouchryx and the doors, no plane, no internet"
+        run: |
+          probe() { sudo docker run --rm --network "$1" busybox:1.36 sh -c "$2" >/dev/null 2>&1; }
+          if probe agent-stack_edge 'wget -q -T10 -O /dev/null http://example.com/'; then
+            echo "positive control: a container on the edge network reaches example.com"
+          else
+            echo "::error::the positive control failed: edge cannot reach example.com, so the checks below would prove nothing"; exit 1
+          fi
+          if probe agent-stack_guests 'ping -c1 -W3 tokenfuse-gateway'; then
+            echo "positive control: the gateway answers a ping by name from the guests network"
+          else
+            echo "::error::the gateway does not answer a ping by name from the guests network, so the names below would prove nothing"; exit 1
+          fi
+          probe agent-stack_guests 'wget -q -T5 -O /dev/null http://tokenfuse-gateway:4100/healthz' \
+            || { echo "::error::a container on the guests network cannot reach the gateway"; exit 1; }
+          cd /opt/agent-stack
+          if grep -qx vouchryx <<<"$(sudo docker compose ps --services)"; then
+            probe agent-stack_guests 'wget -q -T5 -O /dev/null http://vouchryx:4310/healthz' \
+              || { echo "::error::a container on the guests network cannot reach vouchryx"; exit 1; }
+            echo "vouchryx answers from the guests network"
+          fi
+          if grep -qx tokenfuse-mcp-broker <<<"$(sudo docker compose ps --services)"; then
+            probe agent-stack_guests 'ping -c1 -W3 tokenfuse-mcp-broker' \
+              || { echo "::error::a container on the guests network cannot reach the MCP broker"; exit 1; }
+            echo "the MCP broker answers from the guests network"
+          fi
+          for plane in policy-db wardryx keyryx idryx record-seal heraldyx tokenfuse-cloud console; do
+            if probe agent-stack_guests "ping -c1 -W3 $plane"; then
+              echo "::error::a container on the guests network reached $plane by name"; exit 1
+            fi
+          done
+          for out in http://example.com/ http://1.1.1.1/; do
+            if probe agent-stack_guests "wget -q -T5 -O /dev/null $out"; then
+              echo "::error::a container on the guests network reached $out"; exit 1
+            fi
+          done
+          echo "the guests network reaches the doors and nothing else"
+
       # CLAUDE.md invariant 38, the browser's path. The browser's network is shared with
       # wardryx alone: a container on it reaches wardryx's healthz (the policy plane
       # that decides every fetch) and nothing else, with no name for the gateway and no
@@ -773,6 +815,39 @@ jobs:
           [ "$(sudo grep -c ' good ' .install-history)" -ge 2 ] || { echo "::error::the journal does not hold two good runs"; exit 1; }
           [ "$(sudo stat -c '%a %U' .install-history)" = "640 root" ] || { echo "::error::the journal is not 0640 root"; exit 1; }
           grep -q '^   install journal: last good install ' "$RUNNER_TEMP/status.log" || { echo "::error::status printed no line from the journal"; exit 1; }
+
+      # CLAUDE.md invariant 77, on a real Docker: a container guests.txt names is a note on the
+      # guests network, the same container joined to core is a FAIL, and one nobody named is a FAIL.
+      - name: "status: a named guest is a note on the guests network and a stranger on core"
+        if: matrix.profile == 'default'
+        run: |
+          trap 'sudo docker rm -f ci-guest ci-stranger ci-impostor >/dev/null 2>&1 || true; sudo rm -f /opt/agent-stack/guests.txt' EXIT
+          st() { sudo env STACK_DIR=/opt/agent-stack ./install.sh status >"$RUNNER_TEMP/$1.log" 2>&1; }
+          sudo docker run -d --name ci-guest --network agent-stack_guests busybox:1.36 sleep 900 >/dev/null
+          printf '# a guest of this run\nci-guest\n' | sudo tee /opt/agent-stack/guests.txt >/dev/null
+          st guest || { cat "$RUNNER_TEMP/guest.log"; echo "::error::status failed with a named guest on the guests network"; exit 1; }
+          grep -E '^   note  ci-guest ' "$RUNNER_TEMP/guest.log"
+          grep -qE '^   note  ci-guest +running +a guest on agent-stack_guests, named in guests\.txt' "$RUNNER_TEMP/guest.log" \
+            || { echo "::error::status does not name the guest as one"; exit 1; }
+          sudo docker run -d --name ci-stranger --network agent-stack_guests busybox:1.36 sleep 900 >/dev/null
+          if st stranger; then echo "::error::status passed with an unnamed container on the guests network"; exit 1; fi
+          grep -qE '^   FAIL  ci-stranger +running +unknown container on agent-stack_guests$' "$RUNNER_TEMP/stranger.log" \
+            || { cat "$RUNNER_TEMP/stranger.log"; echo "::error::status does not call the unnamed container a stranger"; exit 1; }
+          sudo docker rm -f ci-stranger >/dev/null
+          # A guest that answers to a plane's name on the guests network could be handed the
+          # gateway's call to that plane, so status fails it even when guests.txt names it.
+          sudo docker run -d --name ci-impostor --network agent-stack_guests --network-alias wardryx busybox:1.36 sleep 900 >/dev/null
+          printf 'ci-guest\nci-impostor\n' | sudo tee /opt/agent-stack/guests.txt >/dev/null
+          if st impostor; then echo "::error::status passed with a named guest that answers to wardryx"; exit 1; fi
+          grep -qE "^   FAIL  ci-impostor +running +a guest on agent-stack_guests that answers to wardryx, a name of this stack's own" "$RUNNER_TEMP/impostor.log" \
+            || { cat "$RUNNER_TEMP/impostor.log"; echo "::error::status does not fail a guest that answers to a plane's name"; exit 1; }
+          sudo docker rm -f ci-impostor >/dev/null
+          printf 'ci-guest\n' | sudo tee /opt/agent-stack/guests.txt >/dev/null
+          sudo docker network connect agent-stack_core ci-guest
+          if st on-core; then echo "::error::status passed with a named guest on core"; exit 1; fi
+          grep -E '^   FAIL  ci-guest ' "$RUNNER_TEMP/on-core.log"
+          grep -qE '^   FAIL  ci-guest +running +unknown container on agent-stack_core: guests\.txt lets it onto agent-stack_guests and nowhere else' "$RUNNER_TEMP/on-core.log" \
+            || { echo "::error::status does not fail a named guest on core"; exit 1; }
 
       - name: a tree below the floor is refused, and the way through keeps its reason
         if: matrix.profile == 'default'

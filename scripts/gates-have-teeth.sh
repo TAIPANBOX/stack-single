@@ -3434,7 +3434,7 @@ run_case "status-reads-what-runs: a labelled container compose does not declare 
 
 run_case "status-reads-what-runs: a throwaway is reported after it has left" fail \
 	'./scripts/status-reads-what-runs.sh' \
-	"$(py 'edit("install.sh", "      [ -n \"$state\" ] || continue\n      drift_tally FAIL \"$name\"", "      drift_tally FAIL \"$name\"")')" \
+	"$(py 'edit("install.sh", "      [ -n \"$state\" ] || continue\n      if ! grep -qxF -- \"$name\" <<<\"$guests\"; then\n", "      if ! grep -qxF -- \"$name\" <<<\"$guests\"; then\n")')" \
 	"a container gone by the second read is reported"
 
 run_case "status-reads-what-runs: a compose that will not render reads as nothing wrong" fail \
@@ -3827,6 +3827,67 @@ run_case "status-reads-what-runs: the override is read as the file" fail \
 	'./scripts/status-reads-what-runs.sh' \
 	"$(py 'edit("install.sh", "    if ! file_cfg=\"$(\"${COMPOSE[@]}\" -f compose.yaml --profile '"'"'*'"'"' config 2>/dev/null)\"; then\n", "    if false; then\n")')" \
 	"an override that turns read_only off reads as what the file says"
+
+# A guest of another project in status (CLAUDE.md invariant 77). Each fault lets a container that
+# guests.txt does not hold to the guests network read as a guest, or turns an unread list into one.
+run_case "status-reads-what-runs: a named guest on core reads as a guest" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "      elif [ \"$net\" = \"$guest_net\" ]; then\n", "      elif true; then\n")')" \
+	"a named guest on core passes"
+
+run_case "status-reads-what-runs: any container on the guests network reads as a guest" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "      if ! grep -qxF -- \"$name\" <<<\"$guests\"; then\n", "      if [ \"$net\" != \"$guest_net\" ] && ! grep -qxF -- \"$name\" <<<\"$guests\"; then\n")')" \
+	"a container on the guests network that nobody named is not found"
+
+run_case "status-reads-what-runs: a guests.txt line of two names is skipped" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "          drift_cannot \"guests.txt line $line_no is not one container name, so no container is taken for a guest\"\n          guests=\"\"\n          break\n", "          continue\n")')" \
+	"a line of two names is read as a guest list"
+
+run_case "status-reads-what-runs: a guests.txt that cannot be read is no file" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "  if [ -e guests.txt ]; then\n", "  if [ -f guests.txt ]; then\n")')" \
+	"a guests.txt that cannot be read is not named"
+
+run_case "status-reads-what-runs: a name in guests.txt with no container is not shown" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "    grep -qxF -- \"$line\" <<<\"$seen_guests\" || drift_tally note", "    true || drift_tally note")')" \
+	"a name in guests.txt with no container is not shown"
+
+run_case "status-reads-what-runs: a guest that answers to a name of the stack's own passes" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "          if grep -qixF -- \"$alias\" <<<\"$stack_names\"; then clash=\"$alias\"; fi\n", "          :\n")')" \
+	"a guest that answers to wardryx on the guests network passes"
+
+run_case "status-reads-what-runs: a guest's names are compared with their case" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "          if grep -qixF -- \"$alias\" <<<\"$stack_names\"; then clash=\"$alias\"; fi\n", "          if grep -qxF -- \"$alias\" <<<\"$stack_names\"; then clash=\"$alias\"; fi\n")')" \
+	"a guest that answers to WarDryx passes"
+
+run_case "status-reads-what-runs: a guest's name with a final dot passes" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "          alias=\"${alias%.}\"\n", "")')" \
+	"a guest that answers to wardryx. passes"
+
+run_case "status-reads-what-runs: a guest's names on every network are held to the stack's" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "          [ \"$on\" = \"$net\" ] || continue\n", "")')" \
+	"a name on another network is held against the guests network"
+
+run_case "status-reads-what-runs: a guest's name with a space is read as words" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "          if [[ ! \"$alias\" =~ ^[A-Za-z0-9_.-]+$ ]]; then odd=\"$alias\"; continue; fi\n", "")')" \
+	"a guest name with a space is read as words"
+
+run_case "status-reads-what-runs: a guest's container name is not held to the stack's" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "        names=\"$names\"$", "        unused=\"$names\"$")')" \
+	"a guest whose container name is a stack name passes"
+
+run_case "status-reads-what-runs: the comment above the guest list is reworded (must pass)" pass \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "  # guests.txt beside compose.yaml, written by the operator and never by this installer. A name\n", "  # guests.txt beside compose.yaml, which the operator writes and this installer never does. A name\n")')"
 
 # The container baseline (scripts/containers-carry-the-baseline.sh, CLAUDE.md invariant 69).
 run_case "containers-carry-the-baseline: a new service has no baseline" fail \
@@ -4584,6 +4645,32 @@ run_case "network-membership: scopyx-browser loses its agents alias" fail \
 	'./scripts/network-membership.sh' \
 	"$(py 'edit("compose.yaml", "        aliases: [\"scopyx\"]\n", "        aliases: [\"browser\"]\n")')" \
 	"lost the alias scopyx"
+
+run_case "network-membership: wardryx joins the guests network" fail \
+	'./scripts/network-membership.sh' \
+	"$(py 'import re
+s = open("compose.yaml").read()
+i = re.search(r"\n  wardryx:\n", s).end()
+j = i + re.search(r"\n  [a-z]", s[i:]).start()
+b = s[i:j]
+assert "      - core\n" in b, "wardryx has no core line"
+open("compose.yaml", "w").write(s[:i] + b.replace("      - core\n", "      - core\n      - guests\n", 1) + s[j:])')" \
+	"guests members are"
+
+run_case "network-membership: vouchryx leaves the guests network" fail \
+	'./scripts/network-membership.sh' \
+	"$(py 'edit("compose.yaml", "    networks:\n      - core\n      - guests\n", "    networks:\n      - core\n")')" \
+	"vouchryx is on"
+
+run_case "network-membership: guests is not internal" fail \
+	'./scripts/network-membership.sh' \
+	"$(py 'edit("compose.yaml", "  guests:\n    internal: true\n", "  guests:\n")')" \
+	"network guests must be internal"
+
+run_case "network-membership: install.yml loses the guests probe" fail \
+	'./scripts/network-membership.sh' \
+	"$(py 'edit_all(".github/workflows/install.yml", "agent-stack_guests", "agent-stack_core")')" \
+	"does not probe the guests network"
 
 run_case "network-membership: install.yml loses the agents probe" fail \
 	'./scripts/network-membership.sh' \

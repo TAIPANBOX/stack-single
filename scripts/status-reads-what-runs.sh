@@ -146,6 +146,7 @@ case "${1:-}" in
       fill '{{.HostConfig.SecurityOpt}}' "${C_SECOPT:-[no-new-privileges:true]}"
       fill '{{index .Config.Labels "com.docker.compose.service"}}' "$C_SERVICE"
       fill '{{index .Config.Labels "com.docker.compose.oneoff"}}' "$C_ONEOFF"
+      fill $'{{range $n, $e := .NetworkSettings.Networks}}{{range $e.Aliases}}{{$n}}\t{{.}}\n{{end}}{{range $e.DNSNames}}{{$n}}\t{{.}}\n{{end}}{{end}}' "${C_NETNAMES:-}"
       case "$o" in *'{{'*) printf 'stub: a field this fixture does not know: %s\n' "$o" >&2; exit 3 ;; esac
       printf '%s\n' "$o"
     done
@@ -582,6 +583,170 @@ container q1 wardryx-old running 0 0 "$CFG2" "$PIN_LINE"
 go "a labelled container compose does not declare"
 sees "^   FAIL  agent-stack-wardryx-old-1 +running +unknown container" "a container of this project that compose.yaml does not declare is not found"
 counts 1 0 "a labelled stranger did not fail"
+
+# ---- a guest of another project (invariant 77) -------------------------------------
+# guests.txt beside compose.yaml names a container of another project; the guests network
+# is the one place that name lets it be. The rule is in the code, so no line lets it onto core.
+guests_net() { printf 'agent-stack_guests\n' >"$FIX/n/n2"; }
+netnames() { # ID NETWORK=NAME...: the names Docker gives the container, one network and name a line
+	local id="$1" v="" p
+	shift
+	for p in "$@"; do v="$v${p%%=*}\\t${p#*=}\\n"; done
+	printf "C_NETNAMES=\$'%s'\n" "$v" >>"$FIX/c/$id"
+}
+guest() { # ID NAME NETWORK_FIXTURE: a container of another project, running, on that network
+	if [ ! -f "$FIX/c/$1" ]; then
+		stranger "$1" "" running 0 0 "$CFG2" "lab-gate:v1" "" "/$2"
+		# The names Docker gives it on each network: its service, its container name, its id.
+		netnames "$1" agent-stack_guests=labgate "agent-stack_guests=$2" "agent-stack_guests=$1" agent-stack_core=labgate "agent-stack_core=$2"
+	fi
+	printf '%s=%s\n' "$1" "$2" >>"$FIX/n/$3"
+}
+fresh
+guests_net
+guest g1 lab-gate-labgate-1 n2
+printf '# the lab on this box\n\nlab-gate-labgate-1   # its gateway\n' >"$BOX/guests.txt"
+go "a guest named in guests.txt, on the guests network"
+sees "^   note  lab-gate-labgate-1 +running +a guest on agent-stack_guests, named in guests\.txt" "a guest guests.txt names, on the guests network, is not shown as one"
+never "FAIL" "a guest guests.txt names, on the guests network, failed"
+counts 0 0 "a guest guests.txt names, on the guests network, failed the run"
+
+fresh
+guests_net
+guest g1 lab-gate-labgate-1 n2
+go "a container of another project on the guests network, with no guests.txt"
+sees "^   FAIL  lab-gate-labgate-1 +running +unknown container on agent-stack_guests$" "a container on the guests network that nobody named is not found"
+counts 1 0 "a container on the guests network that nobody named did not fail"
+
+fresh
+guests_net
+guest g1 lab-gate-labgate-1 n2
+printf 'lab-idp-bridge\n' >"$BOX/guests.txt"
+go "a container on the guests network that guests.txt does not name"
+sees "^   FAIL  lab-gate-labgate-1 +running +unknown container on agent-stack_guests$" "a guest another line of guests.txt does not name passes"
+sees "^   note  lab-idp-bridge +named in guests\.txt, and not on agent-stack_guests" "a name in guests.txt with no container is not shown"
+counts 1 0 "a container guests.txt does not name did not fail"
+
+fresh
+guests_net
+guest g1 lab-gate-labgate-1 n1
+printf 'lab-gate-labgate-1\n' >"$BOX/guests.txt"
+go "a named guest on core"
+sees "^   FAIL  lab-gate-labgate-1 +running +unknown container on agent-stack_core: guests\.txt lets it onto agent-stack_guests and nowhere else" "a named guest on core passes"
+never "^   note  lab-gate-labgate-1 +running" "a named guest on core reads as a guest"
+counts 1 0 "a named guest on core did not fail"
+
+fresh
+guests_net
+guest g1 lab-gate-labgate-1 n1
+guest g1 lab-gate-labgate-1 n2
+printf 'lab-gate-labgate-1\n' >"$BOX/guests.txt"
+go "a named guest on core and on the guests network"
+sees "^   note  lab-gate-labgate-1 +running +a guest on agent-stack_guests" "a guest on its own network beside core is not shown as one there"
+sees "^   FAIL  lab-gate-labgate-1 +running +unknown container on agent-stack_core" "a guest that is also on core passes"
+counts 1 0 "a guest that is also on core did not fail"
+
+fresh
+guests_net
+guest g1 lab-gate-labgate-1 n2
+printf 'lab-gate-labgate-1 lab-idp-bridge\n' >"$BOX/guests.txt"
+go "a guests.txt line that is not one container name"
+sees "^   n/a   drift check could not measure: guests\.txt line 1 is not one container name" "a line of two names is read as a guest list"
+sees "^   FAIL  lab-gate-labgate-1 +running +unknown container on agent-stack_guests$" "a guest passes under a guests.txt that could not be read"
+counts 1 1 "a broken guests.txt was not both a could-not-measure and a stranger"
+
+fresh
+guests_net
+guest g1 lab-gate-labgate-1 n2
+mkdir "$BOX/guests.txt"
+go "a guests.txt that cannot be read"
+sees "^   n/a   drift check could not measure: guests\.txt is on this box and could not be read" "a guests.txt that cannot be read is not named"
+sees "^   FAIL  lab-gate-labgate-1 +running +unknown container on agent-stack_guests$" "a guest passes under a guests.txt that cannot be read"
+counts 1 1 "an unreadable guests.txt was not both a could-not-measure and a stranger"
+
+fresh
+guests_net
+guest g1 lab-gate-labgate-1 n2
+netnames g1 agent-stack_guests=lab-gate-labgate-1 agent-stack_guests=wardryx agent-stack_guests=g1
+printf 'lab-gate-labgate-1\n' >"$BOX/guests.txt"
+go "a named guest that answers to a name of the stack's own"
+sees "^   FAIL  lab-gate-labgate-1 +running +a guest on agent-stack_guests that answers to wardryx, a name of this stack's own" "a guest that answers to wardryx on the guests network passes"
+never "^   note  lab-gate-labgate-1 +running" "a guest that answers to wardryx reads as a guest"
+counts 1 0 "a guest that answers to wardryx did not fail"
+
+fresh
+guests_net
+guest g1 lab-gate-labgate-1 n2
+netnames g1 agent-stack_guests=lab-gate-labgate-1 agent-stack_guests=WarDryx
+printf 'lab-gate-labgate-1\n' >"$BOX/guests.txt"
+go "a guest that answers to a stack name in another case"
+sees "^   FAIL  lab-gate-labgate-1 +running +a guest on agent-stack_guests that answers to WarDryx" "a guest that answers to WarDryx passes"
+counts 1 0 "a guest that answers to WarDryx did not fail"
+
+fresh
+guests_net
+guest g1 lab-gate-labgate-1 n2
+netnames g1 agent-stack_guests=lab-gate-labgate-1 agent-stack_guests=wardryx.
+printf 'lab-gate-labgate-1\n' >"$BOX/guests.txt"
+go "a guest that answers to a stack name with a final dot"
+sees "^   FAIL  lab-gate-labgate-1 +running +a guest on agent-stack_guests that answers to wardryx," "a guest that answers to wardryx. passes"
+counts 1 0 "a guest that answers to wardryx. did not fail"
+
+fresh
+guests_net
+guest g1 lab-gate-labgate-1 n2
+netnames g1 agent-stack_guests=lab-gate-labgate-1 agent-stack_guests=agent-stack-wardryx-1
+printf 'lab-gate-labgate-1\n' >"$BOX/guests.txt"
+go "a guest that answers to a container name of the stack"
+sees "^   FAIL  lab-gate-labgate-1 +running +a guest on agent-stack_guests that answers to agent-stack-wardryx-1" "a guest that answers to a container name of the stack passes"
+
+fresh
+guests_net
+guest g1 scopyx n2
+netnames g1 agent-stack_guests=labgate
+printf 'scopyx\n' >"$BOX/guests.txt"
+go "a guest whose container name is a stack name"
+sees "^   FAIL  scopyx +running +a guest on agent-stack_guests that answers to scopyx, a name of this stack's own" "a guest whose container name is a stack name passes"
+counts 1 0 "a guest whose container name is a stack name did not fail"
+
+fresh
+for out in config config-core; do
+	awk '{ print } $0 == "  wardryx:" { print "    environment:\n      WARDRYX_UPSTREAM: https://api.provider.example/v1\n      WARDRYX_PEER: http://labgate:8791/flint2" }' "$FIX/$out" >"$FIX/$out.new"
+	mv "$FIX/$out.new" "$FIX/$out"
+done
+guests_net
+guest g1 lab-gate-labgate-1 n2
+netnames g1 agent-stack_guests=labgate agent-stack_guests=api.provider.example
+printf 'lab-gate-labgate-1\n' >"$BOX/guests.txt"
+go "a guest that answers to a host a URL of the stack calls"
+sees "^   FAIL  lab-gate-labgate-1 +running +a guest on agent-stack_guests that answers to api\.provider\.example" "a guest that answers to the provider's host passes"
+never "answers to labgate" "a guest the broker calls back by its single-label name fails for it"
+counts 1 0 "a guest that answers to the provider's host did not fail"
+
+fresh
+guests_net
+guest g1 lab-gate-labgate-1 n2
+netnames g1 agent-stack_guests=lab-gate-labgate-1 "agent-stack_guests=x wardryx"
+printf 'lab-gate-labgate-1\n' >"$BOX/guests.txt"
+go "a guest that answers to a name with a space"
+sees "^   FAIL  lab-gate-labgate-1 +running +a guest on agent-stack_guests that answers to a name that is no DNS name: x wardryx" "a guest name with a space is read as words"
+counts 1 0 "a guest name with a space did not fail"
+
+fresh
+guests_net
+guest g1 lab-gate-labgate-1 n2
+netnames g1 agent-stack_core=wardryx agent-stack_guests=labgate agent-stack_guests=lab-gate-labgate-1
+printf 'lab-gate-labgate-1\n' >"$BOX/guests.txt"
+go "a guest whose clashing name is on another network"
+sees "^   note  lab-gate-labgate-1 +running +a guest on agent-stack_guests" "a name on another network is held against the guests network"
+counts 0 0 "a name a guest has on another network failed it on the guests network"
+
+fresh
+guests_net
+guest g1 lab-gate-labgate-1 n2
+printf 'lab-gate-labgate-1\n' >"$BOX/guests.txt"
+go "a guest at an install" 0
+counts 0 0 "a named guest on its network failed an install"
 
 # ---- what the file gives a container, against what it runs with --------------------
 hand_made() { # the field, as Docker reports it, for the running wardryx
