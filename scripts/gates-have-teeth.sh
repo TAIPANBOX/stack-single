@@ -3082,6 +3082,18 @@ run_case "bus-has-a-writer: the add-on's stream is given to no one it runs as" f
 	"$(py 'edit("compose.yaml", "chown 10003:10001 /vol/events/costcrew.ndjson", "chown 10001:10001 /vol/events/costcrew.ndjson")')" \
 	"neither the uid nor the gid matches"
 
+# The genaryx console's user is pinned (2026-11-12), so gate B judges its volumes: its state volume is
+# re-owned by init-volumes, and the wg container's socket group is the console's gid.
+run_case "bus-has-a-writer: the console's state volume is not re-owned" fail \
+	'./scripts/bus-has-a-writer.sh' \
+	"$(py 'edit("compose.yaml", "        chown -R 10001:10001 /vol/consolestate\n", "")')" \
+	"no chown line there names /vol/consolestate"
+
+run_case "bus-has-a-writer: the wg socket's group is not the console's" fail \
+	'./scripts/bus-has-a-writer.sh' \
+	"$(py 'edit("compose.yaml", "      WG_SOCKET_GID: \"10001\"\n", "      WG_SOCKET_GID: \"20030\"\n")')" \
+	"not 10001: it cannot reach the socket"
+
 run_case "bus-names: the console writes a stream no reader knows" fail \
 	'./scripts/bus-names-match-their-source.sh' \
 	"$(py 'edit("compose.yaml", "      - -stack-events\n      - /var/lib/stack/events/costcrew.ndjson\n", "      - -stack-events\n      - /var/lib/stack/events/finops.ndjson\n")')" \

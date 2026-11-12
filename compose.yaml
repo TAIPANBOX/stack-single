@@ -85,7 +85,7 @@ services:
       - sh
       - -euc
       - |
-        mkdir -p /vol/events /vol/traces /vol/cloud /vol/heraldyx /vol/records /vol/scopyx /vol/focus /vol/typryx /vol/vouchryx /vol/conform /vol/keyryx /vol/keyryxw /vol/keyryxattest /vol/keyryxalerts /vol/checkpoints
+        mkdir -p /vol/events /vol/traces /vol/cloud /vol/heraldyx /vol/records /vol/scopyx /vol/focus /vol/typryx /vol/vouchryx /vol/conform /vol/keyryx /vol/keyryxw /vol/keyryxattest /vol/keyryxalerts /vol/checkpoints /vol/consolestate
         # Invariant 41. The bus directory is root:10001 0750: nothing but this
         # script creates a file in it, so no plane can create one, let alone
         # write another plane's. Every stream below is created here, owned by
@@ -281,6 +281,12 @@ services:
         [ -e /vol/events/agent-conform.ndjson ] || : > /vol/events/agent-conform.ndjson
         chown 10002:10001 /vol/events/agent-conform.ndjson; chmod 0640 /vol/events/agent-conform.ndjson
         chown -R 10002:10002 /vol/conform; chmod 0775 /vol/conform
+        # The console's own state (its operator record, enrolled passkeys, console.sqlite). It took its
+        # owner from the console image on first use, 10001 with group 999 on the directory; it is re-owned
+        # on every up like every volume a non-root service writes (invariant 49), to the user compose.yaml
+        # pins for the console. On a live box (2026-11-12) everything in it was 10001:10001 already, but
+        # the directory's group. The mode stays the image's.
+        chown -R 10001:10001 /vol/consolestate
         echo "volumes ready"
     volumes:
       - events:/vol/events
@@ -298,6 +304,7 @@ services:
       - keyryxattest:/vol/keyryxattest
       - keyryxalerts:/vol/keyryxalerts
       - checkpoints:/vol/checkpoints
+      - consolestate:/vol/consolestate
     restart: "no"
 
   # ---- the policy plane's durable store ------------------------------------

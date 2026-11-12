@@ -189,6 +189,7 @@ for name, svc in sorted(IMPLIED.items()):
     elif desc_dir not in targets:
         problems.append("%s appends %s in %s (environments/single.json), which is not the bus it mounts "
                         "read-write (%s)" % (svc, name, desc_dir, ", ".join(t for t in targets if t) or "none"))
+
 seen_uid = {}
 for name in streams:
     path = os.path.join(events, name)

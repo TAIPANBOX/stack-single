@@ -1680,6 +1680,10 @@ an absent invariant.
     excluded as shared bus volumes, judged by invariants 10 and 41; 3 teeth cases in `scripts/gates-have-teeth.sh`;
     `features/the-volumes-are-re-owned-on-every-up.feature`. Not covered: a service without a `user:` line, a file a
     process writes as another uid than its service, and an upgrade run on a live box.)*
+    `@claude 2026-11-12`: the console's user is now pinned (`10001:10001`, invariant 61), so its state volume
+    `consolestate` is re-owned here too; on a live box everything in it was 10001:10001 already, but the directory's
+    group (999, from the image). Its other read-write volume, `wgapi`, is prepared by the wg container at every start
+    (group `WG_SOCKET_GID`, mode 2770), and `scripts/bus-has-a-writer.sh` requires that group to be the console's gid.
 
 50. **Every compose profile is installer-managed or operator-started, and the installer treats each kind by its own rule.**
     `@claude 2026-10-19`, revised 1.4.0. The first version removed every profile a run did not name, which also removed
