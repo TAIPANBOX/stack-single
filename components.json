@@ -122,7 +122,7 @@
           "ghcr.io/taipanbox/heraldyx:v0.9.0@sha256:0b22664f56dbcffa71568a5b593cf8cad2995d1649c68464880d4c51e96b6f31",
           "ghcr.io/taipanbox/idryx:v1.4.0@sha256:2c80d101a01b2d3ac300abd57d397f38d8ff5515e34c5f851849244029ba6d15",
           "ghcr.io/taipanbox/keyryx:v0.1.4@sha256:659723319e28c6c8895f5c2af6baa616b2e46ed90a3cf26d1c208dafe6a1ca3f",
-          "ghcr.io/taipanbox/mockryx:v0.5.0@sha256:32e4e79cd3bf95d23aa240f925ca139726faf8a13cdcd3a1728ea3df633f08be",
+          "ghcr.io/taipanbox/mockryx:v0.5.1@sha256:3926512211a4609a402d3812ae0321df46baaa90406ea439e3f5c89316ef85ef",
           "ghcr.io/taipanbox/scopyx:v1.3.0@sha256:a1e640a7965273750bd95d245316059046da203924e7ad5048c06a51d3fa555d",
           "ghcr.io/taipanbox/scopyx:v1.3.0-chromium@sha256:3e5c28024deb462c06d5440414b2f453bfbb70ebd944d087888397367f4d9f99",
           "ghcr.io/taipanbox/stack-caddy:v1.8.1@sha256:d9376051cc5ac9bb83de557bf3e7e861e26f6f6ae4556cd6ed5a32d1ce352c0a",
