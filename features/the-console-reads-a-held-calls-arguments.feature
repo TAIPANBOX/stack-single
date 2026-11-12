@@ -13,6 +13,8 @@ Feature: The console holds the preview key, and wardryx seals each held call's a
     # -> gates-have-teeth.sh "preview-key-is-wired: the recipient is not handed to wardryx"
     # -> gates-have-teeth.sh "preview-key-is-wired: the private key is printed"
     # -> gates-have-teeth.sh "preview-key-is-wired: the mint directory is left behind"
+    # -> gates-have-teeth.sh "preview-key-is-wired: a link the container left is followed"
+    # -> gates-have-teeth.sh "preview-key-is-wired: a recipient outside base64url is accepted"
 
   Scenario: a key without its recipient, or the reverse, stops the install
     Given a box that holds one half of the pair
