@@ -5490,8 +5490,10 @@ preview_key_apply() { # before `up`
         fi
         ( umask 077; head -c 8192 "$tmp/preview.key" >"$key.tmp.$$" ) || { rm -rf "$tmp" "$key.tmp.$$"; die "could not copy the preview key into place"; }
         rm -rf "$tmp"
-        [ "$(wc -l <"$key.tmp.$$" | tr -d ' ')" = 1 ] && grep -qE '^hpke-private:647a:[A-Za-z0-9_-]+$' "$key.tmp.$$" \
-          || { rm -f "$key.tmp.$$"; die "what the console wrote is not an X-Wing preview key. Nothing was started."; }
+        if [ "$(wc -l <"$key.tmp.$$" | tr -d ' ')" != 1 ] || ! grep -qE '^hpke-private:647a:[A-Za-z0-9_-]+$' "$key.tmp.$$"; then
+          rm -f "$key.tmp.$$"
+          die "what the console wrote is not an X-Wing preview key. Nothing was started."
+        fi
         mv -f "$key.tmp.$$" "$key" || { rm -f "$key.tmp.$$"; die "could not put the preview key in place at $key"; }
         { printf '%s\n' "$recipient" >"$pub.tmp.$$" && chmod 0644 "$pub.tmp.$$" && mv -f "$pub.tmp.$$" "$pub"; } \
           || die "could not write the preview recipient to $pub"

@@ -2023,7 +2023,7 @@ run_case "preview-key-is-wired: the private key is printed" fail \
 
 run_case "preview-key-is-wired: the mint directory is left behind" fail \
 	'./scripts/preview-key-is-wired.sh' \
-	"$(py 'edit("install.sh", "        rm -rf \"$tmp\"\n        [ \"$(wc -l", "        [ \"$(wc -l")')" \
+	"$(py 'edit("install.sh", "        rm -rf \"$tmp\"\n        if [ \"$(wc -l", "        if [ \"$(wc -l")')" \
 	"mint directory was left behind"
 
 run_case "preview-key-is-wired: the preview directory is listable by others" fail \
