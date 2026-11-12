@@ -817,7 +817,8 @@ PROFILES_OPERATOR="egress egress-browser finops routines manual crew"
 # running-images: begin
 # The drift check. For every container of this project it compares what Docker runs with
 # the pin compose.yaml names for that service, one line each. It finds drift: a container
-# left on an old image, an override nobody remembers, a stranger on the stack's networks.
+# left on an old image, an override nobody remembers, a stranger on the stack's networks
+# (a guest named in guests.txt is a note on the guests network and a stranger anywhere else).
 # That is all it finds. Its word is Docker's on this box and its pins are a file on this
 # box, so a person with root can change either side, and every run says so (CLAUDE.md
 # invariant 67).
@@ -1029,6 +1030,7 @@ drift_stopped() { # SERVICE PIN PROFILES RESTART IMAGE_ID STATE CODE RESTARTS: n
 }
 drift_measure() {
   local cfg file_cfg pins project ids rows mine nets net out member strangers="" live
+  local guest_net guests guests_raw seen_guests line line_no rest stack_names names clash odd on alias
   local svc pin profiles restart id oneoff name image state code restarts ro limit capdrop secopt
   drift_raw=""
   drift_want=""
@@ -1169,18 +1171,95 @@ drift_measure() {
 "
     done
   done
+  # The containers of other projects this box lets in (invariant 77): one name per line in
+  # guests.txt beside compose.yaml, written by the operator and never by this installer. A name
+  # there lets that container onto the guests network and nowhere else: the rule is here, not in
+  # the file, so no line can let a guest onto core. A file that is there and cannot be read, or a
+  # line that is no container name, lets nobody in and says so.
+  guest_net="${project}_guests"
+  # Every name a service of this stack is reached by: the services, the aliases the file gives,
+  # the names of the project's containers, and every dotted host a URL in the resolved file calls
+  # (a provider's API: Docker answers a name it knows before it asks outside). A single-label host
+  # in a URL is left out on purpose: the broker calls a guest back by its own name. Only a person
+  # with Docker on this box can give a container an alias, so this catches a guest's compose file
+  # that took a stack name by mistake.
+  stack_names="$(cut -d'|' -f1 <<<"$pins")
+$(awk '/^        aliases:/ { a = 1; next } a && /^          - / { print $2; next } { a = 0 }' <<<"$cfg")
+$(awk -F'|' '{ sub(/^\//, "", $4); print $4 }' <<<"$rows")
+$(grep -oE '[a-z][a-z0-9+.-]*://[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)+' <<<"$cfg" | sed 's#^.*://##' | sort -u || true)"
+  guests=""
+  if [ -e guests.txt ]; then
+    if ! guests_raw="$(cat guests.txt 2>/dev/null)"; then
+      drift_cannot "guests.txt is on this box and could not be read, so no container is taken for a guest"
+    else
+      line_no=0
+      while IFS= read -r line || [ -n "$line" ]; do
+        line_no=$((line_no + 1))
+        line="${line%%#*}"
+        read -r line rest <<<"$line" || true
+        [ -n "$line" ] || continue
+        if [ -n "$rest" ] || [[ ! "$line" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]; then
+          drift_cannot "guests.txt line $line_no is not one container name, so no container is taken for a guest"
+          guests=""
+          break
+        fi
+        guests="$guests$line
+"
+      done <<<"$guests_raw"
+    fi
+  fi
   # Read twice, not filtered: a probe of a second status run or a person's debug shell look the
   # same, and only the debug shell is still there a moment later. A filter on --rm or on the
   # probes' image would hide exactly that shell.
+  seen_guests=""
   if [ -n "$strangers" ]; then
     sleep 2
     while IFS='|' read -r id name net; do
       [ -n "$id" ] || continue
       state="$(docker inspect --format '{{.State.Status}}' "$id" 2>/dev/null || true)"
       [ -n "$state" ] || continue
-      drift_tally FAIL "$name" "$state" "unknown container on $net"
+      if ! grep -qxF -- "$name" <<<"$guests"; then
+        drift_tally FAIL "$name" "$state" "unknown container on $net"
+      elif [ "$net" = "$guest_net" ]; then
+        seen_guests="$seen_guests$name
+"
+        # The gateway and the broker sit on core and on guests, and reach the planes by name.
+        # A guest that answers to one of those names on guests could be handed a call, its
+        # credential with it, meant for a plane; so a guest's every name there is held to them.
+        # One name a line, "network<TAB>name", read by read and never split by the shell.
+        if ! names="$(docker inspect --format $'{{range $n, $e := .NetworkSettings.Networks}}{{range $e.Aliases}}{{$n}}\t{{.}}\n{{end}}{{range $e.DNSNames}}{{$n}}\t{{.}}\n{{end}}{{end}}' "$id" 2>/dev/null)"; then
+          drift_cannot "Docker would not say what names $name answers to on $net"
+          continue
+        fi
+        # Its container name answers on every network it is on, whatever DNSNames lists.
+        names="$names"$'\n'"$net"$'\t'"$name"
+        # DNS takes no notice of case or of a final dot, so neither does this. A name that is no
+        # DNS name (a space, a comma) is a FAIL of its own: nothing here guesses how it resolves.
+        clash=""
+        odd=""
+        while IFS=$'\t' read -r on alias; do
+          [ "$on" = "$net" ] || continue
+          alias="${alias%.}"
+          [ -n "$alias" ] || continue
+          if [[ ! "$alias" =~ ^[A-Za-z0-9_.-]+$ ]]; then odd="$alias"; continue; fi
+          if grep -qixF -- "$alias" <<<"$stack_names"; then clash="$alias"; fi
+        done <<<"$names"
+        if [ -n "$clash" ]; then
+          drift_tally FAIL "$name" "$state" "a guest on $net that answers to $clash, a name of this stack's own"
+        elif [ -n "$odd" ]; then
+          drift_tally FAIL "$name" "$state" "a guest on $net that answers to a name that is no DNS name: $odd"
+        else
+          drift_tally note "$name" "$state" "a guest on $net, named in guests.txt"
+        fi
+      else
+        drift_tally FAIL "$name" "$state" "unknown container on $net: guests.txt lets it onto $guest_net and nowhere else"
+      fi
     done <<<"$strangers"
   fi
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    grep -qxF -- "$line" <<<"$seen_guests" || drift_tally note "$line" '' "named in guests.txt, and not on $guest_net"
+  done <<<"$guests"
   if [ "$drift_matched" -eq 0 ] && [ "$drift_differ" -eq 0 ]; then
     drift_cannot "no container could be held to a pin"
   fi

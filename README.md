@@ -105,6 +105,49 @@ Both of Docker's image stores give the same verdict for the same bytes.
 - **A container compose does not know** fails: one with this project's label and no
   service in the file, or one with no label at all that is attached to one of the stack's
   networks. A throwaway that has left a moment later is not counted.
+- **A guest of another project** (see the next section) is a `note` when `guests.txt`
+  names it and it sits on `agent-stack_guests`. The same container on any other network of
+  the stack fails, whatever `guests.txt` says. A name in `guests.txt` with no container is a
+  `note`. A `guests.txt` that cannot be read, or a line that is not one container name,
+  lets nobody in: the run says it could not measure, and every guest fails. A guest that
+  answers on `agent-stack_guests` to the name of a service of the stack (a container named
+  `wardryx`, an alias `policy-db`), or to a provider's host the stack calls, fails too: the gateway and the broker reach the planes by
+  name, and a guest that shares one could be handed a call meant for a plane.
+
+### Letting a container of another project in: the guests network
+
+Something else on the box may need the stack: a lab's gateway that hands its agents
+tokens and model calls, a bridge that bans a person their identity provider has disabled.
+Such a container does not join `agent-stack_core`, where the planes, the policy database
+and custody sit. It joins `agent-stack_guests`, which holds exactly vouchryx, the gateway
+and the MCP broker: the doors an agent uses, and nothing behind them. The network has no
+route out.
+
+In the guest's own compose file:
+
+```yaml
+services:
+  gate:
+    networks: [guests]
+networks:
+  guests:
+    external: true
+    name: agent-stack_guests
+```
+
+Then name the container in `guests.txt` beside `compose.yaml`, one name per line, so
+`status` can tell it from a stranger:
+
+```
+# /opt/agent-stack/guests.txt
+lab-gate-labgate-1
+lab-idp-bridge
+```
+
+The installer never writes, copies over or removes `guests.txt`. A name in it lets that
+container onto the guests network and nowhere else: the rule is in `status`, not in the file.
+Give a guest service a name of its own: one that is also the name of a stack service fails
+`status`.
 
 It only reads: `docker ps`, `inspect`, `image inspect`, `network ls`, `network inspect` and
 `docker compose config`. It reaches no registry and runs no `cosign`.

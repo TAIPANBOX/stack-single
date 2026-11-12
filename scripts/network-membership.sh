@@ -87,12 +87,12 @@ TABLE = {
     "scopyx-browser": {"edge", "browser-policy", "browser-broker"},
     "typryx": {"core"},
     "typryx-wardryx-proxy": {"risk-signal"},
-    "tokenfuse-mcp-broker": {"agents", "core", "risk-signal", "browser-broker", "front"},
-    "vouchryx": {"core"},
+    "tokenfuse-mcp-broker": {"agents", "core", "risk-signal", "browser-broker", "front", "guests"},
+    "vouchryx": {"core", "guests"},
     "keyryx": {"core"},
     "keyryx-witness": set(),
     "tokenfuse-cloud": {"core"},
-    "tokenfuse-gateway": {"edge", "agents", "core"},
+    "tokenfuse-gateway": {"edge", "agents", "core", "guests"},
     "tokenfuse-gateway-openai": {"edge", "agents", "core"},
     "wg": {"edge"},
     "caddy": {"edge", "front"},
@@ -123,7 +123,10 @@ BROWSER_POLICY = {"scopyx-browser", "wardryx"}
 # the broker's one path to the browser (G2.1): the browser is not agent-facing, so the
 # broker is the only way a read of the web reaches it
 BROWSER_BROKER = {"scopyx-browser", "tokenfuse-mcp-broker"}
-INTERNAL = {"core", "agents", "risk-signal", "browser-policy", "browser-broker"}
+# the door for containers of other projects (invariant 77): tokens, model calls and tool calls
+# through the doors an agent uses, and no plane, no database and no key
+GUESTS = {"vouchryx", "tokenfuse-gateway", "tokenfuse-mcp-broker"}
+INTERNAL = {"core", "agents", "risk-signal", "browser-policy", "browser-broker", "guests"}
 NETWORKS = INTERNAL | {"edge", "front"}
 
 # ---- the install.sh block that writes the override --------------------------
@@ -260,6 +263,9 @@ if cfg is not None:
             bad("agents members are %s, the table lists %s" % (sorted(members("agents")), sorted(AGENT_FACING)))
         if members("front") != FRONT:
             bad("front members are %s, the table lists %s" % (sorted(members("front")), sorted(FRONT)))
+        if members("guests") != GUESTS:
+            bad("guests members are %s, the table lists %s: a container of another project reaches vouchryx and the doors, and nothing else may join it"
+                % (sorted(members("guests")), sorted(GUESTS)))
         if members("risk-signal") != RISK:
             bad("risk-signal members are %s, the table lists %s" % (sorted(members("risk-signal")), sorted(RISK)))
         alias = ((svcs.get("scopyx-browser") or {}).get("networks") or {}).get("browser-broker") or {}
@@ -277,6 +283,7 @@ wf = open(wf_path).read() if os.path.exists(wf_path) else ""
 for needle, why in (
     ("agent-stack_browser-policy", "the browser's policy network, from a container that is only on it"),
     ("agent-stack_agents", "the agents network"),
+    ("agent-stack_guests", "the guests network"),
     ("agent-stack_edge", "a positive control on the edge network, so a broken runner cannot pass"),
     ("tokenfuse-gateway:4100", "the gateway, which an agent must reach"),
 ):
@@ -309,4 +316,5 @@ if problems:
 print("OK: %d services classified in the table; %d egress cases resolved; networks %s"
       % (len(TABLE), counted, ", ".join(sorted(NETWORKS))))
 print("    the agents network holds only the doors (%s); scopyx is reached through the broker" % ", ".join(sorted(AGENT_FACING)))
+print("    the guests network holds only %s" % ", ".join(sorted(GUESTS)))
 PY
