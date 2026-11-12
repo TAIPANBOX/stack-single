@@ -1900,7 +1900,7 @@ A profile in `compose.yaml` that is in neither list, or in both, is refused by t
 
 Every image the stack runs is pinned to the digest of the bytes it names. The
 tag stays beside it for reading. A tag can be moved by whoever controls the
-registry; a digest cannot, so a box running `wardryx:v2.6.2@sha256:b799...` runs
+registry; a digest cannot, so a box running `wardryx:v2.7.0@sha256:91dc...` runs
 that build and nothing else.
 
 The images this project publishes (`ghcr.io/taipanbox/...`) are also signed,
@@ -2292,6 +2292,24 @@ a console without an enrolled passkey cannot sign one, and its approvals are ref
 off would decide every hold on a bearer key, with no person named. Only a `CONSOLE_IMAGE` you
 named yourself can turn the check off, and the run says so. `WARDRYX_ALLOW_KEY_APPROVALS` is
 never set by this installer. Set by hand, it would let a bare key approve.
+
+### What the person deciding is shown
+
+From wardryx 2.7.0 the person deciding a held tool call sees its arguments, built by wardryx
+from the bytes the approval is bound to, with secrets and personal data hidden by fixed rules.
+wardryx seals that preview to the console's preview key, keeps only the ciphertext until the hold
+is decided or 24 hours pass, and records whether the person opened it. A person may deny without
+opening it; a grant without it is recorded as unseen.
+
+The installer makes the preview key once with the pinned console image (`genaryx-web
+preview-key`, ML-KEM-768 with X25519), before the stack starts: `preview/preview.key`, mode 0400,
+owned by the console's uid, in a directory root's with the console's group, mode 0710, mounted
+into the console alone and never printed. Its public half is kept at `preview-public/recipient`
+and set as `WARDRYX_PREVIEW_RECIPIENT`. A re-run keeps both. If only one of the two is there, the
+installer stops rather than make a pair that cannot open what was sealed. A pinned image that
+cannot make the key stops the install; a `CONSOLE_IMAGE` you named that cannot turns the preview
+off, and the run says so. The key is not rotated by the installer: a preview sealed to an old key
+can no longer be opened, so rotating means removing both files while no hold is waiting.
 
 ## The console
 

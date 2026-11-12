@@ -26,7 +26,7 @@ name: agent-stack
 # The release this file belongs to, the same number as STACK_VERSION in install.sh: a piped
 # install fetches the two in separate requests, and refuses a pair that are not one tree.
 # A top-level x- key is no part of any service, so it recreates no container.
-x-stack-version: "1.9.0"
+x-stack-version: "1.10.0"
 
 x-restart: &restart
   restart: unless-stopped
@@ -439,7 +439,7 @@ services:
   wardryx:
     <<: [*restart, *baseline]
     pids_limit: 512
-    image: ${WARDRYX_IMAGE:-ghcr.io/taipanbox/wardryx:v2.6.2@sha256:b799701c2429605c9c3819a8cbd3085462fadcf5b07aa0e17f17edd1cacddada}
+    image: ${WARDRYX_IMAGE:-ghcr.io/taipanbox/wardryx:v2.7.0@sha256:91dccc66ba00adefc2e1930423a172d5c17a8c4531fac97e8fab32acdef77940}
     # Its own uid (CLAUDE.md invariant 41): wardryx.ndjson is its stream, and
     # no other plane's uid can write it. The GID stays the bus group, so it
     # reads the other streams. group_add 20001 is for the Keyryx socket
@@ -470,6 +470,10 @@ services:
       # a decision only with a statement the console signed. Never set
       # WARDRYX_ALLOW_KEY_APPROVALS in this file.
       WARDRYX_APPROVER_JWKS: ${WARDRYX_APPROVER_JWKS:-}
+      # The console's PUBLIC preview key (wardryx 2.7.0 and later, CLAUDE.md invariant 78), written by
+      # install.sh from the pinned console image. Set, wardryx seals each held call's arguments to it, and
+      # a grant of a sealed hold names the preview the person was shown. Empty, no preview is kept.
+      WARDRYX_PREVIEW_RECIPIENT: ${WARDRYX_PREVIEW_RECIPIENT:-}
       # WARDRYX_DB, not WARDRYX_DSN. wardryx reads WARDRYX_DB
       # (internal/config/config.go) and has never read WARDRYX_DSN, so this
       # compose generated a correct DSN, waited for policy-db to be healthy,
@@ -1826,7 +1830,7 @@ services:
     # `disk I/O error (6410)`, a warning that goes red nowhere (invariant 24).
     tmpfs:
       - /tmp:size=256m
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.8.8@sha256:55765e22aeb5a157099b30a9ecbda53b83121c17b3b98b6896af5733ba16f9a5}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.12.0@sha256:32c28d24c9a35438cda3b47bac2ea1d001edde268deeb7dfada652102bbc996f}
     networks:
       - core
       - agents
@@ -1934,6 +1938,10 @@ services:
       # assertion (CLAUDE.md invariant 61). Minted by install.sh, PKCS#8 P-256, owned by this
       # uid, mounted read only. A console image that does not sign statements ignores it.
       GENARYX_APPROVER_KEY_FILE: /run/approver/approver.pem
+      # The private preview key the console opens a held call's sealed arguments with (CLAUDE.md
+      # invariant 78). Made by install.sh with this image, X-Wing, owned by this uid, mode 0400, mounted
+      # read only into this service alone. wardryx holds the public half and never this file.
+      GENARYX_PREVIEW_KEY_FILE: /run/preview/preview.key
       # D8: the file holding the same secret, which the console mints closure
       # tokens with after a passkey assertion. Empty, the default, leaves its
       # close command off. Invariant 26.
@@ -1943,6 +1951,7 @@ services:
     volumes:
       - consolestate:/var/lib/stack
       - ./approver:/run/approver:ro
+      - ./preview:/run/preview:ro
       - events:/var/lib/stack/events
       # Read only: the console backtests over what the gateway wrote and must not be able to edit it,
       # the split focus-export makes below. focus-export reads this same directory as 10001:10001,
@@ -2288,7 +2297,7 @@ services:
     pids_limit: 128
     tmpfs:
       - /tmp:size=64m
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.8.8@sha256:55765e22aeb5a157099b30a9ecbda53b83121c17b3b98b6896af5733ba16f9a5}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.12.0@sha256:32c28d24c9a35438cda3b47bac2ea1d001edde268deeb7dfada652102bbc996f}
     networks:
       - core
     user: "10001:10001"
@@ -2337,7 +2346,7 @@ services:
   verdryx-slo:
     <<: [*restart, *baseline]
     pids_limit: 128
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.8.8@sha256:55765e22aeb5a157099b30a9ecbda53b83121c17b3b98b6896af5733ba16f9a5}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.12.0@sha256:32c28d24c9a35438cda3b47bac2ea1d001edde268deeb7dfada652102bbc996f}
     user: "20020:10001"
     profiles: ["slo-signal"]
     environment:

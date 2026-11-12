@@ -1435,7 +1435,7 @@ browser_profile_status() {
 #
 # STACK_VERSION is what the journal records: the newest docs/releases/vX.Y.Z.md, the same
 # number as x-stack-version in compose.yaml (scripts/version-is-one-number.sh).
-STACK_VERSION="1.9.0"
+STACK_VERSION="1.10.0"
 # Raised only when an older tree has become unsafe to run on a box that ran this one, and
 # only with a line in that release's notes that starts `security:` or `irreversible:` and
 # names `rollback index N` (scripts/rollback-floor.sh).
@@ -1608,7 +1608,7 @@ journal_status() {
 # TOOL_HOLD=1 in the environment is the operator's decision to turn it on over that list. It
 # is read from the environment and never from .env, like ALLOW_ROLLBACK: a line left in a
 # file must not answer for a person.
-TOOL_HOLD_WARDRYX_IMAGE="ghcr.io/taipanbox/wardryx:v2.6.2@sha256:b799701c2429605c9c3819a8cbd3085462fadcf5b07aa0e17f17edd1cacddada"
+TOOL_HOLD_WARDRYX_IMAGE="ghcr.io/taipanbox/wardryx:v2.7.0@sha256:91dccc66ba00adefc2e1930423a172d5c17a8c4531fac97e8fab32acdef77940"
 TOOL_HOLD_ON=1
 TOOL_HOLD_SAID=""
 NET="${NET:-agent-stack_core}"
@@ -5442,6 +5442,65 @@ approver_jwks_apply() { # before `up`: writes the console's public key set and t
 }
 # approver-key: end
 
+# preview-key: begin
+# CLAUDE.md invariant 78. A person approving a held tool call is shown its arguments: wardryx 2.7.0 and later
+# seal a preview of them to the console's preview key (WARDRYX_PREVIEW_RECIPIENT, the public half), and only
+# the console opens it, with the private half (GENARYX_PREVIEW_KEY_FILE). install.sh makes the pair once with
+# the pinned console image (`genaryx-web preview-key`, X-Wing: ML-KEM-768 with X25519), because openssl does
+# not make that key. The private key is owned by the console's uid (10001), mode 0400, in a directory only the
+# console's group may pass through, kept across re-runs and never printed. The recipient is public and is
+# kept beside it in preview-public/, so a re-run sets the same one. A pair is never rewritten: a preview
+# sealed to the old key could not be opened.
+preview_key_apply() { # before `up`
+  local dir="$STACK_DIR/preview" key="$STACK_DIR/preview/preview.key" pub="$STACK_DIR/preview-public/recipient"
+  local img tmp recipient=""
+  mkdir -p "$dir" "$STACK_DIR/preview-public" || die "could not create the preview key directories"
+  { chown 0:10001 "$dir" && chmod 0710 "$dir"; } \
+    || die "could not give $dir to root with the console's group (0:10001), mode 0710"
+  chmod 0755 "$STACK_DIR/preview-public" || die "could not set the mode of $STACK_DIR/preview-public"
+  if [ -s "$key" ] && [ -s "$pub" ]; then
+    recipient="$(head -1 "$pub")"
+    [[ "$recipient" =~ ^hpke:(647a|0020):[A-Za-z0-9_-]+$ ]] \
+      || die "$pub does not hold a preview recipient (hpke:<KEM>:<base64url>). Nothing was started. Remove both $pub and $key to make a new pair."
+    note "preview key kept at $key (never printed)"
+  elif [ -e "$key" ] || [ -e "$pub" ]; then
+    die "the preview key and its recipient are not both in $STACK_DIR (one of $key, $pub is missing). A recipient the console's key does not match seals previews nobody can open, so nothing was started. Remove the one that is there and run install.sh again."
+  else
+    img="$(grep -m1 'genaryx-console' <<<"$(GATEWAY_CLIENT_KEYS="${GATEWAY_CLIENT_KEYS:-not-written-before-section-3e:none}" "${COMPOSE[@]}" config --images 2>/dev/null)" || true)"
+    tmp="$(mktemp -d "$STACK_DIR/.preview-mint.XXXXXX")" || die "could not create a private directory for the preview key"
+    { chown 10001:10001 "$tmp" && chmod 0700 "$tmp"; } || { rm -rf "$tmp"; die "could not give $tmp to the console's uid (10001), mode 0700"; }
+    if [ -n "$img" ]; then
+      recipient="$(docker run --rm --network none --user 10001:10001 -v "$tmp:/out" --entrypoint /usr/local/bin/genaryx-web "$img" preview-key --out /out/preview.key 2>/dev/null | head -1)" || recipient=""
+    fi
+    # The whole value, one line of base64url: it lands in .env and in wardryx's environment.
+    [[ "$recipient" =~ ^hpke:647a:[A-Za-z0-9_-]+$ ]] || recipient=""
+    case "$recipient" in
+      hpke:647a:*)
+        [ -s "$tmp/preview.key" ] || { rm -rf "$tmp"; die "the console printed a preview recipient but wrote no key. Nothing was started."; }
+        mv -f "$tmp/preview.key" "$key" || { rm -rf "$tmp"; die "could not put the preview key in place at $key"; }
+        rm -rf "$tmp"
+        { printf '%s\n' "$recipient" >"$pub.tmp.$$" && chmod 0644 "$pub.tmp.$$" && mv -f "$pub.tmp.$$" "$pub"; } \
+          || die "could not write the preview recipient to $pub"
+        note "preview key minted at $key (X-Wing, never printed)"
+        ;;
+      *)
+        rm -rf "$tmp"
+        # Off means a person decides a held call without its arguments in front of them, recorded as unseen.
+        # It happens only on a box that chose an older console itself; the pinned image always makes the key.
+        [ -n "$(typed_env_get CONSOLE_IMAGE)" ] || [ -n "${CONSOLE_IMAGE:-}" ] \
+          || die "the pinned console image did not make a preview key, so no held call's arguments could be shown. Nothing was started. Check: docker run --rm --entrypoint /usr/local/bin/genaryx-web <console image> preview-key --help"
+        typed_forget_env WARDRYX_PREVIEW_RECIPIENT
+        note "argument preview: off. CONSOLE_IMAGE names a console that cannot make a preview key, so a held call is decided without its arguments shown, and recorded as unseen (CLAUDE.md invariant 78)."
+        return 0
+        ;;
+    esac
+  fi
+  { chown 10001:10001 "$key" && chmod 0400 "$key"; } || die "could not give the preview key to the console's uid (10001), mode 0400"
+  typed_set_env WARDRYX_PREVIEW_RECIPIENT "$recipient"
+  note "argument preview: on. wardryx seals each held call's arguments to the console's preview key, and the console shows them to the person deciding (CLAUDE.md invariant 78)."
+}
+# preview-key: end
+
 keyryx_prepare
 approver_key_prepare
 
@@ -6074,6 +6133,7 @@ fi
 # The routes out this box's own choices need (invariant 38), written before `up`
 # reads the files. A refusal here is before any container starts.
 approver_jwks_apply
+preview_key_apply
 egress_override .
 # wardryx reads policy.yaml at start. A run that changed it restarts wardryx
 # after `up`, but only when wardryx was already running: a fresh start reads the

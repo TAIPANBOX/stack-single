@@ -470,11 +470,11 @@ run_case "tool-hold-is-seeded: nothing reads what wardryx loaded" fail \
 	"a file that says on is believed"
 run_case "tool-hold-is-seeded: the question runs another image" fail \
 	'./scripts/tool-hold-is-seeded.sh' \
-	"$(py 'edit("install.sh", "TOOL_HOLD_WARDRYX_IMAGE=\"ghcr.io/taipanbox/wardryx:v2.6.2@sha256:b799701c", "TOOL_HOLD_WARDRYX_IMAGE=\"ghcr.io/taipanbox/wardryx:v2.6.2@sha256:0001d23b")')" \
+	"$(py 'edit("install.sh", "TOOL_HOLD_WARDRYX_IMAGE=\"ghcr.io/taipanbox/wardryx:v2.7.0@sha256:91dccc66", "TOOL_HOLD_WARDRYX_IMAGE=\"ghcr.io/taipanbox/wardryx:v2.7.0@sha256:0001d23b")')" \
 	"not the one compose.yaml pins"
 run_case "tool-hold-is-seeded: the pin goes below 2.6.0" fail \
 	'./scripts/tool-hold-is-seeded.sh' \
-	"$(py 'edit("compose.yaml", "wardryx:v2.6.2@", "wardryx:v2.5.1@")')" \
+	"$(py 'edit("compose.yaml", "wardryx:v2.7.0@", "wardryx:v2.5.1@")')" \
 	"older than 2.6.0"
 run_case "tool-hold-is-seeded: a wardryx that refuses the file gets it anyway" fail \
 	'./scripts/tool-hold-is-seeded.sh' \
@@ -798,7 +798,7 @@ run_case "manifest-is-true: a routine arrives and the manifest does not claim it
 # is one character in one tag, which is exactly how it would arrive.
 run_case "manifest-is-true: a pulled tag moves in compose and not in the manifest" fail \
 	'./scripts/manifest-is-true.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.6.2", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.7.0", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
 	"an image it pulls"
 
 # invariant 15: the delegation plane's default is byte-for-byte what it was
@@ -1941,7 +1941,7 @@ run_case "approver-key-is-wired: the bare-key switch is set" fail \
 
 run_case "approver-key-is-wired: wardryx is pinned back to 2.3.0" fail \
 	'./scripts/approver-key-is-wired.sh' \
-	"$(py 'edit_all("compose.yaml", "wardryx:v2.6.2@sha256:b799701c", "wardryx:v2.3.0@sha256:b799701c")')" \
+	"$(py 'edit_all("compose.yaml", "wardryx:v2.7.0@sha256:91dccc66", "wardryx:v2.3.0@sha256:91dccc66")')" \
 	"older than v2.4.0"
 
 run_case "approver-key-is-wired: the console loses its key mount" fail \
@@ -1984,6 +1984,91 @@ run_case "approver-key-is-wired: the console runs as a uid the key is not given 
 run_case "approver-key-is-wired: a reworded comment on the approver directory is not a fault" pass \
 	'./scripts/approver-key-is-wired.sh' \
 	"$(py 'edit("install.sh", "and nobody else may enter or list", "and no one else may enter or list")')"
+
+# ---- preview-key-is-wired (CLAUDE.md invariant 78) -----------------------
+run_case "preview-key-is-wired: the preview key is left readable by its group" fail \
+	'./scripts/preview-key-is-wired.sh' \
+	"$(py 'edit("install.sh", "chmod 0400 \"$key\"; } || die \"could not give the preview key", "chmod 0440 \"$key\"; } || die \"could not give the preview key")')" \
+	"is mode 440, not 400"
+
+run_case "preview-key-is-wired: a re-run makes a new preview key" fail \
+	'./scripts/preview-key-is-wired.sh' \
+	"$(py 'edit("install.sh", "  if [ -s \"$key\" ] && [ -s \"$pub\" ]; then", "  if false; then")')" \
+	"a re-run"
+
+run_case "preview-key-is-wired: a half pair is repaired instead of refused" fail \
+	'./scripts/preview-key-is-wired.sh' \
+	"$(py 'edit("install.sh", "  elif [ -e \"$key\" ] || [ -e \"$pub\" ]; then", "  elif false; then")')" \
+	"half pair"
+
+run_case "preview-key-is-wired: a pinned console that cannot make the key turns the preview off quietly" fail \
+	'./scripts/preview-key-is-wired.sh' \
+	"$(py 'edit("install.sh", "  [ -n \"$(typed_env_get CONSOLE_IMAGE)\" ] || [ -n \"${CONSOLE_IMAGE:-}\" ] \\\n          || die \"the pinned console image did not make", "  true || die \"the pinned console image did not make")')" \
+	"let the install go on with the preview off"
+
+run_case "preview-key-is-wired: an older console keeps the recipient" fail \
+	'./scripts/preview-key-is-wired.sh' \
+	"$(py 'edit("install.sh", "        typed_forget_env WARDRYX_PREVIEW_RECIPIENT\n", "")')" \
+	"keeps WARDRYX_PREVIEW_RECIPIENT"
+
+run_case "preview-key-is-wired: the recipient is not handed to wardryx" fail \
+	'./scripts/preview-key-is-wired.sh' \
+	"$(py 'edit("install.sh", "  typed_set_env WARDRYX_PREVIEW_RECIPIENT \"$recipient\"\n", "")')" \
+	"is not set to the recipient"
+
+run_case "preview-key-is-wired: the private key is printed" fail \
+	'./scripts/preview-key-is-wired.sh' \
+	"$(py 'edit("install.sh", "        note \"preview key minted at $key (X-Wing, never printed)\"", "        note \"preview key minted at $key: $(cat \"$key\")\"")')" \
+	"printed the private preview key"
+
+run_case "preview-key-is-wired: the mint directory is left behind" fail \
+	'./scripts/preview-key-is-wired.sh' \
+	"$(py 'edit("install.sh", "        mv -f \"$tmp/preview.key\" \"$key\" || { rm -rf \"$tmp\"; die \"could not put the preview key in place at $key\"; }\n        rm -rf \"$tmp\"\n", "        mv -f \"$tmp/preview.key\" \"$key\" || { rm -rf \"$tmp\"; die \"could not put the preview key in place at $key\"; }\n")')" \
+	"mint directory was left behind"
+
+run_case "preview-key-is-wired: the preview directory is listable by others" fail \
+	'./scripts/preview-key-is-wired.sh' \
+	"$(py 'edit("install.sh", "chmod 0710 \"$dir\"", "chmod 0755 \"$dir\"")')" \
+	"others can enter or list it"
+
+run_case "preview-key-is-wired: the preview directory is not given the console's group" fail \
+	'./scripts/preview-key-is-wired.sh' \
+	"$(py 'edit("install.sh", "chown 0:10001 \"$dir\"", "chown 0:0 \"$dir\"")')" \
+	"not root with the console's group"
+
+run_case "preview-key-is-wired: wardryx is pinned back to 2.6.2" fail \
+	'./scripts/preview-key-is-wired.sh' \
+	"$(py 'edit_all("compose.yaml", "wardryx:v2.7.0@sha256:91dccc66", "wardryx:v2.6.2@sha256:91dccc66")')" \
+	"older than v2.7.0"
+
+run_case "preview-key-is-wired: the console loses its preview key mount" fail \
+	'./scripts/preview-key-is-wired.sh' \
+	"$(py 'edit("compose.yaml", "      - ./preview:/run/preview:ro\n", "")')" \
+	"does not mount ./preview"
+
+run_case "preview-key-is-wired: the private preview key reaches wardryx" fail \
+	'./scripts/preview-key-is-wired.sh' \
+	"$(py 'edit("compose.yaml", "      - ./approver-public:/etc/wardryx/approver:ro\n", "      - ./approver-public:/etc/wardryx/approver:ro\n      - ./preview:/run/preview:ro\n")')" \
+	"reaches another service"
+
+run_case "preview-key-is-wired: wardryx gets a recipient by default" fail \
+	'./scripts/preview-key-is-wired.sh' \
+	"$(py 'edit("compose.yaml", "      WARDRYX_PREVIEW_RECIPIENT: ${WARDRYX_PREVIEW_RECIPIENT:-}\n", "      WARDRYX_PREVIEW_RECIPIENT: ${WARDRYX_PREVIEW_RECIPIENT:-hpke:647a:x}\n")')" \
+	"not an empty default"
+
+run_case "preview-key-is-wired: the key is made after the stack is up" fail \
+	'./scripts/preview-key-is-wired.sh' \
+	"$(py 'edit("install.sh", "approver_jwks_apply\npreview_key_apply\n", "approver_jwks_apply\n") or edit("install.sh", "\"${COMPOSE[@]}\" \"${UP_PROFILES[@]}\" up -d --remove-orphans\n", "\"${COMPOSE[@]}\" \"${UP_PROFILES[@]}\" up -d --remove-orphans\npreview_key_apply\n")')" \
+	"before the up that starts the stack"
+
+run_case "preview-key-is-wired: a recipient outside base64url is accepted" fail \
+	'./scripts/preview-key-is-wired.sh' \
+	"$(py 'edit("install.sh", "    [[ \"$recipient\" =~ ^hpke:647a:[A-Za-z0-9_-]+$ ]] || recipient=\"\"\n", "")')" \
+	"outside base64url was accepted"
+
+run_case "preview-key-is-wired: a reworded comment on the preview key is not a fault" pass \
+	'./scripts/preview-key-is-wired.sh' \
+	"$(py 'edit("install.sh", "A pair is never rewritten: a preview", "A pair is never replaced: a preview")')"
 
 # ---- costcrew-runner-spends-through-the-gateway (CLAUDE.md invariant 60) -----
 run_case "costcrew-runner-spends-through-the-gateway: the runner starts with the add-on's profile" fail \
@@ -2216,12 +2301,12 @@ run_case "typed-risk-signal: typryx is pinned before the proxy existed" fail \
 
 run_case "typed-risk-signal: wardryx is pinned before it read signals" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.6.2@sha256:b799701c2429605c9c3819a8cbd3085462fadcf5b07aa0e17f17edd1cacddada}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.7.0@sha256:91dccc66ba00adefc2e1930423a172d5c17a8c4531fac97e8fab32acdef77940}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
 	"hold_if_signal and signals on /v1/decide do not exist before it"
 
 run_case "typed-risk-signal: wardryx is pinned before when_absent" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.6.2@sha256:b799701c2429605c9c3819a8cbd3085462fadcf5b07aa0e17f17edd1cacddada}", "ghcr.io/taipanbox/wardryx:v1.3.2}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.7.0@sha256:91dccc66ba00adefc2e1930423a172d5c17a8c4531fac97e8fab32acdef77940}", "ghcr.io/taipanbox/wardryx:v1.3.2}")')" \
 	"needs v1.4.0 or later"
 
 run_case "typed-risk-signal: tokenfuse is pinned before it sent the tool call" fail \

@@ -159,6 +159,8 @@ jobs:
         run: ./scripts/costcrew-runner-spends-through-the-gateway.sh
       - name: the approver key is minted and wardryx checks statements (invariant 61)
         run: ./scripts/approver-key-is-wired.sh
+      - name: the console's preview key is made once and wardryx holds only its recipient (invariant 78)
+        run: ./scripts/preview-key-is-wired.sh
       - name: the record seal signs through keyryx and the witness attests (invariant 62)
         run: ./scripts/record-is-signed-by-keyryx.sh
       - name: the record seal pins custody's trailryx-root kid at install (invariant 63)
