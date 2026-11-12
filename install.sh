@@ -5444,7 +5444,7 @@ posture and README says so."
   if [ ! -f delegation/signing.pem ]; then
     note "vouchryx: minting a signing key"
     docker run --rm --user 0:0 -v "$STACK_DIR/delegation:/out" \
-        --entrypoint vouchryx-demo "${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.7.0@sha256:c2b684746b854af9cc0a0cef7e5ebcaa8ee5070806ddf3912d5603af45360912}" \
+        --entrypoint vouchryx-demo "${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.8.0@sha256:2e1848151118de3dd69d2d68918fd50eee29859fdc47fb6fd3092914fe73022a}" \
         keygen -out /out/signing >/dev/null \
       || die "could not mint vouchryx's signing key"
     chown 20002:20002 delegation/signing.pem delegation/signing.jwks.json
@@ -5461,7 +5461,7 @@ posture and README says so."
     if [ ! -f delegation/idp.pem ]; then
       note "vouchryx: minting a demo issuer (WITH_DELEGATION_DEMO_ISSUER=1, never for production)"
       docker run --rm --user 0:0 -v "$STACK_DIR/delegation:/out" \
-          --entrypoint vouchryx-demo "${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.7.0@sha256:c2b684746b854af9cc0a0cef7e5ebcaa8ee5070806ddf3912d5603af45360912}" \
+          --entrypoint vouchryx-demo "${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.8.0@sha256:2e1848151118de3dd69d2d68918fd50eee29859fdc47fb6fd3092914fe73022a}" \
           keygen -out /out/idp -kid stack-single-demo-idp >/dev/null \
         || die "could not mint the demo issuer key"
       chown 20002:20002 delegation/idp.pem delegation/idp.jwks.json
