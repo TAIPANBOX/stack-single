@@ -22,6 +22,9 @@
 #   D. SHARED VOLUMES. `events` and `checkpoints` are shared bus volumes with one owner per file
 #      (CLAUDE.md invariants 10 and 41, gated by bus-has-a-writer.sh and
 #      no-plane-writes-another-planes-stream.sh). They are excluded here, and the exclusion is printed.
+#      `wgapi` is excluded the same way: the wg container prepares it at every start (group
+#      WG_SOCKET_GID, mode 2770), and bus-has-a-writer.sh requires that group to be the gid of every
+#      non-root service that writes it (the console, whose user is pinned from 2026-11-12).
 #   E. MEASURED SOMETHING. The gate refuses to report OK when it found no writer, or no one-shot body.
 #   F. A FAILED CHOWN STOPS IT. Each chown of each one-shot, made to fail in turn, must stop the body
 #      with a non-zero status, since a one-shot that holds only some capabilities can be refused one.
@@ -169,6 +172,9 @@ SHARED = {"events", "checkpoints"}
 # untouched until G3.11 closed, and a volume that already opens as 70:70 needs no line of its own.
 # Measured on Compose 2.26.1, 2026-11-07: both volumes opened as 70:70.
 IMAGE_OWNED = {"pgdata"}
+# Prepared by the service that serves it, at every start: the wg container gives /var/run/wireguard
+# and its relay socket to group WG_SOCKET_GID, and bus-has-a-writer.sh judges that group.
+SERVICE_PREPARED = {"wgapi"}
 checked, problems, excluded = 0, [], set()
 for name, s in sorted(services.items()):
     if s["user"] is None or s["user"] == 0:
@@ -176,7 +182,7 @@ for name, s in sorted(services.items()):
     uid = s["user"]
     for rw in s["rw"]:
         vol = rw["volume"]
-        if vol in SHARED or vol in IMAGE_OWNED:
+        if vol in SHARED or vol in IMAGE_OWNED or vol in SERVICE_PREPARED:
             excluded.add(vol)
             continue
         # The one-shot that mounts this volume, and the path it mounts it at there.
