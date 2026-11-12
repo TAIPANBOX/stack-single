@@ -303,8 +303,8 @@ services:
       - keyryxwitness:/vol/keyryxw
       - keyryxattest:/vol/keyryxattest
       - keyryxalerts:/vol/keyryxalerts
-      - checkpoints:/vol/checkpoints
       - consolestate:/vol/consolestate
+      - checkpoints:/vol/checkpoints
     restart: "no"
 
   # ---- the policy plane's durable store ------------------------------------

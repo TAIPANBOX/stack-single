@@ -5767,12 +5767,11 @@ run_case "console-proofs: a reworded comment above the repair is not a fault" pa
 	"$CP" \
 	"$(py 'edit("compose.yaml", "# The console\x27s proofs replay decisions against this archive", "# The console\x27s proofs replay recorded decisions against this archive")')"
 
-run_case "console-proofs: naming the console own account is not a fault" pass \
+# compose.yaml names the console's own account from 2026-11-12 (invariants 41 and 61); leaving it to the
+# image, which runs the same 10001:10001, must not change what the proofs can read.
+run_case "console-proofs: leaving the console's account to its image is not a fault" pass \
 	"$CP" \
-	"$(py 's = open("compose.yaml").read()
-i = s.index("  console:\n    <<: [*restart, *baseline]\n")
-j = i + len("  console:\n    <<: [*restart, *baseline]\n")
-open("compose.yaml", "w").write(s[:j] + "    user: \"10001:10001\"\n" + s[j:])')"
+	"$(py 'edit("compose.yaml", "  console:\n    <<: [*restart, *baseline]\n    # Pinned, not left to the image: init-volumes gives this uid its stream on the bus, and install.sh\n    # gives it the approver key and the approver directory\x27s group (invariants 41 and 61).\n    user: \"10001:10001\"\n", "  console:\n    <<: [*restart, *baseline]\n")')"
 
 # CLAUDE.md invariant 65. Under pipefail a pipe into grep -q fails when the writer is still writing, so a
 # healthy tree went red at random on a loaded machine. The first cases plant the construct where it
