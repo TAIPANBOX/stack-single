@@ -80,20 +80,20 @@ else
   trap 'rm -rf "$scratch"' EXIT
   mkdir -p "$scratch/bin"
   # chown is recorded, not run: the scratch box is not root. Each line is OWNER TARGET.
-  printf '#!/usr/bin/env bash\necho "$1 $2" >>"%s/chown.log"\nexit 0\n' "$scratch" >"$scratch/bin/chown"
+  printf '#!/usr/bin/env bash\n[ "$1" = -h ] && shift\necho "$1 $2" >>"%s/chown.log"\nexit 0\n' "$scratch" >"$scratch/bin/chown"
   printf '#!/usr/bin/env bash\nif [ "$1" = config ]; then echo "ghcr.io/taipanbox/genaryx-console:v9.9.9@sha256:0000"; fi\nexit 0\n' >"$scratch/bin/stubcompose"
   # The stub docker plays `genaryx-web preview-key --out /out/preview.key` with -v DIR:/out. STUB_PROBE=1 means
   # the console can make the key. Every call is logged, so a re-run that runs the console again is seen.
   cat >"$scratch/bin/docker" <<EOD
 #!/usr/bin/env bash
 echo "\$*" >>"$scratch/docker.log"
-case "\${STUB_PROBE:-0}" in 1 | 2) ;; *) exit 2 ;; esac
+case "\${STUB_PROBE:-0}" in 1 | 2 | 3) ;; *) exit 2 ;; esac
 src=""
 while [ \$# -gt 0 ]; do
   case "\$1" in -v) src="\${2%%:/out}"; shift 2 ;; *) shift ;; esac
 done
 [ -n "\$src" ] || exit 3
-printf 'hpke-private:647a:STUBPRIVATEKEYMATERIAL\n' >"\$src/preview.key" && chmod 0400 "\$src/preview.key"
+if [ "\${STUB_PROBE}" = 3 ]; then ln -s "$scratch/hostfile" "\$src/preview.key"; else printf 'hpke-private:647a:STUBPRIVATEKEYMATERIAL\n' >"\$src/preview.key" && chmod 0400 "\$src/preview.key"; fi
 if [ "\${STUB_PROBE}" = 2 ]; then printf "hpke:647a:STUB' x=\\\$(id)\\n"; else printf 'hpke:647a:STUBRECIPIENT\n'; fi
 EOD
   chmod +x "$scratch/bin"/*
@@ -186,6 +186,15 @@ EOD
   outb="$(run_block "$boxb" 2)"; rcb=$?
   [ "$rcb" != 0 ] || fail "C. a recipient outside base64url was accepted: it would land in .env and in wardryx's environment"
   grep -q '^WARDRYX_PREVIEW_RECIPIENT=' "$boxb/.env" 2>/dev/null && fail "C. a recipient outside base64url was written to .env"
+
+  # a container that leaves a link where the key should be: refused, and the link's target is never touched
+  printf 'hpke-private:647a:HOSTFILEBYTES\n' >"$scratch/hostfile"
+  boxl="$scratch/boxl"; mkdir -p "$boxl"
+  outl="$(run_block "$boxl" 3)"; rcl=$?
+  [ "$rcl" != 0 ] || fail "C. a link left in place of the key was accepted: root would chown whatever it points to"
+  grep -q "$scratch/hostfile" "$scratch/chown.log" 2>/dev/null && fail "C. the link left in place of the key was followed by chown"
+  [ "$(cat "$scratch/hostfile")" = "hpke-private:647a:HOSTFILEBYTES" ] || fail "C. the file a planted link points to was changed"
+  [ -e "$boxl/preview/preview.key" ] && fail "C. a link left in place of the key became the key"
 
   # an operator named an older console: off, said out loud, and an earlier value is gone
   boxo="$scratch/boxo"; mkdir -p "$boxo"

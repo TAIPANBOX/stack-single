@@ -2023,7 +2023,7 @@ run_case "preview-key-is-wired: the private key is printed" fail \
 
 run_case "preview-key-is-wired: the mint directory is left behind" fail \
 	'./scripts/preview-key-is-wired.sh' \
-	"$(py 'edit("install.sh", "        mv -f \"$tmp/preview.key\" \"$key\" || { rm -rf \"$tmp\"; die \"could not put the preview key in place at $key\"; }\n        rm -rf \"$tmp\"\n", "        mv -f \"$tmp/preview.key\" \"$key\" || { rm -rf \"$tmp\"; die \"could not put the preview key in place at $key\"; }\n")')" \
+	"$(py 'edit("install.sh", "        rm -rf \"$tmp\"\n        [ \"$(wc -l", "        [ \"$(wc -l")')" \
 	"mint directory was left behind"
 
 run_case "preview-key-is-wired: the preview directory is listable by others" fail \
@@ -2065,6 +2065,11 @@ run_case "preview-key-is-wired: a recipient outside base64url is accepted" fail 
 	'./scripts/preview-key-is-wired.sh' \
 	"$(py 'edit("install.sh", "    [[ \"$recipient\" =~ ^hpke:647a:[A-Za-z0-9_-]+$ ]] || recipient=\"\"\n", "")')" \
 	"outside base64url was accepted"
+
+run_case "preview-key-is-wired: a link the container left is followed" fail \
+	'./scripts/preview-key-is-wired.sh' \
+	"$(py 'edit("install.sh", "        if [ ! -f \"$tmp/preview.key\" ] || [ -L \"$tmp/preview.key\" ] \\\n", "        if [ ! -e \"$tmp/preview.key\" ] \\\n")')" \
+	"link left in place of the key"
 
 run_case "preview-key-is-wired: a reworded comment on the preview key is not a fault" pass \
 	'./scripts/preview-key-is-wired.sh' \

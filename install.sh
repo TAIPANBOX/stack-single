@@ -5458,6 +5458,10 @@ preview_key_apply() { # before `up`
   { chown 0:10001 "$dir" && chmod 0710 "$dir"; } \
     || die "could not give $dir to root with the console's group (0:10001), mode 0710"
   chmod 0755 "$STACK_DIR/preview-public" || die "could not set the mode of $STACK_DIR/preview-public"
+  # A link in place of either file is refused, never followed: root chowns and reads them.
+  if [ -L "$key" ] || [ -L "$pub" ]; then
+    die "$key or $pub is a symbolic link. Nothing was started. Remove it and run install.sh again."
+  fi
   if [ -s "$key" ] && [ -s "$pub" ]; then
     recipient="$(head -1 "$pub")"
     [[ "$recipient" =~ ^hpke:(647a|0020):[A-Za-z0-9_-]+$ ]] \
@@ -5476,9 +5480,19 @@ preview_key_apply() { # before `up`
     [[ "$recipient" =~ ^hpke:647a:[A-Za-z0-9_-]+$ ]] || recipient=""
     case "$recipient" in
       hpke:647a:*)
-        [ -s "$tmp/preview.key" ] || { rm -rf "$tmp"; die "the console printed a preview recipient but wrote no key. Nothing was started."; }
-        mv -f "$tmp/preview.key" "$key" || { rm -rf "$tmp"; die "could not put the preview key in place at $key"; }
+        # The container wrote into $tmp as uid 10001, so what it left is taken only if it is one plain file
+        # with one link, and root copies its bytes into a file of its own: a link or a hard link planted there
+        # would otherwise make the chown below change a file elsewhere on the host.
+        if [ ! -f "$tmp/preview.key" ] || [ -L "$tmp/preview.key" ] \
+           || [ "$(stat -c '%h' "$tmp/preview.key" 2>/dev/null || stat -f '%l' "$tmp/preview.key" 2>/dev/null)" != 1 ]; then
+          rm -rf "$tmp"
+          die "the console printed a preview recipient but left no plain key file. Nothing was started."
+        fi
+        ( umask 077; head -c 8192 "$tmp/preview.key" >"$key.tmp.$$" ) || { rm -rf "$tmp" "$key.tmp.$$"; die "could not copy the preview key into place"; }
         rm -rf "$tmp"
+        [ "$(wc -l <"$key.tmp.$$" | tr -d ' ')" = 1 ] && grep -qE '^hpke-private:647a:[A-Za-z0-9_-]+$' "$key.tmp.$$" \
+          || { rm -f "$key.tmp.$$"; die "what the console wrote is not an X-Wing preview key. Nothing was started."; }
+        mv -f "$key.tmp.$$" "$key" || { rm -f "$key.tmp.$$"; die "could not put the preview key in place at $key"; }
         { printf '%s\n' "$recipient" >"$pub.tmp.$$" && chmod 0644 "$pub.tmp.$$" && mv -f "$pub.tmp.$$" "$pub"; } \
           || die "could not write the preview recipient to $pub"
         note "preview key minted at $key (X-Wing, never printed)"
@@ -5495,7 +5509,7 @@ preview_key_apply() { # before `up`
         ;;
     esac
   fi
-  { chown 10001:10001 "$key" && chmod 0400 "$key"; } || die "could not give the preview key to the console's uid (10001), mode 0400"
+  { chown -h 10001:10001 "$key" && chmod 0400 "$key"; } || die "could not give the preview key to the console's uid (10001), mode 0400"
   typed_set_env WARDRYX_PREVIEW_RECIPIENT "$recipient"
   note "argument preview: on. wardryx seals each held call's arguments to the console's preview key, and the console shows them to the person deciding (CLAUDE.md invariant 78)."
 }
