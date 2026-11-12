@@ -2469,7 +2469,7 @@ services:
     <<: [*restart, *baseline]
     pids_limit: 256
     profiles: ["finops"]
-    image: ${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.10.1@sha256:2fb72d878eb11702141ce0822049a95a28feae8fec9001bc8d568d144ae43036}
+    image: ${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.10.2@sha256:a0fc173b7dc75813abc851cf7ee47ab0f76b3008e2892db2f67a6d3e30089516}
     networks:
       - agents
       - core
@@ -2548,7 +2548,7 @@ services:
     <<: *baseline
     pids_limit: 128
     profiles: ["crew"]
-    image: ${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.10.1@sha256:2fb72d878eb11702141ce0822049a95a28feae8fec9001bc8d568d144ae43036}
+    image: ${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.10.2@sha256:a0fc173b7dc75813abc851cf7ee47ab0f76b3008e2892db2f67a6d3e30089516}
     entrypoint: ["/usr/local/bin/costcrew-run"]
     command:
       # -due first: only cadence-due work, and exit 2 with nothing touched while the console's

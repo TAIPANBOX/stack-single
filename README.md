@@ -2138,7 +2138,7 @@ cd /opt/agent-stack
 docker compose --profile finops up -d costcrew
 ```
 
-That pulls one image, `ghcr.io/taipanbox/costcrew:v0.10.1`, and starts it beside
+That pulls one image, `ghcr.io/taipanbox/costcrew:v0.10.2`, and starts it beside
 a small one-shot that prepares its volume. It is the FinOps console: cloud and
 AI spend, a crew of agents that triages it, and a person who reviews what the
 crew wrote.
@@ -2215,7 +2215,7 @@ then turn cadence on there. Each step is yours. A box given its own client keys 
 carries the crew's key there as a `<secret>:costcrew` line, and the installer puts that id on
 the gateway's static list.
 
-**Moving to a newer console.** The pin is `ghcr.io/taipanbox/costcrew:v0.10.1`.
+**Moving to a newer console.** The pin is `ghcr.io/taipanbox/costcrew:v0.10.2`.
 On a box that already ran an earlier pin, the same `up -d costcrew` picks it
 up. From v0.8.0 every analyst's id is `agent://<host>/costcrew/<name>`. This launcher
 binds no analyst id to a gateway key, an identity map or a policy, so nothing here
