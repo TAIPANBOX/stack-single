@@ -1759,7 +1759,7 @@ post, never what Jev said.
 
 **The opt-in training log.** `@decided 2026-09-30`: typryx can keep a local
 training log, off by default. typryx v0.3.0 is the first release that has it and
-this launcher pins typryx v0.6.0, so it is there. Switch it on with `TYPED_TRAINING=1` next to any typed mode
+this launcher pins typryx v0.6.1, so it is there. Switch it on with `TYPED_TRAINING=1` next to any typed mode
 (`WITH_TYPED=1`, `TYPED_MODE=jev` or `TYPED_MODE=own-model`):
 
 ```bash
@@ -1900,7 +1900,7 @@ A profile in `compose.yaml` that is in neither list, or in both, is refused by t
 
 Every image the stack runs is pinned to the digest of the bytes it names. The
 tag stays beside it for reading. A tag can be moved by whoever controls the
-registry; a digest cannot, so a box running `wardryx:v2.6.1@sha256:2101...` runs
+registry; a digest cannot, so a box running `wardryx:v2.6.2@sha256:b799...` runs
 that build and nothing else.
 
 The images this project publishes (`ghcr.io/taipanbox/...`) are also signed,
@@ -2138,7 +2138,7 @@ cd /opt/agent-stack
 docker compose --profile finops up -d costcrew
 ```
 
-That pulls one image, `ghcr.io/taipanbox/costcrew:v0.10.1`, and starts it beside
+That pulls one image, `ghcr.io/taipanbox/costcrew:v0.10.2`, and starts it beside
 a small one-shot that prepares its volume. It is the FinOps console: cloud and
 AI spend, a crew of agents that triages it, and a person who reviews what the
 crew wrote.
@@ -2215,7 +2215,7 @@ then turn cadence on there. Each step is yours. A box given its own client keys 
 carries the crew's key there as a `<secret>:costcrew` line, and the installer puts that id on
 the gateway's static list.
 
-**Moving to a newer console.** The pin is `ghcr.io/taipanbox/costcrew:v0.10.1`.
+**Moving to a newer console.** The pin is `ghcr.io/taipanbox/costcrew:v0.10.2`.
 On a box that already ran an earlier pin, the same `up -d costcrew` picks it
 up. From v0.8.0 every analyst's id is `agent://<host>/costcrew/<name>`. This launcher
 binds no analyst id to a gateway key, an identity map or a policy, so nothing here
@@ -2269,7 +2269,7 @@ into `./closure/secret`, readable only by the console. Nothing prints it, and a
 re-run keeps it. To turn closing off again, remove `CLOSURE_SECRET` and
 `CLOSURE_SECRET_FILE` from `.env` and run `docker compose up -d`.
 
-It needs tokenfuse v1.9.0 or later and console v1.1.34 or later. The images pinned here are tokenfuse v1.24.0 and
+It needs tokenfuse v1.9.0 or later and console v1.1.34 or later. The images pinned here are tokenfuse v1.25.0 and
 console v1.8.8; an older image ignores the setting.
 
 ## Approvals and the console's approver key

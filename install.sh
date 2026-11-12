@@ -1608,7 +1608,7 @@ journal_status() {
 # TOOL_HOLD=1 in the environment is the operator's decision to turn it on over that list. It
 # is read from the environment and never from .env, like ALLOW_ROLLBACK: a line left in a
 # file must not answer for a person.
-TOOL_HOLD_WARDRYX_IMAGE="ghcr.io/taipanbox/wardryx:v2.6.1@sha256:2101d23bbe8ecb1b932a530611ffa02f1c7c9b82394c4fa8db238f7d0e7bd667"
+TOOL_HOLD_WARDRYX_IMAGE="ghcr.io/taipanbox/wardryx:v2.6.2@sha256:b799701c2429605c9c3819a8cbd3085462fadcf5b07aa0e17f17edd1cacddada"
 TOOL_HOLD_ON=1
 TOOL_HOLD_SAID=""
 NET="${NET:-agent-stack_core}"
