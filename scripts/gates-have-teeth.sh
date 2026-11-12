@@ -1820,12 +1820,12 @@ run_case "drills-broker: the drill runs the gateway drills too" fail \
 
 run_case "drills-broker: the drill pins a mockryx that sends the broker no key" fail \
 	"$DRB" \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/mockryx:v0.5.0@", "ghcr.io/taipanbox/mockryx:v0.4.0@")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/mockryx:v0.5.1@", "ghcr.io/taipanbox/mockryx:v0.4.0@")')" \
 	"older than v0.5.0"
 
 run_case "drills-broker: a newer mockryx pin still passes" pass \
 	"$DRB" \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/mockryx:v0.5.0@", "ghcr.io/taipanbox/mockryx:v0.6.0@")')"
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/mockryx:v0.5.1@", "ghcr.io/taipanbox/mockryx:v0.6.0@")')"
 
 run_case "drills-broker: the drill's image is pulled unchecked" fail \
 	"$DRB" \
