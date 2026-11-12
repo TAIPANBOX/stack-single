@@ -5094,7 +5094,7 @@ run_case "images-are-digest-pinned: the third-party postgres loses its digest" f
 
 run_case "images-are-digest-pinned: the installer names a digest compose does not run" fail \
 	'./scripts/images-are-digest-pinned.sh' \
-	"$(py 'edit_all("install.sh", "c2b684746b854af9cc0a0cef7e5ebcaa8ee5070806ddf3912d5603af45360912", "1111111111111111111111111111111111111111111111111111111111111111")')" \
+	"$(py 'edit_all("install.sh", "2e1848151118de3dd69d2d68918fd50eee29859fdc47fb6fd3092914fe73022a", "1111111111111111111111111111111111111111111111111111111111111111")')" \
 	"pinned to a digest compose.yaml does not run"
 
 run_case "images-are-digest-pinned: no image line left to judge" fail \

@@ -1283,7 +1283,7 @@ services:
     <<: [*restart, *baseline]
     pids_limit: 256
     profiles: ["delegation"]
-    image: ${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.7.0@sha256:c2b684746b854af9cc0a0cef7e5ebcaa8ee5070806ddf3912d5603af45360912}
+    image: ${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.8.0@sha256:2e1848151118de3dd69d2d68918fd50eee29859fdc47fb6fd3092914fe73022a}
     networks:
       - core
     # Group 10001, the same pair typryx and the money plane's writers use: its
