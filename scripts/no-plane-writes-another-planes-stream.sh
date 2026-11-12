@@ -27,7 +27,18 @@
 #   3. every stream is mode 0640 (no world or group write, no world read);
 #   4. the bus directory is owned by root, its group is the bus group (10001),
 #      and it has no write bit for group or other, so no uid can create a file;
-#   5. every per-producer checkpoint file is owned by its stream's writer, mode 0640.
+#   5. every per-producer checkpoint file is owned by its stream's writer, mode 0640;
+#   6. every service that mounts the bus read-write writes a stream of its own. Nothing but the
+#      setup script can create a file there, so a plane given the bus read-write and no stream of
+#      its own can record nothing. The console was that plane until 2026-11-12: it mounted the bus
+#      read-write, no stream was made for it, and it refused every approval it could not journal
+#      ("was NOT journaled: io: Permission denied"), while this gate said OK.
+#
+# A writer that names no file. The console takes its events directory from the environment
+# descriptor install.sh writes (environments/single.json, "events.dir") and appends to a file whose
+# name is fixed in its own code (genaryx CONSOLE_EVENTS_FILE, "console.ndjson"), so neither its
+# environment nor its command says the name. IMPLIED names it here, and the one fact that makes the
+# entry true is checked: the descriptor's directory is the bus the console mounts read-write.
 #
 # It refuses to report OK when it judged nothing (no stream, no writer, no
 # sandbox output): an empty result is "measured nothing", not a pass.
@@ -75,6 +86,9 @@ cfg = json.loads(r.stdout)
 services = cfg.get("services", {})
 if not services:
     bad("the resolved configuration has no services; measured nothing")
+
+# stream -> the service that appends to it without naming it (see the header).
+IMPLIED = {"console.ndjson": "console"}
 
 def uid_of(svc):
     user = str(services[svc].get("user", ""))
@@ -134,22 +148,47 @@ def owner_uid(owner):
     m = re.match(r"^(\d+)", owner or "")
     return int(m.group(1)) if m else None
 
+def bus_rw(d):
+    return [v for v in d.get("volumes", [])
+            if v.get("source") == "events" and v.get("target", "").startswith("/var/lib/stack/events")
+            and not v.get("read_only")]
+
 def writers_of(name):
     out = []
     for svc, d in services.items():
         if str(d.get("user", "")) in ("0:0", "0"):
             continue
-        rw = [v for v in d.get("volumes", [])
-              if v.get("source") == "events" and v.get("target", "").startswith("/var/lib/stack/events")
-              and not v.get("read_only")]
-        if not rw:
+        if not bus_rw(d):
             continue
         blob = json.dumps({"environment": d.get("environment", {}), "command": d.get("command", [])})
-        if re.search(r"(?<![A-Za-z0-9._-])" + re.escape(name) + r"(?![A-Za-z0-9._-])", blob):
+        if re.search(r"(?<![A-Za-z0-9._-])" + re.escape(name) + r"(?![A-Za-z0-9._-])", blob) \
+                or IMPLIED.get(name) == svc:
             out.append(svc)
     return out
 
 problems = []
+
+# An implied writer finds its file in the events directory of the environment descriptor install.sh
+# writes; that directory must be the bus it mounts read-write, or the entry above names a file the
+# service never touches.
+inst = open("install.sh").read()
+m = re.search(r"cat > environments/single\.json <<'EOF'\n(.*?)\nEOF\n", inst, re.S)
+desc_dir = None
+if m:
+    try:
+        desc_dir = json.loads(m.group(1)).get("events", {}).get("dir")
+    except ValueError:
+        desc_dir = None
+for name, svc in sorted(IMPLIED.items()):
+    if svc not in services:
+        continue
+    targets = [v.get("target") for v in bus_rw(services[svc])]
+    if desc_dir is None:
+        problems.append("install.sh writes no environments/single.json with an events dir, so %s's file %s "
+                        "could not be placed" % (svc, name))
+    elif desc_dir not in targets:
+        problems.append("%s appends %s in %s (environments/single.json), which is not the bus it mounts "
+                        "read-write (%s)" % (svc, name, desc_dir, ", ".join(t for t in targets if t) or "none"))
 seen_uid = {}
 for name in streams:
     path = os.path.join(events, name)
@@ -174,6 +213,17 @@ for name in streams:
             problems.append("%s.ckpt.ndjson is owned by %s, want %s (its producer)" % (name, cown, u))
         if cmode is None or int(cmode, 8) != 0o640:
             problems.append("%s.ckpt.ndjson is mode %s, want 0640" % (name, cmode))
+
+# 6. a plane that mounts the bus read-write and writes no stream can record nothing (see the header).
+written = set()
+for name in streams:
+    written.update(writers_of(name))
+for svc, d in sorted(services.items()):
+    if str(d.get("user", "")) in ("0:0", "0") or not bus_rw(d):
+        continue
+    if svc not in written:
+        problems.append("%s mounts the bus read-write and writes no stream: nothing but the setup script "
+                        "can create a file there, so it can record nothing" % svc)
 
 downer, dmode = final.get(events, (None, None))
 if downer is None or not downer.startswith("0:"):

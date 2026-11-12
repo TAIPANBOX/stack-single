@@ -17,7 +17,16 @@
 #      docker and compose on PATH: the key is PKCS#8 P-256 at mode 0600, a re-run keeps
 #      its bytes, and nothing it prints contains the key; with a console that cannot
 #      print its key set the JWKS is not written and WARDRYX_APPROVER_JWKS is not set;
-#      with one that can, the file is written and the variable is set.
+#      with one that can, the file is written and the variable is set. The directory the key
+#      lives in is root's, its group the console's, mode 0710, whatever the umask of the shell
+#      that ran install.sh: the console passes through it to its key and nobody can list it.
+#      The block runs under umask 077 and under 022, because the mode used to be whatever
+#      mkdir left: 0700 under 077, and the console then refused every grant at start ("the
+#      approver key file cannot be used ... Permission denied", 2026-11-12), and 0755 under
+#      022, which lets every account on the host list it.
+#   D. The console's user is pinned in compose.yaml, and it is the uid and gid the block gives
+#      the key and the directory. Unpinned, the image decides who the console is, and the
+#      modes above protect a key for somebody else.
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)" || exit 1
 
@@ -53,6 +62,11 @@ grep -qE '^      - \./approver:/run/approver:ro$' compose.yaml \
   || fail "A. the console does not mount ./approver read only at /run/approver"
 grep -qE '^      GENARYX_APPROVER_KEY_FILE: /run/approver/approver\.pem$' compose.yaml \
   || fail "A. the console does not name GENARYX_APPROVER_KEY_FILE=/run/approver/approver.pem"
+# D. who the console is. Read from its service block, so the block's chowns are judged against it.
+CONSOLE_USER="$(awk 'f && /^  [a-z-]+:$/ { exit } /^  console:$/ { f = 1 } f' compose.yaml | sed -nE 's/^    user: "([0-9]+:[0-9]+)"$/\1/p' | head -1)"
+[ -n "$CONSOLE_USER" ] \
+  || fail "D. the console's user is not pinned in compose.yaml (user: \"UID:GID\"), so the image decides who reaches the approver key"
+CONSOLE_GID="${CONSOLE_USER##*:}"
 grep -qE '^      WARDRYX_APPROVER_JWKS: \$\{WARDRYX_APPROVER_JWKS:-\}$' compose.yaml \
   || fail "A. wardryx's WARDRYX_APPROVER_JWKS is not an empty default: statements would be on before a key set exists"
 
@@ -75,7 +89,8 @@ else
   scratch="$(mktemp -d)"
   trap 'rm -rf "$scratch"' EXIT
   mkdir -p "$scratch/bin"
-  printf '#!/usr/bin/env bash\nexit 0\n' >"$scratch/bin/chown"
+  # chown is recorded, not run: the scratch box is not root. Each line is OWNER TARGET.
+  printf '#!/usr/bin/env bash\necho "$1 $2" >>"%s/chown.log"\nexit 0\n' "$scratch" >"$scratch/bin/chown"
   printf '#!/usr/bin/env bash\n# stub compose: the image list only\nif [ "$1" = config ]; then echo "ghcr.io/taipanbox/genaryx-console:v9.9.9@sha256:0000"; fi\nexit 0\n' >"$scratch/bin/stubcompose"
   # the stub docker answers the console's approver-jwks probe; STUB_PROBE=1 means the console can print
   cat >"$scratch/bin/docker" <<'EOD'
@@ -87,8 +102,9 @@ fi
 exit 2
 EOD
   chmod +x "$scratch/bin"/*
-  run_block() { # BOX STUB_PROBE [CONSOLE_IMAGE]: runs both functions in BOX
-    local box="$1" probe="$2" override="${3:-}"
+  run_block() { # BOX STUB_PROBE [CONSOLE_IMAGE [UMASK]]: runs both functions in BOX
+    local box="$1" probe="$2" override="${3:-}" mask="${4:-077}"
+    umask "$mask"
     env -i PATH="$scratch/bin:$PATH" HOME="$scratch" STACK_DIR="$box" STUB_PROBE="$probe" BLOCK="$BLOCK" COMPOSE_STUB=stubcompose ${override:+CONSOLE_IMAGE="$override"} bash -c '
       set -uo pipefail
       die() { printf "die: %s\n" "$*"; exit 1; }
@@ -101,9 +117,35 @@ EOD
       approver_key_prepare
       approver_jwks_apply' 2>&1
   }
+  # who a path was last given to, from the chown log
+  last_owner() { sed -n "s#^\([^ ]*\) $1\$#\1#p" "$scratch/chown.log" 2>/dev/null | tail -1; }
+  # The approver directory: root's, the console's group, 0710 (pass through, never list).
+  check_dir() { # BOX UMASK
+    local d="$1/approver" m g o owner
+    m="$(stat -c '%a' "$d" 2>/dev/null || stat -f '%Lp' "$d" 2>/dev/null || echo '?')"
+    owner="$(last_owner "$d")"
+    if [ "$m" = '?' ]; then
+      fail "C. no approver directory at $d (umask $2)"
+      return
+    fi
+    m=$((8#$m)); g=$(((m >> 3) & 7)); o=$((m & 7))
+    [ $((g & 1)) = 1 ] \
+      || fail "C. under umask $2 the approver directory is mode $(printf '%o' "$m"): the console's group cannot pass through it to its key, so the console refuses every grant at start"
+    [ "$o" = 0 ] \
+      || fail "C. under umask $2 the approver directory is mode $(printf '%o' "$m"): others can enter or list it"
+    [ $((g & 6)) = 0 ] \
+      || fail "C. under umask $2 the approver directory is mode $(printf '%o' "$m"): its group can list or write it"
+    [ "$owner" = "0:${CONSOLE_GID:-?}" ] \
+      || fail "C. under umask $2 the approver directory is given to ${owner:-nobody (it keeps whoever ran install.sh)}, not root with the console's group (0:${CONSOLE_GID:-?})"
+  }
   box="$scratch/box"
   mkdir -p "$box"
-  out1="$(run_block "$box" 1)"; rc1=$?
+  out1="$(run_block "$box" 1 "" 077)"; rc1=$?
+  check_dir "$box" 077
+  box22="$scratch/box22"
+  mkdir -p "$box22"
+  out22="$(run_block "$box22" 1 "" 022)" || fail "C. the approver block failed under umask 022: $out22"
+  check_dir "$box22" 022
   key="$box/approver/approver.pem"
   [ "$rc1" = 0 ] || fail "C. the approver block failed on a fresh box: $out1"
   if [ ! -s "$key" ]; then
@@ -116,6 +158,9 @@ EOD
     mode="$(stat -c '%a' "$key" 2>/dev/null || stat -f '%Lp' "$key" 2>/dev/null || echo '?')"
     [ "$mode" = 600 ] || fail "C. the approver key is mode $mode, not 600"
     grep -q -- "$KEY_MARK" <<<"$out1" && fail "C. the run printed the approver key"
+    kowner="$(last_owner "$key")"
+    [ "$kowner" = "${CONSOLE_USER:-?}" ] \
+      || fail "C. the approver key is given to ${kowner:-nobody}, not the console's user (${CONSOLE_USER:-unpinned})"
   fi
   before="$(cat "$key" 2>/dev/null)"
   out2="$(run_block "$box" 1)"
@@ -157,4 +202,4 @@ if [ "$problems" -gt 0 ]; then
   echo "$problems problem(s). See CLAUDE.md invariant 61."
   exit 1
 fi
-echo "OK: the approver key is PKCS#8 P-256 at mode 0600, kept across re-runs and never printed; wardryx is pinned by digest at 2.4.0 or later; approver statements are on only when the pinned console can print its key set; a bare key is never allowed to approve (invariant 61)."
+echo "OK: the approver key is PKCS#8 P-256 at mode 0600, owned by the console's pinned user ${CONSOLE_USER}, in a directory root:${CONSOLE_GID} 0710 under umask 077 and 022, kept across re-runs and never printed; wardryx is pinned by digest at 2.4.0 or later; approver statements are on only when the pinned console can print its key set; a bare key is never allowed to approve (invariant 61)."
