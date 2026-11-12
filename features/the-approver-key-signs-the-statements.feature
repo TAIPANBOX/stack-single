@@ -25,3 +25,21 @@ Feature: The console's approver key signs each approval, and a bare key cannot a
     # -> gates-have-teeth.sh "approver-key-is-wired: wardryx is pinned back to 2.3.0"
     # -> gates-have-teeth.sh "approver-key-is-wired: the console loses its key mount"
     # -> gates-have-teeth.sh "approver-key-is-wired: the private key reaches wardryx"
+
+  # @claude 2026-11-12: found when a person's first passkey grant of a held call on a live box was
+  # refused, and went through only after two fixes by hand; these hold that a fresh install needs neither.
+  Scenario: the console reaches its approver key whatever the umask of the shell that ran the installer
+    Given install.sh runs from a root shell whose umask is 077, or 022
+    When it makes the directory that holds the approver key
+    Then the directory is root's, its group the console's, mode 0710: the console passes through it to its key, and no other account can enter or list it
+    # -> gates-have-teeth.sh "approver-key-is-wired: the approver directory is left to the umask"
+    # -> gates-have-teeth.sh "approver-key-is-wired: the approver directory is listable by others"
+    # -> gates-have-teeth.sh "approver-key-is-wired: the approver directory is not given the console's group"
+    # -> gates-have-teeth.sh "approver-key-is-wired: a reworded comment on the approver directory is not a fault"
+
+  Scenario: the key and its directory belong to the user the console runs as
+    Given compose.yaml pins the console's user, and install.sh gives the key and the directory to it
+    When the pin is removed, or names a uid the key is not given to
+    Then the gate fails
+    # -> gates-have-teeth.sh "approver-key-is-wired: the console's user is no longer pinned"
+    # -> gates-have-teeth.sh "approver-key-is-wired: the console runs as a uid the key is not given to"

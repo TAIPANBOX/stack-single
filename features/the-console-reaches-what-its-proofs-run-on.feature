@@ -114,8 +114,8 @@ Feature: the console reaches what its proofs run on, and can only read it
     Then the gate still passes
     # -> gates-have-teeth.sh "console-proofs: a reworded comment above the repair is not a fault"
 
-  Scenario: naming the console's own account is not a fault
-    Given the console runs as the image's own account
-    When compose names that same account
+  Scenario: leaving the console's account to its image is not a fault
+    Given compose names the console's account, 10001:10001, the same one its image runs as
+    When the name is taken out and the image's account applies
     Then the gate still passes
-    # -> gates-have-teeth.sh "console-proofs: naming the console own account is not a fault"
+    # -> gates-have-teeth.sh "console-proofs: leaving the console's account to its image is not a fault"

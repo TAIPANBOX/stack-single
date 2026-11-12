@@ -32,3 +32,24 @@ Feature: a plane writes only its own stream
     When a comment in the setup script is reworded
     Then the gate still passes
     # -> gates-have-teeth.sh "no-plane-writes: a reworded comment in init-volumes is not a fault"
+
+  # @claude 2026-11-12: found when a person's first passkey grant of a held call on a live box was
+  # refused, and went through only after two fixes by hand; these hold that a fresh install needs neither.
+  Scenario: the console is given the bus and no stream of its own
+    Given the console journals every privileged command, a person's grant among them, in console.ndjson on the bus, and refuses one it cannot journal
+    When the setup script makes no console.ndjson, or gives it to another uid
+    Then the gate fails and names the console, which could journal nothing and would refuse every approval
+    # -> gates-have-teeth.sh "no-plane-writes: the console's stream is not created"
+    # -> gates-have-teeth.sh "no-plane-writes: the console's stream is given to another uid"
+
+  Scenario: a service that runs as the console's uid is given the bus read-write
+    Given the record seal runs as the console's uid and mounts the bus read only
+    When its bus mount is made read-write
+    Then the gate fails and names the record seal, a service with the bus read-write and no stream of its own
+    # -> gates-have-teeth.sh "no-plane-writes: a reader at the console's uid is given the bus read-write"
+
+  Scenario: the console looks for its file outside the bus
+    Given the console appends to console.ndjson in the events directory the installer's environment file names
+    When that directory is not the bus the console mounts
+    Then the gate fails, because the stream the setup script made is not the file the console writes
+    # -> gates-have-teeth.sh "no-plane-writes: the console looks for its file outside the bus"

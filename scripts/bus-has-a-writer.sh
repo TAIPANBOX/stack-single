@@ -51,6 +51,9 @@
 #      a `chown` line there. Root services are skipped: root writes anything.
 #      A `<name>-init` one-shot (costcrew-init, the optional FinOps console's)
 #      counts as a preparer too, so an add-on need not edit init-volumes.
+#      `wgapi` is prepared by the wg container itself at every start (group
+#      WG_SOCKET_GID, mode 2770, its relay socket the same group), so for it the
+#      owner that counts is that group, and it must be the service's gid.
 #
 # typryx (profile typed) joined the same bus 2026-09-26, once agent-passport
 # registered its four event types: it names its own file, TYPRYX_EVENTS, so
@@ -246,6 +249,17 @@ for name, block in blocks.items():
         if vol == "pgdata":
             continue
         judged += 1
+        # The UAPI socket's volume: the wg container gives /var/run/wireguard and the relay socket it
+        # serves to group WG_SOCKET_GID at every start, and init-volumes does not touch it. The console
+        # reaches the socket through that group alone, so it must be the gid the service runs with.
+        if vol == "wgapi":
+            wg = blocks.get("wg")
+            sock_gid = field(wg, "WG_SOCKET_GID") if wg else None
+            if not wg or "wgapi" not in [n for n, _, _ in volume_mounts(wg)]:
+                note(f"{name} (user {user}) writes volume wgapi, and no wg service mounts it to prepare it")
+            elif sock_gid != gid:
+                note(f"{name} (user {user}) writes volume wgapi, which the wg container gives to group {sock_gid or 'none'} (WG_SOCKET_GID), not {gid}: it cannot reach the socket")
+            continue
         if vol not in init_mounts:
             note(f"{name} (user {user}) writes volume {vol} at {target}, and init-volumes never mounts it: a fresh named volume is root:root 0755, so the service cannot write")
             continue

@@ -25,3 +25,11 @@ Feature: an upgraded box's files are given back to the uid that writes them
     # -> gates-have-teeth.sh "volumes-are-reowned: init-volumes goes on past a failed chown"
     # -> gates-have-teeth.sh "volumes-are-reowned: costcrew-init goes on past a failed chown"
     # -> gates-have-teeth.sh "volumes-are-reowned: a chown and its chmod on two lines still stop the body (must pass)"
+
+  # @claude 2026-11-12: the console's user is pinned in compose.yaml, which brings its volumes under this rule.
+  Scenario: the console's state and its road to the tunnel belong to the user it runs as
+    Given the console runs as the pinned 10001:10001 and writes its state volume and the wg socket's volume
+    When init-volumes does not re-own the state volume, or the wg container gives its socket to another group
+    Then bus-has-a-writer.sh fails and names the volume the console could not write or reach
+    # -> gates-have-teeth.sh "bus-has-a-writer: the console's state volume is not re-owned"
+    # -> gates-have-teeth.sh "bus-has-a-writer: the wg socket's group is not the console's"
