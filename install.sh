@@ -5323,6 +5323,12 @@ POLICY
 approver_key_prepare() {
   local key="$STACK_DIR/approver/approver.pem" tmp
   mkdir -p "$STACK_DIR/approver" "$STACK_DIR/approver-public" || die "could not create the approver directories"
+  # The console (10001:10001) passes through this directory to its key, and nobody else may enter or list
+  # it: root's, the console's group, 0710. Set here, not left to the umask of the shell that runs install.sh:
+  # under 077 mkdir left 0700 and the console refused every grant at start ("the approver key file cannot be
+  # used ... Permission denied", 2026-11-12); under 022 it left 0755, listable by every account on the host.
+  { chown 0:10001 "$STACK_DIR/approver" && chmod 0710 "$STACK_DIR/approver"; } \
+    || die "could not give $STACK_DIR/approver to root with the console's group (0:10001), mode 0710"
   chmod 0755 "$STACK_DIR/approver-public" || die "could not set the mode of $STACK_DIR/approver-public"
   if [ -s "$key" ]; then
     note "approver key kept at $key (never printed)"

@@ -1,0 +1,15 @@
+# forge, 2026-11-12T01:59:04Z, gates at 12ddecc over the install and compose of f15eb06 (main)
+$ ./scripts/no-plane-writes-another-planes-stream.sh
+FAIL no-plane-writes: console mounts the bus read-write and writes no stream: nothing but the setup script can create a file there, so it can record nothing
+exit 1
+$ ./scripts/approver-key-is-wired.sh
+FAIL: D. the console's user is not pinned in compose.yaml (user: "UID:GID"), so the image decides who reaches the approver key
+FAIL: C. under umask 077 the approver directory is mode 700: the console's group cannot pass through it to its key, so the console refuses every grant at start
+FAIL: C. under umask 077 the approver directory is given to nobody (it keeps whoever ran install.sh), not root with the console's group (0:?)
+FAIL: C. under umask 022 the approver directory is mode 755: others can enter or list it
+FAIL: C. under umask 022 the approver directory is mode 755: its group can list or write it
+FAIL: C. under umask 022 the approver directory is given to nobody (it keeps whoever ran install.sh), not root with the console's group (0:?)
+FAIL: C. the approver key is given to 10001:10001, not the console's user (unpinned)
+
+7 problem(s). See CLAUDE.md invariant 61.
+exit 1

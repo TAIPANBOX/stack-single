@@ -486,6 +486,28 @@ jobs:
           if ! grep -Eq '"signal_events": *"ok"' <<<"$ready"; then echo "::error::wardryx does not believe the file"; exit 1; fi
           if ! grep -q '^- name: slo-burn-hold$' policy.yaml; then echo "::error::policy.yaml carries no slo-burn-hold rule"; exit 1; fi
 
+      # Invariants 41 and 61, on every leg. The console journals a person's grant in its own stream and
+      # signs it with its approver key, and refuses a grant it cannot do both for. So: the stream is the
+      # console's (10001, 0640) and opens for append from inside the console (a zero-byte open, nothing is
+      # written), the key opens from inside it, the console said nothing at start about a key it could not
+      # use, and the approver directory is root's with the console's group, 0710.
+      - name: the console can journal a grant and reach its approver key
+        run: |
+          cd /opt/agent-stack
+          owner="$(sudo docker compose exec -T console stat -c '%u %a' /var/lib/stack/events/console.ndjson)"
+          if [ "$owner" != "10001 640" ]; then echo "::error::console.ndjson is $owner, want 10001 640"; exit 1; fi
+          sudo docker compose exec -T console bash -c ': >> /var/lib/stack/events/console.ndjson' \
+            || { echo "::error::the console cannot open its own stream for append"; exit 1; }
+          sudo docker compose exec -T console bash -c ': < /run/approver/approver.pem' \
+            || { echo "::error::the console cannot open its approver key"; exit 1; }
+          logs="$(sudo docker compose logs --no-log-prefix console 2>&1)"
+          if grep -q 'the approver key file cannot be used' <<<"$logs"; then
+            echo "::error::the console said at start that it cannot use its approver key"; exit 1
+          fi
+          dir="$(sudo stat -c '%u:%g %a' approver)"
+          if [ "$dir" != "0:10001 710" ]; then echo "::error::the approver directory is $dir, want 0:10001 710"; exit 1; fi
+          echo "console.ndjson: $owner; approver directory: $dir; the console opens both"
+
       - name: "agents network: no direct internet, the gateway reachable"
         run: |
           probe() { sudo docker run --rm --network "$1" busybox:1.36 sh -c "$2" >/dev/null 2>&1; }

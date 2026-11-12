@@ -1222,9 +1222,11 @@ Neither key is in `.env`. Back up the `keyryx` directory with the rest of the bo
 Each producer of the record now runs under its own uid, so one plane cannot rewrite
 another plane's stream. Every stream in the shared event volume is owned by the one
 plane that writes it and is mode 0640: the gateway, the control plane, the MCP broker,
-the OpenAI door, wardryx, typryx, vouchryx, and the chain verifier (which reads the
-streams through the bus group and writes only its own). The bus directory belongs to
-root and nothing but the setup script creates a file in it. A checkpoint file per
+the OpenAI door, wardryx, typryx, vouchryx, the console (which journals every command
+it runs, a person's grant of a held call among them, and refuses one it cannot journal),
+and the chain verifier (which reads the streams through the bus group and writes only
+its own). The bus directory belongs to root and nothing but the setup script creates a
+file in it. A checkpoint file per
 producer is created alongside, empty until a producer signs one.
 
 What is wired now, and what is not:
@@ -2233,7 +2235,10 @@ An approval is decided by a person in the console, after a passkey assertion. Fr
 wardryx 2.4.0 the decision can also carry a statement, signed by the console with
 its approver key, and wardryx checks it against the console's public key set. The
 installer mints that key once: `approver/approver.pem`, PKCS#8 P-256, mode 0600,
-owned by the console's uid, mounted into the console alone. It is kept across
+owned by the console's uid, mounted into the console alone. Its directory is root's
+with the console's group, mode 0710, whatever the umask of the shell that ran the
+installer: the console passes through it to the key, and no other account can enter or
+list it. The key is kept across
 re-runs and never printed. Losing it means minting a new one and publishing a new
 key set.
 

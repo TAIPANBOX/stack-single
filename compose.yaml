@@ -205,6 +205,14 @@ services:
         # every box, because an empty file is a file wardryx can believe, and a missing one is not.
         [ -e /vol/events/verdryx.ndjson ] || : > /vol/events/verdryx.ndjson
         chown 20020:10001 /vol/events/verdryx.ndjson; chmod 0640 /vol/events/verdryx.ndjson
+        # The console's own chain (invariant 41): every privileged command it runs, a person's grant
+        # of a held call among them, is journaled here, and the console refuses a command it cannot
+        # journal. It mounts the bus read-write and, like every plane, cannot create a file in it, so
+        # until 2026-11-12 no file was made for it and every approval failed with "was NOT
+        # journaled: io: Permission denied". Its uid is the bus group's (10001), and no other service
+        # at that uid mounts the bus read-write, so the mount keeps them out of it.
+        [ -e /vol/events/console.ndjson ] || : > /vol/events/console.ndjson
+        chown 10001:10001 /vol/events/console.ndjson; chmod 0640 /vol/events/console.ndjson
         # wardryx's policy archive is a directory in the bus (WARDRYX_POLICY_ARCHIVE),
         # made here so that wardryx, which cannot create in the bus, owns it.
         mkdir -p /vol/events/wardryx-policy-archive; chown -R 20001:10001 /vol/events/wardryx-policy-archive; chmod 0750 /vol/events/wardryx-policy-archive
@@ -1797,6 +1805,9 @@ services:
 
   console:
     <<: [*restart, *baseline]
+    # Pinned, not left to the image: init-volumes gives this uid its stream on the bus, and install.sh
+    # gives it the approver key and the approver directory's group (invariants 41 and 61).
+    user: "10001:10001"
     pids_limit: 1024
     # SQLite's VACUUM and big sorts need a temp file, and with no writable /tmp it answers
     # `disk I/O error (6410)`, a warning that goes red nowhere (invariant 24).

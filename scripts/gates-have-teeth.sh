@@ -1954,6 +1954,37 @@ run_case "approver-key-is-wired: the private key reaches wardryx" fail \
 	"$(py 'edit("compose.yaml", "      - ./approver-public:/etc/wardryx/approver:ro\n", "      - ./approver-public:/etc/wardryx/approver:ro\n      - ./approver:/run/approver:ro\n")')" \
 	"private approver key reaches wardryx"
 
+# The approver directory and the console's user (2026-11-12: the console could not reach its key, and
+# refused every grant at start, when the directory was left to the umask).
+run_case "approver-key-is-wired: the approver directory is left to the umask" fail \
+	'./scripts/approver-key-is-wired.sh' \
+	"$(py 'edit("install.sh", "{ chown 0:10001 \"$STACK_DIR/approver\" && chmod 0710 \"$STACK_DIR/approver\"; }", "true")')" \
+	"cannot pass through it"
+
+run_case "approver-key-is-wired: the approver directory is listable by others" fail \
+	'./scripts/approver-key-is-wired.sh' \
+	"$(py 'edit("install.sh", "chmod 0710 \"$STACK_DIR/approver\"", "chmod 0755 \"$STACK_DIR/approver\"")')" \
+	"others can enter or list it"
+
+run_case "approver-key-is-wired: the approver directory is not given the console's group" fail \
+	'./scripts/approver-key-is-wired.sh' \
+	"$(py 'edit("install.sh", "chown 0:10001 \"$STACK_DIR/approver\"", "chown 0:0 \"$STACK_DIR/approver\"")')" \
+	"not root with the console's group"
+
+run_case "approver-key-is-wired: the console's user is no longer pinned" fail \
+	'./scripts/approver-key-is-wired.sh' \
+	"$(py 'edit("compose.yaml", "(invariants 41 and 61).\n    user: \"10001:10001\"\n", "(invariants 41 and 61).\n")')" \
+	"is not pinned"
+
+run_case "approver-key-is-wired: the console runs as a uid the key is not given to" fail \
+	'./scripts/approver-key-is-wired.sh' \
+	"$(py 'edit("compose.yaml", "(invariants 41 and 61).\n    user: \"10001:10001\"\n", "(invariants 41 and 61).\n    user: \"20030:20030\"\n")')" \
+	"not the console's user (20030:20030)"
+
+run_case "approver-key-is-wired: a reworded comment on the approver directory is not a fault" pass \
+	'./scripts/approver-key-is-wired.sh' \
+	"$(py 'edit("install.sh", "and nobody else may enter or list", "and no one else may enter or list")')"
+
 # ---- costcrew-runner-spends-through-the-gateway (CLAUDE.md invariant 60) -----
 run_case "costcrew-runner-spends-through-the-gateway: the runner starts with the add-on's profile" fail \
 	'./scripts/costcrew-runner-spends-through-the-gateway.sh' \
@@ -4888,6 +4919,28 @@ run_case "no-plane-writes: the bus directory is group-writable" fail \
 run_case "no-plane-writes: a reworded comment in init-volumes is not a fault" pass \
 	'./scripts/no-plane-writes-another-planes-stream.sh' \
 	"$(py 'edit("compose.yaml", "# Invariant 41. The bus directory is", "# Invariant 41: the bus directory is")')"
+
+# The console journals every privileged command, a person's grant among them, and refuses one it cannot
+# journal; until 2026-11-12 no stream was made for it and this gate said OK.
+run_case "no-plane-writes: the console's stream is not created" fail \
+	'./scripts/no-plane-writes-another-planes-stream.sh' \
+	"$(py 'edit("compose.yaml", "        [ -e /vol/events/console.ndjson ] || : > /vol/events/console.ndjson\n        chown 10001:10001 /vol/events/console.ndjson; chmod 0640 /vol/events/console.ndjson\n", "")')" \
+	"console mounts the bus read-write and writes no stream"
+
+run_case "no-plane-writes: the console's stream is given to another uid" fail \
+	'./scripts/no-plane-writes-another-planes-stream.sh' \
+	"$(py 'edit("compose.yaml", "chown 10001:10001 /vol/events/console.ndjson;", "chown 20001:10001 /vol/events/console.ndjson;")')" \
+	"console.ndjson is owned by 20001:10001"
+
+run_case "no-plane-writes: a reader at the console's uid is given the bus read-write" fail \
+	'./scripts/no-plane-writes-another-planes-stream.sh' \
+	"$(py 'edit("compose.yaml", "the mount says so rather than the code being trusted to.\n      - events:/var/lib/stack/events:ro\n", "the mount says so rather than the code being trusted to.\n      - events:/var/lib/stack/events\n")')" \
+	"record-seal mounts the bus read-write and writes no stream"
+
+run_case "no-plane-writes: the console looks for its file outside the bus" fail \
+	'./scripts/no-plane-writes-another-planes-stream.sh' \
+	"$(py 'edit("install.sh", "    \"dir\": \"/var/lib/stack/events\",\n", "    \"dir\": \"/var/lib/stack/console-events\",\n")')" \
+	"which is not the bus it mounts"
 
 # invariant 43: the root keys are files, never environment values or .env lines.
 run_case "keyryx-root: a root key is written into .env" fail \
