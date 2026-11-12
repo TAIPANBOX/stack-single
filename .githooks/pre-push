@@ -96,6 +96,7 @@ step "the console reaches what its proofs run on, and can only read it (invarian
 step "the console password is not printed (invariant 59)" "./scripts/console-password-is-not-printed.sh"
 step "the CostCrew runner spends only through the gateway (invariant 60)" "./scripts/costcrew-runner-spends-through-the-gateway.sh"
 step "the approver key is minted and wardryx checks statements (invariant 61)" "./scripts/approver-key-is-wired.sh"
+step "the console's preview key is made once and wardryx holds only its recipient (invariant 78)" "./scripts/preview-key-is-wired.sh"
 step "the record seal signs through keyryx and the witness attests (invariant 62)" "./scripts/record-is-signed-by-keyryx.sh"
 step "the record seal pins custody's trailryx-root kid at install (invariant 63)" "./scripts/trailryx-root-is-pinned.sh"
 step "each door names its own addresses and wardryx the union (invariant 64)" "./scripts/door-origins-are-named.sh"
