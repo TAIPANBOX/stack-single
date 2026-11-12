@@ -1,0 +1,20 @@
+# forge, 2026-11-12T02:59:01Z, dca148b chore(gates): the console's user exception goes, and wgapi is excluded from the re-own like the bus
+$ ./scripts/no-plane-writes-another-planes-stream.sh
+OK: 11 streams, each with one writer, its own uid and mode 0640; bus directory 0:10001 0751
+exit 0
+$ ./scripts/approver-key-is-wired.sh
+OK: the approver key is PKCS#8 P-256 at mode 0600, owned by the console's pinned user 10001:10001, in a directory root:10001 0710 under umask 077 and 022, kept across re-runs and never printed; wardryx is pinned by digest at 2.4.0 or later; approver statements are on only when the pinned console can print its key set; a bare key is never allowed to approve (invariant 61).
+exit 0
+$ ./scripts/bus-has-a-writer.sh
+OK: 2 gateway(s) export (tokenfuse-gateway to /var/lib/stack/events/tokenfuse.ndjson, tokenfuse-gateway-openai to /var/lib/stack/events/tokenfuse-openai.ndjson), the control plane to /var/lib/stack/events/tokenfuse-cloud.ndjson, and typryx to /var/lib/stack/events/typryx.ndjson, every one pre-created by init-volumes; 2 reader(s) load every gateway's file and nothing else as tokenfuse, and every one of 30 writable volume mount(s) of a non-root service is prepared by init-volumes
+exit 0
+$ ./scripts/volumes-are-reowned.sh
+checked 18 read-write volume mount(s); excluded as shared bus volumes: events, pgdata, wgapi
+OK: volumes-are-reowned (invariant 49): every read-write volume of a non-root service is re-owned to its uid, recursively, on every up
+exit 0
+$ ./scripts/containers-carry-the-baseline.sh
+OK: 29 services carry the baseline, 10 named exception(s), every one excusing something.
+exit 0
+$ ./scripts/features-are-bound.sh
+OK: 502 scenario(s) in 54 feature file(s), every one bound to a teeth case that exists (876 binding(s)).
+exit 0
