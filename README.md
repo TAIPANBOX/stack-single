@@ -1759,7 +1759,7 @@ post, never what Jev said.
 
 **The opt-in training log.** `@decided 2026-09-30`: typryx can keep a local
 training log, off by default. typryx v0.3.0 is the first release that has it and
-this launcher pins typryx v0.6.0, so it is there. Switch it on with `TYPED_TRAINING=1` next to any typed mode
+this launcher pins typryx v0.6.1, so it is there. Switch it on with `TYPED_TRAINING=1` next to any typed mode
 (`WITH_TYPED=1`, `TYPED_MODE=jev` or `TYPED_MODE=own-model`):
 
 ```bash
@@ -1900,7 +1900,7 @@ A profile in `compose.yaml` that is in neither list, or in both, is refused by t
 
 Every image the stack runs is pinned to the digest of the bytes it names. The
 tag stays beside it for reading. A tag can be moved by whoever controls the
-registry; a digest cannot, so a box running `wardryx:v2.6.1@sha256:2101...` runs
+registry; a digest cannot, so a box running `wardryx:v2.6.2@sha256:b799...` runs
 that build and nothing else.
 
 The images this project publishes (`ghcr.io/taipanbox/...`) are also signed,

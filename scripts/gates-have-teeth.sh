@@ -470,11 +470,11 @@ run_case "tool-hold-is-seeded: nothing reads what wardryx loaded" fail \
 	"a file that says on is believed"
 run_case "tool-hold-is-seeded: the question runs another image" fail \
 	'./scripts/tool-hold-is-seeded.sh' \
-	"$(py 'edit("install.sh", "TOOL_HOLD_WARDRYX_IMAGE=\"ghcr.io/taipanbox/wardryx:v2.6.1@sha256:2101d23b", "TOOL_HOLD_WARDRYX_IMAGE=\"ghcr.io/taipanbox/wardryx:v2.6.1@sha256:0001d23b")')" \
+	"$(py 'edit("install.sh", "TOOL_HOLD_WARDRYX_IMAGE=\"ghcr.io/taipanbox/wardryx:v2.6.2@sha256:b799701c", "TOOL_HOLD_WARDRYX_IMAGE=\"ghcr.io/taipanbox/wardryx:v2.6.2@sha256:0001d23b")')" \
 	"not the one compose.yaml pins"
 run_case "tool-hold-is-seeded: the pin goes below 2.6.0" fail \
 	'./scripts/tool-hold-is-seeded.sh' \
-	"$(py 'edit("compose.yaml", "wardryx:v2.6.1@", "wardryx:v2.5.1@")')" \
+	"$(py 'edit("compose.yaml", "wardryx:v2.6.2@", "wardryx:v2.5.1@")')" \
 	"older than 2.6.0"
 run_case "tool-hold-is-seeded: a wardryx that refuses the file gets it anyway" fail \
 	'./scripts/tool-hold-is-seeded.sh' \
@@ -798,7 +798,7 @@ run_case "manifest-is-true: a routine arrives and the manifest does not claim it
 # is one character in one tag, which is exactly how it would arrive.
 run_case "manifest-is-true: a pulled tag moves in compose and not in the manifest" fail \
 	'./scripts/manifest-is-true.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.6.1", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.6.2", "ghcr.io/taipanbox/wardryx:v1.0.9")')" \
 	"an image it pulls"
 
 # invariant 15: the delegation plane's default is byte-for-byte what it was
@@ -1038,7 +1038,7 @@ run_case "typed-data-mode: no volume is mounted where the training log lives" fa
 
 run_case "typed-data-mode: compose still pins a typryx older than the pin" fail \
 	'./scripts/typed-data-mode.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/typryx:v0.6.0@sha256:9ffe725c90a51297dca76940cd1e30e968cf323bfac2f61092f0db2acef0812b}", "ghcr.io/taipanbox/typryx:v0.2.0}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/typryx:v0.6.1@sha256:77fc8d0f826bb840043c45ea3eb9f1dba1f73c1925c48502b942b2d491009239}", "ghcr.io/taipanbox/typryx:v0.2.0}")')" \
 	"compose.yaml pins typryx v0.2.0"
 
 run_case "typed-data-mode: a request setting is not passed to typryx" fail \
@@ -1053,12 +1053,12 @@ run_case "typed-risk-signal: the proxy misses a request setting typryx has" fail
 
 run_case "typed-data-mode: components.json keeps the old typryx pin" fail \
 	'./scripts/typed-data-mode.sh' \
-	"$(py 'edit("components.json", "ghcr.io/taipanbox/typryx:v0.6.0", "ghcr.io/taipanbox/typryx:v0.2.0")')" \
+	"$(py 'edit("components.json", "ghcr.io/taipanbox/typryx:v0.6.1", "ghcr.io/taipanbox/typryx:v0.2.0")')" \
 	"components.json names typryx:v0.2.0"
 
 run_case "typed-data-mode: the README names a typryx tag compose does not pin" fail \
 	'./scripts/typed-data-mode.sh' \
-	"$(py 'edit("README.md", "this launcher pins typryx v0.6.0, so it is there", "this launcher pins ghcr.io/taipanbox/typryx:v0.2.0, so it is there")')" \
+	"$(py 'edit("README.md", "this launcher pins typryx v0.6.1, so it is there", "this launcher pins ghcr.io/taipanbox/typryx:v0.2.0, so it is there")')" \
 	"README.md names typryx:v0.2.0"
 
 # ---- run-budget-ceiling (invariant 20): tokenfuse 1.5.0's ceiling is OFF unless
@@ -1652,7 +1652,7 @@ run_case "chain-verifier: its root filesystem becomes writable" fail \
 
 run_case "chain-verifier: its image is unpinned" fail \
 	'./scripts/chain-verifier-is-contained.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/agent-conform:v2.0.2@sha256:65c0c1ef78effe96f09c5684a203616fed396375e182bedb142a5beaa178b713}", "ghcr.io/taipanbox/agent-conform:latest}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/agent-conform:v2.0.3@sha256:f2a5bcbadf4189d2b4979669703aa8b6ef3bfc93a68b90ac6d1f61ac110ed3e4}", "ghcr.io/taipanbox/agent-conform:latest}")')" \
 	"is not pinned to a released"
 
 run_case "chain-verifier: its loop is removed" fail \
@@ -1662,7 +1662,7 @@ run_case "chain-verifier: its loop is removed" fail \
 
 run_case "chain-verifier: no verifier service left to judge" fail \
 	'./scripts/chain-verifier-is-contained.sh' \
-	"$(py 'edit("compose.yaml", "${AGENT_CONFORM_IMAGE:-ghcr.io/taipanbox/agent-conform:v2.0.2@sha256:65c0c1ef78effe96f09c5684a203616fed396375e182bedb142a5beaa178b713}", "${AGENT_CONFORM_IMAGE:-registry.invalid/agent-conform}")')" \
+	"$(py 'edit("compose.yaml", "${AGENT_CONFORM_IMAGE:-ghcr.io/taipanbox/agent-conform:v2.0.3@sha256:f2a5bcbadf4189d2b4979669703aa8b6ef3bfc93a68b90ac6d1f61ac110ed3e4}", "${AGENT_CONFORM_IMAGE:-registry.invalid/agent-conform}")')" \
 	"measured NOTHING about the chain verifier"
 
 # The bus gate's own half: a shared volume is written through ONE FILE a service
@@ -1941,7 +1941,7 @@ run_case "approver-key-is-wired: the bare-key switch is set" fail \
 
 run_case "approver-key-is-wired: wardryx is pinned back to 2.3.0" fail \
 	'./scripts/approver-key-is-wired.sh' \
-	"$(py 'edit_all("compose.yaml", "wardryx:v2.6.1@sha256:2101d23b", "wardryx:v2.3.0@sha256:2101d23b")')" \
+	"$(py 'edit_all("compose.yaml", "wardryx:v2.6.2@sha256:b799701c", "wardryx:v2.3.0@sha256:b799701c")')" \
 	"older than v2.4.0"
 
 run_case "approver-key-is-wired: the console loses its key mount" fail \
@@ -2211,17 +2211,17 @@ open("README.md", "w").write(s.replace("when_absent: hold", "when_absent_gone: h
 
 run_case "typed-risk-signal: typryx is pinned before the proxy existed" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/typryx:v0.6.0@sha256:9ffe725c90a51297dca76940cd1e30e968cf323bfac2f61092f0db2acef0812b}", "ghcr.io/taipanbox/typryx:v0.3.0}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/typryx:v0.6.1@sha256:77fc8d0f826bb840043c45ea3eb9f1dba1f73c1925c48502b942b2d491009239}", "ghcr.io/taipanbox/typryx:v0.3.0}")')" \
 	"the proxy (wardryx-proxy) does not exist before it"
 
 run_case "typed-risk-signal: wardryx is pinned before it read signals" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.6.1@sha256:2101d23bbe8ecb1b932a530611ffa02f1c7c9b82394c4fa8db238f7d0e7bd667}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.6.2@sha256:b799701c2429605c9c3819a8cbd3085462fadcf5b07aa0e17f17edd1cacddada}", "ghcr.io/taipanbox/wardryx:v1.1.3}")')" \
 	"hold_if_signal and signals on /v1/decide do not exist before it"
 
 run_case "typed-risk-signal: wardryx is pinned before when_absent" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.6.1@sha256:2101d23bbe8ecb1b932a530611ffa02f1c7c9b82394c4fa8db238f7d0e7bd667}", "ghcr.io/taipanbox/wardryx:v1.3.2}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/wardryx:v2.6.2@sha256:b799701c2429605c9c3819a8cbd3085462fadcf5b07aa0e17f17edd1cacddada}", "ghcr.io/taipanbox/wardryx:v1.3.2}")')" \
 	"needs v1.4.0 or later"
 
 run_case "typed-risk-signal: tokenfuse is pinned before it sent the tool call" fail \
@@ -2522,12 +2522,12 @@ run_case "bus-has-a-writer: the OpenAI door's file is not pre-created" fail \
 
 run_case "bus-names: the idryx pin goes back before the OpenAI door's row" fail \
 	'./scripts/bus-names-match-their-source.sh' \
-	"$(py 'edit_all("compose.yaml", "ghcr.io/taipanbox/idryx:v1.4.0", "ghcr.io/taipanbox/idryx:v1.1.0")')" \
+	"$(py 'edit_all("compose.yaml", "ghcr.io/taipanbox/idryx:v1.4.1", "ghcr.io/taipanbox/idryx:v1.1.0")')" \
 	"older than v1.2.0"
 
 run_case "bus-names: the heraldyx pin goes back before the OpenAI door's row" fail \
 	'./scripts/bus-names-match-their-source.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/heraldyx:v0.9.0", "ghcr.io/taipanbox/heraldyx:v0.4.0")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/heraldyx:v0.9.1", "ghcr.io/taipanbox/heraldyx:v0.4.0")')" \
 	"older than v0.5.0"
 
 echo "=== and what they must NOT catch ==="
@@ -2867,7 +2867,7 @@ edit("compose.yaml", "      typryx:\n        condition: service_started", "     
 run_case "typed-data-mode: compose names no typryx image to read a pin from" fail \
 	'./scripts/typed-data-mode.sh' \
 	"$(py 's = open("compose.yaml").read()
-a = "image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.6.0@sha256:9ffe725c90a51297dca76940cd1e30e968cf323bfac2f61092f0db2acef0812b}"
+a = "image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.6.1@sha256:77fc8d0f826bb840043c45ea3eb9f1dba1f73c1925c48502b942b2d491009239}"
 assert s.count(a) == 2, "expected the typryx service and the risk-signal proxy to name the image"
 open("compose.yaml", "w").write(s.replace(a, "image: ${TYPRYX_IMAGE:-registry.invalid/typryx}"))')" \
 	"names no ghcr.io/taipanbox/typryx"
@@ -4292,14 +4292,14 @@ json.dump(d, open("hardening-exceptions.json", "w"))')" \
 
 run_case "containers-carry-the-baseline: keyryx is pinned back to v0.1.3" fail \
 	'./scripts/containers-carry-the-baseline.sh' \
-	"$(py 'edit("compose.yaml", "keyryx:v0.1.4@sha256:659723319e28c6c8895f5c2af6baa616b2e46ed90a3cf26d1c208dafe6a1ca3f", "keyryx:v0.1.3@sha256:26d5d49cd4a67eb463f35895de96e628e2304183775bf031170e190c579c0147")')" \
+	"$(py 'edit("compose.yaml", "keyryx:v0.1.5@sha256:967dd49907d48edea9cb0af926ec9beae39de31909ced8149eff1546200d99e7", "keyryx:v0.1.3@sha256:26d5d49cd4a67eb463f35895de96e628e2304183775bf031170e190c579c0147")')" \
 	"keyryx is pinned at v0.1.3, below v0.1.4"
 
 run_case "containers-carry-the-baseline: keyryx is pinned by no digest (measured nothing)" fail \
 	'./scripts/containers-carry-the-baseline.sh' \
 	"$(py 'import re
 s = open("compose.yaml").read()
-s, n = re.subn(r"keyryx:v0\.1\.4@sha256:[0-9a-f]{64}", "keyryx:v0.1.4", s)
+s, n = re.subn(r"keyryx:v0\.1\.5@sha256:[0-9a-f]{64}", "keyryx:v0.1.5", s)
 assert n == 2
 open("compose.yaml", "w").write(s)')" \
 	"the custody under the three was measured against NOTHING"
@@ -5159,7 +5159,7 @@ run_case "bus-names: the witness's findings file loses its keyryx stem" fail \
 
 run_case "bus-names: the heraldyx pin goes back before the keyryx source" fail \
 	'./scripts/bus-names-match-their-source.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/heraldyx:v0.9.0@", "ghcr.io/taipanbox/heraldyx:v0.7.0@")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/heraldyx:v0.9.1@", "ghcr.io/taipanbox/heraldyx:v0.7.0@")')" \
 	"keyryx.ndjson is on this bus and compose.yaml pins heraldyx v0.7.0"
 
 
