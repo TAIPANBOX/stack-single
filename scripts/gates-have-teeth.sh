@@ -405,7 +405,7 @@ run_case "tool-hold-is-seeded: the replay check is gone" fail \
 	"never calls tool_hold_upgrade_check"
 run_case "tool-hold-is-seeded: the question comes after the journal's first line" fail \
 	'./scripts/tool-hold-is-seeded.sh' \
-	"$(py 'edit("install.sh", "\ntool_hold_resolve\ntool_hold_upgrade_check\n", "\ntool_hold_resolve\n"); edit("install.sh", "cd \"$STACK_DIR\"\n\n# ---- 1b. notifications", "tool_hold_upgrade_check\ncd \"$STACK_DIR\"\n\n# ---- 1b. notifications")')" \
+	"$(py 'edit("install.sh", "\ntool_hold_resolve\ntool_hold_upgrade_check\n", "\ntool_hold_resolve\n"); edit("install.sh", "cd \"$STACK_DIR\"\n\n# ---- 1a. the guests", "tool_hold_upgrade_check\ncd \"$STACK_DIR\"\n\n# ---- 1a. the guests")')" \
 	"before the package step"
 run_case "tool-hold-is-seeded: a stopped run keeps the image it pulled" fail \
 	'./scripts/tool-hold-is-seeded.sh' \
