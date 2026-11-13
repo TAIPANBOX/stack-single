@@ -10,6 +10,11 @@ src/
 # it stages one in while the gateway image reads it.
 identity/
 identity.check.*/
+# guest-callback's configuration, which install.sh writes from guest-callbacks.txt (invariant 77),
+# and the operator's own two files beside compose.yaml.
+guest-door/callback/
+guests.txt
+guest-callbacks.txt
 
 # macOS writes these into any directory Finder has opened, and `git add -A`
 # picks them up. Three repositories in this estate got one on 2026-08-10 from

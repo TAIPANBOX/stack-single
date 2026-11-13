@@ -792,6 +792,30 @@ if compose_has vouchryx; then
         "$DC exec -T tokenfuse-gateway printenv TOKENFUSE_DELEGATION_ISSUER"
 fi
 
+# Invariant 77: what a guest sees. No door is on the guests network (a door there could be handed, by a
+# guest that took a name, a call meant for a plane); guest-door is, forwards an agent's route, and
+# answers a route a guest is not given itself, 404, where the gateway would have said 401 or 403. A probe on
+# the guests network sees what a guest sees, and the gateway's healthz through guest-door is the
+# positive control for the refusal beside it.
+GUESTS_NET="${NET%_core}_guests"
+# shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
+guests_no_door() {
+  local s id
+  for s in vouchryx tokenfuse-gateway tokenfuse-mcp-broker; do
+    id="$($DC ps -q "$s" 2>/dev/null | head -n 1)"
+    [ -n "$id" ] || continue
+    docker inspect --format '{{range $n, $_ := .NetworkSettings.Networks}}{{$n}} {{end}}' "$id" | grep -qw -- "$GUESTS_NET" && return 1
+  done
+  return 0
+}
+# shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
+guests_code() { docker run --rm --network "$GUESTS_NET" busybox:1.36 \
+           wget -S -q -T5 -O /dev/null "$1" 2>&1 \
+         | awk '/^  HTTP\//{c=$2} END{print c+0}'; }
+check "guests: no door is on $GUESTS_NET" "guests_no_door"
+check "guests: guest-door forwards a guest's call to the gateway" "[ \"\$(guests_code http://tokenfuse-gateway:4100/healthz)\" = 200 ]"
+check "guests: guest-door answers a route a guest is not given itself" "[ \"\$(guests_code http://tokenfuse-gateway:4100/v1/runs)\" = 404 ]"
+
 # Read off wardryx's own start line, not off the file: wardryx says the floors it loaded at each
 # start, so a box whose file says on and whose running wardryx says otherwise fails here.
 if [ -f "$STACK_DIR/policy.yaml" ] && grep -q '^# tool-hold: begin' "$STACK_DIR/policy.yaml"; then
@@ -1028,9 +1052,83 @@ drift_stopped() { # SERVICE PIN PROFILES RESTART IMAGE_ID STATE CODE RESTARTS: n
     drift_tally FAIL "$1" "$shown" "compose.yaml keeps this running, and it is not"
   fi
 }
+# guest-callbacks: begin
+# The guests this stack calls back (CLAUDE.md invariant 77): guest-callbacks.txt beside compose.yaml,
+# written by the operator and never by this installer, one `<container> <name>:<port>` a line.
+# guest-callback listens on <port> on core and forwards to <name>:<port> on the callbacks network, for
+# a caller on core only. guest_callbacks_read GUESTS reads the file into GCB, one
+# "container<TAB>name<TAB>port" a line, given the names guests.txt holds, one a line. A line that is
+# not one call back, a container guests.txt does not name, a name or a port an earlier line has, or a
+# file that cannot be read empties GCB, says which in GCB_WHY and returns 1. No file is no call back.
+guest_callbacks_read() {
+  local raw line n=0 c target rest name port
+  GCB=""
+  GCB_WHY=""
+  [ -e guest-callbacks.txt ] || return 0
+  if ! raw="$(cat guest-callbacks.txt 2>/dev/null)"; then
+    GCB_WHY="guest-callbacks.txt is on this box and could not be read"
+    return 1
+  fi
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n + 1))
+    line="${line%%#*}"
+    c="" target="" rest=""
+    read -r c target rest <<<"$line" || true
+    [ -n "$c" ] || continue
+    name="${target%:*}"
+    port="${target##*:}"
+    # A name is one lower-case DNS label: no dot, so no provider's host and no network-qualified name.
+    if [ -n "$rest" ] || [ "$name" = "$target" ] \
+      || [[ ! "$c" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] \
+      || [[ ! "$name" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]] \
+      || [[ ! "$port" =~ ^[1-9][0-9]{3,4}$ ]] || [ "$port" -lt 1024 ] || [ "$port" -gt 65535 ]; then
+      GCB=""
+      GCB_WHY="guest-callbacks.txt line $n is not one '<container> <name>:<port>' with a port from 1024 to 65535"
+      return 1
+    fi
+    if ! grep -qxF -- "$c" <<<"$1"; then
+      GCB=""
+      GCB_WHY="guest-callbacks.txt line $n names $c, and guests.txt does not"
+      return 1
+    fi
+    if cut -f2 <<<"$GCB" | grep -qxF -- "$name" || cut -f3 <<<"$GCB" | grep -qxF -- "$port"; then
+      GCB=""
+      GCB_WHY="guest-callbacks.txt line $n repeats the name or the port of an earlier line"
+      return 1
+    fi
+    GCB="$GCB$c"$'\t'"$name"$'\t'"$port"$'\n'
+  done <<<"$raw"
+}
+# The configuration guest-callback runs, from GCB and core's subnets (one a line, $1). Each call
+# back answers a caller on core and refuses every other, so a guest on the callbacks network cannot
+# reach another guest through it in the stack's name. With no call back it answers 404 on one port.
+guest_callbacks_caddyfile() {
+  local c name port subnets
+  subnets="$(grep . <<<"$1" | tr '\n' ' ')"
+  subnets="${subnets% }"
+  printf '%s\n' "# Written by install.sh from guest-callbacks.txt and core's subnets (CLAUDE.md invariant 77)." \
+    "# Edit guest-callbacks.txt and run ./install.sh; status compares this file with what it would write." \
+    "{" "	admin off" "	auto_https off" "	persist_config off" "}"
+  if [ -z "$GCB" ]; then
+    printf '%s\n' ":8080 {" "	respond \"guest-callback: guest-callbacks.txt declares no call back\" 404" "}"
+    return 0
+  fi
+  while IFS=$'\t' read -r c name port; do
+    [ -n "$c" ] || continue
+    printf '%s\n' "# $c" ":$port {" "	@core remote_ip $subnets" "	route {" \
+      "		reverse_proxy @core $name:$port {" "			flush_interval -1" "		}" \
+      "		respond \"guest-callback: only a service on core may call a guest back\" 403" "	}" "}"
+  done <<<"$GCB"
+}
+# Core's subnets, one a line; empty when Docker does not say.
+guest_core_subnets() { # NETWORK
+  docker network inspect --format '{{range .IPAM.Config}}{{.Subnet}}{{"\n"}}{{end}}' "$1" 2>/dev/null | grep . || true
+}
+# guest-callbacks: end
 drift_measure() {
   local cfg file_cfg pins project ids rows mine nets net out member strangers="" live
   local guest_net guests guests_raw seen_guests line line_no rest stack_names names clash odd on alias
+  local callback_net cb_guests seen_cb stolen owner o cb_want cb_have
   local svc pin profiles restart id oneoff name image state code restarts ro limit capdrop secopt
   drift_raw=""
   drift_want=""
@@ -1180,9 +1278,9 @@ drift_measure() {
   # Every name a service of this stack is reached by: the services, the aliases the file gives,
   # the names of the project's containers, and every dotted host a URL in the resolved file calls
   # (a provider's API: Docker answers a name it knows before it asks outside). A single-label host
-  # in a URL is left out on purpose: the broker calls a guest back by its own name. Only a person
-  # with Docker on this box can give a container an alias, so this catches a guest's compose file
-  # that took a stack name by mistake.
+  # in a URL is left out on purpose: a guest is called back by a name of its own (guest-callbacks.txt).
+  # Only a person with Docker on this box can give a container an alias, so this catches a guest's
+  # compose file that took a stack name by mistake.
   stack_names="$(cut -d'|' -f1 <<<"$pins")
 $(awk '/^        aliases:/ { a = 1; next } a && /^          - / { print $2; next } { a = 0 }' <<<"$cfg")
 $(awk -F'|' '{ sub(/^\//, "", $4); print $4 }' <<<"$rows")
@@ -1208,10 +1306,29 @@ $(grep -oE '[a-z][a-z0-9+.-]*://[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)+' <<<"$cfg" | s
       done <<<"$guests_raw"
     fi
   fi
+  # The guests this stack calls back, and the configuration guest-callback runs against the one
+  # guest-callbacks.txt and core's subnets make: an edit nobody installed, or a core recreated with
+  # another subnet, leaves a call back answering the wrong guest or the wrong callers.
+  callback_net="${project}_callbacks"
+  cb_guests=""
+  if ! guest_callbacks_read "$guests"; then
+    drift_cannot "$GCB_WHY, so no container is taken for a guest called back"
+  else
+    cb_guests="$(cut -f1 <<<"$GCB")"
+    if grep -q '^guest-callback|' <<<"$pins"; then
+      cb_want="$(guest_callbacks_caddyfile "$(guest_core_subnets "${project}_core")")"
+      if ! cb_have="$(cat guest-door/callback/Caddyfile 2>/dev/null)"; then
+        drift_tally FAIL guest-callback '' "guest-door/callback/Caddyfile is missing: run ./install.sh"
+      elif [ "$cb_want" != "$cb_have" ]; then
+        drift_tally FAIL guest-callback '' "runs a configuration guest-callbacks.txt and core's subnets no longer make: run ./install.sh"
+      fi
+    fi
+  fi
   # Read twice, not filtered: a probe of a second status run or a person's debug shell look the
   # same, and only the debug shell is still there a moment later. A filter on --rm or on the
   # probes' image would hide exactly that shell.
   seen_guests=""
+  seen_cb=""
   if [ -n "$strangers" ]; then
     sleep 2
     while IFS='|' read -r id name net; do
@@ -1220,12 +1337,18 @@ $(grep -oE '[a-z][a-z0-9+.-]*://[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)+' <<<"$cfg" | s
       [ -n "$state" ] || continue
       if ! grep -qxF -- "$name" <<<"$guests"; then
         drift_tally FAIL "$name" "$state" "unknown container on $net"
-      elif [ "$net" = "$guest_net" ]; then
-        seen_guests="$seen_guests$name
+      elif [ "$net" = "$guest_net" ] || { [ "$net" = "$callback_net" ] && grep -qxF -- "$name" <<<"$cb_guests"; }; then
+        if [ "$net" = "$guest_net" ]; then
+          seen_guests="$seen_guests$name
 "
-        # The gateway and the broker sit on core and on guests, and reach the planes by name.
-        # A guest that answers to one of those names on guests could be handed a call, its
-        # credential with it, meant for a plane; so a guest's every name there is held to them.
+        else
+          seen_cb="$seen_cb$name
+"
+        fi
+        # guest-door and guest-callback sit on core and on a guests' network, and reach the doors
+        # and the guests by name. A guest that answers there to a name of the stack's could be handed
+        # a call meant for a door, and one that answers on callbacks to another guest's call-back
+        # name, a call back meant for that guest; so a guest's every name there is held to both.
         # One name a line, "network<TAB>name", read by read and never split by the shell.
         if ! names="$(docker inspect --format $'{{range $n, $e := .NetworkSettings.Networks}}{{range $e.Aliases}}{{$n}}\t{{.}}\n{{end}}{{range $e.DNSNames}}{{$n}}\t{{.}}\n{{end}}{{end}}' "$id" 2>/dev/null)"; then
           drift_cannot "Docker would not say what names $name answers to on $net"
@@ -1237,20 +1360,32 @@ $(grep -oE '[a-z][a-z0-9+.-]*://[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)+' <<<"$cfg" | s
         # DNS name (a space, a comma) is a FAIL of its own: nothing here guesses how it resolves.
         clash=""
         odd=""
+        stolen=""
+        owner=""
         while IFS=$'\t' read -r on alias; do
           [ "$on" = "$net" ] || continue
           alias="${alias%.}"
           [ -n "$alias" ] || continue
           if [[ ! "$alias" =~ ^[A-Za-z0-9_.-]+$ ]]; then odd="$alias"; continue; fi
           if grep -qixF -- "$alias" <<<"$stack_names"; then clash="$alias"; fi
+          if [ "$net" = "$callback_net" ]; then
+            o="$(awk -F'\t' -v n="$alias" 'tolower($2) == tolower(n) { print $1 }' <<<"$GCB")"
+            if [ -n "$o" ] && [ "$o" != "$name" ]; then stolen="$alias"; owner="$o"; fi
+          fi
         done <<<"$names"
         if [ -n "$clash" ]; then
           drift_tally FAIL "$name" "$state" "a guest on $net that answers to $clash, a name of this stack's own"
         elif [ -n "$odd" ]; then
           drift_tally FAIL "$name" "$state" "a guest on $net that answers to a name that is no DNS name: $odd"
-        else
+        elif [ -n "$stolen" ]; then
+          drift_tally FAIL "$name" "$state" "a guest on $net that answers to $stolen, the call-back name guest-callbacks.txt gives $owner"
+        elif [ "$net" = "$guest_net" ]; then
           drift_tally note "$name" "$state" "a guest on $net, named in guests.txt"
+        else
+          drift_tally note "$name" "$state" "a guest on $net, called back as named in guest-callbacks.txt"
         fi
+      elif grep -qxF -- "$name" <<<"$cb_guests"; then
+        drift_tally FAIL "$name" "$state" "unknown container on $net: guests.txt lets it onto $guest_net, guest-callbacks.txt onto $callback_net, and nowhere else"
       else
         drift_tally FAIL "$name" "$state" "unknown container on $net: guests.txt lets it onto $guest_net and nowhere else"
       fi
@@ -1260,6 +1395,10 @@ $(grep -oE '[a-z][a-z0-9+.-]*://[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)+' <<<"$cfg" | s
     [ -n "$line" ] || continue
     grep -qxF -- "$line" <<<"$seen_guests" || drift_tally note "$line" '' "named in guests.txt, and not on $guest_net"
   done <<<"$guests"
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    grep -qxF -- "$line" <<<"$seen_cb" || drift_tally note "$line" '' "named in guest-callbacks.txt, and not on $callback_net"
+  done <<<"$cb_guests"
   if [ "$drift_matched" -eq 0 ] && [ "$drift_differ" -eq 0 ]; then
     drift_cannot "no container could be held to a pin"
   fi
@@ -4605,12 +4744,34 @@ else
   mkdir -p "$STACK_DIR/${BROWSER_AA_FILE%/*}"
   curl -fsSL "${REPO_SINGLE_RAW:-https://raw.githubusercontent.com/TAIPANBOX/stack-single/main}/$BROWSER_AA_FILE" \
     -o "$STACK_DIR/$BROWSER_AA_FILE" || die "could not fetch $BROWSER_AA_FILE, which the installer loads for the browser"
+  # guest-door's routes (invariant 77), which compose.yaml mounts by a relative path.
+  mkdir -p "$STACK_DIR/guest-door"
+  curl -fsSL "${REPO_SINGLE_RAW:-https://raw.githubusercontent.com/TAIPANBOX/stack-single/main}/guest-door/Caddyfile" \
+    -o "$STACK_DIR/guest-door/Caddyfile" || die "could not fetch guest-door/Caddyfile, which compose.yaml mounts for guest-door"
   # The fire drills' own tool-hold drill (invariant 74), which compose.yaml mounts by a relative path.
   mkdir -p "$STACK_DIR/drill-scenarios"
   curl -fsSL "${REPO_SINGLE_RAW:-https://raw.githubusercontent.com/TAIPANBOX/stack-single/main}/drill-scenarios/mcp-ungranted-tool-held.yaml" \
     -o "$STACK_DIR/drill-scenarios/mcp-ungranted-tool-held.yaml" || die "could not fetch drill-scenarios/mcp-ungranted-tool-held.yaml, which compose.yaml mounts for the fire drills"
 fi
 cd "$STACK_DIR"
+
+# ---- 1a. the guests' two proxies (CLAUDE.md invariant 77) ----------------------
+# guest-door and guest-callback run as nobody and read their configuration through a read-only mount,
+# so it is world-readable whatever umask copied the tree. guest-callbacks.txt is read here, before
+# anything long, and a line that is not one call back stops the run. guest-callback's configuration
+# names core's subnets, which exist once the stack is up, so it is written after `up` (section 7);
+# here it only has to exist, because Docker makes a missing mount source a directory owned by root.
+GCB_GUESTS="$( { sed 's/#.*//' guests.txt 2>/dev/null || true; } | awk 'NF == 1 { print $1 }')"
+guest_callbacks_read "$GCB_GUESTS" || die "$GCB_WHY. Nothing was started."
+mkdir -p guest-door/callback || die "could not make guest-door/callback for guest-callback's configuration"
+if [ ! -e guest-door/callback/Caddyfile ]; then
+  GCB_KEEP="$GCB"
+  GCB=""
+  guest_callbacks_caddyfile "" >guest-door/callback/Caddyfile || die "could not write guest-door/callback/Caddyfile"
+  GCB="$GCB_KEEP"
+fi
+chmod 0755 guest-door guest-door/callback && chmod 0644 guest-door/Caddyfile guest-door/callback/Caddyfile \
+  || die "could not make guest-door's configuration readable by the proxies, which run as nobody"
 
 # ---- 1b. notifications, asked BEFORE anything long ---------------------------
 # Asked here for the same reason the cluster installer asks its questions at the
@@ -6213,6 +6374,27 @@ trailryx_pin_apply() { # writes TRAILRYX_KEYRYX_KID into .env once; a box with t
 
 trailryx_pin_apply
 "${COMPOSE[@]}" "${UP_PROFILES[@]}" up -d --remove-orphans
+
+# guest-callback's configuration (invariant 77), now that core has its subnets: each call back from
+# guest-callbacks.txt answers a caller on core only. Rewritten and restarted only when it changes, so a
+# second run leaves the proxy as it was.
+guest_callbacks_install() {
+  local subnets want have
+  subnets="$(guest_core_subnets "$NET_CORE")"
+  [ -n "$subnets" ] || die "Docker would not say the subnets of $NET_CORE, so guest-callback cannot be told who may call a guest back."
+  want="$(guest_callbacks_caddyfile "$subnets")"
+  have="$(cat guest-door/callback/Caddyfile 2>/dev/null || true)"
+  if [ "$want" != "$have" ]; then
+    { printf '%s\n' "$want" >guest-door/callback/Caddyfile.new \
+        && chmod 0644 guest-door/callback/Caddyfile.new \
+        && mv -f guest-door/callback/Caddyfile.new guest-door/callback/Caddyfile; } \
+      || die "could not write guest-door/callback/Caddyfile"
+    "${COMPOSE[@]}" restart guest-callback >/dev/null || die "guest-callback did not restart on its new configuration. Check: ${COMPOSE[*]} logs guest-callback"
+  fi
+  note "guest-callback: $(grep -c . <<<"$GCB" || true) call back(s) from guest-callbacks.txt, each for a caller on $NET_CORE only"
+}
+NET_CORE="agent-stack_core"
+guest_callbacks_install
 
 # `up --remove-orphans` does not remove a container whose profile this run does not name (measured 2026-10-04).
 # So an installer-managed profile this run turns off has its containers removed by name, under that profile.

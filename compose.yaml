@@ -1155,15 +1155,14 @@ services:
     # the risk-signal network reaches the proxy and wardryx; browser-broker
     # reaches scopyx-browser, which shares no other network with the broker;
     # front publishes port 4200 (a published port needs a network with a route to
-    # the host; see the networks block at the end of this file); guests is where a
-    # declared container of another project reaches it (invariant 77).
+    # the host; see the networks block at the end of this file). Not on guests: a
+    # container of another project reaches it through guest-door (invariant 77).
     networks:
       - agents
       - core
       - risk-signal
       - browser-broker
       - front
-      - guests
     depends_on:
       init-volumes:
         condition: service_completed_successfully
@@ -1290,11 +1289,10 @@ services:
     pids_limit: 256
     profiles: ["delegation"]
     image: ${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.8.0@sha256:2e1848151118de3dd69d2d68918fd50eee29859fdc47fb6fd3092914fe73022a}
-    # guests: a declared container of another project gets its tokens here, and
-    # never needs core for it (invariant 77).
+    # Not on guests: a declared container of another project gets its tokens
+    # through guest-door, and never needs core for it (invariant 77).
     networks:
       - core
-      - guests
     # Group 10001, the same pair typryx and the money plane's writers use: its
     # journal (VOUCHRYX_EVENTS_PATH) lands on the shared `events` volume,
     # root:10001 2775, and this is how it can append there.
@@ -1429,11 +1427,12 @@ services:
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
     user: "20010:10001"
+    # Not on guests: a container of another project calls it through guest-door
+    # (invariant 77).
     networks:
       - edge
       - agents
       - core
-      - guests
     command: ["/usr/local/bin/tokenfuse"]
     healthcheck:
       # bash, not curl: these images ship bash and no HTTP client. The probe is the same
@@ -1786,6 +1785,72 @@ services:
     volumes:
       - wgstate:/var/lib/wireguard
       - wgapi:/var/run/wireguard
+
+  # ---- the doors for containers of other projects (invariant 77) -----------
+  # A guest is a container of another project on this box (a lab's gateway, an
+  # IdP bridge) named in guests.txt beside this file. It reaches the stack through
+  # guest-door and is called back through guest-callback, and it shares a network
+  # with nothing else of this stack. vouchryx, the gateway and the MCP broker hold
+  # keys, ask the policy plane and reach the planes by name, and Docker answers a
+  # name from every network a container is on: a door on the guests network could
+  # be handed, by a guest that took a name, a call meant for a plane (Docker
+  # 26.1.5 looks a name up network by network, internal ones in name order, so a
+  # name that lives only on a network sorting after `guests`, the typed risk
+  # proxy's on risk-signal, or one whose container is being recreated, is a
+  # guest's to answer). Neither proxy holds a key, reads a secret or is given an
+  # environment; both run the image `caddy` runs, with a configuration of their
+  # own and no TLS, as nobody, on a read-only root.
+  #
+  # guest-door takes the doors' three names on the guests network, so a guest's
+  # own configuration is the one it had, and forwards only the routes an agent
+  # uses (guest-door/Caddyfile, held by scripts/guest-door-routes.sh).
+  guest-door:
+    <<: [*restart, *baseline]
+    pids_limit: 64
+    image: ${CADDY_IMAGE:-ghcr.io/taipanbox/stack-caddy:v1.8.1@sha256:d9376051cc5ac9bb83de557bf3e7e861e26f6f6ae4556cd6ed5a32d1ce352c0a}
+    user: "65534:65534"
+    # The binary carries NET_BIND_SERVICE as a file capability, so exec fails
+    # with EPERM unless the bounding set holds it. no-new-privileges keeps the
+    # process from gaining it, and nothing here binds below 1024.
+    cap_add:
+      - NET_BIND_SERVICE
+    entrypoint: ["caddy", "run", "--config", "/etc/guest-door/Caddyfile", "--adapter", "caddyfile"]
+    tmpfs:
+      - /config:size=1m
+      - /data:size=1m
+    volumes:
+      - ./guest-door/Caddyfile:/etc/guest-door/Caddyfile:ro
+    networks:
+      core: {}
+      guests:
+        aliases:
+          - vouchryx
+          - tokenfuse-gateway
+          - tokenfuse-mcp-broker
+  # The other way round: a service of this stack calling a guest back (the MCP
+  # broker calling a lab's relay as a tool upstream) dials guest-callback on core,
+  # which forwards to the guest on the callbacks network. Only the guests
+  # guest-callbacks.txt names sit there, and each route answers only a caller on
+  # core, so a guest cannot reach another through it in the stack's name.
+  # install.sh writes its configuration from guest-callbacks.txt (one
+  # `<container> <name>:<port>` a line: guest-callback listens on <port> and
+  # forwards to <name>:<port>) and core's subnets, and `status` compares the two.
+  guest-callback:
+    <<: [*restart, *baseline]
+    pids_limit: 64
+    image: ${CADDY_IMAGE:-ghcr.io/taipanbox/stack-caddy:v1.8.1@sha256:d9376051cc5ac9bb83de557bf3e7e861e26f6f6ae4556cd6ed5a32d1ce352c0a}
+    user: "65534:65534"
+    cap_add:
+      - NET_BIND_SERVICE
+    entrypoint: ["caddy", "run", "--config", "/etc/guest-callback/Caddyfile", "--adapter", "caddyfile"]
+    tmpfs:
+      - /config:size=1m
+      - /data:size=1m
+    volumes:
+      - ./guest-door/callback:/etc/guest-callback:ro
+    networks:
+      - core
+      - callbacks
 
   # ---- TLS for the console, inside the tunnel ------------------------------
   # Not a way in from the internet: this listens on the TUNNEL address only,
@@ -2710,12 +2775,16 @@ networks:
   # here can address it, and `typed-risk-signal.sh` holds that list.
   risk-signal:
     internal: true
-  # The door for containers of other projects on this box (invariant 77): a
-  # lab's gateway, an IdP bridge. It holds exactly vouchryx, the gateway and the
-  # MCP broker, so a guest gets tokens, model calls and tool calls through the
-  # same doors an agent uses and reaches no plane, no database and no key. A
-  # guest's own compose file names it `agent-stack_guests`, and a guest is named
-  # in guests.txt beside this file, or `status` calls it an unknown container.
-  # Internal: no route out.
+  # Where containers of other projects on this box sit (invariant 77): a lab's
+  # gateway, an IdP bridge. It holds guest-door and nothing else of this stack,
+  # so a guest gets tokens, model calls and tool calls through the routes an
+  # agent uses and shares a network with no door, no plane, no database and no
+  # key. A guest's own compose file names it `agent-stack_guests`, and a guest is
+  # named in guests.txt beside this file, or `status` calls it an unknown
+  # container. Internal: no route out.
   guests:
+    internal: true
+  # Where a guest this stack calls back is reached: guest-callback and the guests
+  # guest-callbacks.txt names, nothing else (invariant 77). Internal: no route out.
+  callbacks:
     internal: true

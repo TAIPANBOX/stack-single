@@ -51,6 +51,8 @@
           "caddy",
           "console",
           "focus-export",
+          "guest-callback",
+          "guest-door",
           "heraldyx",
           "idryx",
           "idryx-detect",
