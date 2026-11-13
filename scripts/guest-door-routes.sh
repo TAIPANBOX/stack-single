@@ -22,13 +22,14 @@ W="$(mktemp -d "${TMPDIR:-/tmp}/guest-callbacks.XXXXXX")"
 trap 'rm -rf "$W"' EXIT
 
 # ---- guest-door/Caddyfile ------------------------------------------------------------
-# The routes each door gives a guest, and nothing more: a token, a key set, the server's metadata
-# and a revocation under a scoped key; model calls in either provider's shape; tool calls.
+# The routes each door gives a guest, and nothing more: from vouchryx a token, a key set, the server's
+# metadata, the revocation list a door reads, and a revocation or its lift under a scoped key; model
+# calls in either provider's shape; tool calls. A route a door adds is closed until it is named here.
 # Not inside $( ): bash 3.2 reads a here-document there for quotes, and the messages below have some.
 python3 - >"$W/caddyfile.out" <<'PY'
 import re
 EXPECT = {
-    "4310": ("vouchryx:4310", {"/v1/token", "/v1/revoke", "/.well-known/jwks.json", "/.well-known/oauth-authorization-server", "/healthz"}),
+    "4310": ("vouchryx:4310", {"/v1/token", "/v1/revocations", "/v1/revoke", "/v1/revoke/lift", "/.well-known/jwks.json", "/.well-known/oauth-authorization-server", "/healthz"}),
     "4100": ("tokenfuse-gateway:4100", {"/v1/messages", "/v1/chat/completions", "/healthz"}),
     "4200": ("tokenfuse-mcp-broker:4200", {"/mcp", "/healthz"}),
 }

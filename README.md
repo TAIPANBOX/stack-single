@@ -124,9 +124,10 @@ tokens and model calls, a bridge that bans a person their identity provider has 
 Such a container does not join `agent-stack_core`, where the planes, the policy database
 and custody sit. It joins `agent-stack_guests`, which holds one thing of the stack:
 guest-door, a proxy with no key that answers there to the names `vouchryx`,
-`tokenfuse-gateway` and `tokenfuse-mcp-broker` and forwards an agent's routes to each (a
-token, a key set and a revocation; model calls; tool calls). Any other route, an
-administrative one among them, gets guest-door's own 404. No door shares the network with
+`tokenfuse-gateway` and `tokenfuse-mcp-broker` and forwards a guest's routes to each (from
+vouchryx a token, a key set, the revocation list, a revocation or its lift under a scoped
+key; model calls; tool calls). Any other route, an administrative one of the gateway among
+them, gets guest-door's own 404. No door shares the network with
 a guest, so a guest that takes a name is never asked for anything by a door. The network
 has no route out.
 

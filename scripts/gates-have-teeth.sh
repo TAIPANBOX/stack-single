@@ -4837,9 +4837,9 @@ run_case "guest-door-routes: the broker's port matches by prefix" fail \
 	"$(py 'edit("guest-door/Caddyfile", "@agent path /mcp /healthz", "@agent path /mcp* /healthz")')" \
 	":4200 gives a guest"
 
-run_case "guest-door-routes: vouchryx's port gives a guest the lift of a ban" fail \
+run_case "guest-door-routes: vouchryx's port gives a guest a route nobody named" fail \
 	'./scripts/guest-door-routes.sh' \
-	"$(py 'edit("guest-door/Caddyfile", "@agent path /v1/token /v1/revoke ", "@agent path /v1/token /v1/revoke /v1/revoke/lift ")')" \
+	"$(py 'edit("guest-door/Caddyfile", "@agent path /v1/token ", "@agent path /v1/token /v1/clients ")')" \
 	":4310 gives a guest"
 
 run_case "guest-door-routes: the gateway's port forwards to vouchryx" fail \

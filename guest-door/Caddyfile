@@ -18,10 +18,11 @@
 	@loop header X-Guest-Door *
 }
 
-# vouchryx: a token for an enrolled agent, its key set and metadata, and a revocation under a scoped key.
+# vouchryx: a token for an enrolled agent, its key set and metadata, the revocation list a door reads, and a
+# revocation or its lift under a key vouchryx scopes. Every route it serves today; one it adds is closed until named.
 :4310 {
 	import loop
-	@agent path /v1/token /v1/revoke /.well-known/jwks.json /.well-known/oauth-authorization-server /healthz
+	@agent path /v1/token /v1/revocations /v1/revoke /v1/revoke/lift /.well-known/jwks.json /.well-known/oauth-authorization-server /healthz
 	route {
 		respond @loop "guest-door: a request that came back to the door" 508
 		reverse_proxy @agent vouchryx:4310 {

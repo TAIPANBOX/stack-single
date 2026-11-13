@@ -34,13 +34,13 @@ Feature: a guest of another project reaches the doors and nothing else
   Scenario: guest-door forwards an agent's routes and answers the rest itself
     Given guest-door's configuration
     When it is read
-    Then each port forwards to its own door only, on the routes an agent uses: a token, a key set, the server's metadata and a revocation from vouchryx, model calls from the gateway, tool calls from the broker
+    Then each port forwards to its own door only, on the routes a guest uses: from vouchryx a token, a key set, the server's metadata, the revocation list and a revocation or its lift under a scoped key, model calls from the gateway, tool calls from the broker
     And every other route, an administrative one of a door among them, is answered 404 by guest-door itself
     And a request that came back to guest-door is answered before anything is forwarded
     And guest-door runs as nobody, with no admin endpoint and no key in its configuration
     # -> gates-have-teeth.sh "guest-door-routes: the gateway's port gives a guest /v1/runs"
     # -> gates-have-teeth.sh "guest-door-routes: the broker's port matches by prefix"
-    # -> gates-have-teeth.sh "guest-door-routes: vouchryx's port gives a guest the lift of a ban"
+    # -> gates-have-teeth.sh "guest-door-routes: vouchryx's port gives a guest a route nobody named"
     # -> gates-have-teeth.sh "guest-door-routes: the gateway's port forwards to vouchryx"
     # -> gates-have-teeth.sh "guest-door-routes: the broker's port forwards every route"
     # -> gates-have-teeth.sh "guest-door-routes: a loop is forwarded before it is answered"
