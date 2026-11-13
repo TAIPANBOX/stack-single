@@ -800,11 +800,14 @@ fi
 GUESTS_NET="${NET%_core}_guests"
 # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
 guests_no_door() {
-  local s id
+  local s id nets_
   for s in vouchryx tokenfuse-gateway tokenfuse-mcp-broker; do
-    id="$($DC ps -q "$s" 2>/dev/null | head -n 1)"
+    # Read whole, never through an early-exit reader: compose exits non-zero on a closed pipe.
+    id="$($DC ps -q "$s" 2>/dev/null || true)"
+    id="${id%%$'\n'*}"
     [ -n "$id" ] || continue
-    docker inspect --format '{{range $n, $_ := .NetworkSettings.Networks}}{{$n}} {{end}}' "$id" | grep -qw -- "$GUESTS_NET" && return 1
+    nets_="$(docker inspect --format '{{range $n, $_ := .NetworkSettings.Networks}}{{$n}} {{end}}' "$id" 2>/dev/null || true)"
+    grep -qw -- "$GUESTS_NET" <<<"$nets_" && return 1
   done
   return 0
 }
@@ -1091,7 +1094,7 @@ guest_callbacks_read() {
       GCB_WHY="guest-callbacks.txt line $n names $c, and guests.txt does not"
       return 1
     fi
-    if cut -f2 <<<"$GCB" | grep -qxF -- "$name" || cut -f3 <<<"$GCB" | grep -qxF -- "$port"; then
+    if grep -qxF -- "$name" <<<"$(cut -f2 <<<"$GCB")" || grep -qxF -- "$port" <<<"$(cut -f3 <<<"$GCB")"; then
       GCB=""
       GCB_WHY="guest-callbacks.txt line $n repeats the name or the port of an earlier line"
       return 1

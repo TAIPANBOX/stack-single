@@ -581,7 +581,8 @@ jobs:
           probe agent-stack_guests 'nslookup ci-shadow-name 127.0.0.11' || { echo "::error::the shadow name does not resolve on the guests network, so the doors' miss below would prove nothing"; exit 1; }
           cd /opt/agent-stack
           for door in tokenfuse-gateway tokenfuse-mcp-broker vouchryx; do
-            id="$(sudo docker compose ps -q "$door" 2>/dev/null | head -n 1)"
+            id="$(sudo docker compose ps -q "$door" 2>/dev/null || true)"
+            id="${id%%$'\n'*}"
             [ -n "$id" ] || continue
             if sudo docker run --rm --network "container:$id" busybox:1.36 nslookup ci-shadow-name 127.0.0.11 >/dev/null 2>&1; then
               echo "::error::$door resolves a name a guest took on the guests network"; exit 1

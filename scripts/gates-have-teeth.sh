@@ -4884,7 +4884,7 @@ run_case "guest-door-routes: a call back may name a container guests.txt does no
 
 run_case "guest-door-routes: two lines may share a port" fail \
 	'./scripts/guest-door-routes.sh' \
-	"$(py 'edit("install.sh", " || cut -f3 <<<\"$GCB\" | grep -qxF -- \"$port\"", "")')" \
+	"$(py 'edit("install.sh", " || grep -qxF -- \"$port\" <<<\"$(cut -f3 <<<\"$GCB\")\"", "")')" \
 	"a port twice"
 
 run_case "guest-door-routes: guest-door runs as root" fail \
