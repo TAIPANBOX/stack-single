@@ -1030,6 +1030,12 @@ rm -rf "$BOX" "$FIX"
 mkdir -p "$BOX" "$FIX/c" "$FIX/i" "$FIX/n"
 no_containers
 cp compose.yaml "$BOX/compose.yaml"
+# guest-callback's configuration as install.sh writes it on a box with no guest-callbacks.txt.
+mkdir -p "$BOX/guest-door/callback"
+printf '%s\n' "# Written by install.sh from guest-callbacks.txt and core's subnets (CLAUDE.md invariant 77)." \
+	"# Edit guest-callbacks.txt and run ./install.sh; status compares this file with what it would write." \
+	"{" "	admin off" "	auto_https off" "	persist_config off" "}" \
+	":8080 {" "	respond \"guest-callback: guest-callbacks.txt declares no call back\" 404" "}" >"$BOX/guest-door/callback/Caddyfile"
 grep -oE '\$\{[A-Za-z0-9_]+:\?' compose.yaml | sed -E 's/^\$\{//; s/:\?$//' | sort -u | sed 's/$/=x/' >"$BOX/.env"
 if ! (cd "$BOX" && "$REAL_DOCKER" compose --profile '*' config >"$FIX/config" 2>"$SANDBOX/render.err"); then
 	report "docker compose could not render the repository's compose.yaml: $(head -2 "$SANDBOX/render.err")"

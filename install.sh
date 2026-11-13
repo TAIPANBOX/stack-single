@@ -4770,8 +4770,9 @@ if [ ! -e guest-door/callback/Caddyfile ]; then
   guest_callbacks_caddyfile "" >guest-door/callback/Caddyfile || die "could not write guest-door/callback/Caddyfile"
   GCB="$GCB_KEEP"
 fi
-chmod 0755 guest-door guest-door/callback && chmod 0644 guest-door/Caddyfile guest-door/callback/Caddyfile \
-  || die "could not make guest-door's configuration readable by the proxies, which run as nobody"
+if ! chmod 0755 guest-door guest-door/callback || ! chmod 0644 guest-door/Caddyfile guest-door/callback/Caddyfile; then
+  die "could not make guest-door's configuration readable by the proxies, which run as nobody"
+fi
 
 # ---- 1b. notifications, asked BEFORE anything long ---------------------------
 # Asked here for the same reason the cluster installer asks its questions at the
