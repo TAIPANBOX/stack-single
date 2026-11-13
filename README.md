@@ -106,22 +106,30 @@ Both of Docker's image stores give the same verdict for the same bytes.
   service in the file, or one with no label at all that is attached to one of the stack's
   networks. A throwaway that has left a moment later is not counted.
 - **A guest of another project** (see the next section) is a `note` when `guests.txt`
-  names it and it sits on `agent-stack_guests`. The same container on any other network of
-  the stack fails, whatever `guests.txt` says. A name in `guests.txt` with no container is a
-  `note`. A `guests.txt` that cannot be read, or a line that is not one container name,
-  lets nobody in: the run says it could not measure, and every guest fails. A guest that
-  answers on `agent-stack_guests` to the name of a service of the stack (a container named
-  `wardryx`, an alias `policy-db`), or to a provider's host the stack calls, fails too: the gateway and the broker reach the planes by
-  name, and a guest that shares one could be handed a call meant for a plane.
+  names it and it sits on `agent-stack_guests`, or when `guest-callbacks.txt` names it and it
+  sits on `agent-stack_callbacks`. The same container on any other network of the stack
+  fails, whatever the files say. A name with no container is a `note`. A file that cannot be
+  read, or a line that is not what it should be, lets nobody in: the run says it could not
+  measure, and every guest it would have let in fails. A guest that answers on its network
+  to the name of a service of the stack (a container named `wardryx`, an alias `policy-db`),
+  or to a provider's host the stack calls, fails too, and so does one that answers on
+  `agent-stack_callbacks` to another guest's call-back name. guest-callback's routes are
+  compared with what `guest-callbacks.txt` and core's subnets make them: an edit nobody
+  installed fails until `./install.sh` runs.
 
 ### Letting a container of another project in: the guests network
 
 Something else on the box may need the stack: a lab's gateway that hands its agents
 tokens and model calls, a bridge that bans a person their identity provider has disabled.
 Such a container does not join `agent-stack_core`, where the planes, the policy database
-and custody sit. It joins `agent-stack_guests`, which holds exactly vouchryx, the gateway
-and the MCP broker: the doors an agent uses, and nothing behind them. The network has no
-route out.
+and custody sit. It joins `agent-stack_guests`, which holds one thing of the stack:
+guest-door, a proxy with no key that answers there to the names `vouchryx`,
+`tokenfuse-gateway` and `tokenfuse-mcp-broker` and forwards a guest's routes to each (from
+vouchryx a token, a key set, the revocation list, a revocation or its lift under a scoped
+key; model calls; tool calls). Any other route, an administrative one of the gateway among
+them, gets guest-door's own 404. No door shares the network with
+a guest, so a guest that takes a name is never asked for anything by a door. The network
+has no route out.
 
 In the guest's own compose file:
 
@@ -148,6 +156,22 @@ The installer never writes, copies over or removes `guests.txt`. A name in it le
 container onto the guests network and nowhere else: the rule is in `status`, not in the file.
 Give a guest service a name of its own: one that is also the name of a stack service fails
 `status`.
+
+When the stack has to call a guest back (the MCP broker calling a lab's relay as a tool
+upstream), the guest also joins `agent-stack_callbacks`, and a line in `guest-callbacks.txt`
+beside `compose.yaml` names it, the name it answers to there and the port:
+
+```
+# /opt/agent-stack/guest-callbacks.txt
+lab-gate-labgate-1 labgate:8791
+```
+
+`./install.sh` then writes guest-callback's routes: it listens on that port on `core` and
+forwards to `labgate:8791`, for a caller on `core` and no other, so the broker's upstream is
+`http://guest-callback:8791/...` and a guest cannot reach another guest through it. The
+container has to be in `guests.txt` too, the port is 1024 or above, and a line that is not
+one call back stops the install before anything starts. Run `./install.sh` again after
+changing the file; until then `status` fails guest-callback.
 
 It only reads: `docker ps`, `inspect`, `image inspect`, `network ls`, `network inspect` and
 `docker compose config`. It reaches no registry and runs no `cosign`.

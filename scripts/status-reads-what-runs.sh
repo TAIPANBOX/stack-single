@@ -167,15 +167,23 @@ case "${1:-}" in
     case "${2:-}" in
       ls) ls "$FIX/n" 2>/dev/null; exit 0 ;;
       inspect)
-        # network inspect --format FORMAT ID
-        [ -f "$FIX/n/$5" ] || { printf 'Error: No such network: %s\n' "$5" >&2; exit 1; }
+        # network inspect --format FORMAT ID-or-NAME
+        nf="$FIX/n/$5"
+        if [ ! -f "$nf" ]; then
+          nf=""
+          for f in "$FIX"/n/*; do
+            [ -f "$f" ] && [ "$(head -n 1 "$f")" = "$5" ] && nf="$f"
+          done
+        fi
+        [ -n "$nf" ] || { printf 'Error: No such network: %s\n' "$5" >&2; exit 1; }
         name=""; members=""
         while read -r l; do
           if [ -z "$name" ]; then name="$l"; else members="$members$l "; fi
-        done <"$FIX/n/$5"
+        done <"$nf"
         o="$4"
         fill '{{.Name}}' "$name"
         fill '{{range $id, $c := .Containers}}{{$id}}={{$c.Name}} {{end}}' "$members"
+        fill '{{range .IPAM.Config}}{{.Subnet}}{{"\n"}}{{end}}' "$(cat "$FIX/subnet/$name" 2>/dev/null || printf '172.18.0.0/16')"
         case "$o" in *'{{'*) printf 'stub: a field this fixture does not know: %s\n' "$o" >&2; exit 3 ;; esac
         printf '%s\n' "$o"
         exit 0 ;;
@@ -295,7 +303,7 @@ render() { # writes compose.yaml as a person wrote it, and the two renders compo
 # finished, and scopyx in a profile that is off.
 fresh() {
 	rm -rf "$FIX" "$BOX"
-	mkdir -p "$FIX/c" "$FIX/i" "$FIX/n" "$BOX"
+	mkdir -p "$FIX/c" "$FIX/i" "$FIX/n" "$FIX/subnet" "$BOX"
 	: >"$FIX/services"
 	: >"$BOX/.env"
 	service wardryx WARDRYX_IMAGE "$PIN_LINE" "$PIN_LINE" "" unless-stopped
@@ -748,6 +756,178 @@ printf 'lab-gate-labgate-1\n' >"$BOX/guests.txt"
 go "a guest at an install" 0
 counts 0 0 "a named guest on its network failed an install"
 
+# ---- a guest this stack calls back (invariant 77) -------------------------------------
+# guest-callbacks.txt names, of the guests, the ones a service of the stack calls back through
+# guest-callback; the callbacks network is where those, and only those, may be. On it a guest is
+# held to the stack's names and to every other guest's call-back name, so it cannot be handed
+# a call back meant for another. guest-callback's configuration is held to what the file and
+# core's subnets make it.
+callbacks_net() { printf 'agent-stack_callbacks\n' >"$FIX/n/n3"; }
+cbguest() { # ID NAME SERVICE_NAME: a guest on the guests and the callbacks networks
+	stranger "$1" "" running 0 0 "$CFG2" "lab:v1" "" "/$2"
+	netnames "$1" "agent-stack_guests=$3" "agent-stack_guests=$2" "agent-stack_callbacks=$3" "agent-stack_callbacks=$2" "agent-stack_callbacks=$1"
+	printf '%s=%s\n' "$1" "$2" >>"$FIX/n/n2"
+	printf '%s=%s\n' "$1" "$2" >>"$FIX/n/n3"
+}
+callback_box() { # the box guest-callback runs on, its configuration as install.sh writes it for lab-gate-labgate-1 labgate:8791
+	service guest-callback CADDY_IMAGE "$PIN_LINE" "$PIN_LINE" "" unless-stopped
+	render
+	container gc1 guest-callback running 0 0 "$CFG" "$PIN_LINE"
+	mkdir -p "$BOX/guest-door/callback"
+	cat >"$BOX/guest-door/callback/Caddyfile" <<'CADDY'
+# Written by install.sh from guest-callbacks.txt and core's subnets (CLAUDE.md invariant 77).
+# Edit guest-callbacks.txt and run ./install.sh; status compares this file with what it would write.
+{
+	admin off
+	auto_https off
+	persist_config off
+}
+# lab-gate-labgate-1
+:8791 {
+	@core remote_ip 172.18.0.0/16
+	route {
+		reverse_proxy @core labgate:8791 {
+			flush_interval -1
+		}
+		respond "guest-callback: only a service on core may call a guest back" 403
+	}
+}
+CADDY
+}
+
+fresh
+guests_net
+callbacks_net
+cbguest g1 lab-gate-labgate-1 labgate
+printf 'lab-gate-labgate-1\n' >"$BOX/guests.txt"
+printf '# the lab relay the broker calls\nlab-gate-labgate-1 labgate:8791\n' >"$BOX/guest-callbacks.txt"
+go "a guest called back, on the callbacks network"
+sees "^   note  lab-gate-labgate-1 +running +a guest on agent-stack_callbacks, called back as named in guest-callbacks\.txt" "a guest guest-callbacks.txt names, on the callbacks network, is not shown as one"
+sees "^   note  lab-gate-labgate-1 +running +a guest on agent-stack_guests, named in guests\.txt" "a guest called back is not also a guest on the guests network"
+counts 0 0 "a guest called back, on the callbacks network, failed"
+
+fresh
+guests_net
+callbacks_net
+cbguest g1 lab-gate-labgate-1 labgate
+printf 'lab-gate-labgate-1\n' >"$BOX/guests.txt"
+go "a guest on the callbacks network that guest-callbacks.txt does not name"
+sees "^   FAIL  lab-gate-labgate-1 +running +unknown container on agent-stack_callbacks: guests\.txt lets it onto agent-stack_guests and nowhere else" "a guest on the callbacks network with no line of guest-callbacks.txt passes"
+counts 1 0 "a guest on the callbacks network with no line of guest-callbacks.txt did not fail"
+
+fresh
+guests_net
+callbacks_net
+guest g1 lab-gate-labgate-1 n1
+printf 'lab-gate-labgate-1\n' >"$BOX/guests.txt"
+printf 'lab-gate-labgate-1 labgate:8791\n' >"$BOX/guest-callbacks.txt"
+go "a guest called back, on core"
+sees "^   FAIL  lab-gate-labgate-1 +running +unknown container on agent-stack_core: guests\.txt lets it onto agent-stack_guests, guest-callbacks\.txt onto agent-stack_callbacks, and nowhere else" "a guest called back passes on core"
+sees "^   note  lab-gate-labgate-1 +named in guest-callbacks\.txt, and not on agent-stack_callbacks" "a guest called back that is not on the callbacks network is not named"
+counts 1 0 "a guest called back, on core, did not fail"
+
+fresh
+guests_net
+callbacks_net
+cbguest g1 lab-gate-labgate-1 labgate
+cbguest g2 lab-idp-bridge bridge
+netnames g2 agent-stack_callbacks=labgate
+printf 'lab-gate-labgate-1\nlab-idp-bridge\n' >"$BOX/guests.txt"
+printf 'lab-gate-labgate-1 labgate:8791\nlab-idp-bridge bridge:9000\n' >"$BOX/guest-callbacks.txt"
+go "a guest that answers to another guest's call-back name"
+sees "^   FAIL  lab-idp-bridge +running +a guest on agent-stack_callbacks that answers to labgate, the call-back name guest-callbacks\.txt gives lab-gate-labgate-1" "a guest that takes another guest's call-back name passes"
+sees "^   note  lab-gate-labgate-1 +running +a guest on agent-stack_callbacks" "the guest whose name it is was failed with it"
+counts 1 0 "a guest that takes another guest's call-back name did not fail"
+
+fresh
+guests_net
+callbacks_net
+cbguest g1 lab-gate-labgate-1 labgate
+netnames g1 agent-stack_callbacks=LabGate.
+cbguest g2 lab-idp-bridge bridge
+netnames g2 agent-stack_callbacks=LabGate.
+printf 'lab-gate-labgate-1\nlab-idp-bridge\n' >"$BOX/guests.txt"
+printf 'lab-gate-labgate-1 labgate:8791\nlab-idp-bridge bridge:9000\n' >"$BOX/guest-callbacks.txt"
+go "a guest that answers to another guest's call-back name in other case, with a final dot"
+sees "^   FAIL  lab-idp-bridge +running +a guest on agent-stack_callbacks that answers to LabGate, the call-back name guest-callbacks\.txt gives lab-gate-labgate-1" "a call-back name is compared with its case"
+counts 1 0 "another guest's call-back name in other case did not fail"
+
+fresh
+guests_net
+callbacks_net
+cbguest g1 lab-gate-labgate-1 labgate
+netnames g1 agent-stack_callbacks=wardryx
+printf 'lab-gate-labgate-1\n' >"$BOX/guests.txt"
+printf 'lab-gate-labgate-1 labgate:8791\n' >"$BOX/guest-callbacks.txt"
+go "a guest called back that answers to a stack name there"
+sees "^   FAIL  lab-gate-labgate-1 +running +a guest on agent-stack_callbacks that answers to wardryx, a name of this stack's own" "a guest on the callbacks network that answers to wardryx passes"
+counts 1 0 "a guest on the callbacks network that answers to a stack name did not fail"
+
+fresh
+guests_net
+callbacks_net
+cbguest g1 lab-gate-labgate-1 labgate
+printf 'lab-gate-labgate-1\n' >"$BOX/guests.txt"
+printf 'lab-gate-labgate-1 labgate:8791\nlab-other lab-other:8792\n' >"$BOX/guest-callbacks.txt"
+go "a guest-callbacks.txt line that names no guest"
+sees "^   n/a   drift check could not measure: guest-callbacks\.txt line 2 names lab-other, and guests\.txt does not" "a call back for a container guests.txt does not name is taken"
+sees "^   FAIL  lab-gate-labgate-1 +running +unknown container on agent-stack_callbacks" "a guest passes on the callbacks network under a guest-callbacks.txt that could not be read"
+counts 1 1 "a call back for no guest was not both a could-not-measure and a stranger"
+
+fresh
+guests_net
+callbacks_net
+cbguest g1 lab-gate-labgate-1 labgate
+printf 'lab-gate-labgate-1\n' >"$BOX/guests.txt"
+printf 'lab-gate-labgate-1 labgate:80\n' >"$BOX/guest-callbacks.txt"
+go "a call back on a port below 1024"
+sees "^   n/a   drift check could not measure: guest-callbacks\.txt line 1 is not one '<container> <name>:<port>' with a port from 1024 to 65535" "a call back on port 80 is taken"
+counts 1 1 "a call back on port 80 was not both a could-not-measure and a stranger"
+
+fresh
+guests_net
+callbacks_net
+cbguest g1 lab-gate-labgate-1 labgate
+printf 'lab-gate-labgate-1\n' >"$BOX/guests.txt"
+printf 'lab-gate-labgate-1 labgate:8791\n' >"$BOX/guest-callbacks.txt"
+callback_box
+go "guest-callback runs what guest-callbacks.txt and core's subnets make it"
+sees "^   ok    guest-callback +running" "guest-callback on its pin is not ok"
+never "FAIL" "guest-callback's configuration as install.sh writes it failed"
+counts 0 0 "guest-callback's configuration as install.sh writes it failed the run"
+
+fresh
+guests_net
+callbacks_net
+cbguest g1 lab-gate-labgate-1 labgate
+printf 'lab-gate-labgate-1\n' >"$BOX/guests.txt"
+printf 'lab-gate-labgate-1 labgate:8792\n' >"$BOX/guest-callbacks.txt"
+callback_box
+go "a guest-callbacks.txt nobody installed"
+sees "^   FAIL  guest-callback +runs a configuration guest-callbacks\.txt and core's subnets no longer make: run \./install\.sh" "an edit of guest-callbacks.txt nobody installed passes"
+counts 1 0 "an edit of guest-callbacks.txt nobody installed did not fail"
+
+fresh
+guests_net
+callbacks_net
+cbguest g1 lab-gate-labgate-1 labgate
+printf 'lab-gate-labgate-1\n' >"$BOX/guests.txt"
+printf 'lab-gate-labgate-1 labgate:8791\n' >"$BOX/guest-callbacks.txt"
+callback_box
+printf '10.9.0.0/24\n' >"$FIX/subnet/agent-stack_core"
+go "a core recreated with another subnet"
+sees "^   FAIL  guest-callback +runs a configuration guest-callbacks\.txt and core's subnets no longer make" "a call back that answers an old subnet of core passes"
+counts 1 0 "a call back that answers an old subnet of core did not fail"
+
+fresh
+guests_net
+callbacks_net
+printf 'lab-gate-labgate-1\n' >"$BOX/guests.txt"
+callback_box
+rm -f "$BOX/guest-door/callback/Caddyfile"
+go "guest-callback with no configuration on the box"
+sees "^   FAIL  guest-callback +guest-door/callback/Caddyfile is missing: run \./install\.sh" "a box with no configuration for guest-callback passes"
+
 # ---- what the file gives a container, against what it runs with --------------------
 hand_made() { # the field, as Docker reports it, for the running wardryx
 	printf '%s\n' "$1" >>"$FIX/c/w1"
@@ -850,6 +1030,12 @@ rm -rf "$BOX" "$FIX"
 mkdir -p "$BOX" "$FIX/c" "$FIX/i" "$FIX/n"
 no_containers
 cp compose.yaml "$BOX/compose.yaml"
+# guest-callback's configuration as install.sh writes it on a box with no guest-callbacks.txt.
+mkdir -p "$BOX/guest-door/callback"
+printf '%s\n' "# Written by install.sh from guest-callbacks.txt and core's subnets (CLAUDE.md invariant 77)." \
+	"# Edit guest-callbacks.txt and run ./install.sh; status compares this file with what it would write." \
+	"{" "	admin off" "	auto_https off" "	persist_config off" "}" \
+	":8080 {" "	respond \"guest-callback: guest-callbacks.txt declares no call back\" 404" "}" >"$BOX/guest-door/callback/Caddyfile"
 grep -oE '\$\{[A-Za-z0-9_]+:\?' compose.yaml | sed -E 's/^\$\{//; s/:\?$//' | sort -u | sed 's/$/=x/' >"$BOX/.env"
 if ! (cd "$BOX" && "$REAL_DOCKER" compose --profile '*' config >"$FIX/config" 2>"$SANDBOX/render.err"); then
 	report "docker compose could not render the repository's compose.yaml: $(head -2 "$SANDBOX/render.err")"

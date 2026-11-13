@@ -158,6 +158,18 @@ jobs:
           [ "$a" = "401 agent_token_required" ] || { echo "::error::a static key the box does not list was not refused 401 agent_token_required: $a"; exit 1; }
           [ "${b%% *}" = 402 ] || { echo "::error::Felyx's listed key did not get past identity to the budget (402): $b"; exit 1; }
 
+      # CLAUDE.md invariant 77, the call back. The operator names a guest in guests.txt and a call
+      # back to it in guest-callbacks.txt, and the re-run below writes guest-callback's routes from
+      # them and core's subnets. The guest, a web server of its own, sits on the callbacks network.
+      # It stays until the job ends, so every status below reads a guest called back as well.
+      - name: "a guest the stack calls back, named before the re-run"
+        if: matrix.profile == 'default'
+        run: |
+          sudo docker run -d --name ci-callee --network agent-stack_callbacks busybox:1.36 \
+            sh -c 'mkdir -p /www && echo ci-callee >/www/marker.txt && exec httpd -f -p 8790 -h /www' >/dev/null
+          printf '# a guest of this run\nci-callee\n' | sudo tee /opt/agent-stack/guests.txt >/dev/null
+          printf '# the call back this run checks\nci-callee ci-callee:8790\n' | sudo tee /opt/agent-stack/guest-callbacks.txt >/dev/null
+
       - name: re-run over the same box
         run: |
           # The re-run says nothing about the risk signal: it must stay on from
@@ -172,6 +184,21 @@ jobs:
           [ "${{ matrix.profile }}" = static-only ] && extra="WITH_AGENT_TOKENS=0"
           sudo env STACK_DIR=/opt/agent-stack $extra ./install.sh 2>&1 | tee install-2.log
           grep -q "every check passed" install-2.log || { echo "::error::the re-run did not pass every check"; exit 1; }
+
+      - name: "a call back reaches its guest from core, and a guest cannot use it"
+        if: matrix.profile == 'default'
+        run: |
+          probe() { sudo docker run --rm --network "$1" busybox:1.36 sh -c "$2" 2>&1; }
+          code() { probe "$1" "wget -S -q -T5 -O /dev/null $2" | awk '/^  HTTP\//{c=$2} END{print c+0}'; }
+          sudo cat /opt/agent-stack/guest-door/callback/Caddyfile
+          sudo grep -qE "^	@core remote_ip $(sudo docker network inspect --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' agent-stack_core | sed 's/ *$//')\$" /opt/agent-stack/guest-door/callback/Caddyfile \
+            || { echo "::error::guest-callback's route does not name core's subnets as its only callers"; exit 1; }
+          got="$(probe agent-stack_core 'wget -q -T5 -O - http://guest-callback:8790/marker.txt')"
+          [ "$got" = ci-callee ] || { echo "::error::a call from core through guest-callback did not reach the guest: $got"; exit 1; }
+          echo "core reaches the guest through guest-callback"
+          c="$(code agent-stack_callbacks http://guest-callback:8790/marker.txt)"
+          [ "$c" = 403 ] || { echo "::error::a container on the callbacks network got $c through guest-callback, not 403"; exit 1; }
+          echo "a container on the callbacks network is refused 403 by guest-callback"
 
       - name: vouchryx runs with agent tokens on by default, and not with them off
         run: |
@@ -531,13 +558,41 @@ jobs:
             echo "::error::a container on the agents network cannot reach the gateway"; exit 1
           fi
 
-      # CLAUDE.md invariant 77. The guests network is the door for containers of other projects
-      # on the box: vouchryx and the gateway answer there (and the broker, when it runs), and no
-      # plane, no database, no key and no route out does. A name answers only on a shared network,
-      # so ping by name is the reach test, with the gateway as its positive control.
-      - name: "guests network: vouchryx and the doors, no plane, no internet"
+      # CLAUDE.md invariant 77. The guests network is where containers of other projects sit:
+      # guest-door answers there under the doors' names and forwards an agent's routes, and no
+      # door, no plane, no database, no key and no route out is on it. A name answers only on a
+      # shared network, so ping by name is the reach test, with the gateway as its positive control.
+      - name: "guests network: the doors through guest-door, no plane, no internet"
         run: |
           probe() { sudo docker run --rm --network "$1" busybox:1.36 sh -c "$2" >/dev/null 2>&1; }
+          members="$(sudo docker network inspect --format '{{range .Containers}}{{.Name}} {{end}}' agent-stack_guests)"
+          for m in $members; do
+            case "$m" in agent-stack-guest-door-1|ci-callee) ;; *) echo "::error::$m is on the guests network: guest-door is the only thing of the stack there"; exit 1 ;; esac
+          done
+          grep -qw agent-stack-guest-door-1 <<<"$members" || { echo "::error::guest-door is not on the guests network"; exit 1; }
+          members="$(sudo docker network inspect --format '{{range .Containers}}{{.Name}} {{end}}' agent-stack_callbacks)"
+          for m in $members; do
+            case "$m" in agent-stack-guest-callback-1|ci-callee) ;; *) echo "::error::$m is on the callbacks network: guest-callback is the only thing of the stack there"; exit 1 ;; esac
+          done
+          # A name a guest takes is asked by no door: it shares no network with one. On the tree
+          # before guest-door, the broker and the gateway resolved this alias of a guest's.
+          sudo docker run -d --name ci-shadow --network agent-stack_guests --network-alias ci-shadow-name busybox:1.36 sleep 300 >/dev/null
+          trap 'sudo docker rm -f ci-shadow >/dev/null 2>&1 || true' EXIT
+          probe agent-stack_guests 'nslookup ci-shadow-name 127.0.0.11' || { echo "::error::the shadow name does not resolve on the guests network, so the doors' miss below would prove nothing"; exit 1; }
+          cd /opt/agent-stack
+          for door in tokenfuse-gateway tokenfuse-mcp-broker vouchryx; do
+            id="$(sudo docker compose ps -q "$door" 2>/dev/null || true)"
+            id="${id%%$'\n'*}"
+            [ -n "$id" ] || continue
+            if sudo docker run --rm --network "container:$id" busybox:1.36 nslookup ci-shadow-name 127.0.0.11 >/dev/null 2>&1; then
+              echo "::error::$door resolves a name a guest took on the guests network"; exit 1
+            fi
+            echo "$door does not see a name a guest takes"
+          done
+          cd - >/dev/null
+          c="$(sudo docker run --rm --network agent-stack_guests busybox:1.36 sh -c 'wget -S -q -T5 -O /dev/null http://tokenfuse-gateway:4100/v1/runs' 2>&1 | awk '/^  HTTP\//{c=$2} END{print c+0}')"
+          [ "$c" = 404 ] || { echo "::error::a guest asking for the gateway's /v1/runs got $c, not guest-door's own 404"; exit 1; }
+          echo "an administrative route of the gateway is answered 404 by guest-door"
           if probe agent-stack_edge 'wget -q -T10 -O /dev/null http://example.com/'; then
             echo "positive control: a container on the edge network reaches example.com"
           else
@@ -557,7 +612,7 @@ jobs:
             echo "vouchryx answers from the guests network"
           fi
           if grep -qx tokenfuse-mcp-broker <<<"$(sudo docker compose ps --services)"; then
-            probe agent-stack_guests 'ping -c1 -W3 tokenfuse-mcp-broker' \
+            probe agent-stack_guests 'wget -q -T5 -O /dev/null http://tokenfuse-mcp-broker:4200/healthz' \
               || { echo "::error::a container on the guests network cannot reach the MCP broker"; exit 1; }
             echo "the MCP broker answers from the guests network"
           fi
@@ -571,7 +626,7 @@ jobs:
               echo "::error::a container on the guests network reached $out"; exit 1
             fi
           done
-          echo "the guests network reaches the doors and nothing else"
+          echo "the guests network reaches the doors through guest-door, and nothing else"
 
       # CLAUDE.md invariant 38, the browser's path. The browser's network is shared with
       # wardryx alone: a container on it reaches wardryx's healthz (the policy plane
@@ -821,14 +876,17 @@ jobs:
       - name: "status: a named guest is a note on the guests network and a stranger on core"
         if: matrix.profile == 'default'
         run: |
-          trap 'sudo docker rm -f ci-guest ci-stranger ci-impostor >/dev/null 2>&1 || true; sudo rm -f /opt/agent-stack/guests.txt' EXIT
+          # ci-callee, the guest called back since the re-run, stays named: guest-callbacks.txt names it.
+          trap 'sudo docker rm -f ci-guest ci-stranger ci-impostor >/dev/null 2>&1 || true; printf "ci-callee\n" | sudo tee /opt/agent-stack/guests.txt >/dev/null' EXIT
           st() { sudo env STACK_DIR=/opt/agent-stack ./install.sh status >"$RUNNER_TEMP/$1.log" 2>&1; }
           sudo docker run -d --name ci-guest --network agent-stack_guests busybox:1.36 sleep 900 >/dev/null
-          printf '# a guest of this run\nci-guest\n' | sudo tee /opt/agent-stack/guests.txt >/dev/null
+          printf '# a guest of this run\nci-callee\nci-guest\n' | sudo tee /opt/agent-stack/guests.txt >/dev/null
           st guest || { cat "$RUNNER_TEMP/guest.log"; echo "::error::status failed with a named guest on the guests network"; exit 1; }
           grep -E '^   note  ci-guest ' "$RUNNER_TEMP/guest.log"
           grep -qE '^   note  ci-guest +running +a guest on agent-stack_guests, named in guests\.txt' "$RUNNER_TEMP/guest.log" \
             || { echo "::error::status does not name the guest as one"; exit 1; }
+          grep -qE '^   note  ci-callee +running +a guest on agent-stack_callbacks, called back as named in guest-callbacks\.txt' "$RUNNER_TEMP/guest.log" \
+            || { cat "$RUNNER_TEMP/guest.log"; echo "::error::status does not name the guest called back as one"; exit 1; }
           sudo docker run -d --name ci-stranger --network agent-stack_guests busybox:1.36 sleep 900 >/dev/null
           if st stranger; then echo "::error::status passed with an unnamed container on the guests network"; exit 1; fi
           grep -qE '^   FAIL  ci-stranger +running +unknown container on agent-stack_guests$' "$RUNNER_TEMP/stranger.log" \
@@ -837,12 +895,12 @@ jobs:
           # A guest that answers to a plane's name on the guests network could be handed the
           # gateway's call to that plane, so status fails it even when guests.txt names it.
           sudo docker run -d --name ci-impostor --network agent-stack_guests --network-alias wardryx busybox:1.36 sleep 900 >/dev/null
-          printf 'ci-guest\nci-impostor\n' | sudo tee /opt/agent-stack/guests.txt >/dev/null
+          printf 'ci-callee\nci-guest\nci-impostor\n' | sudo tee /opt/agent-stack/guests.txt >/dev/null
           if st impostor; then echo "::error::status passed with a named guest that answers to wardryx"; exit 1; fi
           grep -qE "^   FAIL  ci-impostor +running +a guest on agent-stack_guests that answers to wardryx, a name of this stack's own" "$RUNNER_TEMP/impostor.log" \
             || { cat "$RUNNER_TEMP/impostor.log"; echo "::error::status does not fail a guest that answers to a plane's name"; exit 1; }
           sudo docker rm -f ci-impostor >/dev/null
-          printf 'ci-guest\n' | sudo tee /opt/agent-stack/guests.txt >/dev/null
+          printf 'ci-callee\nci-guest\n' | sudo tee /opt/agent-stack/guests.txt >/dev/null
           sudo docker network connect agent-stack_core ci-guest
           if st on-core; then echo "::error::status passed with a named guest on core"; exit 1; fi
           grep -E '^   FAIL  ci-guest ' "$RUNNER_TEMP/on-core.log"

@@ -121,6 +121,8 @@ jobs:
         run: ./scripts/wardryx-gateway-key-is-pep.sh
       - name: the agents network is internal, and only the doors and scopyx reach it
         run: ./scripts/network-membership.sh
+      - name: a guest reaches the doors through guest-door on an agent's routes, and is called back from core alone (invariant 77)
+        run: ./scripts/guest-door-routes.sh
       - name: the provider key is held by the gateway, read from a file, and no agent-facing service has it
         run: ./scripts/no-provider-key-outside-the-gateway.sh
       - name: agent tokens are off by default, and when on, the doors verify them against vouchryx and fail closed

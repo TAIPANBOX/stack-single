@@ -87,15 +87,18 @@ TABLE = {
     "scopyx-browser": {"edge", "browser-policy", "browser-broker"},
     "typryx": {"core"},
     "typryx-wardryx-proxy": {"risk-signal"},
-    "tokenfuse-mcp-broker": {"agents", "core", "risk-signal", "browser-broker", "front", "guests"},
-    "vouchryx": {"core", "guests"},
+    "tokenfuse-mcp-broker": {"agents", "core", "risk-signal", "browser-broker", "front"},
+    "vouchryx": {"core"},
     "keyryx": {"core"},
     "keyryx-witness": set(),
     "tokenfuse-cloud": {"core"},
-    "tokenfuse-gateway": {"edge", "agents", "core", "guests"},
+    "tokenfuse-gateway": {"edge", "agents", "core"},
     "tokenfuse-gateway-openai": {"edge", "agents", "core"},
     "wg": {"edge"},
     "caddy": {"edge", "front"},
+    # the guests' two proxies (invariant 77): no key, no secret, no environment
+    "guest-door": {"core", "guests"},
+    "guest-callback": {"core", "callbacks"},
     "console": {"core", "agents", "front"},
     "record-seal": {"core"},
     "focus-export": {"core"},
@@ -123,10 +126,15 @@ BROWSER_POLICY = {"scopyx-browser", "wardryx"}
 # the broker's one path to the browser (G2.1): the browser is not agent-facing, so the
 # broker is the only way a read of the web reaches it
 BROWSER_BROKER = {"scopyx-browser", "tokenfuse-mcp-broker"}
-# the door for containers of other projects (invariant 77): tokens, model calls and tool calls
-# through the doors an agent uses, and no plane, no database and no key
-GUESTS = {"vouchryx", "tokenfuse-gateway", "tokenfuse-mcp-broker"}
-INTERNAL = {"core", "agents", "risk-signal", "browser-policy", "browser-broker", "guests"}
+# where containers of other projects sit (invariant 77): guest-door alone, which takes the doors'
+# three names there and forwards an agent's routes; no door, no plane, no database and no key.
+# A door that shared a network with a guest could be handed, by a guest that took a plane's
+# name, a call meant for that plane: Docker answers a name from every network a container is on.
+GUESTS = {"guest-door"}
+GUEST_DOOR_NAMES = {"vouchryx", "tokenfuse-gateway", "tokenfuse-mcp-broker"}
+# where a guest the stack calls back is reached: guest-callback alone
+CALLBACKS = {"guest-callback"}
+INTERNAL = {"core", "agents", "risk-signal", "browser-policy", "browser-broker", "guests", "callbacks"}
 NETWORKS = INTERNAL | {"edge", "front"}
 
 # ---- the install.sh block that writes the override --------------------------
@@ -264,8 +272,25 @@ if cfg is not None:
         if members("front") != FRONT:
             bad("front members are %s, the table lists %s" % (sorted(members("front")), sorted(FRONT)))
         if members("guests") != GUESTS:
-            bad("guests members are %s, the table lists %s: a container of another project reaches vouchryx and the doors, and nothing else may join it"
+            bad("guests members are %s, the table lists %s: a container of another project reaches the doors through guest-door, and nothing else may join it"
                 % (sorted(members("guests")), sorted(GUESTS)))
+        if members("callbacks") != CALLBACKS:
+            bad("callbacks members are %s, the table lists %s: a guest is called back through guest-callback, and nothing else may join it"
+                % (sorted(members("callbacks")), sorted(CALLBACKS)))
+        gd = ((svcs.get("guest-door") or {}).get("networks") or {}).get("guests") or {}
+        if set(gd.get("aliases") or []) != GUEST_DOOR_NAMES:
+            bad("guest-door answers on the guests network to %s, not to %s: a guest calls the doors by their own names"
+                % (sorted(gd.get("aliases") or []), sorted(GUEST_DOOR_NAMES)))
+        for n in ("guest-door", "guest-callback"):
+            s_ = svcs.get(n) or {}
+            if s_.get("environment"):
+                bad("%s is given an environment (%s): the guests' proxies hold no key and read no secret"
+                    % (n, ", ".join(sorted(s_["environment"]))))
+            for v in s_.get("volumes") or []:
+                src = v.get("source", "") if isinstance(v, dict) else str(v).split(":")[0]
+                ro = v.get("read_only") if isinstance(v, dict) else str(v).endswith(":ro")
+                if not ro or "guest-door" not in str(src):
+                    bad("%s mounts %s: the guests' proxies mount their own configuration, read only, and nothing else" % (n, src))
         if members("risk-signal") != RISK:
             bad("risk-signal members are %s, the table lists %s" % (sorted(members("risk-signal")), sorted(RISK)))
         alias = ((svcs.get("scopyx-browser") or {}).get("networks") or {}).get("browser-broker") or {}
@@ -284,6 +309,7 @@ for needle, why in (
     ("agent-stack_browser-policy", "the browser's policy network, from a container that is only on it"),
     ("agent-stack_agents", "the agents network"),
     ("agent-stack_guests", "the guests network"),
+    ("agent-stack_callbacks", "the callbacks network"),
     ("agent-stack_edge", "a positive control on the edge network, so a broken runner cannot pass"),
     ("tokenfuse-gateway:4100", "the gateway, which an agent must reach"),
 ):
@@ -316,5 +342,6 @@ if problems:
 print("OK: %d services classified in the table; %d egress cases resolved; networks %s"
       % (len(TABLE), counted, ", ".join(sorted(NETWORKS))))
 print("    the agents network holds only the doors (%s); scopyx is reached through the broker" % ", ".join(sorted(AGENT_FACING)))
-print("    the guests network holds only %s" % ", ".join(sorted(GUESTS)))
+print("    the guests network holds only %s, under the names %s; callbacks only %s"
+      % (", ".join(sorted(GUESTS)), ", ".join(sorted(GUEST_DOOR_NAMES)), ", ".join(sorted(CALLBACKS))))
 PY

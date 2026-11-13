@@ -405,7 +405,7 @@ run_case "tool-hold-is-seeded: the replay check is gone" fail \
 	"never calls tool_hold_upgrade_check"
 run_case "tool-hold-is-seeded: the question comes after the journal's first line" fail \
 	'./scripts/tool-hold-is-seeded.sh' \
-	"$(py 'edit("install.sh", "\ntool_hold_resolve\ntool_hold_upgrade_check\n", "\ntool_hold_resolve\n"); edit("install.sh", "cd \"$STACK_DIR\"\n\n# ---- 1b. notifications", "tool_hold_upgrade_check\ncd \"$STACK_DIR\"\n\n# ---- 1b. notifications")')" \
+	"$(py 'edit("install.sh", "\ntool_hold_resolve\ntool_hold_upgrade_check\n", "\ntool_hold_resolve\n"); edit("install.sh", "cd \"$STACK_DIR\"\n\n# ---- 1a. the guests", "tool_hold_upgrade_check\ncd \"$STACK_DIR\"\n\n# ---- 1a. the guests")')" \
 	"before the package step"
 run_case "tool-hold-is-seeded: a stopped run keeps the image it pulled" fail \
 	'./scripts/tool-hold-is-seeded.sh' \
@@ -3922,7 +3922,7 @@ run_case "status-reads-what-runs: the override is read as the file" fail \
 # guests.txt does not hold to the guests network read as a guest, or turns an unread list into one.
 run_case "status-reads-what-runs: a named guest on core reads as a guest" fail \
 	'./scripts/status-reads-what-runs.sh' \
-	"$(py 'edit("install.sh", "      elif [ \"$net\" = \"$guest_net\" ]; then\n", "      elif true; then\n")')" \
+	"$(py 'edit("install.sh", "      elif [ \"$net\" = \"$guest_net\" ] || { [ \"$net\" = \"$callback_net\" ] && grep -qxF -- \"$name\" <<<\"$cb_guests\"; }; then\n", "      elif true; then\n")')" \
 	"a named guest on core passes"
 
 run_case "status-reads-what-runs: any container on the guests network reads as a guest" fail \
@@ -3974,6 +3974,38 @@ run_case "status-reads-what-runs: a guest's container name is not held to the st
 	'./scripts/status-reads-what-runs.sh' \
 	"$(py 'edit("install.sh", "        names=\"$names\"$", "        unused=\"$names\"$")')" \
 	"a guest whose container name is a stack name passes"
+
+# A guest this stack calls back (invariant 77): each fault lets a guest sit on the callbacks network
+# without a line, take another guest's call-back name, or leaves guest-callback's configuration unread.
+run_case "status-reads-what-runs: a guest on the callbacks network needs no line of guest-callbacks.txt" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "{ [ \"$net\" = \"$callback_net\" ] && grep -qxF -- \"$name\" <<<\"$cb_guests\"; }", "[ \"$net\" = \"$callback_net\" ]")')" \
+	"a guest on the callbacks network with no line of guest-callbacks.txt passes"
+
+run_case "status-reads-what-runs: another guest's call-back name is not held" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "            if [ -n \"$o\" ] && [ \"$o\" != \"$name\" ]; then stolen=", "            if false; then stolen=")')" \
+	"a guest that takes another guest's call-back name passes"
+
+run_case "status-reads-what-runs: call-back names are compared with their case" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "tolower($2) == tolower(n)", "$2 == n")')" \
+	"a call-back name is compared with its case"
+
+run_case "status-reads-what-runs: a guest called back may sit on core" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "      elif grep -qxF -- \"$name\" <<<\"$cb_guests\"; then\n", "      elif false; then\n")')" \
+	"a guest called back passes on core"
+
+run_case "status-reads-what-runs: guest-callback's configuration is not compared" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "      elif [ \"$cb_want\" != \"$cb_have\" ]; then\n", "      elif false; then\n")')" \
+	"an edit of guest-callbacks.txt nobody installed passes"
+
+run_case "status-reads-what-runs: guest-callback's configuration is read without core's subnets" fail \
+	'./scripts/status-reads-what-runs.sh' \
+	"$(py 'edit("install.sh", "      cb_want=\"$(guest_callbacks_caddyfile \"$(guest_core_subnets \"${project}_core\")\")\"\n", "      cb_want=\"$(guest_callbacks_caddyfile 172.18.0.0/16)\"\n")')" \
+	"a call back that answers an old subnet of core passes"
 
 run_case "status-reads-what-runs: the comment above the guest list is reworded (must pass)" pass \
 	'./scripts/status-reads-what-runs.sh' \
@@ -4747,10 +4779,40 @@ assert "      - core\n" in b, "wardryx has no core line"
 open("compose.yaml", "w").write(s[:i] + b.replace("      - core\n", "      - core\n      - guests\n", 1) + s[j:])')" \
 	"guests members are"
 
-run_case "network-membership: vouchryx leaves the guests network" fail \
+run_case "network-membership: vouchryx joins the guests network again" fail \
 	'./scripts/network-membership.sh' \
-	"$(py 'edit("compose.yaml", "    networks:\n      - core\n      - guests\n", "    networks:\n      - core\n")')" \
-	"vouchryx is on"
+	"$(py 'edit("compose.yaml", "    # through guest-door, and never needs core for it (invariant 77).\n    networks:\n      - core\n", "    networks:\n      - core\n      - guests\n")')" \
+	"guests members are"
+
+run_case "network-membership: the broker joins the callbacks network" fail \
+	'./scripts/network-membership.sh' \
+	"$(py 'edit("compose.yaml", "      - browser-broker\n      - front\n", "      - browser-broker\n      - front\n      - callbacks\n")')" \
+	"callbacks members are"
+
+run_case "network-membership: callbacks is not internal" fail \
+	'./scripts/network-membership.sh' \
+	"$(py 'edit("compose.yaml", "  callbacks:\n    internal: true\n", "  callbacks:\n")')" \
+	"network callbacks must be internal"
+
+run_case "network-membership: guest-door loses the broker's name" fail \
+	'./scripts/network-membership.sh' \
+	"$(py 'edit("compose.yaml", "          - tokenfuse-gateway\n          - tokenfuse-mcp-broker\n", "          - tokenfuse-gateway\n")')" \
+	"guest-door answers on the guests network to"
+
+run_case "network-membership: guest-door is given an environment" fail \
+	'./scripts/network-membership.sh' \
+	"$(py 'edit("compose.yaml", "    entrypoint: [\"caddy\", \"run\", \"--config\", \"/etc/guest-door/Caddyfile\", \"--adapter\", \"caddyfile\"]\n", "    entrypoint: [\"caddy\", \"run\", \"--config\", \"/etc/guest-door/Caddyfile\", \"--adapter\", \"caddyfile\"]\n    environment:\n      GATEWAY_ADMIN: x\n")')" \
+	"guest-door is given an environment"
+
+run_case "network-membership: guest-callback mounts the events volume" fail \
+	'./scripts/network-membership.sh' \
+	"$(py 'edit("compose.yaml", "      - ./guest-door/callback:/etc/guest-callback:ro\n", "      - ./guest-door/callback:/etc/guest-callback:ro\n      - events:/var/lib/stack/events\n")')" \
+	"guest-callback mounts"
+
+run_case "network-membership: install.yml loses the callbacks probe" fail \
+	'./scripts/network-membership.sh' \
+	"$(py 'edit_all(".github/workflows/install.yml", "agent-stack_callbacks", "agent-stack_core")')" \
+	"does not probe the callbacks network"
 
 run_case "network-membership: guests is not internal" fail \
 	'./scripts/network-membership.sh' \
@@ -4761,6 +4823,83 @@ run_case "network-membership: install.yml loses the guests probe" fail \
 	'./scripts/network-membership.sh' \
 	"$(py 'edit_all(".github/workflows/install.yml", "agent-stack_guests", "agent-stack_core")')" \
 	"does not probe the guests network"
+
+# The guests' two proxies (scripts/guest-door-routes.sh, CLAUDE.md invariant 77). Each fault gives a
+# guest a route it is not given, sends a port to the wrong door, forwards a loop, gives the proxy a key,
+# or lets a call back answer a guest or a line guests.txt does not hold.
+run_case "guest-door-routes: the gateway's port gives a guest /v1/runs" fail \
+	'./scripts/guest-door-routes.sh' \
+	"$(py 'edit("guest-door/Caddyfile", "@agent path /v1/messages /v1/chat/completions /healthz", "@agent path /v1/messages /v1/chat/completions /v1/runs /healthz")')" \
+	":4100 gives a guest"
+
+run_case "guest-door-routes: the broker's port matches by prefix" fail \
+	'./scripts/guest-door-routes.sh' \
+	"$(py 'edit("guest-door/Caddyfile", "@agent path /mcp /healthz", "@agent path /mcp* /healthz")')" \
+	":4200 gives a guest"
+
+run_case "guest-door-routes: vouchryx's port gives a guest a route nobody named" fail \
+	'./scripts/guest-door-routes.sh' \
+	"$(py 'edit("guest-door/Caddyfile", "@agent path /v1/token ", "@agent path /v1/token /v1/clients ")')" \
+	":4310 gives a guest"
+
+run_case "guest-door-routes: the gateway's port forwards to vouchryx" fail \
+	'./scripts/guest-door-routes.sh' \
+	"$(py 'edit("guest-door/Caddyfile", "reverse_proxy @agent tokenfuse-gateway:4100 {", "reverse_proxy @agent vouchryx:4310 {")')" \
+	":4100 forwards with"
+
+run_case "guest-door-routes: the broker's port forwards every route" fail \
+	'./scripts/guest-door-routes.sh' \
+	"$(py 'edit("guest-door/Caddyfile", "reverse_proxy @agent tokenfuse-mcp-broker:4200 {", "reverse_proxy tokenfuse-mcp-broker:4200 {")')" \
+	":4200 forwards with"
+
+run_case "guest-door-routes: a loop is forwarded before it is answered" fail \
+	'./scripts/guest-door-routes.sh' \
+	"$(py 'edit("guest-door/Caddyfile", "\t\trespond @loop \"guest-door: a request that came back to the door\" 508\n\t\treverse_proxy @agent vouchryx:4310 {\n\t\t\theader_up X-Guest-Door 1\n\t\t}\n", "\t\treverse_proxy @agent vouchryx:4310 {\n\t\t\theader_up X-Guest-Door 1\n\t\t}\n\t\trespond @loop \"guest-door: a request that came back to the door\" 508\n")')" \
+	":4310 answers"
+
+run_case "guest-door-routes: guest-door gets an admin endpoint" fail \
+	'./scripts/guest-door-routes.sh' \
+	"$(py 'edit("guest-door/Caddyfile", "\tadmin off\n", "\tadmin localhost:2019\n")')" \
+	"global options are"
+
+run_case "guest-door-routes: guest-door sends a key from its environment" fail \
+	'./scripts/guest-door-routes.sh' \
+	"$(py 'edit("guest-door/Caddyfile", "\t\t\theader_up X-Guest-Door 1\n\t\t\tflush_interval -1\n\t\t}\n\t\trespond \"guest-door: not a route a guest is given\" 404\n\t}\n}\n\n# The MCP", "\t\t\theader_up X-Guest-Door 1\n\t\t\theader_up X-Fuse-Key {env.GATEWAY_KEY}\n\t\t\tflush_interval -1\n\t\t}\n\t\trespond \"guest-door: not a route a guest is given\" 404\n\t}\n}\n\n# The MCP")')" \
+	"uses '{env.'"
+
+run_case "guest-door-routes: a call back answers every caller" fail \
+	'./scripts/guest-door-routes.sh' \
+	"$(py 'edit("install.sh", "\"\t\treverse_proxy @core $name:$port {\"", "\"\t\treverse_proxy $name:$port {\"")')" \
+	"a forward answers every caller"
+
+run_case "guest-door-routes: a call back may take port 1023" fail \
+	'./scripts/guest-door-routes.sh' \
+	"$(py 'edit("install.sh", " || [ \"$port\" -lt 1024 ]", "")')" \
+	"port 1023: the output does not hold"
+
+run_case "guest-door-routes: a call back may name a container guests.txt does not" fail \
+	'./scripts/guest-door-routes.sh' \
+	"$(py 'edit("install.sh", "    if ! grep -qxF -- \"$c\" <<<\"$1\"; then\n", "    if false; then\n")')" \
+	"a container guests.txt does not name"
+
+run_case "guest-door-routes: two lines may share a port" fail \
+	'./scripts/guest-door-routes.sh' \
+	"$(py 'edit("install.sh", " || grep -qxF -- \"$port\" <<<\"$(cut -f3 <<<\"$GCB\")\"", "")')" \
+	"a port twice"
+
+run_case "guest-door-routes: guest-door runs as root" fail \
+	'./scripts/guest-door-routes.sh' \
+	"$(py 'edit("compose.yaml", "    image: ${CADDY_IMAGE:-ghcr.io/taipanbox/stack-caddy:v1.8.1@sha256:d9376051cc5ac9bb83de557bf3e7e861e26f6f6ae4556cd6ed5a32d1ce352c0a}\n    user: \"65534:65534\"\n", "    image: ${CADDY_IMAGE:-ghcr.io/taipanbox/stack-caddy:v1.8.1@sha256:d9376051cc5ac9bb83de557bf3e7e861e26f6f6ae4556cd6ed5a32d1ce352c0a}\n")')" \
+	"guest-door does not run as nobody"
+
+run_case "guest-door-routes: a comment of guest-door/Caddyfile is reworded (must pass)" pass \
+	'./scripts/guest-door-routes.sh' \
+	"$(py 'edit("guest-door/Caddyfile", "# The gateway: an agent'"'"'s model calls, in either provider'"'"'s shape.\n", "# The gateway: model calls of an agent, in the shape of either provider.\n")')"
+
+run_case "guest-door-routes: guest-door/Caddyfile is gone" fail \
+	'./scripts/guest-door-routes.sh' \
+	"$(py 'import os; os.remove("guest-door/Caddyfile")')" \
+	"measured NOTHING"
 
 run_case "network-membership: install.yml loses the agents probe" fail \
 	'./scripts/network-membership.sh' \

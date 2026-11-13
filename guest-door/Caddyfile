@@ -1,0 +1,61 @@
+# guest-door: the only thing of this stack on the guests network (CLAUDE.md invariant 77).
+#
+# A guest (a container of another project, named in guests.txt) calls vouchryx, the gateway and the
+# MCP broker by their own names and ports; on the guests network those three names are this proxy's.
+# It holds no key and reads no secret: a guest's credential passes through it untouched, to the one
+# door the port names. It forwards only the routes an agent uses and answers every other one 404
+# itself, so a guest reaches no administrative route of a door. scripts/guest-door-routes.sh holds
+# this file: the three sites, each route list, the upstream of each, and the order inside each site.
+{
+	admin off
+	auto_https off
+	persist_config off
+}
+
+# A request that comes back to this proxy is a loop, not a guest: a door's name resolves to this
+# proxy's own guests address only while that door is being recreated. Answered here, never forwarded.
+(loop) {
+	@loop header X-Guest-Door *
+}
+
+# vouchryx: a token for an enrolled agent, its key set and metadata, the revocation list a door reads, and a
+# revocation or its lift under a key vouchryx scopes. Every route it serves today; one it adds is closed until named.
+:4310 {
+	import loop
+	@agent path /v1/token /v1/revocations /v1/revoke /v1/revoke/lift /.well-known/jwks.json /.well-known/oauth-authorization-server /healthz
+	route {
+		respond @loop "guest-door: a request that came back to the door" 508
+		reverse_proxy @agent vouchryx:4310 {
+			header_up X-Guest-Door 1
+		}
+		respond "guest-door: not a route a guest is given" 404
+	}
+}
+
+# The gateway: an agent's model calls, in either provider's shape.
+:4100 {
+	import loop
+	@agent path /v1/messages /v1/chat/completions /healthz
+	route {
+		respond @loop "guest-door: a request that came back to the door" 508
+		reverse_proxy @agent tokenfuse-gateway:4100 {
+			header_up X-Guest-Door 1
+			flush_interval -1
+		}
+		respond "guest-door: not a route a guest is given" 404
+	}
+}
+
+# The MCP broker: an agent's tool calls, streamed.
+:4200 {
+	import loop
+	@agent path /mcp /healthz
+	route {
+		respond @loop "guest-door: a request that came back to the door" 508
+		reverse_proxy @agent tokenfuse-mcp-broker:4200 {
+			header_up X-Guest-Door 1
+			flush_interval -1
+		}
+		respond "guest-door: not a route a guest is given" 404
+	}
+}
