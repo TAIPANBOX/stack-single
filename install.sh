@@ -6379,26 +6379,6 @@ trailryx_pin_apply() { # writes TRAILRYX_KEYRYX_KID into .env once; a box with t
 trailryx_pin_apply
 "${COMPOSE[@]}" "${UP_PROFILES[@]}" up -d --remove-orphans
 
-# guest-callback's configuration (invariant 77), now that core has its subnets: each call back from
-# guest-callbacks.txt answers a caller on core only. Rewritten and restarted only when it changes, so a
-# second run leaves the proxy as it was.
-guest_callbacks_install() {
-  local subnets want have
-  subnets="$(guest_core_subnets "$NET_CORE")"
-  [ -n "$subnets" ] || die "Docker would not say the subnets of $NET_CORE, so guest-callback cannot be told who may call a guest back."
-  want="$(guest_callbacks_caddyfile "$subnets")"
-  have="$(cat guest-door/callback/Caddyfile 2>/dev/null || true)"
-  if [ "$want" != "$have" ]; then
-    { printf '%s\n' "$want" >guest-door/callback/Caddyfile.new \
-        && chmod 0644 guest-door/callback/Caddyfile.new \
-        && mv -f guest-door/callback/Caddyfile.new guest-door/callback/Caddyfile; } \
-      || die "could not write guest-door/callback/Caddyfile"
-    "${COMPOSE[@]}" restart guest-callback >/dev/null || die "guest-callback did not restart on its new configuration. Check: ${COMPOSE[*]} logs guest-callback"
-  fi
-  note "guest-callback: $(grep -c . <<<"$GCB" || true) call back(s) from guest-callbacks.txt, each for a caller on $NET_CORE only"
-}
-NET_CORE="agent-stack_core"
-guest_callbacks_install
 
 # `up --remove-orphans` does not remove a container whose profile this run does not name (measured 2026-10-04).
 # So an installer-managed profile this run turns off has its containers removed by name, under that profile.
@@ -6532,6 +6512,26 @@ if [ "$DOOR_ON" = 1 ] && [ "${IDENTITY_openai_MAP_CHANGED:-0}" = 1 ]; then
     || die "could not restart the OpenAI door to read its new identity map"
   note "OpenAI door restarted to read its new identity map"
 fi
+# guest-callback's configuration (invariant 77), now that the stack is up and core has its subnets: each call back from
+# guest-callbacks.txt answers a caller on core only. Rewritten and restarted only when it changes, so a
+# second run leaves the proxy as it was.
+guest_callbacks_install() {
+  local subnets want have
+  subnets="$(guest_core_subnets "$NET_CORE")"
+  [ -n "$subnets" ] || die "Docker would not say the subnets of $NET_CORE, so guest-callback cannot be told who may call a guest back."
+  want="$(guest_callbacks_caddyfile "$subnets")"
+  have="$(cat guest-door/callback/Caddyfile 2>/dev/null || true)"
+  if [ "$want" != "$have" ]; then
+    { printf '%s\n' "$want" >guest-door/callback/Caddyfile.new \
+        && chmod 0644 guest-door/callback/Caddyfile.new \
+        && mv -f guest-door/callback/Caddyfile.new guest-door/callback/Caddyfile; } \
+      || die "could not write guest-door/callback/Caddyfile"
+    "${COMPOSE[@]}" restart guest-callback >/dev/null || die "guest-callback did not restart on its new configuration. Check: ${COMPOSE[*]} logs guest-callback"
+  fi
+  note "guest-callback: $(grep -c . <<<"$GCB" || true) call back(s) from guest-callbacks.txt, each for a caller on $NET_CORE only"
+}
+NET_CORE="agent-stack_core"
+guest_callbacks_install
 sleep 8
 
 # ---- 6. the firewall ---------------------------------------------------------
