@@ -26,7 +26,7 @@ name: agent-stack
 # The release this file belongs to, the same number as STACK_VERSION in install.sh: a piped
 # install fetches the two in separate requests, and refuses a pair that are not one tree.
 # A top-level x- key is no part of any service, so it recreates no container.
-x-stack-version: "1.10.0"
+x-stack-version: "1.11.0"
 
 x-restart: &restart
   restart: unless-stopped
@@ -439,7 +439,7 @@ services:
   wardryx:
     <<: [*restart, *baseline]
     pids_limit: 512
-    image: ${WARDRYX_IMAGE:-ghcr.io/taipanbox/wardryx:v2.7.0@sha256:91dccc66ba00adefc2e1930423a172d5c17a8c4531fac97e8fab32acdef77940}
+    image: ${WARDRYX_IMAGE:-ghcr.io/taipanbox/wardryx:v2.8.0@sha256:f9b86a82114698f64a3251816ee0be6f80b4a6b2c239082b7035f1b4228f06aa}
     # Its own uid (CLAUDE.md invariant 41): wardryx.ndjson is its stream, and
     # no other plane's uid can write it. The GID stays the bus group, so it
     # reads the other streams. group_add 20001 is for the Keyryx socket
@@ -1895,7 +1895,7 @@ services:
     # `disk I/O error (6410)`, a warning that goes red nowhere (invariant 24).
     tmpfs:
       - /tmp:size=256m
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.12.0@sha256:32c28d24c9a35438cda3b47bac2ea1d001edde268deeb7dfada652102bbc996f}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.14.0@sha256:583fcbe19330c461c6de7784f383620feaabf3f7474f977917570b6dfd3641ca}
     networks:
       - core
       - agents
@@ -2362,7 +2362,7 @@ services:
     pids_limit: 128
     tmpfs:
       - /tmp:size=64m
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.12.0@sha256:32c28d24c9a35438cda3b47bac2ea1d001edde268deeb7dfada652102bbc996f}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.14.0@sha256:583fcbe19330c461c6de7784f383620feaabf3f7474f977917570b6dfd3641ca}
     networks:
       - core
     user: "10001:10001"
@@ -2411,7 +2411,7 @@ services:
   verdryx-slo:
     <<: [*restart, *baseline]
     pids_limit: 128
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.12.0@sha256:32c28d24c9a35438cda3b47bac2ea1d001edde268deeb7dfada652102bbc996f}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.14.0@sha256:583fcbe19330c461c6de7784f383620feaabf3f7474f977917570b6dfd3641ca}
     user: "20020:10001"
     profiles: ["slo-signal"]
     environment:

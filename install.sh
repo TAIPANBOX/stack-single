@@ -1577,7 +1577,7 @@ browser_profile_status() {
 #
 # STACK_VERSION is what the journal records: the newest docs/releases/vX.Y.Z.md, the same
 # number as x-stack-version in compose.yaml (scripts/version-is-one-number.sh).
-STACK_VERSION="1.10.0"
+STACK_VERSION="1.11.0"
 # Raised only when an older tree has become unsafe to run on a box that ran this one, and
 # only with a line in that release's notes that starts `security:` or `irreversible:` and
 # names `rollback index N` (scripts/rollback-floor.sh).
@@ -1750,7 +1750,7 @@ journal_status() {
 # TOOL_HOLD=1 in the environment is the operator's decision to turn it on over that list. It
 # is read from the environment and never from .env, like ALLOW_ROLLBACK: a line left in a
 # file must not answer for a person.
-TOOL_HOLD_WARDRYX_IMAGE="ghcr.io/taipanbox/wardryx:v2.7.0@sha256:91dccc66ba00adefc2e1930423a172d5c17a8c4531fac97e8fab32acdef77940"
+TOOL_HOLD_WARDRYX_IMAGE="ghcr.io/taipanbox/wardryx:v2.8.0@sha256:f9b86a82114698f64a3251816ee0be6f80b4a6b2c239082b7035f1b4228f06aa"
 TOOL_HOLD_ON=1
 TOOL_HOLD_SAID=""
 NET="${NET:-agent-stack_core}"
