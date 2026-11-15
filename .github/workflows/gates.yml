@@ -175,6 +175,8 @@ jobs:
         run: ./scripts/broker-callers-are-gateway-keys.sh
       - name: the installer fetches no tree of stack-k8s unless it builds from source (invariant 76)
         run: ./scripts/no-unverified-download-outside-build.sh
+      - name: the installer's broker ask asks again after a hold, bounded (invariant 79)
+        run: ./scripts/broker-ask-retries-a-held-call.sh
 
       # Last, because it mutates tracked files and restores them. It needs a
       # clean tree and says so plainly, so it also reports any earlier step
