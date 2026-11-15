@@ -6328,6 +6328,33 @@ run_case "no-download-outside-build: the build block fetches as before (must pas
 	"$NUD" \
 	"$(py 'edit("install.sh", "say \"fetching the image definitions\"\n  mkdir -p", "say \"fetching the image definitions now\"\n  mkdir -p")')"
 
+
+# ---- broker-ask-retries-a-held-call (CLAUDE.md invariant 79) ---------------
+BAR='./scripts/broker-ask-retries-a-held-call.sh'
+run_case "broker-ask-retries: a held ask is not asked again" fail \
+	"$BAR" \
+	"$(py 'edit("install.sh", "tries=$((tries + 1))\n      [ \"$tries\" -lt 4 ] || return 1", "return 1")')" \
+	"a held call is not asked again"
+
+run_case "broker-ask-retries: the retry is unbounded" fail \
+	"$BAR" \
+	"$(py 'edit("install.sh", "[ \"$tries\" -lt 4 ] || return 1", "[ \"$tries\" -lt 40 ] || return 1")')" \
+	"the retry must be bounded"
+
+run_case "broker-ask-retries: an error that is not a hold is asked again" fail \
+	"$BAR" \
+	"$(py 'edit("install.sh", "<<<\"$out\" || return 1\n      tries=", "<<<\"$out\" || true\n      tries=")')" \
+	"a real fault must not be retried"
+
+run_case "broker-ask-retries: the block is gone (measured nothing)" fail \
+	"$BAR" \
+	"$(py 'edit("install.sh", "# mcp-ask: start", "# mcp-ask begins")')" \
+	"measured nothing"
+
+run_case "broker-ask-retries: a longer pause between tries (must pass)" pass \
+	"$BAR" \
+	"$(py 'edit("install.sh", "      sleep 5\n    done", "      sleep 6\n    done")')"
+
 echo
 if [ -n "$(git status --porcelain)" ]; then
 	printf 'FAIL: this script left the tree dirty, so it cannot be trusted about anything above\n'

@@ -668,9 +668,10 @@ if compose_has tokenfuse-mcp-broker && compose_has typryx; then
   # the whole path (broker door, vault, _meta credential, typryx's own door,
   # a template, the stub backend), and it needs typryx v0.2.0 or later:
   # _meta credential reading is typryx#6, not in v0.1.0.
+  # mcp-ask: start
   # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
   mcp_ask_answered() { # url, key
-    local hdrs
+    local hdrs out tries=0
     hdrs="Content-Type: application/json"$'\r\n'"X-Fuse-Mcp-Upstream: typryx"$'\r\n'"x-fuse-key: $2"$'\r\n'
     # The broker is a policy enforcement point on every box (invariant 36): it
     # asks wardryx about each tools/call and refuses one it cannot attribute, so
@@ -681,9 +682,23 @@ if compose_has tokenfuse-mcp-broker && compose_has typryx; then
     # names no run is refused ("the taint gate needs x-fuse-run-id"). A run of this check's own, never the
     # gateway checks' install-check, whose owner would be another key.
     hdrs+="x-fuse-run-id: install-check-broker"$'\r\n'
-    grep -q '"isError":false' <<<"$(http_request POST "$1" "$hdrs" \
+    # A call held for a person is asked again, at most four times in all, five seconds apart (invariant 79).
+    # With the typed risk signal on, the broker asks the proxy for a risk class on every tool call and the seeded
+    # rule (invariant 57) holds one that arrives with none, so a proxy whose hosted model missed its deadline on
+    # the first call after a quiet night held this ask, and a healthy box printed FAIL (forge, 2026-11-15). The
+    # same call in the same run is the same pending hold, so it goes through once the signal answers. Any other
+    # answer, a refusal or an error from typryx among them, is read on the first try.
+    while :; do
+      out="$(http_request POST "$1" "$hdrs" \
         '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ask","arguments":{"template":"eval.outcome_met","state":{"task":"2+2","final_answer":"4"}},"_meta":{"typryx/key":"{{secret:typryx_key}}"}}}')"
+      grep -q '"isError":false' <<<"$out" && return 0
+      grep -q 'requires approval' <<<"$out" || return 1
+      tries=$((tries + 1))
+      [ "$tries" -lt 4 ] || return 1
+      sleep 5
+    done
   }
+  # mcp-ask: end
   if [ "$TYPED_PLANE" = jev ]; then
     # Not asked on purpose: this ask would go to TypeSafe's API, on every run
     # of this installer, spending on the operator's account and sending them a
