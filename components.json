@@ -131,7 +131,7 @@
           "ghcr.io/taipanbox/stack-wg:v1.8.1@sha256:8996ce01a5b8a9d38a71b711f06653e23b54d5ad3e1578669be49ae8c79ba3ae",
           "ghcr.io/taipanbox/tokenfuse-control-plane:v1.25.0@sha256:e7d4160649128c6dc7d91d295a9a31e107e3bb7241d5483b5b193158a94dba58",
           "ghcr.io/taipanbox/tokenfuse:v1.25.0@sha256:3a81dbcd116557eff54aae29e7d68104af8fc788265d58e71adf3f96fea03317",
-          "ghcr.io/taipanbox/trailryx-node:v1.5.0@sha256:f15215cd9708724e83fbd8493f2bf7d2a11980b37edf3b887081d8e17da18bab",
+          "ghcr.io/taipanbox/trailryx-node:v1.6.0@sha256:68c413c2d6d0bd3bde4ad3478e6ee9ebc3a95e5a0d1b26d1d1ca5f588baf20a8",
           "ghcr.io/taipanbox/typryx:v0.6.1@sha256:77fc8d0f826bb840043c45ea3eb9f1dba1f73c1925c48502b942b2d491009239",
           "ghcr.io/taipanbox/vouchryx:v0.8.0@sha256:2e1848151118de3dd69d2d68918fd50eee29859fdc47fb6fd3092914fe73022a",
           "ghcr.io/taipanbox/wardryx:v2.8.0@sha256:f9b86a82114698f64a3251816ee0be6f80b4a6b2c239082b7035f1b4228f06aa"

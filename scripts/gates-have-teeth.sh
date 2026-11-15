@@ -5395,12 +5395,12 @@ run_case "bus-names: the heraldyx pin goes back before the keyryx source" fail \
 # ---- images-are-digest-pinned and images-are-verified (CLAUDE.md invariant 44) --
 run_case "images-are-digest-pinned: a published image loses its digest" fail \
 	'./scripts/images-are-digest-pinned.sh' \
-	"$(py 'edit("compose.yaml", "trailryx-node:v1.5.0@sha256:f15215cd9708724e83fbd8493f2bf7d2a11980b37edf3b887081d8e17da18bab}", "trailryx-node:v1.5.0}")')" \
-	"trailryx-node:v1.5.0 is not pinned"
+	"$(py 'edit("compose.yaml", "trailryx-node:v1.6.0@sha256:68c413c2d6d0bd3bde4ad3478e6ee9ebc3a95e5a0d1b26d1d1ca5f588baf20a8}", "trailryx-node:v1.6.0}")')" \
+	"trailryx-node:v1.6.0 is not pinned"
 
 run_case "images-are-digest-pinned: a digest is cut short" fail \
 	'./scripts/images-are-digest-pinned.sh' \
-	"$(py 'edit("compose.yaml", "trailryx-node:v1.5.0@sha256:f15215cd9708724e83fbd8493f2bf7d2a11980b37edf3b887081d8e17da18bab}", "trailryx-node:v1.5.0@sha256:ab305ac6a65444e08090b56d6f666498b56d560f7351c96a8a84137ece9e6d3}")')" \
+	"$(py 'edit("compose.yaml", "trailryx-node:v1.6.0@sha256:68c413c2d6d0bd3bde4ad3478e6ee9ebc3a95e5a0d1b26d1d1ca5f588baf20a8}", "trailryx-node:v1.6.0@sha256:ab305ac6a65444e08090b56d6f666498b56d560f7351c96a8a84137ece9e6d3}")')" \
 	"is not pinned by a full sha256 digest"
 
 run_case "images-are-digest-pinned: the third-party postgres loses its digest" fail \
