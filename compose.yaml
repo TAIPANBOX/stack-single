@@ -26,7 +26,7 @@ name: agent-stack
 # The release this file belongs to, the same number as STACK_VERSION in install.sh: a piped
 # install fetches the two in separate requests, and refuses a pair that are not one tree.
 # A top-level x- key is no part of any service, so it recreates no container.
-x-stack-version: "1.11.0"
+x-stack-version: "1.12.0"
 
 x-restart: &restart
   restart: unless-stopped
@@ -2060,7 +2060,7 @@ services:
     pids_limit: 128
     tmpfs:
       - /tmp:size=64m
-    image: ${TRAILRYX_IMAGE:-ghcr.io/taipanbox/trailryx-node:v1.5.0@sha256:f15215cd9708724e83fbd8493f2bf7d2a11980b37edf3b887081d8e17da18bab}
+    image: ${TRAILRYX_IMAGE:-ghcr.io/taipanbox/trailryx-node:v1.6.0@sha256:68c413c2d6d0bd3bde4ad3478e6ee9ebc3a95e5a0d1b26d1d1ca5f588baf20a8}
     networks:
       - core
     user: "10001:10001"
