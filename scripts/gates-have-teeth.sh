@@ -6507,6 +6507,62 @@ run_case "env-guard: the block is gone (measured nothing)" fail \
 run_case "env-guard: a comment in the block is reworded (must pass)" pass \
 	"$EGV" \
 	"$(py 'edit("install.sh", "# run). So a run that finds no .env asks Docker", "# run). So a run finding no .env asks Docker")')"
+# invariant 82: the console's revoke button, with a key of its own only the console holds, as a file.
+CRV='./scripts/console-revoke-is-wired.sh'
+
+run_case "console-revoke: the console loses vouchryx's address" fail \
+	"$CRV" \
+	"$(py 'edit("compose.yaml", "      GENARYX_VOUCHRYX_URL: http://vouchryx:4310\n", "")')" \
+	"GENARYX_VOUCHRYX_URL"
+
+run_case "console-revoke: the console loses its key file" fail \
+	"$CRV" \
+	"$(py 'edit("compose.yaml", "      GENARYX_VOUCHRYX_REVOKE_KEY_FILE: /run/console-revoke/revoke.key\n", "")')" \
+	"has no GENARYX_VOUCHRYX_REVOKE_KEY_FILE"
+
+run_case "console-revoke: the key is mounted read-write" fail \
+	"$CRV" \
+	"$(py 'edit("compose.yaml", "      - ./console-revoke:/run/console-revoke:ro\n", "      - ./console-revoke:/run/console-revoke\n")')" \
+	"mounts ./console-revoke read-write"
+
+run_case "console-revoke: vouchryx does not take the console's key" fail \
+	"$CRV" \
+	"$(py 'edit("compose.yaml", "${VOUCHRYX_REVOKE_KEYS:-}${CONSOLE_REVOKE_KEY:+,${CONSOLE_REVOKE_KEY}}", "${VOUCHRYX_REVOKE_KEYS:-}")')" \
+	"not the operator's key and the console's"
+
+run_case "console-revoke: another service mounts the console's key" fail \
+	"$CRV" \
+	"$(py 'edit("compose.yaml", "      - costcrewdata:/var/lib/costcrew\n    read_only: true\n", "      - costcrewdata:/var/lib/costcrew\n      - ./console-revoke:/run/x:ro\n    read_only: true\n")')" \
+	"is the console's alone"
+
+run_case "console-revoke: the key file is readable by its group" fail \
+	"$CRV" \
+	"$(py 'edit("install.sh", "chmod 0400 \"$key\"; } || die \"could not give the console'"'"'s revoke key", "chmod 0440 \"$key\"; } || die \"could not give the console'"'"'s revoke key")')" \
+	"not 0400"
+
+run_case "console-revoke: the key file gets a newline" fail \
+	"$CRV" \
+	"$(py 'edit("install.sh", "( umask 077; printf '"'"'%s'"'"' \"$want\" >\"$tmp\" )", "( umask 077; printf '"'"'%s\\n'"'"' \"$want\" >\"$tmp\" )")')" \
+	"exactly"
+
+run_case "console-revoke: a link at the key's name is followed" fail \
+	"$CRV" \
+	"$(py 'edit("install.sh", "    mv -f \"$tmp\" \"$key\" || die \"could not put the console'"'"'s revoke key in place at $key\"", "    cat \"$tmp\" >\"$key\" || die \"could not put the console'"'"'s revoke key in place at $key\"")')" \
+	"was followed"
+
+run_case "console-revoke: install.sh stops asking vouchryx about the key" fail \
+	"$CRV" \
+	"$(py 'edit("install.sh", "vouchryx accepts the console'"'"'s revoke key (nothing revoked)", "vouchryx answers")')" \
+	"does not check that vouchryx accepts"
+
+run_case "console-revoke: the block is gone (measured nothing)" fail \
+	"$CRV" \
+	"$(py 'edit("install.sh", "# console-revoke-key: begin\n", "# console-revoke-key begins\n")')" \
+	"measured nothing"
+
+run_case "console-revoke: a note is reworded (must pass)" pass \
+	"$CRV" \
+	"$(py 'edit("install.sh", "note \"console revoke key written to $key (never printed)\"", "note \"console revoke key put at $key (never printed)\"")')"
 
 echo
 if [ -n "$(git status --porcelain)" ]; then

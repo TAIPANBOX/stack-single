@@ -325,6 +325,10 @@ status_of() {
 # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
 http_status() { status_of "$(http_request GET "$1" "Authorization: Bearer $2"$'\r\n' "")"; }
 # argv-free-http: end
+# The status vouchryx gives POST /v1/revoke with an empty body and the given bearer key: 400 when the key is
+# one it holds (the body names nobody, so nothing is revoked), 401 when it is not (invariant 82).
+# shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
+console_revoke_status() { status_of "$(http_request POST http://vouchryx:4310/v1/revoke "Authorization: Bearer $1"$'\r\n'"Content-Type: application/json"$'\r\n' '{}')"; }
 # Same as http_status(), minus the header entirely: an empty bearer token is still a
 # credential, and the point of this one is that none was presented at all.
 # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
@@ -582,6 +586,8 @@ check "wireguard interface is up" \
 if compose_has console; then
   check "console can manage peers over UAPI" \
         "$DC exec -T console test -r /var/run/wireguard/console.sock"
+  check "console can read its own revoke key" \
+        "$DC exec -T console test -r /run/console-revoke/revoke.key"
 fi
 
 # `--protocol udp <port>`, not `<port>/udp`: compose parses the argument as a
@@ -809,6 +815,16 @@ if compose_has vouchryx; then
   # resolves the money plane" checks a wired value rather than a live call.
   check "gateway resolves the delegation door" \
         "$DC exec -T tokenfuse-gateway printenv TOKENFUSE_DELEGATION_ISSUER"
+  # The console's revoke button (invariant 82): vouchryx takes the console's own key. An empty body
+  # sent with it is refused 400 for naming nobody, after the key was accepted, so nothing is revoked;
+  # with a key vouchryx does not hold the same call is 401, which must fail to pass. Install only: a POST is
+  # not something status sends (vouchryx logs each refusal, on its own log, not on the bus).
+  if compose_has console; then
+    install_only check "vouchryx accepts the console's revoke key (nothing revoked)" \
+          "[ \"\$(console_revoke_status \"\$(cat '$STACK_DIR/console-revoke/revoke.key')\")\" = 400 ]"
+    install_only check "vouchryx refuses a revoke key it does not hold" \
+          "[ \"\$(console_revoke_status not-a-revoke-key-0000000000000000000000)\" = 401 ]"
+  fi
 fi
 
 # Invariant 77: what a guest sees. No door is on the guests network (a door there could be handed, by a
@@ -5432,6 +5448,9 @@ upstream_apply
 # repo's spec-then-bare-key shape the other planes use: a plain bearer
 # credential, no `:org` half to omit by mistake.
 add_env_default VOUCHRYX_REVOKE_KEYS "$(gen 40)"
+# The console's own revoke key, a second bare key vouchryx accepts beside the operator's (compose appends it to
+# VOUCHRYX_REVOKE_KEYS), so taking the console's away never touches the operator's (CLAUDE.md invariant 82).
+add_env_default CONSOLE_REVOKE_KEY "$(gen 40)"
 # VOUCHRYX_TRUSTED_ISSUERS is deliberately NOT given an empty default here,
 # unlike every key above: it is written to .env only once a real value
 # exists, either the operator's own or WITH_DELEGATION_DEMO_ISSUER's minted
@@ -5659,6 +5678,33 @@ approver_jwks_apply() { # before `up`: writes the console's public key set and t
 }
 # approver-key: end
 
+# console-revoke-key: begin
+# CLAUDE.md invariant 82. The console's revoke button posts to vouchryx's /v1/revoke with a bearer key of its
+# own, CONSOLE_REVOKE_KEY in .env, which compose adds to vouchryx's VOUCHRYX_REVOKE_KEYS. The console reads the
+# key from a FILE (GENARYX_VOUCHRYX_REVOKE_KEY_FILE), so this writes .env's value to
+# $STACK_DIR/console-revoke/revoke.key: printf with no newline, under umask 077, owned by the console's uid
+# 10001, mode 0400, in a directory of root's with the console's group, 0710, the approver directory's shape. A
+# key already in place and equal to .env is left alone; a changed .env value replaces it. Never printed.
+console_revoke_key_prepare() {
+  local dir="$STACK_DIR/console-revoke" key want tmp
+  key="$dir/revoke.key"
+  want="$(typed_env_get CONSOLE_REVOKE_KEY)"
+  [ -n "$want" ] || die "no CONSOLE_REVOKE_KEY in .env, so the console's revoke button would have no key. Run ./install.sh again; it mints one."
+  mkdir -p "$dir" || die "could not create $dir"
+  { chown 0:10001 "$dir" && chmod 0710 "$dir"; } || die "could not give $dir to root with the console's group (0:10001), mode 0710"
+  if [ -f "$key" ] && [ ! -L "$key" ] && [ "$(cat "$key")" = "$want" ]; then
+    note "console revoke key kept at $key (never printed)"
+  else
+    if [ -e "$key" ] || [ -L "$key" ]; then CONSOLE_REVOKE_CHANGED=1; fi
+    tmp="$key.tmp.$$"
+    ( umask 077; printf '%s' "$want" >"$tmp" ) || die "could not write the console's revoke key"
+    mv -f "$tmp" "$key" || die "could not put the console's revoke key in place at $key"
+    note "console revoke key written to $key (never printed)"
+  fi
+  { chown -h 10001:10001 "$key" && chmod 0400 "$key"; } || die "could not give the console's revoke key to its uid (10001), mode 0400"
+}
+# console-revoke-key: end
+
 # preview-key: begin
 # CLAUDE.md invariant 78. A person approving a held tool call is shown its arguments: wardryx 2.7.0 and later
 # seal a preview of them to the console's preview key (WARDRYX_PREVIEW_RECIPIENT, the public half), and only
@@ -5736,6 +5782,7 @@ preview_key_apply() { # before `up`
 
 keyryx_prepare
 approver_key_prepare
+console_revoke_key_prepare
 
 # ---- 3b. delegation: vouchryx, opt-in -----------------------------------------
 # @decided 2026-09-27: the launchers offer vouchryx as an opt-in delegation
@@ -6430,6 +6477,13 @@ trailryx_pin_apply() { # writes TRAILRYX_KEYRYX_KID into .env once; a box with t
 
 trailryx_pin_apply
 "${COMPOSE[@]}" "${UP_PROFILES[@]}" up -d --remove-orphans
+# The console reads its revoke key once, at start, and `up` compares no mounted file, so a key this run replaced
+# reaches a running console only through a restart (invariant 82). vouchryx is recreated by `up` itself: its
+# VOUCHRYX_REVOKE_KEYS changed.
+if [ "${CONSOLE_REVOKE_CHANGED:-}" = 1 ] && compose_has console; then
+  "${COMPOSE[@]}" restart console >/dev/null || die "could not restart the console after its revoke key changed"
+  note "console restarted: its revoke key changed"
+fi
 
 
 # `up --remove-orphans` does not remove a container whose profile this run does not name (measured 2026-10-04).

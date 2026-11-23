@@ -2164,10 +2164,18 @@ a plain `docker compose down` never loses one either.
 and policy planes: the gateway reaches it, and polls
 `GET /v1/revocations`, over the compose network only. `POST /v1/revoke`
 needs `VOUCHRYX_REVOKE_KEYS` from `.env` as a bearer key and is reached the
-same way, from a container on this compose network, not the host; this
-launcher does not yet wire the console's own revoke button
-(`GENARYX_VOUCHRYX_URL`, `GENARYX_VOUCHRYX_REVOKE_KEY_FILE`) the way
-`stack-up`'s does.
+same way, from a container on this compose network, not the host. The
+console's own revoke button uses a key of its own: `install.sh` mints
+`CONSOLE_REVOKE_KEY` into `.env`, compose adds it to vouchryx's
+`VOUCHRYX_REVOKE_KEYS` beside the operator's key, and the console reads it from
+`/opt/agent-stack/console-revoke/revoke.key` (its own uid, 0400, mounted read
+only into the console alone) with `GENARYX_VOUCHRYX_URL=http://vouchryx:4310`.
+Revoking from the console is an admin action behind a passkey. To replace the
+console's key without touching yours, delete the `CONSOLE_REVOKE_KEY` line from
+`.env` and run the installer again: it mints a new one, vouchryx is recreated with
+it and the console restarted, and the old key stops working. Each install checks that vouchryx takes the
+console's key (an empty request is refused for naming nobody, so nothing is
+revoked) and refuses a key it does not hold.
 
 **What this does not cover.** It verifies a chain a caller presents; it does
 not decide what a proven chain is allowed to do; that is `wardryx`'s policy,

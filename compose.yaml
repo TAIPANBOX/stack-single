@@ -1347,7 +1347,9 @@ services:
       VOUCHRYX_EVENTS_PATH: /var/lib/stack/events/vouchryx.ndjson
       # Empty here means `POST /v1/revoke` itself refuses every call
       # (vouchryx's own fail-closed default), not that this plane is open.
-      VOUCHRYX_REVOKE_KEYS: ${VOUCHRYX_REVOKE_KEYS:-}
+      # The operator's key, and the console's own beside it (CLAUDE.md invariant 82): two bare keys, so
+      # the console's can be taken out without touching the operator's. Empty CONSOLE_REVOKE_KEY adds none.
+      VOUCHRYX_REVOKE_KEYS: ${VOUCHRYX_REVOKE_KEYS:-}${CONSOLE_REVOKE_KEY:+,${CONSOLE_REVOKE_KEY}}
       # On its own volume, never the shared `events` bus: a revocation is not
       # an agent event, and it has to survive a plain `docker compose down`
       # the same way `pgdata` and `wgstate` already do, so an operator
@@ -2013,6 +2015,13 @@ services:
       # invariant 78). Made by install.sh with this image, X-Wing, owned by this uid, mode 0400, mounted
       # read only into this service alone. wardryx holds the public half and never this file.
       GENARYX_PREVIEW_KEY_FILE: /run/preview/preview.key
+      # The console's own revoke button (CLAUDE.md invariant 82): its `delegation_revoke` command, admin
+      # only and behind a passkey, posts to vouchryx's /v1/revoke with a bearer key of its own. The key is a
+      # FILE, minted by install.sh into ./console-revoke (this uid, 0400) and mounted read only into this
+      # service alone; the console refuses to start with one of the two set and not the other. On a box
+      # where vouchryx does not run, the button answers that vouchryx is unreachable.
+      GENARYX_VOUCHRYX_URL: http://vouchryx:4310
+      GENARYX_VOUCHRYX_REVOKE_KEY_FILE: /run/console-revoke/revoke.key
       # D8: the file holding the same secret, which the console mints closure
       # tokens with after a passkey assertion. Empty, the default, leaves its
       # close command off. Invariant 26.
@@ -2023,6 +2032,7 @@ services:
       - consolestate:/var/lib/stack
       - ./approver:/run/approver:ro
       - ./preview:/run/preview:ro
+      - ./console-revoke:/run/console-revoke:ro
       - events:/var/lib/stack/events
       # Read only: the console backtests over what the gateway wrote and must not be able to edit it,
       # the split focus-export makes below. focus-export reads this same directory as 10001:10001,
