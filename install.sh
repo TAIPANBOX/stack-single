@@ -329,6 +329,56 @@ http_status() { status_of "$(http_request GET "$1" "Authorization: Bearer $2"$'\
 # one it holds (the body names nobody, so nothing is revoked), 401 when it is not (invariant 82).
 # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
 console_revoke_status() { status_of "$(http_request POST http://vouchryx:4310/v1/revoke "Authorization: Bearer $1"$'\r\n'"Content-Type: application/json"$'\r\n' '{}')"; }
+
+# bus-writers: begin
+# CLAUDE.md invariant 83. Every producer on the bus runs under its own uid and writes one stream, and the bus
+# directory is root's (invariant 41). That is read from compose.yaml by a gate; this asks the running box. For each
+# producer, a throwaway busybox runs as that producer's uid, gid and extra groups (BUS_WRITERS, the same table
+# compose.yaml gives the services) against the live events volume, with no network, and must be able to append to
+# its own stream and must NOT be able to append to, rename or link another producer's stream, or create a file in
+# the bus directory. Appending is `: >>`, which writes no byte; a rename that went through is put back at once. A
+# stream that is not on this box (costcrew's, before the add-on is started) is passed over, and said so. Every
+# attempt runs in a subshell: in busybox sh a failed redirection on `:`, a special builtin, ends the whole shell
+# (found on a live box, 2026-11-23, where the first refused append stopped every probe).
+BUS_WRITERS="20010:10001:-:tokenfuse.ndjson 20011:10001:-:tokenfuse-openai.ndjson 20012:10001:-:tokenfuse-mcp.ndjson
+20013:10001:-:tokenfuse-cloud.ndjson 20001:10001:20001:wardryx.ndjson 20005:10001:-:typryx.ndjson
+20002:10001:20002:vouchryx.ndjson 20020:10001:-:verdryx.ndjson 10001:10001:-:console.ndjson
+10002:10002:10001:agent-conform.ndjson 10003:10003:-:costcrew.ndjson"
+# shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
+bus_writers_probe() {
+  local row uid gid extra own groups fail=0 out names=()
+  # Every stream by name, from the table: a producer outside the bus group (costcrew, uid 10003) can enter the
+  # 0751 directory but not list it, so a glob there matches nothing and would prove nothing.
+  for row in $BUS_WRITERS; do names+=("${row##*:}"); done
+  for row in $BUS_WRITERS; do
+    IFS=: read -r uid gid extra own <<<"$row"
+    groups=()
+    [ "$extra" = - ] || groups=(--group-add "$extra")
+    out="$(docker run --rm --network none --user "$uid:$gid" "${groups[@]}" -v "${NET%_core}_events:/e" busybox:1.36 sh -c '
+      own="$1"; shift; bad=0
+      if [ -e "/e/$own" ]; then
+        ( : >>"/e/$own" ) 2>/dev/null || { echo "cannot append to its own $own"; bad=1; }
+      elif [ "$own" = costcrew.ndjson ]; then
+        echo "note: no $own on this box (the FinOps console has not been started)"
+      else
+        echo "its own $own is not on the bus"; bad=1
+      fi
+      for n in "$@"; do
+        [ "$n" = "$own" ] && continue
+        f="/e/$n"
+        [ -e "$f" ] || continue
+        if ( : >>"$f" ) 2>/dev/null; then echo "appended to $n"; bad=1; fi
+        # A rename that went through means the directory is open: put it back and stop asking at once, so
+        # nothing else is moved on a bus that is already broken.
+        if mv "$f" "$f.probe" 2>/dev/null; then mv "$f.probe" "$f"; echo "renamed $n"; exit 1; fi
+        if ln "$f" "/e/.probe-link" 2>/dev/null; then rm -f "/e/.probe-link"; echo "linked $n"; bad=1; fi
+      done
+      if ( : >"/e/.probe-new" ) 2>/dev/null; then rm -f "/e/.probe-new"; echo "created a file on the bus"; bad=1; fi
+      exit "$bad"' sh "$own" "${names[@]}" 2>&1)" || { fail=1; printf '      uid %s (%s): %s\n' "$uid" "$own" "$(tr '\n' ';' <<<"$out")" >&2; }
+  done
+  return "$fail"
+}
+# bus-writers: end
 # Same as http_status(), minus the header entirely: an empty bearer token is still a
 # credential, and the point of this one is that none was presented at all.
 # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
@@ -560,6 +610,9 @@ install_only check "chain verifier cannot write another plane's stream" \
       "! docker run --rm --user 10002:10002 --group-add 10001 -v agent-stack_events:/e busybox:1.36 sh -c ': >> /e/wardryx.ndjson'"
 install_only check "chain verifier cannot create a file on the bus" \
       "! docker run --rm --user 10002:10002 --group-add 10001 -v agent-stack_events:/e busybox:1.36 sh -c ': > /e/not-its-own.ndjson'"
+# Every producer, the same three questions and the rename and the link, asked of the running box (invariant 83).
+install_only check "no producer can write, rename or link another plane's stream, or create a file on the bus" \
+      "bus_writers_probe"
 
 # The FOCUS export, which the FinOps console reads as the gateway's spend (CLAUDE.md
 # invariant 80). On every box, over both doors: it must be running, and each door's

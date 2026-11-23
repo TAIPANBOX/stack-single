@@ -6563,6 +6563,72 @@ run_case "console-revoke: the block is gone (measured nothing)" fail \
 run_case "console-revoke: a note is reworded (must pass)" pass \
 	"$CRV" \
 	"$(py 'edit("install.sh", "note \"console revoke key written to $key (never printed)\"", "note \"console revoke key put at $key (never printed)\"")')"
+# invariant 83: every install asks the box, producer by producer, who can write what on the bus.
+BWP='./scripts/bus-writers-are-probed.sh'
+
+run_case "bus-writers: a stream drops out of the table" fail \
+	"$BWP" \
+	"$(py 'edit("install.sh", " 20020:10001:-:verdryx.ndjson", "")')" \
+	"does not ask about it"
+
+run_case "bus-writers: the table names the wrong uid" fail \
+	"$BWP" \
+	"$(py 'edit("install.sh", "20005:10001:-:typryx.ndjson", "20006:10001:-:typryx.ndjson")')" \
+	"BUS_WRITERS asks about typryx.ndjson as uid 20006"
+
+run_case "bus-writers: the probe drops a writer's extra group" fail \
+	"$BWP" \
+	"$(py 'edit("install.sh", "    [ \"$extra\" = - ] || groups=(--group-add \"$extra\")\n", "")')" \
+	"without the group"
+
+run_case "bus-writers: the probe stops trying another stream" fail \
+	"$BWP" \
+	"$(py 'edit("install.sh", "        if ( : >>\"$f\" ) 2>/dev/null; then echo \"appended to $n\"; bad=1; fi\n", "")')" \
+	"a bus with other-writable passed"
+
+run_case "bus-writers: a rename that went through is not put back" fail \
+	"$BWP" \
+	"$(py 'edit("install.sh", "then mv \"$f.probe\" \"$f\"; echo \"renamed $n\"", "then echo \"renamed $n\"")')" \
+	"not every stream back under its own name"
+
+run_case "bus-writers: the probe lists the directory instead of naming the streams" fail \
+	"$BWP" \
+	"$(py 'edit("install.sh", "      for n in \"$@\"; do\n        [ \"$n\" = \"$own\" ] && continue\n        f=\"/e/$n\"\n", "      for f in /e/*.ndjson; do\n        n=\"${f##*/}\"\n        [ \"$n\" = \"$own\" ] && continue\n")')" \
+	"reads the directory instead of the names"
+
+run_case "bus-writers: a producer's missing stream passes" fail \
+	"$BWP" \
+	"$(py 'edit("install.sh", "        echo \"its own $own is not on the bus\"; bad=1\n", "        echo \"note: no $own\"\n")')" \
+	"only costcrew's may be absent"
+
+run_case "bus-writers: an attempt runs outside a subshell" fail \
+	"$BWP" \
+	"$(py 'edit("install.sh", "        if ( : >>\"$f\" ) 2>/dev/null; then", "        if : >>\"$f\" 2>/dev/null; then")')" \
+	"not in a subshell"
+
+run_case "bus-writers: the probe gets a network" fail \
+	"$BWP" \
+	"$(py 'edit("install.sh", "docker run --rm --network none --user \"$uid:$gid\"", "docker run --rm --user \"$uid:$gid\"")')" \
+	"is on a network"
+
+run_case "bus-writers: install.sh stops running the probe" fail \
+	"$BWP" \
+	"$(py 'edit("install.sh", "      \"bus_writers_probe\"\n", "      \"true\"\n")')" \
+	"does not run bus_writers_probe"
+
+run_case "bus-writers: the README says the bus is open again" fail \
+	"$BWP" \
+	"$(py 'edit("README.md", "Who can write what on the bus.", "What is still open: any writer in the bus group can append to any other plane'"'"'s file. Who can write what on the bus.")')" \
+	"the README still says"
+
+run_case "bus-writers: the block is gone (measured nothing)" fail \
+	"$BWP" \
+	"$(py 'edit("install.sh", "# bus-writers: begin\n", "# bus-writers begins\n")')" \
+	"measured nothing"
+
+run_case "bus-writers: a comment is reworded (must pass)" pass \
+	"$BWP" \
+	"$(py 'edit("install.sh", "# its own stream and must NOT be able to append to", "# its own stream, and must NOT be able to append to")')"
 
 echo
 if [ -n "$(git status --porcelain)" ]; then

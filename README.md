@@ -2093,17 +2093,21 @@ If the console source is not present it says so and installs the governed
 stack without it, which is a real deployment: the planes enforce with or
 without a UI in front of them.
 
-One thing it does not check, said here rather than found later. The
-`events` volume is shared by every plane that writes the bus, group-writable
-so each can append its own file. Since heraldyx 0.3.0 and idryx 1.1.0 a line is
-read as the source its FILE may carry (`wardryx.ndjson` carries `wardryx`,
-`tokenfuse-cloud.ndjson` and `tokenfuse-mcp.ndjson` carry `tokenfuse`), so a
-line claiming another plane inside the wrong file is refused and said once; the
-file names this installer writes are held to that by `scripts/bus-names-match-their-source.sh`.
-What is still open: any writer in the bus group can append to any other plane's
-file under that file's own source, and the record plane takes a line as that
-plane's word. The containers sharing that volume trust each other as much as
-they trust the box.
+Who can write what on the bus. The `events` volume is shared by every plane
+that writes it, and each plane writes one file of its own: every stream is owned
+by its one writer's uid, mode 0640, and the bus directory is root's (0751), so no
+plane can append to, rename, link or replace another plane's file or create a new
+one (CLAUDE.md invariant 41, held in `compose.yaml` by
+`scripts/no-plane-writes-another-planes-stream.sh`). Every install also asks the
+running box: a throwaway container per producer, as that producer's uid and
+groups, must append to its own stream and be refused on everyone else's, and on
+creating a file (invariant 83). Since heraldyx 0.3.0 and idryx 1.1.0 a line is
+also read as the source its FILE may carry (`wardryx.ndjson` carries `wardryx`,
+`tokenfuse-cloud.ndjson` and `tokenfuse-mcp.ndjson` carry `tokenfuse`), so a line
+claiming another plane inside the wrong file is refused and said once
+(`scripts/bus-names-match-their-source.sh`). What the layout cannot stop is a plane
+writing false lines into its own file, under its own name: the record takes a
+line as that plane's word.
 
 The other thing this used to say here, delegation being verified nowhere on
 this box, is the gap the next section closes.
