@@ -302,7 +302,10 @@ run_case "slo-signal-is-wired: a failed measurement is swallowed" fail \
 	"a fleet with nothing to report"
 run_case "slo-signal-is-wired: the routine reads one door" fail \
 	'./scripts/slo-signal-is-wired.sh' \
-	"$(py 'edit("compose.yaml", "for door in gateway gateway-openai; do", "for door in gateway; do")')" \
+	"$(py 's = open("compose.yaml").read()
+i = s.index("  verdryx-slo:\n")
+j = s.index("for door in gateway gateway-openai; do", i)
+open("compose.yaml", "w").write(s[:j] + "for door in gateway; do" + s[j + len("for door in gateway gateway-openai; do"):])')" \
 	"the Anthropic door alone"
 run_case "slo-signal-is-wired: the rule holds on a broken file" fail \
 	'./scripts/slo-signal-is-wired.sh' \
