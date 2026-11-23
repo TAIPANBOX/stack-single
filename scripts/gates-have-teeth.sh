@@ -6629,6 +6629,45 @@ run_case "bus-writers: the block is gone (measured nothing)" fail \
 run_case "bus-writers: a comment is reworded (must pass)" pass \
 	"$BWP" \
 	"$(py 'edit("install.sh", "# its own stream and must NOT be able to append to", "# its own stream, and must NOT be able to append to")')"
+# invariant 85: every service carries a memory limit of its own.
+EML='./scripts/every-service-has-a-memory-limit.sh'
+
+run_case "mem-limit: a service loses its limit" fail \
+	"$EML" \
+	"$(py 'edit("compose.yaml", "    pids_limit: 512\n    mem_limit: 512m\n", "    pids_limit: 512\n")')" \
+	"wardryx has no mem_limit"
+
+run_case "mem-limit: the anchor carries one limit for all" fail \
+	"$EML" \
+	"$(py 'edit("compose.yaml", "  ulimits: { core: 0 }\n", "  ulimits: { core: 0 }\n  mem_limit: 512m\n")')" \
+	"an anchor above the services carries mem_limit"
+
+run_case "mem-limit: the console is squeezed below its work" fail \
+	"$EML" \
+	"$(py 's = open("compose.yaml").read()
+i = s.index("  console:\n")
+j = s.index("    mem_limit: 2g\n", i)
+open("compose.yaml", "w").write(s[:j] + "    mem_limit: 512m\n" + s[j + len("    mem_limit: 2g\n"):])')" \
+	"console has 512 MiB, below 1 GiB"
+
+run_case "mem-limit: a typo leaves a limit in kilobytes" fail \
+	"$EML" \
+	"$(py 'edit("compose.yaml", "    pids_limit: 512\n    mem_limit: 512m\n", "    pids_limit: 512\n    mem_limit: 512k\n")')" \
+	"below 64 MiB"
+
+run_case "mem-limit: a limit that limits nothing" fail \
+	"$EML" \
+	"$(py 'edit("compose.yaml", "    pids_limit: 512\n    mem_limit: 512m\n", "    pids_limit: 512\n    mem_limit: 64g\n")')" \
+	"above 4 GiB"
+
+run_case "mem-limit: the services are gone (measured nothing)" fail \
+	"$EML" \
+	"$(py 'edit("compose.yaml", "\nservices:\n", "\nservicez:\n")')" \
+	"FAIL mem-limit"
+
+run_case "mem-limit: one plane is given more room (must pass)" pass \
+	"$EML" \
+	"$(py 'edit("compose.yaml", "    pids_limit: 512\n    mem_limit: 512m\n", "    pids_limit: 512\n    mem_limit: 768m\n")')"
 
 echo
 if [ -n "$(git status --porcelain)" ]; then

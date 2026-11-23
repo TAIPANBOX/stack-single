@@ -49,6 +49,12 @@ x-baseline: &baseline
     - no-new-privileges:true
   # On one line: several gates find services as two-space keys alone on a line.
   ulimits: { core: 0 }
+# No memory limit here, on purpose: every service carries a `mem_limit` of its own, beside its pids_limit
+# (CLAUDE.md invariant 85). A limit is a ceiling against a runaway, not a size: the planes idle at 1 to 30 MiB
+# (measured 2026-11-23 on a Debian 13 VM, the default install plus the typed plane), and the ones that run a
+# query engine over a whole trace (the console's backtest and replay, focus-export, the gateways) or a database
+# (policy-db) are given room for that work. At the ceiling the kernel stops that one container and compose
+# starts it again; nothing else on the box is touched.
 
 services:
   # ---- one-shot: make the shared volumes writable --------------------------
@@ -73,6 +79,7 @@ services:
     # taking it out: CHOWN for chown, DAC_OVERRIDE to enter and create in a directory another uid
     # owns (keyryx's is 0700), FOWNER to chmod what another uid owns.
     pids_limit: 32
+    mem_limit: 64m
     cap_add:
       - CHOWN
       - DAC_OVERRIDE
@@ -319,6 +326,7 @@ services:
   policy-db:
     <<: [*restart, *baseline]
     pids_limit: 800
+    mem_limit: 1g
     # Starts as postgres itself: the entrypoint's chown and su-exec need capabilities this
     # container no longer has. A volume the image's entrypoint set up is already uid 70.
     user: "70:70"
@@ -361,6 +369,7 @@ services:
   keyryx:
     <<: [*restart, *baseline]
     pids_limit: 128
+    mem_limit: 256m
     image: ${KEYRYX_IMAGE:-ghcr.io/taipanbox/keyryx:v0.1.5@sha256:967dd49907d48edea9cb0af926ec9beae39de31909ced8149eff1546200d99e7}
     # The image's own 65532 is replaced: custody runs under its own uid, and
     # no other container runs as it (invariant 41).
@@ -400,6 +409,7 @@ services:
   keyryx-witness:
     <<: [*restart, *baseline]
     pids_limit: 128
+    mem_limit: 256m
     image: ${KEYRYX_IMAGE:-ghcr.io/taipanbox/keyryx:v0.1.5@sha256:967dd49907d48edea9cb0af926ec9beae39de31909ced8149eff1546200d99e7}
     user: "20100:10001"
     command:
@@ -445,6 +455,7 @@ services:
   wardryx:
     <<: [*restart, *baseline]
     pids_limit: 512
+    mem_limit: 512m
     image: ${WARDRYX_IMAGE:-ghcr.io/taipanbox/wardryx:v2.8.0@sha256:f9b86a82114698f64a3251816ee0be6f80b4a6b2c239082b7035f1b4228f06aa}
     # Its own uid (CLAUDE.md invariant 41): wardryx.ndjson is its stream, and
     # no other plane's uid can write it. The GID stays the bus group, so it
@@ -550,6 +561,7 @@ services:
   idryx:
     <<: [*restart, *baseline]
     pids_limit: 256
+    mem_limit: 1g
     image: ${IDRYX_IMAGE:-ghcr.io/taipanbox/idryx:v1.4.1@sha256:7ace674b5c44bf2ec65a22399315e1e8e71d71e75cfd933dcd0ddec53a9c20a6}
     networks:
       - core
@@ -588,6 +600,7 @@ services:
   heraldyx:
     <<: [*restart, *baseline]
     pids_limit: 256
+    mem_limit: 256m
     image: ${HERALDYX_IMAGE:-ghcr.io/taipanbox/heraldyx:v0.9.1@sha256:ad1b03a2007a2163cc55378899c9640becf2e4f4d70cef83c6840528bbe7bc6e}
     networks:
       - edge
@@ -686,6 +699,7 @@ services:
   agent-conform:
     <<: [*restart, *baseline]
     pids_limit: 128
+    mem_limit: 256m
     image: ${AGENT_CONFORM_IMAGE:-ghcr.io/taipanbox/agent-conform:v2.0.3@sha256:f2a5bcbadf4189d2b4979669703aa8b6ef3bfc93a68b90ac6d1f61ac110ed3e4}
     networks:
       - core
@@ -734,6 +748,7 @@ services:
   scopyx:
     <<: [*restart, *baseline]
     pids_limit: 256
+    mem_limit: 512m
     profiles: ["egress"]
     image: ${SCOPYX_IMAGE:-ghcr.io/taipanbox/scopyx:v1.3.1@sha256:e61b115a7d3d63a94897f39bea78a98f2640afa64f1698d5ae078ecb2bb25638}
     # NOT on `agents` since G2.1: an agent reaches this service only through the
@@ -908,6 +923,7 @@ services:
   typryx:
     <<: [*restart, *baseline]
     pids_limit: 256
+    mem_limit: 512m
     profiles: ["typed"]
     image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.6.1@sha256:77fc8d0f826bb840043c45ea3eb9f1dba1f73c1925c48502b942b2d491009239}
     networks:
@@ -1018,6 +1034,7 @@ services:
   tokenfuse-mcp-broker:
     <<: [*restart, *baseline]
     pids_limit: 1024
+    mem_limit: 512m
     profiles: ["typed", "egress", "egress-browser"]
     image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.25.0@sha256:3a81dbcd116557eff54aae29e7d68104af8fc788265d58e71adf3f96fea03317}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
@@ -1221,6 +1238,7 @@ services:
   typryx-wardryx-proxy:
     <<: [*restart, *baseline]
     pids_limit: 256
+    mem_limit: 256m
     profiles: ["typed-risk-signal"]
     image: ${TYPRYX_IMAGE:-ghcr.io/taipanbox/typryx:v0.6.1@sha256:77fc8d0f826bb840043c45ea3eb9f1dba1f73c1925c48502b942b2d491009239}
     user: "65532:65532"
@@ -1293,6 +1311,7 @@ services:
   vouchryx:
     <<: [*restart, *baseline]
     pids_limit: 256
+    mem_limit: 256m
     profiles: ["delegation"]
     image: ${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.8.0@sha256:2e1848151118de3dd69d2d68918fd50eee29859fdc47fb6fd3092914fe73022a}
     # Not on guests: a declared container of another project gets its tokens
@@ -1384,6 +1403,7 @@ services:
   tokenfuse-cloud:
     <<: [*restart, *baseline]
     pids_limit: 1024
+    mem_limit: 512m
     image: ${TOKENFUSE_CLOUD_IMAGE:-ghcr.io/taipanbox/tokenfuse-control-plane:v1.25.0@sha256:e7d4160649128c6dc7d91d295a9a31e107e3bb7241d5483b5b193158a94dba58}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
@@ -1431,6 +1451,7 @@ services:
   tokenfuse-gateway:
     <<: [*restart, *baseline]
     pids_limit: 1024
+    mem_limit: 1g
     image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.25.0@sha256:3a81dbcd116557eff54aae29e7d68104af8fc788265d58e71adf3f96fea03317}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
@@ -1674,6 +1695,7 @@ services:
   tokenfuse-gateway-openai:
     <<: [*restart, *baseline]
     pids_limit: 1024
+    mem_limit: 1g
     image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.25.0@sha256:3a81dbcd116557eff54aae29e7d68104af8fc788265d58e71adf3f96fea03317}
     # Its own uid (CLAUDE.md invariant 41): the stream this service writes is
     # owned by it and by no other plane. The GID stays the bus group.
@@ -1759,6 +1781,7 @@ services:
   wg:
     <<: [*restart, *baseline]
     pids_limit: 128
+    mem_limit: 256m
     image: ${WG_IMAGE:-ghcr.io/taipanbox/stack-wg:v1.8.1@sha256:8996ce01a5b8a9d38a71b711f06653e23b54d5ad3e1578669be49ae8c79ba3ae}
     networks:
       - edge
@@ -1815,6 +1838,7 @@ services:
   guest-door:
     <<: [*restart, *baseline]
     pids_limit: 64
+    mem_limit: 128m
     image: ${CADDY_IMAGE:-ghcr.io/taipanbox/stack-caddy:v1.8.1@sha256:d9376051cc5ac9bb83de557bf3e7e861e26f6f6ae4556cd6ed5a32d1ce352c0a}
     user: "65534:65534"
     # The binary carries NET_BIND_SERVICE as a file capability, so exec fails
@@ -1846,6 +1870,7 @@ services:
   guest-callback:
     <<: [*restart, *baseline]
     pids_limit: 64
+    mem_limit: 128m
     image: ${CADDY_IMAGE:-ghcr.io/taipanbox/stack-caddy:v1.8.1@sha256:d9376051cc5ac9bb83de557bf3e7e861e26f6f6ae4556cd6ed5a32d1ce352c0a}
     user: "65534:65534"
     cap_add:
@@ -1868,6 +1893,7 @@ services:
   caddy:
     <<: [*restart, *baseline]
     pids_limit: 256
+    mem_limit: 256m
     # The image's binary carries a file capability, so exec fails with EPERM unless the bounding
     # set still holds it. The entrypoint writes /etc/caddy/Caddyfile on every start.
     cap_add:
@@ -1899,6 +1925,7 @@ services:
     # gives it the approver key and the approver directory's group (invariants 41 and 61).
     user: "10001:10001"
     pids_limit: 1024
+    mem_limit: 2g
     # SQLite's VACUUM and big sorts need a temp file, and with no writable /tmp it answers
     # `disk I/O error (6410)`, a warning that goes red nowhere (invariant 24).
     tmpfs:
@@ -2074,6 +2101,7 @@ services:
   record-seal:
     <<: [*restart, *baseline]
     pids_limit: 128
+    mem_limit: 1g
     tmpfs:
       - /tmp:size=64m
     image: ${TRAILRYX_IMAGE:-ghcr.io/taipanbox/trailryx-node:v1.6.0@sha256:68c413c2d6d0bd3bde4ad3478e6ee9ebc3a95e5a0d1b26d1d1ca5f588baf20a8}
@@ -2221,6 +2249,7 @@ services:
   focus-export:
     <<: [*restart, *baseline]
     pids_limit: 128
+    mem_limit: 1g
     tmpfs:
       - /tmp:size=64m
     image: ${TOKENFUSE_IMAGE:-ghcr.io/taipanbox/tokenfuse:v1.25.0@sha256:3a81dbcd116557eff54aae29e7d68104af8fc788265d58e71adf3f96fea03317}
@@ -2348,6 +2377,7 @@ services:
   idryx-detect:
     <<: *baseline
     pids_limit: 64
+    mem_limit: 1g
     restart: "no"
     image: ${IDRYX_IMAGE:-ghcr.io/taipanbox/idryx:v1.4.1@sha256:7ace674b5c44bf2ec65a22399315e1e8e71d71e75cfd933dcd0ddec53a9c20a6}
     networks:
@@ -2403,6 +2433,7 @@ services:
   mockryx-drill:
     <<: *baseline
     pids_limit: 64
+    mem_limit: 256m
     restart: "no"
     image: ${MOCKRYX_IMAGE:-ghcr.io/taipanbox/mockryx:v0.5.1@sha256:3926512211a4609a402d3812ae0321df46baaa90406ea439e3f5c89316ef85ef}
     networks:
@@ -2420,6 +2451,7 @@ services:
   verdryx-drift:
     <<: [*restart, *baseline]
     pids_limit: 128
+    mem_limit: 1g
     tmpfs:
       - /tmp:size=64m
     image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.14.0@sha256:583fcbe19330c461c6de7784f383620feaabf3f7474f977917570b6dfd3641ca}
@@ -2471,6 +2503,7 @@ services:
   verdryx-slo:
     <<: [*restart, *baseline]
     pids_limit: 128
+    mem_limit: 1g
     image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.14.0@sha256:583fcbe19330c461c6de7784f383620feaabf3f7474f977917570b6dfd3641ca}
     user: "20020:10001"
     profiles: ["slo-signal"]
@@ -2573,6 +2606,7 @@ services:
     profiles: ["finops"]
     <<: *baseline
     pids_limit: 32
+    mem_limit: 64m
     # chown and chmod over paths other uids own, for the few seconds it lives.
     cap_add:
       - CHOWN
@@ -2602,6 +2636,7 @@ services:
   costcrew:
     <<: [*restart, *baseline]
     pids_limit: 256
+    mem_limit: 1g
     profiles: ["finops"]
     image: ${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.10.2@sha256:a0fc173b7dc75813abc851cf7ee47ab0f76b3008e2892db2f67a6d3e30089516}
     networks:
@@ -2694,6 +2729,7 @@ services:
   costcrew-run:
     <<: *baseline
     pids_limit: 128
+    mem_limit: 512m
     profiles: ["crew"]
     image: ${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.10.2@sha256:a0fc173b7dc75813abc851cf7ee47ab0f76b3008e2892db2f67a6d3e30089516}
     entrypoint: ["/usr/local/bin/costcrew-run"]

@@ -185,6 +185,8 @@ jobs:
         run: ./scripts/console-revoke-is-wired.sh
       - name: every install asks the box who can write what on the bus (invariant 83)
         run: ./scripts/bus-writers-are-probed.sh
+      - name: every service carries a memory limit of its own (invariant 85)
+        run: ./scripts/every-service-has-a-memory-limit.sh
 
       # Last, because it mutates tracked files and restores them. It needs a
       # clean tree and says so plainly, so it also reports any earlier step

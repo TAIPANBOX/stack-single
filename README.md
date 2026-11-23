@@ -1988,6 +1988,12 @@ Every service in `compose.yaml` runs with the same baseline, unless a named line
 - `no-new-privileges:true`: nothing it runs can gain one through setuid or a file capability.
 - `pids_limit`: a number per service, well above what it was measured to use, there to stop
   a fork bomb and not to hold a service under a ceiling.
+- `mem_limit`: a memory ceiling per service, written in its own block. The planes idle at a
+  few MiB; the console, the FOCUS export and the gateways, which run a query engine over a
+  whole trace or hold every request in flight, get 1 to 2 GiB. A ceiling stops the one
+  container that runs away and compose starts it again, instead of the kernel stopping
+  whatever it picks on a box out of memory. Raise a number in `compose.yaml` if a box
+  needs more.
 - `ulimits: core: 0`: no core dump with a key in it.
 - a user that is not root.
 
