@@ -2362,6 +2362,39 @@ esac
 # Before anything else that reads or asks, because this one refuses the whole tree.
 rollback_floor_check
 
+# env-guard: begin
+# .env holds every secret this box has, the Postgres password among them, and pgdata knows only the
+# password it was created with. A re-run with .env gone used to write a fresh one, with a new
+# POLICY_DB_PASSWORD the existing database refuses: wardryx restart-looped on `open postgres` and both
+# doors failed closed until somebody noticed (stack-single#62, measured 2026-09-17 on the appliance
+# run). So a run that finds no .env asks Docker whether this project's volumes are already there, and
+# refuses before anything is changed, naming the file to restore. FRESH_ENV=1, read from the
+# environment only, is the operator saying a new .env over those volumes is what they mean; the
+# database's own password then has to be reset by hand or its volume removed. A box with no Docker
+# yet has no volumes, and a Docker that does not answer cannot say, so that refuses too
+# (CLAUDE.md invariant 81).
+env_guard_check() {
+  local envf="$STACK_DIR/.env" vols
+  [ -s "$envf" ] && return 0
+  command -v docker >/dev/null 2>&1 || return 0
+  if ! docker info >/dev/null 2>&1; then
+    [ "${FRESH_ENV:-}" = 1 ] && { note "FRESH_ENV=1: Docker does not answer, so whether this box already holds a stack was not read"; return 0; }
+    die "there is no $envf, and Docker does not answer, so this run cannot tell whether a stack's volumes are already on this box. A fresh .env over them would give the policy database a password it does not know. Start Docker and run again, restore .env first if this box had a stack, or set FRESH_ENV=1 if you mean a new one. Nothing was changed."
+  fi
+  # The name filter matches anywhere in a name, so `foo-agent-stack_x` would count: keep the names that begin
+  # with this project's prefix.
+  vols="$( { docker volume ls -q --filter label=com.docker.compose.project=agent-stack; docker volume ls -q --filter name=agent-stack_ | grep '^agent-stack_'; } 2>/dev/null | sort -u | tr '\n' ' ')"
+  vols="${vols% }"
+  [ -n "$vols" ] || return 0
+  if [ "${FRESH_ENV:-}" = 1 ]; then
+    note "FRESH_ENV=1: writing a new .env over this stack's existing volumes ($vols). The policy database keeps its old password: reset it, or remove the agent-stack_pgdata volume, or wardryx will not start."
+    return 0
+  fi
+  die "there is no $envf, and this box already holds the stack's volumes: $vols. A re-run would write a new .env with a new Postgres password that agent-stack_pgdata does not know, and wardryx would stop with both doors closed. Restore your backup of .env to $envf (mode 0600) and run again; see the README, \"Back up .env\". If you mean a new .env over these volumes, set FRESH_ENV=1. Nothing was changed."
+}
+env_guard_check
+# env-guard: end
+
 # smtp-tls: begin
 # heraldyx 0.8.0 sends mail only over TLS: STARTTLS by default, implicit TLS on port 465 on its own, and
 # plain only to a loopback host. SMTP_TLS is written into .env as HERALDYX_SMTP_TLS. Unset is heraldyx's

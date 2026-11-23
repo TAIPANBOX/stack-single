@@ -179,6 +179,8 @@ jobs:
         run: ./scripts/broker-ask-retries-a-held-call.sh
       - name: the gateway's spend reaches the FinOps console, over both doors (invariant 80)
         run: ./scripts/costcrew-reads-the-gateway-spend.sh
+      - name: a lost .env is never regenerated over a stack's volumes (invariant 81)
+        run: ./scripts/env-is-not-regenerated-over-a-stack.sh
 
       # Last, because it mutates tracked files and restores them. It needs a
       # clean tree and says so plainly, so it also reports any earlier step

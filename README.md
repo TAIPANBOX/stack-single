@@ -250,6 +250,28 @@ It also does not cover:
 - Restoring `$STACK_DIR` from a backup. The journal comes back as it was that day, and the
   floor with it. Removing the file makes the box new again.
 
+## Back up .env
+
+`/opt/agent-stack/.env` (mode 0600) holds every secret this box has: the policy
+database's password, the planes' keys, the gateway's client keys and the
+console's. It is the one file to back up, and to keep off the box, because the
+volumes cannot be used without it: the policy database (`agent-stack_pgdata`)
+knows only the password it was created with. Copy it somewhere only you can read
+after the first install and after any run that changes it:
+
+```bash
+sudo install -m 0600 /opt/agent-stack/.env ~/agent-stack.env.backup   # then move it off the box
+```
+
+What a re-run does without it: the installer finds no `.env`, asks Docker whether
+this stack's volumes are already on the box, and if they are it stops before it
+changes anything, names the volumes and asks for the file back. Restore it to
+`/opt/agent-stack/.env` with mode 0600 and run again. `FRESH_ENV=1 ./install.sh`
+is the way to say a new `.env` over those volumes is what you mean; the policy
+database then keeps its old password, so reset it or remove `agent-stack_pgdata`
+(and with it every policy and approval it held), or wardryx will not start. A box
+whose Docker does not answer cannot be asked, and is refused the same way.
+
 ## This is not the sandbox
 
 [`stack-up`](https://github.com/TAIPANBOX/stack-up) is the local try: it binds

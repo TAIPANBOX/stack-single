@@ -6455,6 +6455,58 @@ run_case "manifest-is-true: a scheduled routine sits behind an operator profile"
 	'./scripts/manifest-is-true.sh' \
 	"$(py 'edit("components.json", "\"verdryx-slo\": \"verdryx-slo\",", "\"verdryx-slo\": \"verdryx-slo\",\n          \"verdryx-drift\": \"verdryx-drift\",")')" \
 	"A routine no install starts is not scheduled"
+# invariant 81 (stack-single#62): no fresh .env over a stack whose volumes are already on the box.
+EGV='./scripts/env-is-not-regenerated-over-a-stack.sh'
+
+run_case "env-guard: volumes on the box do not stop a fresh .env" fail \
+	"$EGV" \
+	"$(py 'edit("install.sh", "  [ -n \"$vols\" ] || return 0\n", "  return 0\n")')" \
+	"refuse-labelled: the run went on"
+
+run_case "env-guard: a Docker that does not answer is read as an empty box" fail \
+	"$EGV" \
+	"$(py 'edit("install.sh", "  if ! docker info >/dev/null 2>&1; then\n", "  if false; then\n")')" \
+	"refuse-down: the run went on"
+
+run_case "env-guard: only labelled volumes are looked for" fail \
+	"$EGV" \
+	"$(py 'edit("install.sh", " docker volume ls -q --filter name=agent-stack_ | grep '"'"'^agent-stack_'"'"';", "")')" \
+	"refuse-unlabelled: the run went on"
+
+run_case "env-guard: another project's volume stops a fresh box" fail \
+	"$EGV" \
+	"$(py 'edit("install.sh", " | grep '"'"'^agent-stack_'"'"'", "")')" \
+	"go-foreign: the run stopped"
+
+run_case "env-guard: an empty .env counts as one" fail \
+	"$EGV" \
+	"$(py 'edit("install.sh", "  [ -s \"$envf\" ] && return 0\n", "  [ -e \"$envf\" ] && return 0\n")')" \
+	"refuse-empty: the run went on"
+
+run_case "env-guard: the refusal stops naming the way through" fail \
+	"$EGV" \
+	"$(py 'edit("install.sh", " If you mean a new .env over these volumes, set FRESH_ENV=1.", "")')" \
+	"does not name FRESH_ENV=1"
+
+run_case "env-guard: the check moves after the first package install" fail \
+	"$EGV" \
+	"$(py 'edit("install.sh", "env_guard_check\n# env-guard: end\n", "# env-guard: end\n")
+edit("install.sh", "say \"credentials\"\n", "say \"credentials\"\nenv_guard_check\n")')" \
+	"runs after the first apt-get"
+
+run_case "env-guard: the README loses the backup section" fail \
+	"$EGV" \
+	"$(py 'edit("README.md", "## Back up .env\n", "## Keeping .env\n")')" \
+	"has no '## Back up .env' section"
+
+run_case "env-guard: the block is gone (measured nothing)" fail \
+	"$EGV" \
+	"$(py 'edit("install.sh", "# env-guard: begin\n", "# env-guard begins\n")')" \
+	"measured nothing"
+
+run_case "env-guard: a comment in the block is reworded (must pass)" pass \
+	"$EGV" \
+	"$(py 'edit("install.sh", "# run). So a run that finds no .env asks Docker", "# run). So a run finding no .env asks Docker")')"
 
 echo
 if [ -n "$(git status --porcelain)" ]; then
