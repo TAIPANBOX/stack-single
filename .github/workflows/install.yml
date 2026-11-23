@@ -91,7 +91,9 @@ jobs:
                   body = json.dumps({
                       "id": "chatcmpl-ci", "object": "chat.completion", "model": "gpt-4o-mini",
                       "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
-                      "usage": {"prompt_tokens": 5, "completion_tokens": 1, "total_tokens": 6},
+                      # Large enough to be a figure on the FinOps console (invariant 80): at
+                      # gpt-4o-mini's list price, 0.03 + 0.03 = 0.06 USD.
+                      "usage": {"prompt_tokens": 200000, "completion_tokens": 50000, "total_tokens": 250000},
                   }).encode()
                   self.send_response(200)
                   self.send_header("content-type", "application/json")
@@ -292,10 +294,12 @@ jobs:
         run: |
           cd /opt/agent-stack
           sleep 5   # the gateway writes its trace every 2 seconds
-          # focus-export exports first and then waits, so a restart is one window now.
+          # focus-export exports first and then waits, so a restart is one window now. Only the
+          # lines after the restart count: a line from the first start must not end the wait.
+          since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           sudo docker compose restart focus-export
           for _ in $(seq 1 45); do
-            logs="$(sudo docker compose logs focus-export 2>&1)"
+            logs="$(sudo docker compose logs --since "$since" focus-export 2>&1)"
             grep -q 'focus-export: gateway-openai: wrote' <<<"$logs" && break
             sleep 2
           done
@@ -304,7 +308,18 @@ jobs:
             || { echo "::error::focus-export wrote no export for the OpenAI door"; exit 1; }
           csv="$(sudo docker run --rm -v agent-stack_focus:/f:ro busybox:1.36 cat /f/gateway-openai/focus-gateway-openai.csv)"
           head -c 600 <<<"$csv"; echo
-          grep -q 'agent://ci.invalid/flint/one' <<<"$csv" || { echo "::error::the door's export does not carry the admitted call's agent"; exit 1; }
+          # The admitted call, not the refused ones beside it: a row for this agent, not blocked,
+          # with a billed cost above zero. A blocked row costs 0 and would match the agent alone.
+          billed="$(python3 -c '
+          import csv, sys
+          tot = 0.0
+          for r in csv.DictReader(sys.stdin):
+              if r.get("x_agent_id") == "agent://ci.invalid/flint/one" and r.get("x_blocked") == "false":
+                  tot += float(r.get("BilledCost") or 0)
+          print("%.6f" % tot)' <<<"$csv")"
+          echo "the door's export bills agent://ci.invalid/flint/one $billed USD"
+          python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) > 0 else 1)' "$billed" \
+            || { echo "::error::the door's export carries no admitted, billed call for the agent"; exit 1; }
           files="$(sudo docker run --rm -v agent-stack_focus:/f:ro busybox:1.36 sh -c 'ls -A /f/gateway /f/gateway-openai')"
           echo "$files"
           if grep -q '\.partial' <<<"$files"; then echo "::error::focus-export left a partial file beside the export"; exit 1; fi

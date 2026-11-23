@@ -60,6 +60,13 @@ Feature: the gateway's spend reaches the FinOps console
     Then the gate fails, because the console would lose the spend it had
     # -> gates-have-teeth.sh "costcrew-reads-spend: an empty window deletes the last export"
 
+  Scenario: a door that has never exported blocks the other door's spend
+    Given the console refuses a configured folder with nothing in it, and the whole import with it
+    When a door that served nothing is left with no file, or header-only files are written with no real export beside them
+    Then the gate fails, because the console would read neither door, or wipe its demo data with no call to show
+    # -> gates-have-teeth.sh "costcrew-reads-spend: a door that never exported gets no file"
+    # -> gates-have-teeth.sh "costcrew-reads-spend: header-only files with no real export beside them"
+
   Scenario: the install stops asking whether the export runs
     Given install.sh checks every box at the end of a run and in status
     When the focus-export check is gone

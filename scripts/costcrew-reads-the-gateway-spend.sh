@@ -117,9 +117,15 @@ script = "\n".join(fx.get("command") or [])
 entry = fx.get("entrypoint") or []
 if not script.strip():
     stop("focus-export has no script in its command; measured nothing")
-for door in DOORS:
-    if not re.search(r"\bfor door in\b[^\n]*\b%s\b" % re.escape(door), script):
-        bad("focus-export's loop does not name the %s door, so its calls never reach FOCUS" % door)
+# The loop that runs the export: the last `for door in` before `tokenfuse focus-export`.
+cut = script.find("tokenfuse focus-export")
+loops = re.findall(r"\bfor door in ([^;\n]*);", script[:cut]) if cut >= 0 else []
+if not loops:
+    bad("focus-export's script has no `for door in ...` loop around `tokenfuse focus-export`")
+else:
+    for door in DOORS:
+        if door not in loops[-1].split():
+            bad("focus-export's loop does not name the %s door, so its calls never reach FOCUS" % door)
 
 # ---- B. costcrew --------------------------------------------------------------------
 cc = services["costcrew"]
@@ -248,8 +254,11 @@ for o in outs:
             "the write sees half an export" % os.path.relpath(o, tree))
         break
 first = {d: readable(d) for d in DOORS}
+def content(door):
+    return [open(os.path.join(stack, "focus", door, n)).read() for n in readable(door)]
+before = content("gateway")
 w2 = window({"gateway": "none", "gateway-openai": "csv"})
-if readable("gateway") != first["gateway"] or not first["gateway"]:
+if readable("gateway") != first["gateway"] or not first["gateway"] or content("gateway") != before:
     bad("a window that exported nothing on the gateway did not keep its last good file: %s -> %s"
         % (first["gateway"], readable("gateway")))
 if len(readable("gateway-openai")) != 1:
@@ -258,6 +267,42 @@ if leftovers("gateway") != readable("gateway"):
     bad("a window that exported nothing left a file beside the export: %s" % leftovers("gateway"))
 if "no calls found" not in (w2.stdout + w2.stderr):
     bad("a window that exported nothing did not print the tool's own words, so a real failure would read as quiet")
+
+# A door that has never exported, on a fresh tree. The console refuses a configured folder with no
+# *.csv in it, and refuses the whole import with it (costcrew v0.10.2 csvFolder), so the idle door
+# needs a file of the other door's header and no row; and with neither door exported there must be
+# nothing at all, because the console wipes its generated estate on the first import of any file.
+def fresh():
+    for door in DOORS:
+        d = os.path.join(stack, "focus", door)
+        for n in os.listdir(d):
+            os.unlink(os.path.join(d, n))
+
+for real, idle in (("gateway", "gateway-openai"), ("gateway-openai", "gateway")):
+    fresh()
+    w = window({real: "csv", idle: "none"})
+    got = readable(idle)
+    if len(got) != 1:
+        bad("with only the %s door exported, focus/%s holds %s: the console would refuse the whole import "
+            "and read neither door's spend: %s" % (real, idle, got or "no *.csv", (w.stdout + w.stderr).strip()[-300:]))
+    else:
+        lines = open(os.path.join(stack, "focus", idle, got[0])).read().splitlines()
+        head = open(os.path.join(stack, "focus", real, readable(real)[0])).read().splitlines()[:1]
+        if lines != head:
+            bad("the never-exported %s door's file is %r, not the other door's header alone %r" % (idle, lines, head))
+    if leftovers(idle) != readable(idle):
+        bad("writing the %s door's header-only file left a file beside it: %s" % (idle, leftovers(idle)))
+    # and a real export later replaces the header-only file
+    window({real: "csv", idle: "csv"})
+    if idle not in open(os.path.join(stack, "focus", idle, readable(idle)[0])).read():
+        bad("a real export of the %s door did not replace its header-only file" % idle)
+
+fresh()
+window({"gateway": "none", "gateway-openai": "none"})
+for door in DOORS:
+    if leftovers(door):
+        bad("with neither door exported, focus/%s holds %s; a file with no real call beside it lets the console "
+            "wipe its generated estate with nothing to show" % (door, leftovers(door)))
 
 # ---- E. install.sh asks the box ---------------------------------------------------------------
 install = open("install.sh").read()

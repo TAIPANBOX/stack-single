@@ -2216,10 +2216,13 @@ generated estate: `focus-export` writes each door's calls as a FOCUS CSV, one fo
 per door in the `focus` volume (`focus/gateway`, `focus/gateway-openai`), every 15
 minutes (`FOCUS_EXPORT_INTERVAL` in `.env`, in seconds), and the console mounts that
 volume read only and reads both folders at start and every 15 minutes after
-(`-focus-dir`, `-focus-dir-openai`). The first read that finds a real call replaces
-the generated estate (`-focus-replace-generated`), so a box that has served agents
-shows their spend by agent on the AI pages, and one that has not still shows the
-demo data. The console runs as a user outside the bus group, so it reads the
+(`-focus-dir`, `-focus-dir-openai`). A door that has served nothing yet gets a file
+of the other door's header and no row, because the console refuses a folder with
+nothing in it and with it the whole import; with neither door exported there is no
+file at all. The first read that finds an export replaces the generated estate
+(`-focus-replace-generated`): the demo board, its tasks, sprints, anomalies and
+forecasts go with it, so a box that has served agents shows their spend by agent on
+the AI pages, and one that has not still shows the demo data. The console runs as a user outside the bus group, so it reads the
 folders through their "other" bits (0755, files 0644); it can change nothing in
 them.
 

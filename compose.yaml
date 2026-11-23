@@ -2238,6 +2238,11 @@ services:
     command:
       - |
         set -u
+        interval="$$FOCUS_EXPORT_INTERVAL"
+        case "$$interval" in
+          ''|*[!0-9]*) echo "focus-export: FOCUS_EXPORT_INTERVAL is not a whole number of seconds; using 900"; interval=900 ;;
+        esac
+        [ "$$interval" -ge 60 ] || { echo "focus-export: FOCUS_EXPORT_INTERVAL is below 60 seconds; using 60"; interval=60; }
         while :; do
           for door in gateway gateway-openai; do
             traces="/var/lib/stack/traces/$$door"
@@ -2247,8 +2252,11 @@ services:
             if [ ! -d "$$traces" ]; then
               echo "focus-export: $$door: no trace directory at $$traces yet"
             elif said="$$(tokenfuse focus-export --traces "$$traces" --out "$$part" 2>&1)"; then
-              mv -f "$$part" "$$csv"
-              echo "focus-export: $$door: wrote $$csv"
+              if mv -f "$$part" "$$csv"; then
+                echo "focus-export: $$door: wrote $$csv"
+              else
+                echo "focus-export: $$door: could not put the export in place at $$csv"
+              fi
             else
               # An idle door exits non-zero with "no calls found in the trace",
               # which is not a failure of the export; anything else is printed
@@ -2257,7 +2265,28 @@ services:
               echo "focus-export: $$door: nothing exported this window: $$said"
             fi
           done
-          sleep "$$FOCUS_EXPORT_INTERVAL"
+          # A door that has never exported gets a file of the other door's header and no row,
+          # once the other door has a real export. The FinOps console refuses a configured folder
+          # with no *.csv in it, and refuses the whole import with it, so a box whose OpenAI door
+          # is off (or whose main door is idle) would otherwise import neither door's spend. Only
+          # beside a real export: the console replaces its generated estate on its first import,
+          # and two header-only files would wipe it with no real call to show for it.
+          for door in gateway gateway-openai; do
+            csv="/var/lib/stack/focus/$$door/focus-$$door.csv"
+            [ -e "$$csv" ] && continue
+            for other in gateway gateway-openai; do
+              src="/var/lib/stack/focus/$$other/focus-$$other.csv"
+              { [ "$$other" != "$$door" ] && [ -s "$$src" ]; } || continue
+              part="/var/lib/stack/focus/$$door/.focus-$$door.partial"
+              if head -n 1 "$$src" >"$$part" && mv -f "$$part" "$$csv"; then
+                echo "focus-export: $$door: no call yet; wrote the header alone so the console reads $$other"
+              else
+                echo "focus-export: $$door: could not write the header-only file at $$csv"
+              fi
+              break
+            done
+          done
+          sleep "$$interval"
         done
     volumes:
       # Read only. It reads what the gateways wrote and must not be able to edit

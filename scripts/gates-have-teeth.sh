@@ -6424,6 +6424,16 @@ run_case "costcrew-reads-spend: an empty window deletes the last export" fail \
 	"$(py 'edit("compose.yaml", "              rm -f \"$$part\"\n", "              rm -f \"$$part\" \"$$csv\"\n")')" \
 	"did not keep its last good file"
 
+run_case "costcrew-reads-spend: a door that never exported gets no file" fail \
+	"$CRS" \
+	"$(py 'edit("compose.yaml", "            [ -e \"$$csv\" ] && continue\n", "            continue\n")')" \
+	"the console would refuse the whole import"
+
+run_case "costcrew-reads-spend: header-only files with no real export beside them" fail \
+	"$CRS" \
+	"$(py 'edit("compose.yaml", "              { [ \"$$other\" != \"$$door\" ] && [ -s \"$$src\" ]; } || continue\n", "              [ \"$$other\" != \"$$door\" ] || continue\n              [ -s \"$$src\" ] || printf \"BilledCost\\\\n\" >\"$$src\"\n")')" \
+	"with neither door exported"
+
 run_case "costcrew-reads-spend: install.sh stops checking the export" fail \
 	"$CRS" \
 	"$(py 'edit("install.sh", "check \"focus-export is running, with a folder per door\"", "check \"focus-export is running\"")')" \
