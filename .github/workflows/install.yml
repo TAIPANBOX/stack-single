@@ -282,6 +282,69 @@ jobs:
             echo "::error::the door's events reached the gateway's stream"; exit 1
           fi
 
+      # CLAUDE.md invariant 80: the money arrives. The call the step above admitted through the
+      # OpenAI door (priced from the stub's usage) is exported by focus-export into the door's own
+      # folder, and the FinOps console, started the way the README says, reads it and shows the
+      # agent on its AI page. The console is removed again at the end, so the re-runs below find
+      # it absent, as on a box where nobody started it.
+      - name: "the money arrives: the door's admitted call is spend on the FinOps console's AI page"
+        if: matrix.profile == 'openai-door'
+        run: |
+          cd /opt/agent-stack
+          sleep 5   # the gateway writes its trace every 2 seconds
+          # focus-export exports first and then waits, so a restart is one window now.
+          sudo docker compose restart focus-export
+          for _ in $(seq 1 45); do
+            logs="$(sudo docker compose logs focus-export 2>&1)"
+            grep -q 'focus-export: gateway-openai: wrote' <<<"$logs" && break
+            sleep 2
+          done
+          echo "$logs" | tail -6
+          grep -q 'focus-export: gateway-openai: wrote /var/lib/stack/focus/gateway-openai/focus-gateway-openai.csv' <<<"$logs" \
+            || { echo "::error::focus-export wrote no export for the OpenAI door"; exit 1; }
+          csv="$(sudo docker run --rm -v agent-stack_focus:/f:ro busybox:1.36 cat /f/gateway-openai/focus-gateway-openai.csv)"
+          head -c 600 <<<"$csv"; echo
+          grep -q 'agent://ci.invalid/flint/one' <<<"$csv" || { echo "::error::the door's export does not carry the admitted call's agent"; exit 1; }
+          files="$(sudo docker run --rm -v agent-stack_focus:/f:ro busybox:1.36 sh -c 'ls -A /f/gateway /f/gateway-openai')"
+          echo "$files"
+          if grep -q '\.partial' <<<"$files"; then echo "::error::focus-export left a partial file beside the export"; exit 1; fi
+          # The console, the README's way, with an owner from the environment (no .env line).
+          sudo env COSTCREW_OWNER=ci-owner@ci.invalid docker compose --profile finops up -d costcrew
+          for _ in $(seq 1 45); do
+            curl -fsS -m 3 -o /dev/null http://127.0.0.1:8321/healthz && break
+            sleep 2
+          done
+          pw="ci$(openssl rand -hex 16)"
+          sudo env COSTCREW_OWNER=ci-owner@ci.invalid docker compose --profile finops exec -T costcrew \
+            /usr/local/bin/costcrew -data /var/lib/costcrew -set-password "ci:$pw" >/dev/null
+          clog="$(sudo docker compose --profile finops logs costcrew 2>&1)"
+          grep -q 'reading the gateway.s export from /var/lib/stack/focus/gateway and the OpenAI-wire door.s from /var/lib/stack/focus/gateway-openai' <<<"$clog" \
+            || { echo "$clog" | tail -20; echo "::error::the console did not say it reads both doors' folders"; exit 1; }
+          # Sign in by hand: the session cookie is marked Secure on this listener, which a
+          # cookie jar would not send over plain http to 127.0.0.1.
+          hdrs="$RUNNER_TEMP/cc-login.h"
+          page="$(curl -s -D "$hdrs" http://127.0.0.1:8321/login)"
+          csrf="$(sed -n 's/.*name="csrf" value="\([^"]*\)".*/\1/p' <<<"$page" | head -1)"
+          pre="$(sed -n 's/^[Ss]et-[Cc]ookie: \([^;]*\).*/\1/p' "$hdrs" | tr -d '\r' | paste -sd ';' -)"
+          curl -s -o /dev/null -D "$hdrs" -H "Cookie: $pre" --data-urlencode "csrf=$csrf" \
+            --data-urlencode "username=ci" --data-urlencode "password=$pw" http://127.0.0.1:8321/login
+          sess="$(sed -n 's/^[Ss]et-[Cc]ookie: \([^;]*\).*/\1/p' "$hdrs" | tr -d '\r' | paste -sd ';' -)"
+          [ -n "$sess" ] || { echo "::error::signing in to the FinOps console gave no session"; exit 1; }
+          ok=""
+          for _ in $(seq 1 30); do
+            ai="$(curl -s -H "Cookie: $sess" http://127.0.0.1:8321/ai)"
+            grep -q 'ci.invalid/flint' <<<"$ai" && { ok=1; break; }
+            sleep 2
+          done
+          if [ -z "$ok" ]; then
+            sudo docker compose --profile finops logs costcrew 2>&1 | tail -20
+            sed 's/<[^>]*>/ /g' <<<"$ai" | tr -s ' \n' | head -c 1500; echo
+            echo "::error::the FinOps console's AI page does not show the agent whose call the gateway admitted"; exit 1
+          fi
+          echo "the console's AI page, the agent's row:"
+          grep -m3 'flint' <<<"$(sed 's/<[^>]*>/ /g' <<<"$ai" | tr -s ' ')" || true
+          sudo docker compose --profile finops rm -sf costcrew costcrew-init
+
       - name: client keys and the identity map are kept, and the gateway holds callers to them
         if: matrix.profile == 'identity'
         run: |

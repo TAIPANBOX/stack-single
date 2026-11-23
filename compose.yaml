@@ -141,9 +141,15 @@ services:
         # by default, and without this chown the plane refuses to start rather
         # than run with a revocation list nobody can prove survived a restart.
         chown -R 20002:10001 /vol/vouchryx; chmod 0775 /vol/vouchryx
-        # focus-export (profile routines) runs 10001:10001 and writes the FOCUS
-        # CSVs here; found by the gate the day it was written, same trap.
+        # focus-export runs 10001:10001 and writes the FOCUS CSVs here; found by
+        # the gate the day it was written, same trap. One folder per gateway door
+        # (CLAUDE.md invariant 80): the FinOps console reads each as its own
+        # door and refuses one folder named as both. The console runs as 10003,
+        # outside the bus group, so it reads them through the "other" bits:
+        # 0755 folders, and focus-export writes 0644 files under its umask.
+        mkdir -p /vol/focus/gateway /vol/focus/gateway-openai
         chown -R 10001:10001 /vol/focus; chmod 0775 /vol/focus
+        chmod 0755 /vol/focus/gateway /vol/focus/gateway-openai
         # idryx is told to load the gateway's log at startup and exits if the
         # file is absent, which on a box that has served no traffic yet it
         # always is. An empty file is a valid empty log, and pre-creating it is
@@ -2211,9 +2217,20 @@ services:
     networks:
       - core
     user: "10001:10001"
-    profiles: ["routines"]
+    # ON BY DEFAULT, AND OVER BOTH DOORS (CLAUDE.md invariant 80, stack-single#61). Until 1.13.0
+    # this sat behind the operator's `routines` profile and read `traces/gateway` alone, so no box
+    # exported anything unless a person started it, and the OpenAI door's calls never reached
+    # FOCUS at all. It spends nothing and serves nothing.
+    #
+    # One file per door, rewritten whole every window: `tokenfuse focus-export` with no --from
+    # exports every call in the trace, so a new timestamped file each window would grow the folder
+    # by the whole trace every time. It writes beside the file under a name the FinOps console does
+    # not read (`.partial`; the console takes `*.csv` and `*.csv.gz` only) and then renames it over
+    # the old one, which is atomic on one file system, so a reader never sees half an export. A
+    # window that exports nothing leaves the last good file where it is and prints the tool's own
+    # words, so a failure is seen in `docker compose logs focus-export` rather than read as quiet.
     environment:
-      ROUTINE_INTERVAL: ${ROUTINE_INTERVAL:-3600}
+      FOCUS_EXPORT_INTERVAL: ${FOCUS_EXPORT_INTERVAL:-900}
     # The image's entrypoint is the gateway, so without this line the script below is handed
     # to it as arguments and the service exits asking for an upstream (found in the hardening
     # lab, 2026-11-07: it had never started; verdryx-drift had the same fault).
@@ -2221,25 +2238,29 @@ services:
     command:
       - |
         set -u
-        traces=/var/lib/stack/traces/gateway
-        out=/var/lib/stack/focus
-        sleep "$$ROUTINE_INTERVAL"
         while :; do
-          if [ ! -d "$$traces" ]; then
-            echo "focus-export: no trace directory at $$traces yet"
-          elif tokenfuse focus-export --traces "$$traces" \
-                 --out "$$out/focus-$$(date -u +%Y%m%dT%H%M%SZ).csv" 2>&1; then
-            echo "focus-export: wrote a window"
-          else
-            # An idle window exits non-zero with "no calls found in the trace",
-            # which is not a failure of the export. stack-up's routine makes the
-            # same judgement.
-            echo "focus-export: nothing to export in this window"
-          fi
-          sleep "$$ROUTINE_INTERVAL"
+          for door in gateway gateway-openai; do
+            traces="/var/lib/stack/traces/$$door"
+            out="/var/lib/stack/focus/$$door"
+            csv="$$out/focus-$$door.csv"
+            part="$$out/.focus-$$door.partial"
+            if [ ! -d "$$traces" ]; then
+              echo "focus-export: $$door: no trace directory at $$traces yet"
+            elif said="$$(tokenfuse focus-export --traces "$$traces" --out "$$part" 2>&1)"; then
+              mv -f "$$part" "$$csv"
+              echo "focus-export: $$door: wrote $$csv"
+            else
+              # An idle door exits non-zero with "no calls found in the trace",
+              # which is not a failure of the export; anything else is printed
+              # as the tool said it. Either way the last good file stays.
+              rm -f "$$part"
+              echo "focus-export: $$door: nothing exported this window: $$said"
+            fi
+          done
+          sleep "$$FOCUS_EXPORT_INTERVAL"
         done
     volumes:
-      # Read only. It reads what the gateway wrote and must not be able to edit
+      # Read only. It reads what the gateways wrote and must not be able to edit
       # it, the same split the record profile makes over the bus.
       - traces:/var/lib/stack/traces:ro
       - focus:/var/lib/stack/focus
@@ -2571,6 +2592,18 @@ services:
       - ${RECORD_TRUST_DOMAIN:-set-me.invalid}
       - -stack-owner
       - ${COSTCREW_OWNER:-${ALERT_TO:-}}
+      # THE MONEY ARRIVES (CLAUDE.md invariant 80). The gateway's spend, as focus-export writes it,
+      # one folder per door, read at start and every 15 minutes into the AI pages (costcrew
+      # invariant 104, -focus-every's default). Until 1.13.0 no folder was named, and the console
+      # beside two gateways showed only the generated estate it starts with.
+      # -focus-replace-generated is the launcher's yes to replacing that generated estate on the
+      # first import that finds a real call: without it a real box imports nothing while the demo
+      # data is there. Read only: the console reads the export and cannot change it.
+      - -focus-dir
+      - /var/lib/stack/focus/gateway
+      - -focus-dir-openai
+      - /var/lib/stack/focus/gateway-openai
+      - -focus-replace-generated
     ports:
       - "127.0.0.1:8321:8321"
     # A writable temp, because the root is read-only. SQLite writes a VACUUM's
@@ -2589,6 +2622,7 @@ services:
     volumes:
       - events:/var/lib/stack/events
       - costcrewdata:/var/lib/costcrew
+      - focus:/var/lib/stack/focus:ro
     read_only: true
     cap_drop:
       - ALL
@@ -2720,7 +2754,8 @@ volumes:
   # a hash-chained record kept inside the volume its own inputs live in is
   # evidence an operator can delete while clearing space on the bus.
   # focus-export's own output, so it never writes into the trace directory it
-  # reads. Its artifact is the log line; the CSV is a convenience.
+  # reads: one folder per gateway door, which the FinOps console reads (read
+  # only) as the gateway's spend (CLAUDE.md invariant 80).
   focus:
   records:
   # The WireGuard server's own key. On a volume because regenerating it would

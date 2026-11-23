@@ -237,6 +237,31 @@ for local, routine in sorted(schedules.items()):
         print(f"FAIL: components.json says {routine!r} runs here as {local!r} and compose")
         print(f"      starts no such service.")
         problems += 1
+# A routine this file says RUNS here must be one an install starts. It sat in this
+# map for months behind `profiles: ["routines"]`, which install.sh never passes
+# (the operator's kind, PROFILES_OPERATOR), so the map said focus-export and
+# verdryx-drift ran on every box and neither ran on any (CLAUDE.md invariant 80).
+# A scheduled routine has no profile, or a profile in PROFILES_INSTALLED, the
+# installer's own kind, which it starts from its flags.
+inst_profiles = re.search(r'^PROFILES_INSTALLED="([^"]*)"', install, re.M)
+if not inst_profiles:
+    print("FAIL: install.sh has no PROFILES_INSTALLED line, so whether a scheduled routine is")
+    print("      one an install starts measured NOTHING.")
+    problems += 1
+else:
+    installed_kind = set(inst_profiles.group(1).split())
+    for local in sorted(schedules):
+        block = re.search(rf"^  {re.escape(local)}:\n(.*?)(?=^  [a-z0-9-]+:\s*$|\Z)",
+                          compose, re.M | re.S)
+        if not block:
+            continue
+        prof = re.search(r'profiles:\s*\["([a-z-]+)"\]', block.group(1))
+        if prof and prof.group(1) not in installed_kind:
+            print(f"FAIL: components.json says {local!r} runs here on a loop, and it sits behind the")
+            print(f"      {prof.group(1)!r} profile, which install.sh does not start (not in")
+            print("      PROFILES_INSTALLED). A routine no install starts is not scheduled.")
+            problems += 1
+
 if len(set(schedules.values())) != len(schedules):
     print("FAIL: two services are mapped to the same routine. One routine runs once per")
     print("      deployment, so this map cannot be right.")
