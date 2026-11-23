@@ -110,6 +110,7 @@ step "a lost .env is never regenerated over a stack's volumes (invariant 81)" ".
 step "the console's revoke button has a key of its own (invariant 82)" "./scripts/console-revoke-is-wired.sh"
 step "every install asks the box who can write what on the bus (invariant 83)" "./scripts/bus-writers-are-probed.sh"
 step "every service carries a memory limit of its own (invariant 85)" "./scripts/every-service-has-a-memory-limit.sh"
+step "a piped install takes a signed release (invariant 84)" "./scripts/piped-tree-is-verified.sh"
 # Reaches the network (a tarball from the sibling repo), which is why it is
 # last: everything that can be judged offline has already spoken by here.
 step "every image has the files it copies" "./scripts/build-context-complete.sh"

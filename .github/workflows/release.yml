@@ -1,0 +1,92 @@
+name: release
+
+# The tree a piped install runs (CLAUDE.md invariant 84). On a version tag, the tag's own tree is packed into one
+# tarball, signed keyless with this job's GitHub OIDC identity, checked the way install.sh checks it, and put on the
+# release with its bundle, its SHA-256 and the bootstrap install.sh. A person still pushes the tag and publishes
+# the release: the publish job creates a DRAFT when there is none, so the latest release never lacks its signed tree.
+#
+# The identity install.sh requires is exactly this file on the tag being installed:
+#   https://github.com/TAIPANBOX/stack-single/.github/workflows/release.yml@refs/tags/vX.Y.Z
+# issued by https://token.actions.githubusercontent.com. Renaming this file, or signing from another workflow,
+# makes every new release refuse to install, which is the point.
+#
+# A pull request that edits this file runs the tree job, so the packing is proven before a tag needs it; the job
+# that signs and publishes runs on a tag only (estate-gates C17). Each job packs the tree itself, the same way.
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+
+permissions:
+  contents: read
+
+jobs:
+  tree:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: on a tag, the tag is the tree's one version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          want="${GITHUB_REF_NAME#v}"
+          got="$(sed -n 's/^STACK_VERSION="\([^"]*\)"$/\1/p' install.sh | head -n 1)"
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::$GITHUB_REF_NAME is not a tag of the form vX.Y.Z"; exit 1; }
+          [ "$got" = "$want" ] || { echo "::error::install.sh says STACK_VERSION $got, the tag says $want"; exit 1; }
+          [ -f "docs/releases/$GITHUB_REF_NAME.md" ] || { echo "::error::no docs/releases/$GITHUB_REF_NAME.md"; exit 1; }
+
+      - name: the tarball of this tree, holding what install.sh looks for at its top
+        run: |
+          git archive --format=tar --prefix=stack-single/ HEAD | gzip -n >stack-single.tar.gz
+          sha256sum stack-single.tar.gz
+          tar -tzf stack-single.tar.gz stack-single/install.sh stack-single/compose.yaml >/dev/null
+
+  publish:
+    needs: tree
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write   # the draft release and its assets
+      id-token: write   # the keyless signature
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: the tarball of the tag's tree
+        run: |
+          git archive --format=tar --prefix=stack-single/ HEAD | gzip -n >stack-single.tar.gz
+          sha256sum stack-single.tar.gz >stack-single.tar.gz.sha256
+          cat stack-single.tar.gz.sha256
+
+      # The same cosign binary install.sh uses, checked against the same pinned SHA-256 before it runs.
+      - name: cosign, the installer's pinned binary
+        run: |
+          ver="$(sed -n 's/^COSIGN_VERSION="\([^"]*\)"$/\1/p' install.sh)"
+          sum="$(sed -n 's/^COSIGN_SHA256_amd64="\([0-9a-f]*\)"$/\1/p' install.sh)"
+          [ -n "$ver" ] && [ -n "$sum" ] || { echo "::error::install.sh pins no cosign"; exit 1; }
+          curl -fsSL -o "$RUNNER_TEMP/cosign" "https://github.com/sigstore/cosign/releases/download/$ver/cosign-linux-amd64"
+          printf '%s  %s\n' "$sum" "$RUNNER_TEMP/cosign" | sha256sum -c --status || { echo "::error::cosign does not match its pinned SHA-256"; exit 1; }
+          chmod 0755 "$RUNNER_TEMP/cosign"
+
+      - name: sign the tree
+        run: '"$RUNNER_TEMP/cosign" sign-blob --yes --bundle stack-single.tar.gz.sigstore.json stack-single.tar.gz'
+
+      - name: check it the way install.sh will
+        run: |
+          "$RUNNER_TEMP/cosign" verify-blob --bundle stack-single.tar.gz.sigstore.json \
+            --certificate-identity "https://github.com/TAIPANBOX/stack-single/.github/workflows/release.yml@$GITHUB_REF" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com stack-single.tar.gz
+
+      - name: a draft release unless one exists, and its assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          gh release view "$tag" >/dev/null 2>&1 \
+            || gh release create "$tag" --draft --verify-tag --title "$tag" --notes-file "docs/releases/$tag.md"
+          gh release upload "$tag" --clobber \
+            stack-single.tar.gz stack-single.tar.gz.sigstore.json stack-single.tar.gz.sha256 install.sh

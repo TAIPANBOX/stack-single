@@ -1023,6 +1023,45 @@ jobs:
   # its own, with the controls that prove each claim by taking it away, then the operator's own
   # path. The second half is the first fetch through `egress-browser` in CI: the installer's
   # measurement, the README's command, the wardryx the installer started, and a real page.
+  # CLAUDE.md invariant 84: a piped install refuses a release whose tree carries no good signature, and leaves
+  # the box as it was. The tree of this commit is served from the runner as a release with no bundle, then with
+  # a bundle that is not one, and install.sh is piped into bash the way the README says. The positive path needs
+  # a tarball signed by release.yml on a tag, which a pull request cannot make; it is proven after a release.
+  piped:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: a release of this tree, served from the runner, with no bundle and with a bad one
+        run: |
+          ver="$(sed -n 's/^STACK_VERSION="\([^"]*\)"$/\1/p' install.sh)"
+          echo "TAG=v$ver" >>"$GITHUB_ENV"
+          for kind in none bad; do
+            d="$RUNNER_TEMP/rel-$kind/download/v$ver"
+            mkdir -p "$d"
+            git archive --format=tar --prefix=stack-single/ HEAD | gzip -n >"$d/stack-single.tar.gz"
+            [ "$kind" = bad ] && printf '{"mediaType":"application/vnd.dev.sigstore.bundle.v0.3+json"}\n' >"$d/stack-single.tar.gz.sigstore.json"
+          done
+          (cd "$RUNNER_TEMP" && nohup python3 -m http.server 8998 >"$RUNNER_TEMP/http.log" 2>&1 &)
+          sleep 1
+      - name: a piped install refuses both, and the box is untouched
+        run: |
+          for kind in none bad; do
+            set +e
+            sudo env STACK_DIR=/opt/agent-stack STACK_TAG="$TAG" STACK_RELEASE_BASE="http://127.0.0.1:8998/rel-$kind" \
+              bash <install.sh >"$RUNNER_TEMP/piped-$kind.log" 2>&1
+            rc=$?
+            set -e
+            cat "$RUNNER_TEMP/piped-$kind.log"
+            [ "$rc" -ne 0 ] || { echo "::error::a release with $kind bundle was installed"; exit 1; }
+            grep -q 'Nothing was changed' "$RUNNER_TEMP/piped-$kind.log" || { echo "::error::the $kind refusal does not say nothing was changed"; exit 1; }
+            [ ! -e /opt/agent-stack ] || { echo "::error::the $kind refusal created /opt/agent-stack"; exit 1; }
+            if ls -d /tmp/stack-single-tree.* 2>/dev/null; then echo "::error::the $kind refusal left its temporary tree"; exit 1; fi
+          done
+          grep -q 'no signature bundle' "$RUNNER_TEMP/piped-none.log" || { echo "::error::no bundle was not named"; exit 1; }
+          grep -q 'does not carry a signature from this repository' "$RUNNER_TEMP/piped-bad.log" || { echo "::error::a bad bundle was not refused by cosign"; exit 1; }
+          if command -v docker >/dev/null && grep -q . <<<"$(sudo docker ps -q)"; then echo "::error::a container is running after a refusal"; exit 1; fi
+
   browser:
     runs-on: ubuntu-24.04
     timeout-minutes: 30

@@ -124,7 +124,8 @@ for lineno, cmd in commands(lines):
         continue
     if not FETCH.search(cmd):
         continue
-    if "|| die" in cmd or "||die" in cmd:
+    # tree_die (invariant 84) is die that also removes the bootstrap's temporary directory.
+    if re.search(r"\|\|\s*(tree_)?die\b", cmd):
         continue
     # `|| true` is a deliberate, visible decision to ignore a failure.
     if "|| true" in cmd:

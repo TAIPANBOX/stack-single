@@ -473,12 +473,15 @@ done
 printf '#!/usr/bin/env bash\necho 0\n' >"$scratch/bin2/id"
 chmod +x "$scratch"/bin2/*
 printf 'ID=debian\nPRETTY_NAME="a stub"\n' >"$scratch/os-release"
-sed "s#/etc/os-release#$scratch/os-release#g" install.sh >"$scratch/install-copy.sh"
+# A copy with its tree beside it, as a clone has (a lone install.sh would be a piped install, invariant 84).
+mkdir -p "$scratch/real"
+sed "s#/etc/os-release#$scratch/os-release#g" install.sh >"$scratch/real/install.sh"
+cp compose.yaml "$scratch/real/compose.yaml"
 real() { # DIR ARGS...: the real file, with REPORT read by the stub docker
 	local d="$1"
 	shift
 	env -i PATH="$scratch/bin2:$PATH" HOME="$d" STACK_DIR="$d" STATE="$d/state" LOG="$d/state/log" REPORT="$rep" \
-		bash "$scratch/install-copy.sh" "$@" </dev/null 2>&1 || printf 'rc=%s\n' "$?"
+		bash "$scratch/real/install.sh" "$@" </dev/null 2>&1 || printf 'rc=%s\n' "$?"
 }
 d="$(box)"
 touch "$d/state/image"

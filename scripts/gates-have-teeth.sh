@@ -1887,7 +1887,7 @@ run_case "drills-broker: the broker's scopes admit search_notes" fail \
 
 run_case "drills-broker: a piped install does not fetch this box's drill" fail \
 	"$DRB" \
-	"$(py 'edit("install.sh", "/drill-scenarios/mcp-ungranted-tool-held.yaml\" \\\n", "/drill-scenarios/elsewhere.yaml\" \\\n")')" \
+	"$(py 'open(".gitattributes", "a").write("drill-scenarios export-ignore\n")')" \
 	"a piped install does not fetch"
 
 run_case "drills-broker: a bare .env line comes back quoted" fail \
@@ -3710,12 +3710,12 @@ run_case "rollback-floor: a line that cannot be read is skipped" fail \
 run_case "rollback-floor: the version of the compose file is not compared" fail \
 	'./scripts/rollback-floor.sh' \
 	"$(py 'edit("install.sh", "  if [ \"$v\" != \"$STACK_VERSION\" ]; then\n", "  if false; then\n")')" \
-	"a piped install whose compose file is another version: it was not refused"
+	"a tree whose compose file is another version: it was not refused"
 
-run_case "rollback-floor: the fetch writes over the box's file" fail \
+run_case "rollback-floor: a tag set by hand is written as verified" fail \
 	'./scripts/rollback-floor.sh' \
-	"$(py 'edit("install.sh", "    -o \"$STACK_DIR/compose.yaml.fetched\" || die", "    -o \"$STACK_DIR/compose.yaml\" || die")')" \
-	"the box's compose.yaml was replaced before the refusal"
+	"$(py 'edit("install.sh", "  if [ -n \"${STACK_TREE_VERIFIED:-}\" ] && [ -n \"$1\" ] && [ -n \"$tt\" ] \\\n     && [[ \"$(cd \"$1\" && pwd -P)\" == \"$tt\"/* ]]; then", "  if [ -n \"${STACK_TREE_VERIFIED:-}\" ]; then")')" \
+	"a tag set by hand was written to the journal as verified"
 
 run_case "rollback-floor: the tree's journal replaces the box's" fail \
 	'./scripts/rollback-floor.sh' \
@@ -3829,8 +3829,7 @@ run_case "rollback-floor: the function is gone" fail \
 
 run_case "rollback-floor: section 1 calls nothing" fail \
 	'./scripts/rollback-floor.sh' \
-	"$(py 'edit("install.sh", "  journal_begin \"$HERE\"\n", "")
-edit("install.sh", "  journal_begin \"\"\n", "")')" \
+	"$(py 'edit("install.sh", "  journal_begin \"$HERE\"\n", "")')" \
 	"measured NOTHING"
 
 run_case "rollback-floor: the README section is gone" fail \
@@ -6286,7 +6285,7 @@ run_case "no-download-outside-build: a script is piped into bash" fail \
 run_case "no-download-outside-build: a file is downloaded and kept with no check" fail \
 	"$NUD" \
 	"$(py 'edit("install.sh", "'"$BRANCH_OPEN"'", "curl -fsSL https://example.invalid/x -o \"$STACK_DIR/x\"\n'"$BRANCH_OPEN"'")')" \
-	"not one of the two named exceptions"
+	"not one of the named exceptions"
 
 run_case "no-download-outside-build: a repository is cloned outside the build" fail \
 	"$NUD" \
@@ -6308,10 +6307,20 @@ run_case "no-download-outside-build: REPO_RAW comes back" fail \
 	"$(py 'edit("install.sh", "REPO_TARBALL=\"${REPO_TARBALL:-", "REPO_RAW=\"${REPO_RAW:-https://raw.githubusercontent.com/TAIPANBOX/stack-k8s/main}\"\nREPO_TARBALL=\"${REPO_TARBALL:-")')" \
 	"REPO_RAW"
 
-run_case "no-download-outside-build: a piped install fetches its files from another URL" fail \
+run_case "no-download-outside-build: a file of main is fetched outside the bootstrap again" fail \
 	"$NUD" \
-	"$(py 'edit_all("install.sh", "${REPO_SINGLE_RAW:-https://raw.githubusercontent.com/TAIPANBOX/stack-single/main}", "${REPO_ELSE_RAW:-https://raw.githubusercontent.com/TAIPANBOX/stack-single/main}")')" \
-	"not one of the two named exceptions"
+	"$(py 'edit("install.sh", "'"$BRANCH_OPEN"'", "curl -fsSL \"https://raw.githubusercontent.com/TAIPANBOX/stack-single/main/compose.yaml\" -o \"$STACK_DIR/compose.yaml\" || die \"could not fetch compose.yaml\"\n'"$BRANCH_OPEN"'")')" \
+	"not one of the named exceptions"
+
+run_case "no-download-outside-build: the release tree is unpacked before its signature" fail \
+	"$NUD" \
+	"$(py 'edit("install.sh", "  ( STACK_DIR=\"$d\"; cosign_install )", "  tree_unpack \"$d/$STACK_TREE_ASSET\" \"$d/early\"\n  ( STACK_DIR=\"$d\"; cosign_install )")')" \
+	"unpacked before cosign verify-blob"
+
+run_case "no-download-outside-build: main is fetched outside its flag" fail \
+	"$NUD" \
+	"$(py 'edit("install.sh", "  base=\"${base%/}\"\n", "  base=\"${base%/}\"\n  curl -fsSL -o \"$d/main.tar.gz\" \"$base/main.tar.gz\" || tree_die \"x\"\n")')" \
+	"outside the INSTALL_FROM_MAIN=1 branch"
 
 run_case "no-download-outside-build: the build block is gone (measured nothing)" fail \
 	"$NUD" \
@@ -6323,9 +6332,9 @@ run_case "no-download-outside-build: the cosign exception matches nothing (measu
 	"$(py 'edit_all("install.sh", "\"$dest.download\"", "\"$dest.fetched\"")')" \
 	"measured NOTHING"
 
-run_case "no-download-outside-build: a piped install fetches another file of this repository (must pass)" pass \
+run_case "no-download-outside-build: the release tree fetches one more of its assets (must pass)" pass \
 	"$NUD" \
-	"$(py 'edit("install.sh", "'"$BRANCH_OPEN"'", "curl -fsSL \"${REPO_SINGLE_RAW:-https://raw.githubusercontent.com/TAIPANBOX/stack-single/main}/x.yaml\" -o \"$STACK_DIR/x.yaml\" || die \"could not fetch x\"\n'"$BRANCH_OPEN"'")')"
+	"$(py 'edit("install.sh", "  ( STACK_DIR=\"$d\"; cosign_install )", "  curl -fsSL -o \"$d/$STACK_TREE_ASSET.sha256\" \"$base/download/$tag/$STACK_TREE_ASSET.sha256\" || tree_die \"x\"\n  ( STACK_DIR=\"$d\"; cosign_install )")')"
 
 run_case "no-download-outside-build: the build block fetches as before (must pass)" pass \
 	"$NUD" \
@@ -6673,6 +6682,57 @@ run_case "mem-limit: the services are gone (measured nothing)" fail \
 run_case "mem-limit: one plane is given more room (must pass)" pass \
 	"$EML" \
 	"$(py 'edit("compose.yaml", "    pids_limit: 512\n    mem_limit: 512m\n", "    pids_limit: 512\n    mem_limit: 768m\n")')"
+# invariant 84: a piped install runs the latest release's tree, only behind its signature.
+PTV='./scripts/piped-tree-is-verified.sh'
+
+run_case "piped-tree: the signature is checked after the tree is unpacked" fail \
+	"$PTV" \
+	"$(py 'edit("install.sh", "  if ! got=\"$(\"$d/bin/cosign\" verify-blob", "  tree_unpack \"$d/$STACK_TREE_ASSET\" \"$d/tree\"\n  exec env STACK_TREE_VERIFIED=\"$tag\" STACK_TREE_TMP=\"$d\" bash \"$TREE_ROOT/install.sh\" </dev/null\n  if ! got=\"$(\"$d/bin/cosign\" verify-blob")')" \
+	"bad-signature: it was not refused"
+
+run_case "piped-tree: the identity is widened to any repository" fail \
+	"$PTV" \
+	"$(py 'edit("install.sh", "STACK_TREE_SIGNER_PREFIX='"'"'https://github.com/TAIPANBOX/stack-single/.github/workflows/release.yml@refs/tags/'"'"'", "STACK_TREE_SIGNER_PREFIX='"'"'https://github.com/TAIPANBOX/'"'"'")')" \
+	"not exactly this repository"
+
+run_case "piped-tree: a failed check falls back to main" fail \
+	"$PTV" \
+	"$(py 'edit("install.sh", "    tree_die \"the tree of release $tag does not carry a signature", "    curl -fsSL -o \"$d/main.tar.gz\" \"${STACK_MAIN_TARBALL:-x}\" || true\n    tree_die \"the tree of release $tag does not carry a signature")')" \
+	"fell back to fetching main"
+
+run_case "piped-tree: a tree of another version is accepted" fail \
+	"$PTV" \
+	"$(py 'edit("install.sh", "  [ \"$got\" = \"$want\" ] || tree_die", "  true || tree_die")')" \
+	"other-version: it was not refused"
+
+run_case "piped-tree: a member that climbs out of the tarball is unpacked" fail \
+	"$PTV" \
+	"$(py 'edit("install.sh", "  if grep -qE '"'"'(^/|(^|/)\\.\\.(/|$))'"'"' <<<\"$names\"; then", "  if false; then")')" \
+	"climbs out was not refused by the block itself"
+
+run_case "piped-tree: a server can name an older release as the latest" fail \
+	"$PTV" \
+	"$(py 'edit("install.sh", "    tree_die \"$base/latest names $tag, older than this script", "    true || tree_die \"$base/latest names $tag, older than this script")')" \
+	"older-latest: it was not refused"
+
+run_case "piped-tree: the README points back at main" fail \
+	"$PTV" \
+	"$(py 'edit("README.md", "curl -fsSL https://github.com/TAIPANBOX/stack-single/releases/latest/download/install.sh | bash", "curl -fsSL https://raw.githubusercontent.com/TAIPANBOX/stack-single/main/install.sh | bash")')" \
+	"README's install line"
+
+run_case "piped-tree: the release workflow stops signing" fail \
+	"$PTV" \
+	"$(py 'edit(".github/workflows/release.yml", "sign-blob --yes --bundle stack-single.tar.gz.sigstore.json stack-single.tar.gz", "true")')" \
+	"does not sign"
+
+run_case "piped-tree: the block is gone (measured nothing)" fail \
+	"$PTV" \
+	"$(py 'edit("install.sh", "# tree-bootstrap: begin\n", "# tree-bootstrap begins\n")')" \
+	"measured nothing"
+
+run_case "piped-tree: a refusal is reworded (must pass)" pass \
+	"$PTV" \
+	"$(py 'edit("install.sh", "so its tree was not used. Nothing was changed.\"\n  ( STACK_DIR", "so its tree was not used at all. Nothing was changed.\"\n  ( STACK_DIR")')"
 
 echo
 if [ -n "$(git status --porcelain)" ]; then

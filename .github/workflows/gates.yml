@@ -187,6 +187,8 @@ jobs:
         run: ./scripts/bus-writers-are-probed.sh
       - name: every service carries a memory limit of its own (invariant 85)
         run: ./scripts/every-service-has-a-memory-limit.sh
+      - name: a piped install takes a signed release (invariant 84)
+        run: ./scripts/piped-tree-is-verified.sh
 
       # Last, because it mutates tracked files and restores them. It needs a
       # clean tree and says so plainly, so it also reports any earlier step

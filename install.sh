@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # The agent stack on one machine, ready for agents that live somewhere else.
 #
-#   curl -fsSL https://raw.githubusercontent.com/TAIPANBOX/stack-single/main/install.sh | bash
+#   curl -fsSL https://github.com/TAIPANBOX/stack-single/releases/latest/download/install.sh | bash
+#
+# (the latest release, unpacked only behind its cosign signature; see the tree-bootstrap block and the
+# README, "What a piped install runs"; INSTALL_FROM_MAIN=1 for the main branch, unsigned)
 #
 # or, from a clone:
 #
@@ -139,6 +142,10 @@ set -euo pipefail
 REPO_TARBALL="${REPO_TARBALL:-https://api.github.com/repos/TAIPANBOX/stack-k8s/tarball/main}"
 STACK_DIR="${STACK_DIR:-/opt/agent-stack}"
 SRC_DIR="${SRC_DIR:-$STACK_DIR/src}"
+# The file this script was read from, taken here at the top level: inside a function bash 5.2 reports
+# BASH_SOURCE[0] as `main` when the script came on stdin, and a file of that name in the current directory
+# would then pass for a tree (invariant 84). Empty for a piped script.
+SELF="${BASH_SOURCE[0]:-}"
 CONSOLE_TOKEN="${CONSOLE_TOKEN:-}"   # optional: only for a private fork of the console
 CONSOLE_USER="${CONSOLE_USER:-ops}"
 # The host interface Docker publishes the gateway on. Loopback by default: a
@@ -1764,7 +1771,15 @@ journal_entry() { # EVENT: when, what, and which tree
 journal_begin() { # TREE: its directory, empty for a piped install, which has no commit to name
   local cv dv
   journal_tree=piped
-  if [ -n "$1" ]; then
+  local tt=""
+  if tree_tmp_valid "${STACK_TREE_TMP:-}"; then tt="$(cd "$STACK_TREE_TMP" && pwd -P)" || tt=""; fi
+  if [ -n "${STACK_TREE_VERIFIED:-}" ] && [ -n "$1" ] && [ -n "$tt" ] \
+     && [[ "$(cd "$1" && pwd -P)" == "$tt"/* ]]; then
+    # The tag tree_bootstrap checked (invariant 84), or main-unsigned: the tree has no .git to describe. Only
+    # for a tree inside the bootstrap's own temporary directory, so a variable set by hand names nothing.
+    journal_tree="$STACK_TREE_VERIFIED"
+    case "$journal_tree" in ""|*[!A-Za-z0-9._+-]*) journal_tree=unknown ;; esac
+  elif [ -n "$1" ]; then
     journal_tree="$(git -c safe.directory="$1" -C "$1" describe --tags --always 2>/dev/null || true)"
     case "$journal_tree" in ""|*[!A-Za-z0-9._+-]*) journal_tree=unknown ;; esac
   fi
@@ -2561,6 +2576,132 @@ image_verify() {
   note "signature verified: $name"
 }
 # image-verify: end
+
+# tree-bootstrap: begin
+# CLAUDE.md invariant 84. A piped install (`curl ... | bash`, so no tree beside this script) installs the LATEST
+# RELEASE, and every file it uses comes from one tarball whose cosign bundle checks against this repository's own
+# release workflow, on that tag. Nothing from `main` unless INSTALL_FROM_MAIN=1 says so, and then it says plainly
+# that nothing was checked. It runs before anything is installed or written: it touches a temporary directory and
+# nothing else, and any failure stops the run with the box as it was. A run from a clone is the operator's own
+# tree and is not touched here.
+#
+#   STACK_TAG=vX.Y.Z       a release to install instead of the latest (still checked; invariant 68's floor
+#                          refuses one below the box's)
+#   STACK_RELEASE_BASE     where the release assets are fetched from (a mirror); never changes whose
+#                          signature is required
+#   INSTALL_FROM_MAIN=1    the main branch, unsigned and unchecked, by name only, never as a fallback
+#
+# The identity is exact, built from the tag the tarball is for: the release workflow of TAIPANBOX/stack-single on
+# that tag. Not the images' signer: that regexp accepts any TAIPANBOX repository's release workflow.
+STACK_TREE_SIGNER_PREFIX='https://github.com/TAIPANBOX/stack-single/.github/workflows/release.yml@refs/tags/'
+STACK_TREE_ISSUER='https://token.actions.githubusercontent.com'
+STACK_TREE_ASSET='stack-single.tar.gz'
+
+# The one way out of this block once the temporary directory exists: it goes with the run, and the installer's
+# own EXIT trap (which narrates a crash) is left as it is.
+tree_tmp_valid() { # VALUE: whether it is a directory of exactly the name tree_bootstrap makes, and no link
+  local base="${TMPDIR:-/tmp}" v="$1"
+  [[ "$v" == "$base"/stack-single-tree.* ]] || return 1
+  [[ "${v#"$base"/stack-single-tree.}" =~ ^[A-Za-z0-9]{8}$ ]] || return 1
+  [ -d "$v" ] && [ ! -L "$v" ]
+}
+tree_die() {
+  if tree_tmp_valid "${TREE_TMP:-}"; then rm -rf "$TREE_TMP"; fi
+  die "$@"
+}
+
+tree_is_beside() { # whether this script was read from a file that has the stack's tree beside it
+  local src="$SELF" dir
+  [ -n "$src" ] && [ -f "$src" ] || return 1
+  # A path, or the very name bash was handed: not a word that happens to name a file here.
+  [[ "$src" == */* ]] || [ "$src" = "$0" ] || return 1
+  dir="$(cd "$(dirname "$src")" 2>/dev/null && pwd)" || return 1
+  [ -f "$dir/compose.yaml" ] && [ -f "$dir/install.sh" ]
+}
+
+tree_unpack() { # TARBALL DEST: refuses an absolute path, a `..`, or more than one top directory, then extracts
+  local tb="$1" dest="$2" names top
+  names="$(tar -tzf "$tb" 2>/dev/null)" || tree_die "the fetched tree is not a gzip tarball. Nothing was changed."
+  if grep -qE '(^/|(^|/)\.\.(/|$))' <<<"$names"; then
+    tree_die "the fetched tree names a path outside itself, so it was not unpacked. Nothing was changed."
+  fi
+  top="$(cut -d/ -f1 <<<"$names" | sort -u)"
+  [ "$(grep -c . <<<"$top")" = 1 ] || tree_die "the fetched tree has more than one top directory, so it was not unpacked. Nothing was changed."
+  mkdir -p "$dest" && tar -xzf "$tb" -C "$dest" --no-same-owner --no-same-permissions \
+    || tree_die "could not unpack the fetched tree. Nothing was changed."
+  TREE_ROOT="$dest/$top"
+  [ -f "$TREE_ROOT/install.sh" ] && [ -f "$TREE_ROOT/compose.yaml" ] \
+    || tree_die "the fetched tree has no install.sh and compose.yaml at its top. Nothing was changed."
+}
+
+tree_bootstrap() {
+  local d tag base latest want got
+  [ -z "${STACK_TREE_VERIFIED:-}" ] || return 0
+  tree_is_beside && return 0
+  if [ "${INSTALL_FROM_MAIN:-}" = 1 ] && [ -n "${STACK_TAG:-}" ]; then
+    die "INSTALL_FROM_MAIN=1 and STACK_TAG=${STACK_TAG} name two trees; set one. Nothing was changed."
+  fi
+  command -v curl >/dev/null 2>&1 || die "a piped install needs curl to fetch its tree. Nothing was changed."
+  d="$(mktemp -d "${TMPDIR:-/tmp}/stack-single-tree.XXXXXXXX")" || die "could not make a temporary directory. Nothing was changed."
+  TREE_TMP="$d"
+  chmod 0700 "$d"
+  if [ "${INSTALL_FROM_MAIN:-}" = 1 ]; then
+    say "fetching main, UNSIGNED: this is not a release, and no signature is checked"
+    curl -fsSL -o "$d/main.tar.gz" "${STACK_MAIN_TARBALL:-https://github.com/TAIPANBOX/stack-single/archive/refs/heads/main.tar.gz}" \
+      || tree_die "could not fetch the main branch's tree. Nothing was changed."
+    tree_unpack "$d/main.tar.gz" "$d/tree"
+    tree_run main-unsigned "$@"
+  fi
+  base="${STACK_RELEASE_BASE:-https://github.com/TAIPANBOX/stack-single/releases}"
+  base="${base%/}"
+  tag="${STACK_TAG:-}"
+  if [ -z "$tag" ]; then
+    latest="$(curl -fsSI -o /dev/null -w '%{redirect_url}' "$base/latest" 2>/dev/null)" \
+      || tree_die "could not ask $base/latest which release is the latest. Nothing was changed."
+    tag="${latest##*/}"
+  fi
+  [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || tree_die "the release to install is '${tag:0:40}', which is not a tag of the form vX.Y.Z. Nothing was changed."
+  # Whoever serves the releases also answers which one is the latest, so a mirror (or anyone in its path) could
+  # name an older release that is genuinely signed. A release found that way may not be older than this script:
+  # the bootstrap is the release's own install.sh, or main's, which is never behind it. STACK_TAG is the operator
+  # asking for a release by name, and the box's rollback floor (invariant 68) still judges it.
+  if [ -z "${STACK_TAG:-}" ] && [ "$(printf '%s\n%s\n' "${tag#v}" "$STACK_VERSION" | sort -V | head -n 1)" != "$STACK_VERSION" ]; then
+    tree_die "$base/latest names $tag, older than this script ($STACK_VERSION), so it was not used. Name a release with STACK_TAG if that is the one you mean. Nothing was changed."
+  fi
+  say "fetching release $tag and checking its signature"
+  curl -fsSL -o "$d/$STACK_TREE_ASSET" "$base/download/$tag/$STACK_TREE_ASSET" \
+    || tree_die "could not fetch $STACK_TREE_ASSET of release $tag. Nothing was changed."
+  curl -fsSL -o "$d/$STACK_TREE_ASSET.sigstore.json" "$base/download/$tag/$STACK_TREE_ASSET.sigstore.json" \
+    || tree_die "release $tag carries no signature bundle ($STACK_TREE_ASSET.sigstore.json), so its tree was not used. Nothing was changed."
+  ( STACK_DIR="$d"; cosign_install ) || tree_die "could not install cosign to check the release. Nothing was changed."
+  if ! got="$("$d/bin/cosign" verify-blob --bundle "$d/$STACK_TREE_ASSET.sigstore.json" \
+        --certificate-identity "$STACK_TREE_SIGNER_PREFIX$tag" --certificate-oidc-issuer "$STACK_TREE_ISSUER" \
+        "$d/$STACK_TREE_ASSET" 2>&1)"; then
+    tree_die "the tree of release $tag does not carry a signature from this repository's release workflow on $tag, so it was not unpacked. Nothing was changed. cosign said: ${got%%$'\n'*}"
+  fi
+  note "signature verified: $STACK_TREE_ASSET of $tag, signed by the release workflow on $tag"
+  tree_unpack "$d/$STACK_TREE_ASSET" "$d/tree"
+  want="${tag#v}"
+  got="$(sed -n 's/^STACK_VERSION="\([^"]*\)"$/\1/p' "$TREE_ROOT/install.sh" | head -n 1)"
+  [ "$got" = "$want" ] || tree_die "release $tag carries a tree of version '${got:0:20}', not $want, so it was not used. Nothing was changed."
+  tree_run "$tag" "$@"
+}
+
+# Runs the unpacked tree's install.sh as a child and ends this script with its status. Not `exec`: this way the
+# temporary directory (the tree and the cosign binary) is removed whatever the tree does, a refusal before its
+# section 1 included. The rest of the piped script is read first and dropped: the tree must not read it as input
+# (its questions use /dev/tty), and curl, writing into a pipe nobody reads, would end with "(23)". This is a
+# function, so bash has already read all of it; nothing after the call is read from stdin.
+tree_run() { # LABEL ARGS...: STACK_TREE_VERIFIED for the tree, then install.sh's own arguments
+  local label="$1" rc=0
+  shift
+  [ -t 0 ] || cat >/dev/null
+  env STACK_TREE_VERIFIED="$label" STACK_TREE_TMP="$TREE_TMP" bash "$TREE_ROOT/install.sh" "$@" </dev/null || rc=$?
+  if tree_tmp_valid "${TREE_TMP:-}"; then rm -rf "$TREE_TMP"; fi
+  exit "$rc"
+}
+tree_bootstrap "$@"
+# tree-bootstrap: end
 
 # ---- 0b. typed answers: where does the data go? ------------------------------
 # @decided 2026-09-30: an operator chooses where typed answers come from, one
@@ -4836,11 +4977,14 @@ note "docker $(docker --version | awk '{print $3}' | tr -d ,), compose present"
 # ---- 1. this repo, whether cloned or piped ----------------------------------
 # The browser's profile, which compose.yaml names by a path beside itself.
 BROWSER_SECCOMP=seccomp/chromium-v1.json
-# C here is `true`, so the fallback is an empty HERE, which the next line handles.
-# shellcheck disable=SC2015
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
+# HERE is the tree this script was read from, and only that: a piped script has no file, and the directory the
+# operator happens to stand in is not a tree (with `$0` as the fallback, a compose.yaml in the current directory
+# was taken for one). A piped install never reaches here: tree_bootstrap above has already run the verified
+# tree's own install.sh, which has its tree beside it (invariant 84).
+HERE=""
+if tree_is_beside; then HERE="$(cd "$(dirname "$SELF")" && pwd)"; fi
 mkdir -p "$STACK_DIR"
-if [ -n "$HERE" ] && [ -f "$HERE/compose.yaml" ]; then
+if [ -n "$HERE" ]; then
   stack_version_check "$HERE/compose.yaml"
   journal_begin "$HERE"
   if [ "$HERE" != "$STACK_DIR" ]; then
@@ -4850,31 +4994,7 @@ if [ -n "$HERE" ] && [ -f "$HERE/compose.yaml" ]; then
     mv -f "$JOURNAL.kept" "$JOURNAL" || die "could not put $JOURNAL back after the copy"
   fi
 else
-  say "fetching the stack definition"
-  # To a name of its own: the file on the box stays what it was until it is known to be this tree's.
-  curl -fsSL "${REPO_SINGLE_RAW:-https://raw.githubusercontent.com/TAIPANBOX/stack-single/main}/compose.yaml" \
-    -o "$STACK_DIR/compose.yaml.fetched" || die "could not fetch compose.yaml"
-  stack_version_check "$STACK_DIR/compose.yaml.fetched"
-  journal_begin ""
-  mv -f "$STACK_DIR/compose.yaml.fetched" "$STACK_DIR/compose.yaml" || die "could not put compose.yaml in place"
-  # compose.yaml names this file by a relative path, and a piped install has no tree to copy it from.
-  mkdir -p "$STACK_DIR/${BROWSER_SECCOMP%/*}"
-  curl -fsSL "${REPO_SINGLE_RAW:-https://raw.githubusercontent.com/TAIPANBOX/stack-single/main}/$BROWSER_SECCOMP" \
-    -o "$STACK_DIR/$BROWSER_SECCOMP" || die "could not fetch $BROWSER_SECCOMP, which compose.yaml names for the browser"
-  # install.sh loads this one into the host's AppArmor, so it is fetched beside the rest. The name
-  # is set in the browser-apparmor block above, and a slice of this section run alone has not read it.
-  BROWSER_AA_FILE="${BROWSER_AA_FILE:-apparmor/scopyx-browser}"
-  mkdir -p "$STACK_DIR/${BROWSER_AA_FILE%/*}"
-  curl -fsSL "${REPO_SINGLE_RAW:-https://raw.githubusercontent.com/TAIPANBOX/stack-single/main}/$BROWSER_AA_FILE" \
-    -o "$STACK_DIR/$BROWSER_AA_FILE" || die "could not fetch $BROWSER_AA_FILE, which the installer loads for the browser"
-  # guest-door's routes (invariant 77), which compose.yaml mounts by a relative path.
-  mkdir -p "$STACK_DIR/guest-door"
-  curl -fsSL "${REPO_SINGLE_RAW:-https://raw.githubusercontent.com/TAIPANBOX/stack-single/main}/guest-door/Caddyfile" \
-    -o "$STACK_DIR/guest-door/Caddyfile" || die "could not fetch guest-door/Caddyfile, which compose.yaml mounts for guest-door"
-  # The fire drills' own tool-hold drill (invariant 74), which compose.yaml mounts by a relative path.
-  mkdir -p "$STACK_DIR/drill-scenarios"
-  curl -fsSL "${REPO_SINGLE_RAW:-https://raw.githubusercontent.com/TAIPANBOX/stack-single/main}/drill-scenarios/mcp-ungranted-tool-held.yaml" \
-    -o "$STACK_DIR/drill-scenarios/mcp-ungranted-tool-held.yaml" || die "could not fetch drill-scenarios/mcp-ungranted-tool-held.yaml, which compose.yaml mounts for the fire drills"
+  die "no tree beside this script, and no verified tree was fetched for it. Nothing was changed."
 fi
 cd "$STACK_DIR"
 
