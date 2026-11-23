@@ -18,15 +18,13 @@
 # and the console has a sign-in that exists.
 #
 # What this box does NOT run, so you can compare before installing rather
-# than after: none of stack-up's governance routines (a FinOps export, a
-# crypto-inventory trend, a quality-drift check, an identity-anomaly sweep,
-# an on-box chain verification, the record seal and an opt-in fire drill) run here
-# on any schedule; stack-k8s runs three of
-# the four safe ones as CronJobs, stack-up runs its six default ones as OS timers, and
-# this compose file runs none of them. The error budget is the one routine it
-# does run (verdryx-slo, invariant 66). See the README's "What this box does
-# not run" section for the rest of the comparison, including the memory
-# plane.
+# than after: of stack-up's governance routines it runs the FinOps export
+# (focus-export, both gateway doors, invariant 80), the error budget
+# (verdryx-slo, invariant 66), the chain verifier and the record seal; the
+# crypto-inventory trend, the quality-drift check and the identity-anomaly sweep
+# run on no schedule here, and the fire drill is a template a person runs.
+# See the README's "What this box does not run" section for the rest of the
+# comparison, including the memory plane.
 #
 # The gateway is published to the host's loopback only, until you say
 # otherwise. Publishing an enforcement plane to the internet is a decision, not
@@ -558,6 +556,12 @@ install_only check "chain verifier cannot write another plane's stream" \
       "! docker run --rm --user 10002:10002 --group-add 10001 -v agent-stack_events:/e busybox:1.36 sh -c ': >> /e/wardryx.ndjson'"
 install_only check "chain verifier cannot create a file on the bus" \
       "! docker run --rm --user 10002:10002 --group-add 10001 -v agent-stack_events:/e busybox:1.36 sh -c ': > /e/not-its-own.ndjson'"
+
+# The FOCUS export, which the FinOps console reads as the gateway's spend (CLAUDE.md
+# invariant 80). On every box, over both doors: it must be running, and each door's
+# folder must be there, because the console refuses to start on a folder that is not.
+check "focus-export is running, with a folder per door" \
+      "$DC exec -T focus-export sh -c 'test -d /var/lib/stack/focus/gateway && test -d /var/lib/stack/focus/gateway-openai'"
 
 # The operator's tunnel. Checked from the CONSOLE's side rather than the wg
 # container's: what matters is not that a socket exists somewhere, it is that
@@ -6909,9 +6913,11 @@ $CONSOLE_ACCESS_NOTE
       cd $STACK_DIR && ${COMPOSE[*]} down     # stop, keeping every volume
 
   The error budget is measured every six hours (verdryx-slo; SLO_SIGNAL=0 turns
-  it off). Nothing on this box runs the other governance routines (FinOps export,
-  crypto trend, quality drift, identity sweep) on a schedule. Run one by hand with
-  ${COMPOSE[*]} exec, or see the README for how stack-up and stack-k8s do it.
+  it off), and the gateway's spend is exported for FinOps every 15 minutes, over
+  both doors (focus-export), where the FinOps console reads it once you start it.
+  Nothing on this box runs the other governance routines (crypto trend, quality
+  drift, identity sweep) on a schedule. Run one by hand with ${COMPOSE[*]} exec,
+  or see the README for how stack-up and stack-k8s do it.
 
 EOF
 # The banner above already said what failed, so the trap must not narrate a

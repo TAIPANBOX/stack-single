@@ -280,17 +280,21 @@ absence rather than presence. An operator choosing between the three
 deployment shapes (`stack-up`, this one, `stack-k8s`) should be able to see
 both before installing, not after.
 
-**No governance routines run on a schedule.** `stack-up`'s `routines.sh`
-installs six OS-native timers for the stack's own recurring governance work by
-default: a FinOps export, a crypto-inventory trend, a quality-drift check, an
-identity-anomaly sweep, an on-box chain verification and the record seal. It also
-has an opt-in fire drill. `stack-k8s` runs three of
-those as CronJobs (`crypto-trend`, `quality-drift`, `identity-sweep`; its own
-docs explain why the fourth, the FinOps export, cannot run as a CronJob
-there). No install starts one of them, and the error budget is the one routine an install does start ([below](#an-agent-whose-error-budget-is-spent-waits-for-a-person)). `compose.yaml` does define two of them as looping
-services (`focus-export` and `verdryx-drift`) behind a `routines` profile that no
-install enables, so `docker compose --profile routines up -d` would start them. Run
-one by hand
+**Some governance routines run on a schedule, and some do not.** `stack-up`'s
+`routines.sh` installs six OS-native timers for the stack's own recurring
+governance work by default: a FinOps export, a crypto-inventory trend, a
+quality-drift check, an identity-anomaly sweep, an on-box chain verification and
+the record seal. It also has an opt-in fire drill. `stack-k8s` runs the crypto
+trend, the quality drift and the identity sweep as CronJobs and the FinOps export
+as a sidecar of its gateway. Every install here starts four of them as looping
+services: the FinOps export (`focus-export`, over both gateway doors, every 15
+minutes, [read by the FinOps console](#the-finops-console-costcrew-optional)),
+the chain verifier, the record seal and the error budget
+([below](#an-agent-whose-error-budget-is-spent-waits-for-a-person)). The
+quality-drift check is defined as a looping service too (`verdryx-drift`), behind
+a `routines` profile that no install enables: it needs a baseline you choose
+(`ROUTINE_VERDRYX_BASELINE` in `.env`), and with none it only says it skipped. Start
+it with `docker compose --profile routines up -d verdryx-drift`, or run one by hand
 inside the console container when you want it:
 
 ```bash
@@ -1081,8 +1085,9 @@ and map, and refuses a call with no key and with an unknown key (401).
 
 What the door does not do, so you can decide before you turn it on:
 
-- **Its spend is not in the FOCUS export.** `focus-export` reads the gateway's
-  traces only, and the door's are in their own directory (stack-single#61).
+- **Its spend is exported on its own.** `focus-export` reads each door's traces
+  into a folder of that door's, `focus/gateway-openai` beside `focus/gateway`, and
+  the FinOps console reads both, so a door call is never counted twice.
 - **The console shows the gateway's runs, not the door's.** It reaches one
   gateway's admin routes, the 4100 one. A run through 4110 is visible in the
   Cloud and on the bus, not in the console's runs view.
@@ -2194,7 +2199,8 @@ docker compose --profile finops exec costcrew /usr/local/bin/costcrew \
 
 The password is visible in your shell history and in the process list for as
 long as that command runs. The first start also fills the console with a
-generated estate so there is something to look at; it is not a bill of yours.
+generated estate so there is something to look at; it is not a bill of yours,
+and the first export that holds a real call replaces it (below).
 It answers `/healthz` with 200 and no redirect; from the compose network that
 is `docker run --rm --network agent-stack_core busybox:1.36 wget -q -O - http://costcrew:8321/healthz`.
 
@@ -2204,6 +2210,21 @@ a user of its own that can write that one file on the bus and nothing else
 there, with a read-only root filesystem, a 128 MB temporary directory in
 memory at `/tmp` (SQLite needs one to compact its database), and no
 capabilities.
+
+**The money it reads.** The console is given the gateway's spend, not only the
+generated estate: `focus-export` writes each door's calls as a FOCUS CSV, one folder
+per door in the `focus` volume (`focus/gateway`, `focus/gateway-openai`), every 15
+minutes (`FOCUS_EXPORT_INTERVAL` in `.env`, in seconds), and the console mounts that
+volume read only and reads both folders at start and every 15 minutes after
+(`-focus-dir`, `-focus-dir-openai`). A door that has served nothing yet gets a file
+of the other door's header and no row, because the console refuses a folder with
+nothing in it and with it the whole import; with neither door exported there is no
+file at all. The first read that finds an export replaces the generated estate
+(`-focus-replace-generated`): the demo board, its tasks, sprints, anomalies and
+forecasts go with it, so a box that has served agents shows their spend by agent on
+the AI pages, and one that has not still shows the demo data. The console runs as a user outside the bus group, so it reads the
+folders through their "other" bits (0755, files 0644); it can change nothing in
+them.
 
 **What it does not do.** The console cannot spend: no gateway is wired to it, and
 it makes no model call of its own. The crew's model calls belong to the runner,

@@ -105,6 +105,7 @@ step "the fire drills reach the MCP broker with a key of its own (invariant 74)"
 step "the broker's tool-call check fails closed and its static callers are gateway keys (invariant 75)" "./scripts/broker-callers-are-gateway-keys.sh"
 step "the installer fetches no tree of stack-k8s unless it builds from source (invariant 76)" "./scripts/no-unverified-download-outside-build.sh"
 step "the installer's broker ask asks again after a hold, bounded (invariant 79)" "./scripts/broker-ask-retries-a-held-call.sh"
+step "the gateway's spend reaches the FinOps console, over both doors (invariant 80)" "./scripts/costcrew-reads-the-gateway-spend.sh"
 # Reaches the network (a tarball from the sibling repo), which is why it is
 # last: everything that can be judged offline has already spoken by here.
 step "every image has the files it copies" "./scripts/build-context-complete.sh"

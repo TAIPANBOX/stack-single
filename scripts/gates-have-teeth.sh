@@ -302,7 +302,10 @@ run_case "slo-signal-is-wired: a failed measurement is swallowed" fail \
 	"a fleet with nothing to report"
 run_case "slo-signal-is-wired: the routine reads one door" fail \
 	'./scripts/slo-signal-is-wired.sh' \
-	"$(py 'edit("compose.yaml", "for door in gateway gateway-openai; do", "for door in gateway; do")')" \
+	"$(py 's = open("compose.yaml").read()
+i = s.index("  verdryx-slo:\n")
+j = s.index("for door in gateway gateway-openai; do", i)
+open("compose.yaml", "w").write(s[:j] + "for door in gateway; do" + s[j + len("for door in gateway gateway-openai; do"):])')" \
 	"the Anthropic door alone"
 run_case "slo-signal-is-wired: the rule holds on a broken file" fail \
 	'./scripts/slo-signal-is-wired.sh' \
@@ -6354,6 +6357,104 @@ run_case "broker-ask-retries: the block is gone (measured nothing)" fail \
 run_case "broker-ask-retries: a longer pause between tries (must pass)" pass \
 	"$BAR" \
 	"$(py 'edit("install.sh", "      sleep 5\n    done", "      sleep 6\n    done")')"
+
+# invariant 80: the gateway's spend reaches the FinOps console. focus-export runs on every box over
+# both doors, one file per door written whole, and the console reads both folders, read only.
+CRS='./scripts/costcrew-reads-the-gateway-spend.sh'
+
+run_case "costcrew-reads-spend: focus-export goes back behind the routines profile" fail \
+	"$CRS" \
+	"$(py 'edit("compose.yaml", "    # ON BY DEFAULT, AND OVER BOTH DOORS", "    profiles: [\"routines\"]\n    # ON BY DEFAULT, AND OVER BOTH DOORS")')" \
+	"sits behind the profile"
+
+run_case "costcrew-reads-spend: focus-export reads one door" fail \
+	"$CRS" \
+	"$(py 'edit("compose.yaml", "for door in gateway gateway-openai; do", "for door in gateway; do")')" \
+	"does not name the gateway-openai door"
+
+run_case "costcrew-reads-spend: the console loses -focus-dir" fail \
+	"$CRS" \
+	"$(py 'edit("compose.yaml", "      - -focus-dir\n      - /var/lib/stack/focus/gateway\n", "")')" \
+	"has no -focus-dir,"
+
+run_case "costcrew-reads-spend: the console loses the OpenAI door's folder" fail \
+	"$CRS" \
+	"$(py 'edit("compose.yaml", "      - -focus-dir-openai\n      - /var/lib/stack/focus/gateway-openai\n", "")')" \
+	"has no -focus-dir-openai"
+
+run_case "costcrew-reads-spend: one folder named as both doors" fail \
+	"$CRS" \
+	"$(py 'edit("compose.yaml", "      - -focus-dir-openai\n      - /var/lib/stack/focus/gateway-openai\n", "      - -focus-dir-openai\n      - /var/lib/stack/focus/gateway\n")')" \
+	"one folder as both doors"
+
+run_case "costcrew-reads-spend: the generated estate is never replaced" fail \
+	"$CRS" \
+	"$(py 'edit("compose.yaml", "      - -focus-replace-generated\n", "")')" \
+	"has no -focus-replace-generated"
+
+run_case "costcrew-reads-spend: the console mounts the export read-write" fail \
+	"$CRS" \
+	"$(py 'edit("compose.yaml", "      - focus:/var/lib/stack/focus:ro\n", "      - focus:/var/lib/stack/focus\n")')" \
+	"mounts the focus volume read-write"
+
+run_case "costcrew-reads-spend: the console does not mount the export" fail \
+	"$CRS" \
+	"$(py 'edit("compose.yaml", "      - focus:/var/lib/stack/focus:ro\n", "")')" \
+	"does not mount the focus volume"
+
+run_case "costcrew-reads-spend: init-volumes stops making a door's folder" fail \
+	"$CRS" \
+	"$(py 'edit("compose.yaml", "mkdir -p /vol/focus/gateway /vol/focus/gateway-openai", "mkdir -p /vol/focus/gateway")')" \
+	"does not create /vol/focus/gateway-openai"
+
+run_case "costcrew-reads-spend: a door's folder is closed to other users" fail \
+	"$CRS" \
+	"$(py 'edit("compose.yaml", "chmod 0755 /vol/focus/gateway /vol/focus/gateway-openai", "chmod 0750 /vol/focus/gateway /vol/focus/gateway-openai")')" \
+	"which costcrew (outside the bus group) cannot read"
+
+run_case "costcrew-reads-spend: a new file every window" fail \
+	"$CRS" \
+	"$(py 'edit("compose.yaml", "csv=\"$$out/focus-$$door.csv\"", "csv=\"$$out/focus-$$door-$$$$.csv\"")')" \
+	"one file per door is what bounds the folder"
+
+run_case "costcrew-reads-spend: the export is written straight into the name the console reads" fail \
+	"$CRS" \
+	"$(py 'edit("compose.yaml", "part=\"$$out/.focus-$$door.partial\"", "part=\"$$out/focus-$$door.csv\"")')" \
+	"a name the console reads"
+
+run_case "costcrew-reads-spend: an empty window deletes the last export" fail \
+	"$CRS" \
+	"$(py 'edit("compose.yaml", "              rm -f \"$$part\"\n", "              rm -f \"$$part\" \"$$csv\"\n")')" \
+	"did not keep its last good file"
+
+run_case "costcrew-reads-spend: a door that never exported gets no file" fail \
+	"$CRS" \
+	"$(py 'edit("compose.yaml", "            [ -e \"$$csv\" ] && continue\n", "            continue\n")')" \
+	"the console would refuse the whole import"
+
+run_case "costcrew-reads-spend: header-only files with no real export beside them" fail \
+	"$CRS" \
+	"$(py 'edit("compose.yaml", "              { [ \"$$other\" != \"$$door\" ] && [ -s \"$$src\" ]; } || continue\n", "              [ \"$$other\" != \"$$door\" ] || continue\n              [ -s \"$$src\" ] || printf \"BilledCost\\\\n\" >\"$$src\"\n")')" \
+	"with neither door exported"
+
+run_case "costcrew-reads-spend: install.sh stops checking the export" fail \
+	"$CRS" \
+	"$(py 'edit("install.sh", "check \"focus-export is running, with a folder per door\"", "check \"focus-export is running\"")')" \
+	"does not check that focus-export"
+
+run_case "costcrew-reads-spend: focus-export is gone (measured nothing)" fail \
+	"$CRS" \
+	"$(py 'edit("compose.yaml", "  focus-export:\n    <<: [*restart, *baseline]\n", "  focus-exporter:\n    <<: [*restart, *baseline]\n")')" \
+	"measured nothing"
+
+run_case "costcrew-reads-spend: a longer export interval (must pass)" pass \
+	"$CRS" \
+	"$(py 'edit("compose.yaml", "FOCUS_EXPORT_INTERVAL: ${FOCUS_EXPORT_INTERVAL:-900}", "FOCUS_EXPORT_INTERVAL: ${FOCUS_EXPORT_INTERVAL:-1800}")')"
+
+run_case "manifest-is-true: a scheduled routine sits behind an operator profile" fail \
+	'./scripts/manifest-is-true.sh' \
+	"$(py 'edit("components.json", "\"verdryx-slo\": \"verdryx-slo\",", "\"verdryx-slo\": \"verdryx-slo\",\n          \"verdryx-drift\": \"verdryx-drift\",")')" \
+	"A routine no install starts is not scheduled"
 
 echo
 if [ -n "$(git status --porcelain)" ]; then

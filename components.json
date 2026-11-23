@@ -11,13 +11,13 @@
     "of it living where the fact lives. This is the other statement of the same",
     "fact, made where it does.",
     "",
-    "IT SCHEDULES NOTHING, AND THAT IS THE LARGEST DIFFERENCE BETWEEN THE THREE.",
-    "`schedules_routines` is empty and checked as empty, not omitted. stack-up",
-    "runs six routines on a timer and stack-k8s runs them as CronJobs; this one",
-    "installs no scheduler of any kind, so all six show up in estate-gates'",
-    "deployment-parity file as recorded gaps. Declaring the emptiness here means",
-    "the day somebody adds cron, this file has to say so rather than staying",
-    "quietly true.",
+    "IT RUNS ITS ROUTINES AS LOOPS, NOT TIMERS. `schedules_routines` names the",
+    "ones every install starts: focus-export (both gateway doors, invariant 80),",
+    "verdryx-slo and the record seal. manifest-is-true.sh refuses a routine in",
+    "that map that sits behind a profile install.sh does not start, because",
+    "until 1.13.0 the map named focus-export and verdryx-drift while both sat",
+    "behind the operator's `routines` profile and ran on no box. verdryx-drift",
+    "still does, and is left out of the map for that reason.",
     "",
     "THE IMAGES ARE PART OF WHAT IT INSTALLS. Unlike the other two launchers this",
     "one BUILDS what it runs, from source it fetches, because there is no public",
@@ -70,7 +70,6 @@
           "tokenfuse-mcp-broker",
           "typryx",
           "typryx-wardryx-proxy",
-          "verdryx-drift",
           "verdryx-slo",
           "vouchryx",
           "wardryx",
@@ -78,16 +77,16 @@
         ],
         "schedules_routines": {
           "focus-export": "focus-export",
-          "verdryx-drift": "verdryx-drift",
           "verdryx-slo": "verdryx-slo",
           "record-seal": "trailryx-seal"
         },
         "manual_jobs": {
           "idryx-detect": "A TEMPLATE a person runs, not a schedule, and not by preference. Measured 2026-09-01 on the published image: `go-service.Dockerfile` builds on distroless, so there is no /bin/sh for a loop, the binary is `/usr/local/bin/service` rather than `idryx`, and `detect` has no --interval or --watch. A loop is impossible here rather than unwanted. Publishing a shell-bearing idryx would put a shell back into a governance plane to buy a scheduler, which is a security property traded for a convenience.\\n\\nSo it takes the shape the estate already has for exactly this: stack-k8s keeps its `drills` CronJob suspended until a person runs it, and this is the compose equivalent, behind a profile no install enables. Run it with `docker compose run --rm idryx-detect`.\\n\\nVerified rather than asserted: manifest-is-true.sh requires the service to exist, to sit behind a profile, and requires install.sh never to pass that profile. That is this file's answer to the `suspend: true` stack-k8s's own gate checks.",
-          "mockryx-drill": "A TEMPLATE a person runs: `docker compose run --rm mockryx-drill`, behind the `manual` profile no install passes, the shape stack-k8s gives its suspended `drills` CronJob. It sends mockryx's broker drills (/scenarios/mcp in the image, which carries its scenarios since mockryx v0.1.1) to this box's own MCP broker, with the drills' key at the broker (`drills-broker` in TOKENFUSE_MCP_KEYS and on the broker's static list, the same secret in drills/broker.key, uid 65532, 0400), minted by install.sh (CLAUDE.md invariant 74). Only the broker drills: the gateway drills need a client key the gateway admits without a token, and the installer keeps the drills' gateway key off that list (invariant 53). The broker runs only with WITH_TYPED, WITH_EGRESS or WITH_BROWSER; without it mockryx refuses the run with exit 2. mockryx's own tool-hold drill asks an MCP server for an answer this box has no server to give, so the box mounts its own copy over it (drill-scenarios/mcp-ungranted-tool-held.yaml): its second call gets past the hold and is refused by the broker's vault, so it needs no server. CI runs both, the box's copy and mockryx's original with a stand-in server."
+          "mockryx-drill": "A TEMPLATE a person runs: `docker compose run --rm mockryx-drill`, behind the `manual` profile no install passes, the shape stack-k8s gives its suspended `drills` CronJob. It sends mockryx's broker drills (/scenarios/mcp in the image, which carries its scenarios since mockryx v0.1.1) to this box's own MCP broker, with the drills' key at the broker (`drills-broker` in TOKENFUSE_MCP_KEYS and on the broker's static list, the same secret in drills/broker.key, uid 65532, 0400), minted by install.sh (CLAUDE.md invariant 74). Only the broker drills: the gateway drills need a client key the gateway admits without a token, and the installer keeps the drills' gateway key off that list (invariant 53). The broker runs only with WITH_TYPED, WITH_EGRESS or WITH_BROWSER; without it mockryx refuses the run with exit 2. mockryx's own tool-hold drill asks an MCP server for an answer this box has no server to give, so the box mounts its own copy over it (drill-scenarios/mcp-ungranted-tool-held.yaml): its second call gets past the hold and is refused by the broker's vault, so it needs no server. CI runs both, the box's copy and mockryx's original with a stand-in server.",
+          "verdryx-drift": "A loop a person starts, not one an install does: `docker compose --profile routines up -d verdryx-drift`, behind the operator's `routines` profile, which install.sh never passes and never removes (CLAUDE.md invariant 50). A drift check needs a baseline somebody chose (ROUTINE_VERDRYX_BASELINE in .env) and a verdryx store a person's eval made; with neither it only prints that it skipped, so starting it on every box would report a routine that measures nothing. Until 1.13.0 components.json listed it under schedules_routines while it ran on no box; manifest-is-true.sh now refuses a scheduled routine behind a profile install.sh does not start."
         },
         "optional_addons": {
-          "costcrew": "The FinOps console (CostCrew), an optional add-on in the `finops` profile. Started only by hand, `docker compose --profile finops up -d costcrew`; install.sh never passes that profile and never names the service. As shipped it cannot spend: no gateway is wired to it.",
+          "costcrew": "The FinOps console (CostCrew), an optional add-on in the `finops` profile. Started only by hand, `docker compose --profile finops up -d costcrew`; install.sh never passes that profile and never names the service. As shipped it cannot spend: no gateway is wired to it. It reads the gateway's spend, focus-export's folders, read only (CLAUDE.md invariant 80).",
           "costcrew-init": "The one-shot that prepares costcrew's own volume and its one stream on the bus, in the same `finops` profile. It exists so the add-on does not have to edit init-volumes, which every install runs.",
           "costcrew-run": "The CostCrew runner (costcrew-run), in profile `crew`. Started only by hand, `docker compose --profile finops --profile crew run --rm costcrew-run`, and only under the console's cadence switch and a COSTCREW_CEILING. Its model calls go through the gateway with the crew's own client key, and it holds no provider key. install.sh never starts it."
         },
@@ -147,8 +146,8 @@
           "why": "A one-shot busybox container that creates the shared volume layout and exits. It is in `installs_services` because compose starts it and this list is what compose starts; estate-gates records separately that it is not a component of the product."
         },
         "three_of_the_five_and_the_other_two_are_named": {
-          "value": "--profile routines",
-          "why": "This deployment installed NO scheduler of any kind until 2026-08-28: the planes came up and the work that keeps them producing did not happen. estate-gates recorded six divergences from 2026-08-06, on the single-box install, the one most likely to be somebody's first look at the estate.\\n\\nThree run now, as loops rather than timers, because compose has no cron. qryx-trend is not included, and the reason is a fact rather than effort: it scans a SOURCE TREE, and there is none in these containers; mounting the operator's disk into a governance plane to look for crypto is a bigger decision than a missing routine. mockryx-drill and idryx-detect are here as templates a person runs (`manual_jobs`).\\n\\nThe sixth, trailryx-seal, is the `record` profile."
+          "value": "focus-export by default; --profile routines for verdryx-drift",
+          "why": "This deployment installed NO scheduler of any kind until 2026-08-28: the planes came up and the work that keeps them producing did not happen. estate-gates recorded six divergences from 2026-08-06, on the single-box install, the one most likely to be somebody's first look at the estate.\\n\\nThey run as loops rather than timers, because compose has no cron. focus-export runs on every box since 1.13.0, over both gateway doors, and the FinOps console reads what it writes (CLAUDE.md invariant 80). verdryx-drift stays behind the operator's `routines` profile: a drift check needs a baseline somebody chose (ROUTINE_VERDRYX_BASELINE), and with none it only says it skipped, so it is not in schedules_routines. qryx-trend is not included, and the reason is a fact rather than effort: it scans a SOURCE TREE, and there is none in these containers; mounting the operator's disk into a governance plane to look for crypto is a bigger decision than a missing routine. mockryx-drill and idryx-detect are here as templates a person runs (`manual_jobs`).\\n\\nThe record seal is the `record` profile, which install.sh starts by default."
         },
         "trailryx_seal_runs_under_a_local_name": {
           "value": "record-seal",
