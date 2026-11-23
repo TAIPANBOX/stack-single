@@ -10,7 +10,8 @@
 #
 # WHAT THIS CHECKS
 #
-#   A. the `# env-guard:` block, lifted out of install.sh and run against a stub `docker` in a scratch
+#   A. the `# env-guard:` block, lifted out of install.sh and run under `set -euo pipefail`, as install.sh
+#      runs it (a grep that finds nothing fails a pipeline there), against a stub `docker` in a scratch
 #      STACK_DIR, case by case:
 #        no .env, this project's volumes present            -> refuses, names .env and the volumes, exit != 0
 #        no .env, volumes found only by name (no label)     -> refuses
@@ -81,7 +82,7 @@ run() {
 		return 2
 	fi
 	out="$(env -i PATH="$p" STACK_DIR="$dir" STUB_STATE="$state" STUB_LOG="$work/$name.log" "$@" \
-		bash -c 'say() { :; }; note() { printf "   %s\n" "$*"; }; die() { printf "!! %s\n" "$*" >&2; exit 1; }
+		bash -c 'set -euo pipefail; say() { :; }; note() { printf "   %s\n" "$*"; }; die() { printf "!! %s\n" "$*" >&2; exit 1; }
 '"$(grep -vx env_guard_check <<<"$block")"'
 env_guard_check
 echo REACHED-THE-END' 2>&1)" && rc=0 || rc=$?

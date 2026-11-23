@@ -336,19 +336,19 @@ console_revoke_status() { status_of "$(http_request POST http://vouchryx:4310/v1
 # producer, a throwaway busybox runs as that producer's uid, gid and extra groups (BUS_WRITERS, the same table
 # compose.yaml gives the services) against the live events volume, with no network, and must be able to append to
 # its own stream and must NOT be able to append to, rename or link another producer's stream, or create a file in
-# the bus directory. Appending is `: >>`, which writes no byte; a rename that went through is put back at once. A
-# stream that is not on this box (costcrew's, before the add-on is started) is passed over, and said so. Every
+# the bus directory. Appending is `: >>`, which writes no byte; a rename that went through is put back at once. The
+# optional add-on's stream is not in the table: the installer does not know the add-on (invariant 24). Every
 # attempt runs in a subshell: in busybox sh a failed redirection on `:`, a special builtin, ends the whole shell
 # (found on a live box, 2026-11-23, where the first refused append stopped every probe).
 BUS_WRITERS="20010:10001:-:tokenfuse.ndjson 20011:10001:-:tokenfuse-openai.ndjson 20012:10001:-:tokenfuse-mcp.ndjson
 20013:10001:-:tokenfuse-cloud.ndjson 20001:10001:20001:wardryx.ndjson 20005:10001:-:typryx.ndjson
 20002:10001:20002:vouchryx.ndjson 20020:10001:-:verdryx.ndjson 10001:10001:-:console.ndjson
-10002:10002:10001:agent-conform.ndjson 10003:10003:-:costcrew.ndjson"
+10002:10002:10001:agent-conform.ndjson"
 # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
 bus_writers_probe() {
   local row uid gid extra own groups fail=0 out names=()
-  # Every stream by name, from the table: a producer outside the bus group (costcrew, uid 10003) can enter the
-  # 0751 directory but not list it, so a glob there matches nothing and would prove nothing.
+  # Every stream by name, from the table, never a glob: a uid outside the bus group can enter the 0751
+  # directory but not list it, so a glob there would match nothing and prove nothing.
   for row in $BUS_WRITERS; do names+=("${row##*:}"); done
   for row in $BUS_WRITERS; do
     IFS=: read -r uid gid extra own <<<"$row"
@@ -358,8 +358,6 @@ bus_writers_probe() {
       own="$1"; shift; bad=0
       if [ -e "/e/$own" ]; then
         ( : >>"/e/$own" ) 2>/dev/null || { echo "cannot append to its own $own"; bad=1; }
-      elif [ "$own" = costcrew.ndjson ]; then
-        echo "note: no $own on this box (the FinOps console has not been started)"
       else
         echo "its own $own is not on the bus"; bad=1
       fi
@@ -2452,7 +2450,8 @@ env_guard_check() {
   fi
   # The name filter matches anywhere in a name, so `foo-agent-stack_x` would count: keep the names that begin
   # with this project's prefix.
-  vols="$( { docker volume ls -q --filter label=com.docker.compose.project=agent-stack; docker volume ls -q --filter name=agent-stack_ | grep '^agent-stack_'; } 2>/dev/null | sort -u | tr '\n' ' ')"
+  vols="$( { docker volume ls -q --filter label=com.docker.compose.project=agent-stack; docker volume ls -q --filter name=agent-stack_ | { grep '^agent-stack_' || true; }; } 2>/dev/null | sort -u | tr '\n' ' ')" \
+    || die "Docker answered and then could not list its volumes, so this run cannot tell whether a stack is on this box. Nothing was changed."
   vols="${vols% }"
   [ -n "$vols" ] || return 0
   if [ "${FRESH_ENV:-}" = 1 ]; then

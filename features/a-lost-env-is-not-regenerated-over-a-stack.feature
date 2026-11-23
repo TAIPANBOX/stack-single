@@ -20,6 +20,7 @@ Feature: a lost .env is not regenerated over a stack
     When a volume of another project, named foo-agent-stack_data, is taken for this stack's
     Then the gate fails, because a clean box would be refused
     # -> gates-have-teeth.sh "env-guard: another project's volume stops a fresh box"
+    # -> gates-have-teeth.sh "env-guard: a fresh box with no volumes stops the run"
 
   Scenario: Docker cannot say what the box holds
     Given Docker is installed and does not answer

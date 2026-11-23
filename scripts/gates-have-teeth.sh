@@ -6466,17 +6466,22 @@ run_case "env-guard: volumes on the box do not stop a fresh .env" fail \
 run_case "env-guard: a Docker that does not answer is read as an empty box" fail \
 	"$EGV" \
 	"$(py 'edit("install.sh", "  if ! docker info >/dev/null 2>&1; then\n", "  if false; then\n")')" \
-	"refuse-down: the run went on"
+	"refuse-down: the refusal does not name FRESH_ENV=1"
 
 run_case "env-guard: only labelled volumes are looked for" fail \
 	"$EGV" \
-	"$(py 'edit("install.sh", " docker volume ls -q --filter name=agent-stack_ | grep '"'"'^agent-stack_'"'"';", "")')" \
+	"$(py 'edit("install.sh", " docker volume ls -q --filter name=agent-stack_ | { grep '"'"'^agent-stack_'"'"' || true; };", "")')" \
 	"refuse-unlabelled: the run went on"
 
 run_case "env-guard: another project's volume stops a fresh box" fail \
 	"$EGV" \
-	"$(py 'edit("install.sh", " | grep '"'"'^agent-stack_'"'"'", "")')" \
+	"$(py 'edit("install.sh", " | { grep '"'"'^agent-stack_'"'"' || true; }", "")')" \
 	"go-foreign: the run stopped"
+
+run_case "env-guard: a fresh box with no volumes stops the run" fail \
+	"$EGV" \
+	"$(py 'edit("install.sh", " | { grep '"'"'^agent-stack_'"'"' || true; }", " | grep '"'"'^agent-stack_'"'"'")')" \
+	"go-none: the run stopped"
 
 run_case "env-guard: an empty .env counts as one" fail \
 	"$EGV" \
@@ -6594,12 +6599,12 @@ run_case "bus-writers: a rename that went through is not put back" fail \
 run_case "bus-writers: the probe lists the directory instead of naming the streams" fail \
 	"$BWP" \
 	"$(py 'edit("install.sh", "      for n in \"$@\"; do\n        [ \"$n\" = \"$own\" ] && continue\n        f=\"/e/$n\"\n", "      for f in /e/*.ndjson; do\n        n=\"${f##*/}\"\n        [ \"$n\" = \"$own\" ] && continue\n")')" \
-	"reads the directory instead of the names"
+	"a bus with other-writable passed"
 
 run_case "bus-writers: a producer's missing stream passes" fail \
 	"$BWP" \
 	"$(py 'edit("install.sh", "        echo \"its own $own is not on the bus\"; bad=1\n", "        echo \"note: no $own\"\n")')" \
-	"only costcrew's may be absent"
+	"every producer's stream must be there"
 
 run_case "bus-writers: an attempt runs outside a subshell" fail \
 	"$BWP" \

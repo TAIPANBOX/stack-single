@@ -81,6 +81,10 @@ created = {}
 for name, d in svc.items():
     if str(d.get("user", "")) not in ("0:0", "0"):
         continue
+    # An optional add-on's own one-shot (it sits behind a profile): install.sh does not know the add-on
+    # (invariant 24), so its stream is not the installer's to probe.
+    if d.get("profiles"):
+        continue
     body = "\n".join(d.get("command") or [])
     for uid, f in re.findall(r"chown (\d+):10001 /vol/events/([a-z0-9-]+\.ndjson)", body):
         created[f] = uid
@@ -136,7 +140,9 @@ for n in os.listdir(bus):
     if fault == "other-writable": mode = 0o644
     if fault == "own-closed" and n == own: mode = 0o444
     os.chmod(p, mode)
-os.chmod(bus, 0o755 if fault == "dir-open" else (0o111 if user.startswith("10003:") else 0o555))
+# a closed bus directory: no list, no create, no rename, files opened by name only (the same for every uid,
+# so a probe that globbed the directory instead of naming the streams finds nothing to try)
+os.chmod(bus, 0o755 if fault == "dir-open" else 0o111)
 r = subprocess.run(["sh", "-c", script.replace("/e/", bus + "/"), "sh", own] + names)
 os.chmod(bus, 0o755)
 sys.exit(r.returncode)
@@ -199,16 +205,11 @@ for fault, needle in (("other-writable", "appended to"), ("dir-open", "renamed")
         if names != sorted(rows):
             bad("after a rename went through, the bus is %s, not every stream back under its own name" % names)
 
-part = probe("", streams=[s for s in rows if s != "costcrew.ndjson"])
-if part.returncode != 0:
-    bad("a box with no costcrew.ndjson (the add-on not started) failed the probe: %s" % (part.stdout + part.stderr).strip()[-200:])
 gone = probe("", streams=[s for s in rows if s != "wardryx.ndjson"])
 if gone.returncode == 0:
-    bad("a box whose wardryx.ndjson is missing passed the probe; only costcrew's may be absent")
-# costcrew's uid cannot list the bus, so its probe must still try every other stream by name
-cc = probe("other-writable")
-if "uid 10003 (costcrew.ndjson): " not in cc.stderr or "appended to" not in cc.stderr.split("uid 10003 (costcrew.ndjson): ", 1)[1].split("\n")[0]:
-    bad("with every stream left writable, costcrew's probe found nothing to append to: it reads the directory instead of the names")
+    bad("a box whose wardryx.ndjson is missing passed the probe; every producer's stream must be there")
+if "costcrew" in block:
+    bad("the probe names the FinOps console's stream; install.sh does not know the add-on (invariant 24)")
 
 # busybox sh ends the whole shell when a redirection on `:` fails (a special builtin), which the stub's sh does
 # not: measured on a live box, 2026-11-23, the first refused append stopped every probe. So every attempt must
