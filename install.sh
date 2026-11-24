@@ -2610,9 +2610,14 @@ tree_die() {
   die "$@"
 }
 
+tree_cosign_install() { # DIR: the pinned cosign into DIR/bin, the way tool_hold_verify fetches it into its own
+  local STACK_DIR="$1"
+  cosign_install
+}
+
 tree_is_beside() { # whether this script was read from a file that has the stack's tree beside it
   local src="$SELF" dir
-  [ -n "$src" ] && [ -f "$src" ] || return 1
+  if [ -z "$src" ] || [ ! -f "$src" ]; then return 1; fi
   # A path, or the very name bash was handed: not a word that happens to name a file here.
   [[ "$src" == */* ]] || [ "$src" = "$0" ] || return 1
   dir="$(cd "$(dirname "$src")" 2>/dev/null && pwd)" || return 1
@@ -2627,11 +2632,13 @@ tree_unpack() { # TARBALL DEST: refuses an absolute path, a `..`, or more than o
   fi
   top="$(cut -d/ -f1 <<<"$names" | sort -u)"
   [ "$(grep -c . <<<"$top")" = 1 ] || tree_die "the fetched tree has more than one top directory, so it was not unpacked. Nothing was changed."
-  mkdir -p "$dest" && tar -xzf "$tb" -C "$dest" --no-same-owner --no-same-permissions \
-    || tree_die "could not unpack the fetched tree. Nothing was changed."
+  if ! mkdir -p "$dest" || ! tar -xzf "$tb" -C "$dest" --no-same-owner --no-same-permissions; then
+    tree_die "could not unpack the fetched tree. Nothing was changed."
+  fi
   TREE_ROOT="$dest/$top"
-  [ -f "$TREE_ROOT/install.sh" ] && [ -f "$TREE_ROOT/compose.yaml" ] \
-    || tree_die "the fetched tree has no install.sh and compose.yaml at its top. Nothing was changed."
+  if [ ! -f "$TREE_ROOT/install.sh" ] || [ ! -f "$TREE_ROOT/compose.yaml" ]; then
+    tree_die "the fetched tree has no install.sh and compose.yaml at its top. Nothing was changed."
+  fi
 }
 
 tree_bootstrap() {
@@ -2673,7 +2680,7 @@ tree_bootstrap() {
     || tree_die "could not fetch $STACK_TREE_ASSET of release $tag. Nothing was changed."
   curl -fsSL -o "$d/$STACK_TREE_ASSET.sigstore.json" "$base/download/$tag/$STACK_TREE_ASSET.sigstore.json" \
     || tree_die "release $tag carries no signature bundle ($STACK_TREE_ASSET.sigstore.json), so its tree was not used. Nothing was changed."
-  ( STACK_DIR="$d"; cosign_install ) || tree_die "could not install cosign to check the release. Nothing was changed."
+  tree_cosign_install "$d" || tree_die "could not install cosign to check the release. Nothing was changed."
   if ! got="$("$d/bin/cosign" verify-blob --bundle "$d/$STACK_TREE_ASSET.sigstore.json" \
         --certificate-identity "$STACK_TREE_SIGNER_PREFIX$tag" --certificate-oidc-issuer "$STACK_TREE_ISSUER" \
         "$d/$STACK_TREE_ASSET" 2>&1)"; then

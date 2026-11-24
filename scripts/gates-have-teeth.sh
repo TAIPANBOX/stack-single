@@ -6314,7 +6314,7 @@ run_case "no-download-outside-build: a file of main is fetched outside the boots
 
 run_case "no-download-outside-build: the release tree is unpacked before its signature" fail \
 	"$NUD" \
-	"$(py 'edit("install.sh", "  ( STACK_DIR=\"$d\"; cosign_install )", "  tree_unpack \"$d/$STACK_TREE_ASSET\" \"$d/early\"\n  ( STACK_DIR=\"$d\"; cosign_install )")')" \
+	"$(py 'edit("install.sh", "  tree_cosign_install \"$d\"", "  tree_unpack \"$d/$STACK_TREE_ASSET\" \"$d/early\"\n  ( STACK_DIR=\"$d\"; cosign_install )")')" \
 	"unpacked before cosign verify-blob"
 
 run_case "no-download-outside-build: main is fetched outside its flag" fail \
@@ -6334,7 +6334,7 @@ run_case "no-download-outside-build: the cosign exception matches nothing (measu
 
 run_case "no-download-outside-build: the release tree fetches one more of its assets (must pass)" pass \
 	"$NUD" \
-	"$(py 'edit("install.sh", "  ( STACK_DIR=\"$d\"; cosign_install )", "  curl -fsSL -o \"$d/$STACK_TREE_ASSET.sha256\" \"$base/download/$tag/$STACK_TREE_ASSET.sha256\" || tree_die \"x\"\n  ( STACK_DIR=\"$d\"; cosign_install )")')"
+	"$(py 'edit("install.sh", "  tree_cosign_install \"$d\"", "  curl -fsSL -o \"$d/$STACK_TREE_ASSET.sha256\" \"$base/download/$tag/$STACK_TREE_ASSET.sha256\" || tree_die \"x\"\n  ( STACK_DIR=\"$d\"; cosign_install )")')"
 
 run_case "no-download-outside-build: the build block fetches as before (must pass)" pass \
 	"$NUD" \
@@ -6732,7 +6732,7 @@ run_case "piped-tree: the block is gone (measured nothing)" fail \
 
 run_case "piped-tree: a refusal is reworded (must pass)" pass \
 	"$PTV" \
-	"$(py 'edit("install.sh", "so its tree was not used. Nothing was changed.\"\n  ( STACK_DIR", "so its tree was not used at all. Nothing was changed.\"\n  ( STACK_DIR")')"
+	"$(py 'edit("install.sh", "so its tree was not used. Nothing was changed.\"\n  tree_cosign_install", "so its tree was not used at all. Nothing was changed.\"\n  tree_cosign_install")')"
 
 echo
 if [ -n "$(git status --porcelain)" ]; then
