@@ -325,6 +325,58 @@ status_of() {
 # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
 http_status() { status_of "$(http_request GET "$1" "Authorization: Bearer $2"$'\r\n' "")"; }
 # argv-free-http: end
+# The status vouchryx gives POST /v1/revoke with an empty body and the given bearer key: 400 when the key is
+# one it holds (the body names nobody, so nothing is revoked), 401 when it is not (invariant 82).
+# shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
+console_revoke_status() { status_of "$(http_request POST http://vouchryx:4310/v1/revoke "Authorization: Bearer $1"$'\r\n'"Content-Type: application/json"$'\r\n' '{}')"; }
+
+# bus-writers: begin
+# CLAUDE.md invariant 83. Every producer on the bus runs under its own uid and writes one stream, and the bus
+# directory is root's (invariant 41). That is read from compose.yaml by a gate; this asks the running box. For each
+# producer, a throwaway busybox runs as that producer's uid, gid and extra groups (BUS_WRITERS, the same table
+# compose.yaml gives the services) against the live events volume, with no network, and must be able to append to
+# its own stream and must NOT be able to append to, rename or link another producer's stream, or create a file in
+# the bus directory. Appending is `: >>`, which writes no byte; a rename that went through is put back at once. The
+# optional add-on's stream is not in the table: the installer does not know the add-on (invariant 24). Every
+# attempt runs in a subshell: in busybox sh a failed redirection on `:`, a special builtin, ends the whole shell
+# (found on a live box, 2026-11-23, where the first refused append stopped every probe).
+BUS_WRITERS="20010:10001:-:tokenfuse.ndjson 20011:10001:-:tokenfuse-openai.ndjson 20012:10001:-:tokenfuse-mcp.ndjson
+20013:10001:-:tokenfuse-cloud.ndjson 20001:10001:20001:wardryx.ndjson 20005:10001:-:typryx.ndjson
+20002:10001:20002:vouchryx.ndjson 20020:10001:-:verdryx.ndjson 10001:10001:-:console.ndjson
+10002:10002:10001:agent-conform.ndjson"
+# shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
+bus_writers_probe() {
+  local row uid gid extra stream groups fail=0 out names=()
+  # Every stream by name, from the table, never a glob: a uid outside the bus group can enter the 0751
+  # directory but not list it, so a glob there would match nothing and prove nothing.
+  for row in $BUS_WRITERS; do names+=("${row##*:}"); done
+  for row in $BUS_WRITERS; do
+    IFS=: read -r uid gid extra stream <<<"$row"
+    groups=()
+    [ "$extra" = - ] || groups=(--group-add "$extra")
+    out="$(docker run --rm --network none --user "$uid:$gid" "${groups[@]}" -v "${NET%_core}_events:/e" busybox:1.36 sh -c '
+      own="$1"; shift; bad=0
+      if [ -e "/e/$own" ]; then
+        ( : >>"/e/$own" ) 2>/dev/null || { echo "cannot append to its own $own"; bad=1; }
+      else
+        echo "its own $own is not on the bus"; bad=1
+      fi
+      for n in "$@"; do
+        [ "$n" = "$own" ] && continue
+        f="/e/$n"
+        [ -e "$f" ] || continue
+        if ( : >>"$f" ) 2>/dev/null; then echo "appended to $n"; bad=1; fi
+        # A rename that went through means the directory is open: put it back and stop asking at once, so
+        # nothing else is moved on a bus that is already broken.
+        if mv "$f" "$f.probe" 2>/dev/null; then mv "$f.probe" "$f"; echo "renamed $n"; exit 1; fi
+        if ln "$f" "/e/.probe-link" 2>/dev/null; then rm -f "/e/.probe-link"; echo "linked $n"; bad=1; fi
+      done
+      if ( : >"/e/.probe-new" ) 2>/dev/null; then rm -f "/e/.probe-new"; echo "created a file on the bus"; bad=1; fi
+      exit "$bad"' sh "$stream" "${names[@]}" 2>&1)" || { fail=1; printf '      uid %s (%s): %s\n' "$uid" "$stream" "$(tr '\n' ';' <<<"$out")" >&2; }
+  done
+  return "$fail"
+}
+# bus-writers: end
 # Same as http_status(), minus the header entirely: an empty bearer token is still a
 # credential, and the point of this one is that none was presented at all.
 # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
@@ -556,6 +608,9 @@ install_only check "chain verifier cannot write another plane's stream" \
       "! docker run --rm --user 10002:10002 --group-add 10001 -v agent-stack_events:/e busybox:1.36 sh -c ': >> /e/wardryx.ndjson'"
 install_only check "chain verifier cannot create a file on the bus" \
       "! docker run --rm --user 10002:10002 --group-add 10001 -v agent-stack_events:/e busybox:1.36 sh -c ': > /e/not-its-own.ndjson'"
+# Every producer, the same three questions and the rename and the link, asked of the running box (invariant 83).
+install_only check "no producer can write, rename or link another plane's stream, or create a file on the bus" \
+      "bus_writers_probe"
 
 # The FOCUS export, which the FinOps console reads as the gateway's spend (CLAUDE.md
 # invariant 80). On every box, over both doors: it must be running, and each door's
@@ -582,6 +637,8 @@ check "wireguard interface is up" \
 if compose_has console; then
   check "console can manage peers over UAPI" \
         "$DC exec -T console test -r /var/run/wireguard/console.sock"
+  check "console can read its own revoke key" \
+        "$DC exec -T console test -r /run/console-revoke/revoke.key"
 fi
 
 # `--protocol udp <port>`, not `<port>/udp`: compose parses the argument as a
@@ -809,6 +866,16 @@ if compose_has vouchryx; then
   # resolves the money plane" checks a wired value rather than a live call.
   check "gateway resolves the delegation door" \
         "$DC exec -T tokenfuse-gateway printenv TOKENFUSE_DELEGATION_ISSUER"
+  # The console's revoke button (invariant 82): vouchryx takes the console's own key. An empty body
+  # sent with it is refused 400 for naming nobody, after the key was accepted, so nothing is revoked;
+  # with a key vouchryx does not hold the same call is 401, which must fail to pass. Install only: a POST is
+  # not something status sends (vouchryx logs each refusal, on its own log, not on the bus).
+  if compose_has console; then
+    install_only check "vouchryx accepts the console's revoke key (nothing revoked)" \
+          "[ \"\$(console_revoke_status \"\$(cat '$STACK_DIR/console-revoke/revoke.key')\")\" = 400 ]"
+    install_only check "vouchryx refuses a revoke key it does not hold" \
+          "[ \"\$(console_revoke_status not-a-revoke-key-0000000000000000000000)\" = 401 ]"
+  fi
 fi
 
 # Invariant 77: what a guest sees. No door is on the guests network (a door there could be handed, by a
@@ -2361,6 +2428,40 @@ case "${ID:-}${ID_LIKE:-}" in
 esac
 # Before anything else that reads or asks, because this one refuses the whole tree.
 rollback_floor_check
+
+# env-guard: begin
+# .env holds every secret this box has, the Postgres password among them, and pgdata knows only the
+# password it was created with. A re-run with .env gone used to write a fresh one, with a new
+# POLICY_DB_PASSWORD the existing database refuses: wardryx restart-looped on `open postgres` and both
+# doors failed closed until somebody noticed (stack-single#62, measured 2026-09-17 on the appliance
+# run). So a run that finds no .env asks Docker whether this project's volumes are already there, and
+# refuses before anything is changed, naming the file to restore. FRESH_ENV=1, read from the
+# environment only, is the operator saying a new .env over those volumes is what they mean; the
+# database's own password then has to be reset by hand or its volume removed. A box with no Docker
+# yet has no volumes, and a Docker that does not answer cannot say, so that refuses too
+# (CLAUDE.md invariant 81).
+env_guard_check() {
+  local envf="$STACK_DIR/.env" vols
+  [ -s "$envf" ] && return 0
+  command -v docker >/dev/null 2>&1 || return 0
+  if ! docker info >/dev/null 2>&1; then
+    [ "${FRESH_ENV:-}" = 1 ] && { note "FRESH_ENV=1: Docker does not answer, so whether this box already holds a stack was not read"; return 0; }
+    die "there is no $envf, and Docker does not answer, so this run cannot tell whether a stack's volumes are already on this box. A fresh .env over them would give the policy database a password it does not know. Start Docker and run again, restore .env first if this box had a stack, or set FRESH_ENV=1 if you mean a new one. Nothing was changed."
+  fi
+  # The name filter matches anywhere in a name, so `foo-agent-stack_x` would count: keep the names that begin
+  # with this project's prefix.
+  vols="$( { docker volume ls -q --filter label=com.docker.compose.project=agent-stack; docker volume ls -q --filter name=agent-stack_ | { grep '^agent-stack_' || true; }; } 2>/dev/null | sort -u | tr '\n' ' ')" \
+    || die "Docker answered and then could not list its volumes, so this run cannot tell whether a stack is on this box. Nothing was changed."
+  vols="${vols% }"
+  [ -n "$vols" ] || return 0
+  if [ "${FRESH_ENV:-}" = 1 ]; then
+    note "FRESH_ENV=1: writing a new .env over this stack's existing volumes ($vols). The policy database keeps its old password: reset it, or remove the agent-stack_pgdata volume, or wardryx will not start."
+    return 0
+  fi
+  die "there is no $envf, and this box already holds the stack's volumes: $vols. A re-run would write a new .env with a new Postgres password that agent-stack_pgdata does not know, and wardryx would stop with both doors closed. Restore your backup of .env to $envf (mode 0600) and run again; see the README, \"Back up .env\". If you mean a new .env over these volumes, set FRESH_ENV=1. Nothing was changed."
+}
+env_guard_check
+# env-guard: end
 
 # smtp-tls: begin
 # heraldyx 0.8.0 sends mail only over TLS: STARTTLS by default, implicit TLS on port 465 on its own, and
@@ -5399,6 +5500,9 @@ upstream_apply
 # repo's spec-then-bare-key shape the other planes use: a plain bearer
 # credential, no `:org` half to omit by mistake.
 add_env_default VOUCHRYX_REVOKE_KEYS "$(gen 40)"
+# The console's own revoke key, a second bare key vouchryx accepts beside the operator's (compose appends it to
+# VOUCHRYX_REVOKE_KEYS), so taking the console's away never touches the operator's (CLAUDE.md invariant 82).
+add_env_default CONSOLE_REVOKE_KEY "$(gen 40)"
 # VOUCHRYX_TRUSTED_ISSUERS is deliberately NOT given an empty default here,
 # unlike every key above: it is written to .env only once a real value
 # exists, either the operator's own or WITH_DELEGATION_DEMO_ISSUER's minted
@@ -5626,6 +5730,36 @@ approver_jwks_apply() { # before `up`: writes the console's public key set and t
 }
 # approver-key: end
 
+# console-revoke-key: begin
+# CLAUDE.md invariant 82. The console's revoke button posts to vouchryx's /v1/revoke with a bearer key of its
+# own, CONSOLE_REVOKE_KEY in .env, which compose adds to vouchryx's VOUCHRYX_REVOKE_KEYS. The console reads the
+# key from a FILE (GENARYX_VOUCHRYX_REVOKE_KEY_FILE), so this writes .env's value to
+# $STACK_DIR/console-revoke/revoke.key: printf with no newline, under umask 077, owned by the console's uid
+# 10001, mode 0400, in a directory of root's with the console's group, 0710, the approver directory's shape. A
+# key already in place and equal to .env is left alone; a changed .env value replaces it. Never printed.
+console_revoke_key_prepare() {
+  local rdir="$STACK_DIR/console-revoke" key want tmp
+  key="$rdir/revoke.key"
+  # Read here rather than through typed_env_get, so the block stands on its own (a gate lifts this section).
+  want="$(sed -n "/^CONSOLE_REVOKE_KEY=/{s///p;q;}" "$STACK_DIR/.env")"
+  want="${want#\'}"
+  want="${want%\'}"
+  [ -n "$want" ] || die "no CONSOLE_REVOKE_KEY in .env, so the console's revoke button would have no key. Run ./install.sh again; it mints one."
+  mkdir -p "$rdir" || die "could not create $rdir"
+  { chown 0:10001 "$rdir" && chmod 0710 "$rdir"; } || die "could not give $rdir to root with the console's group (0:10001), mode 0710"
+  if [ -f "$key" ] && [ ! -L "$key" ] && [ "$(cat "$key")" = "$want" ]; then
+    note "console revoke key kept at $key (never printed)"
+  else
+    if [ -e "$key" ] || [ -L "$key" ]; then CONSOLE_REVOKE_CHANGED=1; fi
+    tmp="$key.tmp.$$"
+    ( umask 077; printf '%s' "$want" >"$tmp" ) || die "could not write the console's revoke key"
+    mv -f "$tmp" "$key" || die "could not put the console's revoke key in place at $key"
+    note "console revoke key written to $key (never printed)"
+  fi
+  { chown -h 10001:10001 "$key" && chmod 0400 "$key"; } || die "could not give the console's revoke key to its uid (10001), mode 0400"
+}
+# console-revoke-key: end
+
 # preview-key: begin
 # CLAUDE.md invariant 78. A person approving a held tool call is shown its arguments: wardryx 2.7.0 and later
 # seal a preview of them to the console's preview key (WARDRYX_PREVIEW_RECIPIENT, the public half), and only
@@ -5703,6 +5837,7 @@ preview_key_apply() { # before `up`
 
 keyryx_prepare
 approver_key_prepare
+console_revoke_key_prepare
 
 # ---- 3b. delegation: vouchryx, opt-in -----------------------------------------
 # @decided 2026-09-27: the launchers offer vouchryx as an opt-in delegation
@@ -6397,6 +6532,13 @@ trailryx_pin_apply() { # writes TRAILRYX_KEYRYX_KID into .env once; a box with t
 
 trailryx_pin_apply
 "${COMPOSE[@]}" "${UP_PROFILES[@]}" up -d --remove-orphans
+# The console reads its revoke key once, at start, and `up` compares no mounted file, so a key this run replaced
+# reaches a running console only through a restart (invariant 82). vouchryx is recreated by `up` itself: its
+# VOUCHRYX_REVOKE_KEYS changed.
+if [ "${CONSOLE_REVOKE_CHANGED:-}" = 1 ] && compose_has console; then
+  "${COMPOSE[@]}" restart console >/dev/null || die "could not restart the console after its revoke key changed"
+  note "console restarted: its revoke key changed"
+fi
 
 
 # `up --remove-orphans` does not remove a container whose profile this run does not name (measured 2026-10-04).

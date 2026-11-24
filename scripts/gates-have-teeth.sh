@@ -3688,7 +3688,7 @@ run_case "rollback-floor: the journal is written before the refusal" fail \
 
 run_case "rollback-floor: the check stands after the package step" fail \
 	'./scripts/rollback-floor.sh' \
-	"$(py 'edit("install.sh", "\nrollback_floor_check\n\n# smtp-tls: begin\n", "\n\n# smtp-tls: begin\n")
+	"$(py 'edit("install.sh", "\nrollback_floor_check\n\n# env-guard: begin\n", "\n\n# env-guard: begin\n")
 edit("install.sh", "say \"installing docker and git\"\nexport DEBIAN_FRONTEND=noninteractive\n", "say \"installing docker and git\"\nexport DEBIAN_FRONTEND=noninteractive\napt-get update -qq\nrollback_floor_check\n")')" \
 	"the floor check comes after the first apt-get"
 
@@ -6455,6 +6455,224 @@ run_case "manifest-is-true: a scheduled routine sits behind an operator profile"
 	'./scripts/manifest-is-true.sh' \
 	"$(py 'edit("components.json", "\"verdryx-slo\": \"verdryx-slo\",", "\"verdryx-slo\": \"verdryx-slo\",\n          \"verdryx-drift\": \"verdryx-drift\",")')" \
 	"A routine no install starts is not scheduled"
+# invariant 81 (stack-single#62): no fresh .env over a stack whose volumes are already on the box.
+EGV='./scripts/env-is-not-regenerated-over-a-stack.sh'
+
+run_case "env-guard: volumes on the box do not stop a fresh .env" fail \
+	"$EGV" \
+	"$(py 'edit("install.sh", "  [ -n \"$vols\" ] || return 0\n", "  return 0\n")')" \
+	"refuse-labelled: the run went on"
+
+run_case "env-guard: a Docker that does not answer is read as an empty box" fail \
+	"$EGV" \
+	"$(py 'edit("install.sh", "  if ! docker info >/dev/null 2>&1; then\n", "  if false; then\n")')" \
+	"refuse-down: the refusal does not name FRESH_ENV=1"
+
+run_case "env-guard: only labelled volumes are looked for" fail \
+	"$EGV" \
+	"$(py 'edit("install.sh", " docker volume ls -q --filter name=agent-stack_ | { grep '"'"'^agent-stack_'"'"' || true; };", "")')" \
+	"refuse-unlabelled: the run went on"
+
+run_case "env-guard: another project's volume stops a fresh box" fail \
+	"$EGV" \
+	"$(py 'edit("install.sh", " | { grep '"'"'^agent-stack_'"'"' || true; }", "")')" \
+	"go-foreign: the run stopped"
+
+run_case "env-guard: a fresh box with no volumes stops the run" fail \
+	"$EGV" \
+	"$(py 'edit("install.sh", " | { grep '"'"'^agent-stack_'"'"' || true; }", " | grep '"'"'^agent-stack_'"'"'")')" \
+	"go-none: the run stopped"
+
+run_case "env-guard: an empty .env counts as one" fail \
+	"$EGV" \
+	"$(py 'edit("install.sh", "  [ -s \"$envf\" ] && return 0\n", "  [ -e \"$envf\" ] && return 0\n")')" \
+	"refuse-empty: the run went on"
+
+run_case "env-guard: the refusal stops naming the way through" fail \
+	"$EGV" \
+	"$(py 'edit("install.sh", " If you mean a new .env over these volumes, set FRESH_ENV=1.", "")')" \
+	"does not name FRESH_ENV=1"
+
+run_case "env-guard: the check moves after the first package install" fail \
+	"$EGV" \
+	"$(py 'edit("install.sh", "env_guard_check\n# env-guard: end\n", "# env-guard: end\n")
+edit("install.sh", "say \"credentials\"\n", "say \"credentials\"\nenv_guard_check\n")')" \
+	"runs after the first apt-get"
+
+run_case "env-guard: the README loses the backup section" fail \
+	"$EGV" \
+	"$(py 'edit("README.md", "## Back up .env\n", "## Keeping .env\n")')" \
+	"has no '## Back up .env' section"
+
+run_case "env-guard: the block is gone (measured nothing)" fail \
+	"$EGV" \
+	"$(py 'edit("install.sh", "# env-guard: begin\n", "# env-guard begins\n")')" \
+	"measured nothing"
+
+run_case "env-guard: a comment in the block is reworded (must pass)" pass \
+	"$EGV" \
+	"$(py 'edit("install.sh", "# run). So a run that finds no .env asks Docker", "# run). So a run finding no .env asks Docker")')"
+# invariant 82: the console's revoke button, with a key of its own only the console holds, as a file.
+CRV='./scripts/console-revoke-is-wired.sh'
+
+run_case "console-revoke: the console loses vouchryx's address" fail \
+	"$CRV" \
+	"$(py 'edit("compose.yaml", "      GENARYX_VOUCHRYX_URL: http://vouchryx:4310\n", "")')" \
+	"GENARYX_VOUCHRYX_URL"
+
+run_case "console-revoke: the console loses its key file" fail \
+	"$CRV" \
+	"$(py 'edit("compose.yaml", "      GENARYX_VOUCHRYX_REVOKE_KEY_FILE: /run/console-revoke/revoke.key\n", "")')" \
+	"has no GENARYX_VOUCHRYX_REVOKE_KEY_FILE"
+
+run_case "console-revoke: the key is mounted read-write" fail \
+	"$CRV" \
+	"$(py 'edit("compose.yaml", "      - ./console-revoke:/run/console-revoke:ro\n", "      - ./console-revoke:/run/console-revoke\n")')" \
+	"mounts ./console-revoke read-write"
+
+run_case "console-revoke: vouchryx does not take the console's key" fail \
+	"$CRV" \
+	"$(py 'edit("compose.yaml", "${VOUCHRYX_REVOKE_KEYS:-}${CONSOLE_REVOKE_KEY:+,${CONSOLE_REVOKE_KEY}}", "${VOUCHRYX_REVOKE_KEYS:-}")')" \
+	"not the operator's key and the console's"
+
+run_case "console-revoke: another service mounts the console's key" fail \
+	"$CRV" \
+	"$(py 'edit("compose.yaml", "      - costcrewdata:/var/lib/costcrew\n    read_only: true\n", "      - costcrewdata:/var/lib/costcrew\n      - ./console-revoke:/run/x:ro\n    read_only: true\n")')" \
+	"is the console's alone"
+
+run_case "console-revoke: the key file is readable by its group" fail \
+	"$CRV" \
+	"$(py 'edit("install.sh", "chmod 0400 \"$key\"; } || die \"could not give the console'"'"'s revoke key", "chmod 0440 \"$key\"; } || die \"could not give the console'"'"'s revoke key")')" \
+	"not 0400"
+
+run_case "console-revoke: the key file gets a newline" fail \
+	"$CRV" \
+	"$(py 'edit("install.sh", "( umask 077; printf '"'"'%s'"'"' \"$want\" >\"$tmp\" )", "( umask 077; printf '"'"'%s\\n'"'"' \"$want\" >\"$tmp\" )")')" \
+	"exactly"
+
+run_case "console-revoke: a link at the key's name is followed" fail \
+	"$CRV" \
+	"$(py 'edit("install.sh", "    mv -f \"$tmp\" \"$key\" || die \"could not put the console'"'"'s revoke key in place at $key\"", "    cat \"$tmp\" >\"$key\" || die \"could not put the console'"'"'s revoke key in place at $key\"")')" \
+	"was followed"
+
+run_case "console-revoke: install.sh stops asking vouchryx about the key" fail \
+	"$CRV" \
+	"$(py 'edit("install.sh", "vouchryx accepts the console'"'"'s revoke key (nothing revoked)", "vouchryx answers")')" \
+	"does not check that vouchryx accepts"
+
+run_case "console-revoke: the block is gone (measured nothing)" fail \
+	"$CRV" \
+	"$(py 'edit("install.sh", "# console-revoke-key: begin\n", "# console-revoke-key begins\n")')" \
+	"measured nothing"
+
+run_case "console-revoke: a note is reworded (must pass)" pass \
+	"$CRV" \
+	"$(py 'edit("install.sh", "note \"console revoke key written to $key (never printed)\"", "note \"console revoke key put at $key (never printed)\"")')"
+# invariant 83: every install asks the box, producer by producer, who can write what on the bus.
+BWP='./scripts/bus-writers-are-probed.sh'
+
+run_case "bus-writers: a stream drops out of the table" fail \
+	"$BWP" \
+	"$(py 'edit("install.sh", " 20020:10001:-:verdryx.ndjson", "")')" \
+	"does not ask about it"
+
+run_case "bus-writers: the table names the wrong uid" fail \
+	"$BWP" \
+	"$(py 'edit("install.sh", "20005:10001:-:typryx.ndjson", "20006:10001:-:typryx.ndjson")')" \
+	"BUS_WRITERS asks about typryx.ndjson as uid 20006"
+
+run_case "bus-writers: the probe drops a writer's extra group" fail \
+	"$BWP" \
+	"$(py 'edit("install.sh", "    [ \"$extra\" = - ] || groups=(--group-add \"$extra\")\n", "")')" \
+	"without the group"
+
+run_case "bus-writers: the probe stops trying another stream" fail \
+	"$BWP" \
+	"$(py 'edit("install.sh", "        if ( : >>\"$f\" ) 2>/dev/null; then echo \"appended to $n\"; bad=1; fi\n", "")')" \
+	"a bus with other-writable passed"
+
+run_case "bus-writers: a rename that went through is not put back" fail \
+	"$BWP" \
+	"$(py 'edit("install.sh", "then mv \"$f.probe\" \"$f\"; echo \"renamed $n\"", "then echo \"renamed $n\"")')" \
+	"not every stream back under its own name"
+
+run_case "bus-writers: the probe lists the directory instead of naming the streams" fail \
+	"$BWP" \
+	"$(py 'edit("install.sh", "      for n in \"$@\"; do\n        [ \"$n\" = \"$own\" ] && continue\n        f=\"/e/$n\"\n", "      for f in /e/*.ndjson; do\n        n=\"${f##*/}\"\n        [ \"$n\" = \"$own\" ] && continue\n")')" \
+	"a bus with other-writable passed"
+
+run_case "bus-writers: a producer's missing stream passes" fail \
+	"$BWP" \
+	"$(py 'edit("install.sh", "        echo \"its own $own is not on the bus\"; bad=1\n", "        echo \"note: no $own\"\n")')" \
+	"every producer's stream must be there"
+
+run_case "bus-writers: an attempt runs outside a subshell" fail \
+	"$BWP" \
+	"$(py 'edit("install.sh", "        if ( : >>\"$f\" ) 2>/dev/null; then", "        if : >>\"$f\" 2>/dev/null; then")')" \
+	"not in a subshell"
+
+run_case "bus-writers: the probe gets a network" fail \
+	"$BWP" \
+	"$(py 'edit("install.sh", "docker run --rm --network none --user \"$uid:$gid\"", "docker run --rm --user \"$uid:$gid\"")')" \
+	"is on a network"
+
+run_case "bus-writers: install.sh stops running the probe" fail \
+	"$BWP" \
+	"$(py 'edit("install.sh", "      \"bus_writers_probe\"\n", "      \"true\"\n")')" \
+	"does not run bus_writers_probe"
+
+run_case "bus-writers: the README says the bus is open again" fail \
+	"$BWP" \
+	"$(py 'edit("README.md", "Who can write what on the bus.", "What is still open: any writer in the bus group can append to any other plane'"'"'s file. Who can write what on the bus.")')" \
+	"the README still says"
+
+run_case "bus-writers: the block is gone (measured nothing)" fail \
+	"$BWP" \
+	"$(py 'edit("install.sh", "# bus-writers: begin\n", "# bus-writers begins\n")')" \
+	"measured nothing"
+
+run_case "bus-writers: a comment is reworded (must pass)" pass \
+	"$BWP" \
+	"$(py 'edit("install.sh", "# its own stream and must NOT be able to append to", "# its own stream, and must NOT be able to append to")')"
+# invariant 85: every service carries a memory limit of its own.
+EML='./scripts/every-service-has-a-memory-limit.sh'
+
+run_case "mem-limit: a service loses its limit" fail \
+	"$EML" \
+	"$(py 'edit("compose.yaml", "    pids_limit: 512\n    mem_limit: 512m\n", "    pids_limit: 512\n")')" \
+	"wardryx has no mem_limit"
+
+run_case "mem-limit: the anchor carries one limit for all" fail \
+	"$EML" \
+	"$(py 'edit("compose.yaml", "  ulimits: { core: 0 }\n", "  ulimits: { core: 0 }\n  mem_limit: 512m\n")')" \
+	"an anchor above the services carries mem_limit"
+
+run_case "mem-limit: the console is squeezed below its work" fail \
+	"$EML" \
+	"$(py 's = open("compose.yaml").read()
+i = s.index("  console:\n")
+j = s.index("    mem_limit: 2g\n", i)
+open("compose.yaml", "w").write(s[:j] + "    mem_limit: 512m\n" + s[j + len("    mem_limit: 2g\n"):])')" \
+	"console has 512 MiB, below 1 GiB"
+
+run_case "mem-limit: a typo leaves a limit in kilobytes" fail \
+	"$EML" \
+	"$(py 'edit("compose.yaml", "    pids_limit: 512\n    mem_limit: 512m\n", "    pids_limit: 512\n    mem_limit: 512k\n")')" \
+	"below 64 MiB"
+
+run_case "mem-limit: a limit that limits nothing" fail \
+	"$EML" \
+	"$(py 'edit("compose.yaml", "    pids_limit: 512\n    mem_limit: 512m\n", "    pids_limit: 512\n    mem_limit: 64g\n")')" \
+	"above 4 GiB"
+
+run_case "mem-limit: the services are gone (measured nothing)" fail \
+	"$EML" \
+	"$(py 'edit("compose.yaml", "\nservices:\n", "\nservicez:\n")')" \
+	"FAIL mem-limit"
+
+run_case "mem-limit: one plane is given more room (must pass)" pass \
+	"$EML" \
+	"$(py 'edit("compose.yaml", "    pids_limit: 512\n    mem_limit: 512m\n", "    pids_limit: 512\n    mem_limit: 768m\n")')"
 
 echo
 if [ -n "$(git status --porcelain)" ]; then

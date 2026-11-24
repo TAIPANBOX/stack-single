@@ -250,6 +250,28 @@ It also does not cover:
 - Restoring `$STACK_DIR` from a backup. The journal comes back as it was that day, and the
   floor with it. Removing the file makes the box new again.
 
+## Back up .env
+
+`/opt/agent-stack/.env` (mode 0600) holds every secret this box has: the policy
+database's password, the planes' keys, the gateway's client keys and the
+console's. It is the one file to back up, and to keep off the box, because the
+volumes cannot be used without it: the policy database (`agent-stack_pgdata`)
+knows only the password it was created with. Copy it somewhere only you can read
+after the first install and after any run that changes it:
+
+```bash
+sudo install -m 0600 /opt/agent-stack/.env ~/agent-stack.env.backup   # then move it off the box
+```
+
+What a re-run does without it: the installer finds no `.env`, asks Docker whether
+this stack's volumes are already on the box, and if they are it stops before it
+changes anything, names the volumes and asks for the file back. Restore it to
+`/opt/agent-stack/.env` with mode 0600 and run again. `FRESH_ENV=1 ./install.sh`
+is the way to say a new `.env` over those volumes is what you mean; the policy
+database then keeps its old password, so reset it or remove `agent-stack_pgdata`
+(and with it every policy and approval it held), or wardryx will not start. A box
+whose Docker does not answer cannot be asked, and is refused the same way.
+
 ## This is not the sandbox
 
 [`stack-up`](https://github.com/TAIPANBOX/stack-up) is the local try: it binds
@@ -1966,6 +1988,12 @@ Every service in `compose.yaml` runs with the same baseline, unless a named line
 - `no-new-privileges:true`: nothing it runs can gain one through setuid or a file capability.
 - `pids_limit`: a number per service, well above what it was measured to use, there to stop
   a fork bomb and not to hold a service under a ceiling.
+- `mem_limit`: a memory ceiling per service, written in its own block. The planes idle at a
+  few MiB; the console, the FOCUS export and the gateways, which run a query engine over a
+  whole trace or hold every request in flight, get 1 to 2 GiB. A ceiling stops the one
+  container that runs away and compose starts it again, instead of the kernel stopping
+  whatever it picks on a box out of memory. Raise a number in `compose.yaml` if a box
+  needs more.
 - `ulimits: core: 0`: no core dump with a key in it.
 - a user that is not root.
 
@@ -2071,17 +2099,21 @@ If the console source is not present it says so and installs the governed
 stack without it, which is a real deployment: the planes enforce with or
 without a UI in front of them.
 
-One thing it does not check, said here rather than found later. The
-`events` volume is shared by every plane that writes the bus, group-writable
-so each can append its own file. Since heraldyx 0.3.0 and idryx 1.1.0 a line is
-read as the source its FILE may carry (`wardryx.ndjson` carries `wardryx`,
-`tokenfuse-cloud.ndjson` and `tokenfuse-mcp.ndjson` carry `tokenfuse`), so a
-line claiming another plane inside the wrong file is refused and said once; the
-file names this installer writes are held to that by `scripts/bus-names-match-their-source.sh`.
-What is still open: any writer in the bus group can append to any other plane's
-file under that file's own source, and the record plane takes a line as that
-plane's word. The containers sharing that volume trust each other as much as
-they trust the box.
+Who can write what on the bus. The `events` volume is shared by every plane
+that writes it, and each plane writes one file of its own: every stream is owned
+by its one writer's uid, mode 0640, and the bus directory is root's (0751), so no
+plane can append to, rename, link or replace another plane's file or create a new
+one (CLAUDE.md invariant 41, held in `compose.yaml` by
+`scripts/no-plane-writes-another-planes-stream.sh`). Every install also asks the
+running box: a throwaway container per producer, as that producer's uid and
+groups, must append to its own stream and be refused on everyone else's, and on
+creating a file (invariant 83). Since heraldyx 0.3.0 and idryx 1.1.0 a line is
+also read as the source its FILE may carry (`wardryx.ndjson` carries `wardryx`,
+`tokenfuse-cloud.ndjson` and `tokenfuse-mcp.ndjson` carry `tokenfuse`), so a line
+claiming another plane inside the wrong file is refused and said once
+(`scripts/bus-names-match-their-source.sh`). What the layout cannot stop is a plane
+writing false lines into its own file, under its own name: the record takes a
+line as that plane's word.
 
 The other thing this used to say here, delegation being verified nowhere on
 this box, is the gap the next section closes.
@@ -2142,10 +2174,18 @@ a plain `docker compose down` never loses one either.
 and policy planes: the gateway reaches it, and polls
 `GET /v1/revocations`, over the compose network only. `POST /v1/revoke`
 needs `VOUCHRYX_REVOKE_KEYS` from `.env` as a bearer key and is reached the
-same way, from a container on this compose network, not the host; this
-launcher does not yet wire the console's own revoke button
-(`GENARYX_VOUCHRYX_URL`, `GENARYX_VOUCHRYX_REVOKE_KEY_FILE`) the way
-`stack-up`'s does.
+same way, from a container on this compose network, not the host. The
+console's own revoke button uses a key of its own: `install.sh` mints
+`CONSOLE_REVOKE_KEY` into `.env`, compose adds it to vouchryx's
+`VOUCHRYX_REVOKE_KEYS` beside the operator's key, and the console reads it from
+`/opt/agent-stack/console-revoke/revoke.key` (its own uid, 0400, mounted read
+only into the console alone) with `GENARYX_VOUCHRYX_URL=http://vouchryx:4310`.
+Revoking from the console is an admin action behind a passkey. To replace the
+console's key without touching yours, delete the `CONSOLE_REVOKE_KEY` line from
+`.env` and run the installer again: it mints a new one, vouchryx is recreated with
+it and the console restarted, and the old key stops working. Each install checks that vouchryx takes the
+console's key (an empty request is refused for naming nobody, so nothing is
+revoked) and refuses a key it does not hold.
 
 **What this does not cover.** It verifies a chain a caller presents; it does
 not decide what a proven chain is allowed to do; that is `wardryx`'s policy,

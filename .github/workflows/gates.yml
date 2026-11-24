@@ -179,6 +179,14 @@ jobs:
         run: ./scripts/broker-ask-retries-a-held-call.sh
       - name: the gateway's spend reaches the FinOps console, over both doors (invariant 80)
         run: ./scripts/costcrew-reads-the-gateway-spend.sh
+      - name: a lost .env is never regenerated over a stack's volumes (invariant 81)
+        run: ./scripts/env-is-not-regenerated-over-a-stack.sh
+      - name: the console's revoke button has a key of its own (invariant 82)
+        run: ./scripts/console-revoke-is-wired.sh
+      - name: every install asks the box who can write what on the bus (invariant 83)
+        run: ./scripts/bus-writers-are-probed.sh
+      - name: every service carries a memory limit of its own (invariant 85)
+        run: ./scripts/every-service-has-a-memory-limit.sh
 
       # Last, because it mutates tracked files and restores them. It needs a
       # clean tree and says so plainly, so it also reports any earlier step
