@@ -60,7 +60,8 @@ and GitHub's OIDC issuer. Only then does it unpack the tarball, check that its
 bundle, a signature that does not check, a tree of another version, a path that
 climbs out of the tarball) stops the run with the box as it was. The release
 workflow (`.github/workflows/release.yml`) is what signs the tarball, on the tag,
-when the tag is pushed.
+when the tag is pushed, into a draft release; a person publishes each release, so
+nothing becomes the latest without that step.
 
 - `STACK_TAG=vX.Y.Z` installs that release instead, checked the same way, and the
   rollback index still refuses one below the box's ("Going backwards by mistake").
