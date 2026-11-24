@@ -346,12 +346,12 @@ BUS_WRITERS="20010:10001:-:tokenfuse.ndjson 20011:10001:-:tokenfuse-openai.ndjso
 10002:10002:10001:agent-conform.ndjson"
 # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
 bus_writers_probe() {
-  local row uid gid extra own groups fail=0 out names=()
+  local row uid gid extra stream groups fail=0 out names=()
   # Every stream by name, from the table, never a glob: a uid outside the bus group can enter the 0751
   # directory but not list it, so a glob there would match nothing and prove nothing.
   for row in $BUS_WRITERS; do names+=("${row##*:}"); done
   for row in $BUS_WRITERS; do
-    IFS=: read -r uid gid extra own <<<"$row"
+    IFS=: read -r uid gid extra stream <<<"$row"
     groups=()
     [ "$extra" = - ] || groups=(--group-add "$extra")
     out="$(docker run --rm --network none --user "$uid:$gid" "${groups[@]}" -v "${NET%_core}_events:/e" busybox:1.36 sh -c '
@@ -372,7 +372,7 @@ bus_writers_probe() {
         if ln "$f" "/e/.probe-link" 2>/dev/null; then rm -f "/e/.probe-link"; echo "linked $n"; bad=1; fi
       done
       if ( : >"/e/.probe-new" ) 2>/dev/null; then rm -f "/e/.probe-new"; echo "created a file on the bus"; bad=1; fi
-      exit "$bad"' sh "$own" "${names[@]}" 2>&1)" || { fail=1; printf '      uid %s (%s): %s\n' "$uid" "$own" "$(tr '\n' ';' <<<"$out")" >&2; }
+      exit "$bad"' sh "$stream" "${names[@]}" 2>&1)" || { fail=1; printf '      uid %s (%s): %s\n' "$uid" "$stream" "$(tr '\n' ';' <<<"$out")" >&2; }
   done
   return "$fail"
 }
