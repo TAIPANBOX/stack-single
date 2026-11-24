@@ -5740,7 +5740,10 @@ approver_jwks_apply() { # before `up`: writes the console's public key set and t
 console_revoke_key_prepare() {
   local dir="$STACK_DIR/console-revoke" key want tmp
   key="$dir/revoke.key"
-  want="$(typed_env_get CONSOLE_REVOKE_KEY)"
+  # Read here rather than through typed_env_get, so the block stands on its own (a gate lifts this section).
+  want="$(sed -n "/^CONSOLE_REVOKE_KEY=/{s///p;q;}" "$STACK_DIR/.env")"
+  want="${want#\'}"
+  want="${want%\'}"
   [ -n "$want" ] || die "no CONSOLE_REVOKE_KEY in .env, so the console's revoke button would have no key. Run ./install.sh again; it mints one."
   mkdir -p "$dir" || die "could not create $dir"
   { chown 0:10001 "$dir" && chmod 0710 "$dir"; } || die "could not give $dir to root with the console's group (0:10001), mode 0710"
