@@ -5738,15 +5738,15 @@ approver_jwks_apply() { # before `up`: writes the console's public key set and t
 # 10001, mode 0400, in a directory of root's with the console's group, 0710, the approver directory's shape. A
 # key already in place and equal to .env is left alone; a changed .env value replaces it. Never printed.
 console_revoke_key_prepare() {
-  local dir="$STACK_DIR/console-revoke" key want tmp
-  key="$dir/revoke.key"
+  local rdir="$STACK_DIR/console-revoke" key want tmp
+  key="$rdir/revoke.key"
   # Read here rather than through typed_env_get, so the block stands on its own (a gate lifts this section).
   want="$(sed -n "/^CONSOLE_REVOKE_KEY=/{s///p;q;}" "$STACK_DIR/.env")"
   want="${want#\'}"
   want="${want%\'}"
   [ -n "$want" ] || die "no CONSOLE_REVOKE_KEY in .env, so the console's revoke button would have no key. Run ./install.sh again; it mints one."
-  mkdir -p "$dir" || die "could not create $dir"
-  { chown 0:10001 "$dir" && chmod 0710 "$dir"; } || die "could not give $dir to root with the console's group (0:10001), mode 0710"
+  mkdir -p "$rdir" || die "could not create $rdir"
+  { chown 0:10001 "$rdir" && chmod 0710 "$rdir"; } || die "could not give $rdir to root with the console's group (0:10001), mode 0710"
   if [ -f "$key" ] && [ ! -L "$key" ] && [ "$(cat "$key")" = "$want" ]; then
     note "console revoke key kept at $key (never printed)"
   else

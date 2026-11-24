@@ -3688,7 +3688,7 @@ run_case "rollback-floor: the journal is written before the refusal" fail \
 
 run_case "rollback-floor: the check stands after the package step" fail \
 	'./scripts/rollback-floor.sh' \
-	"$(py 'edit("install.sh", "\nrollback_floor_check\n\n# smtp-tls: begin\n", "\n\n# smtp-tls: begin\n")
+	"$(py 'edit("install.sh", "\nrollback_floor_check\n\n# env-guard: begin\n", "\n\n# env-guard: begin\n")
 edit("install.sh", "say \"installing docker and git\"\nexport DEBIAN_FRONTEND=noninteractive\n", "say \"installing docker and git\"\nexport DEBIAN_FRONTEND=noninteractive\napt-get update -qq\nrollback_floor_check\n")')" \
 	"the floor check comes after the first apt-get"
 
