@@ -429,6 +429,7 @@ says "line 3" "status does not name the line it cannot read"
 cat >"$SANDBOX/section1.head" <<'HARNESS'
 #!/usr/bin/env bash
 set -euo pipefail
+SELF="${BASH_SOURCE[0]:-}"
 note() { printf '   %s\n' "$*"; }
 say() { printf '>> %s\n' "$*"; }
 die() { printf '\n!! %s\n' "$*" >&2; exit 1; }
@@ -446,12 +447,16 @@ exit 1
 STUB
 chmod +x "$SANDBOX/bin1/curl"
 version_line="$(grep -E '^x-stack-version: ' compose.yaml)"
+# Section 1 asks tree_is_beside (invariant 84) whether a tree is beside the script, so the harness carries it.
+TREE_BESIDE="$(sed -n '/^tree_tmp_valid() {/,/^}/p; /^tree_is_beside() {/,/^}/p' install.sh)"
+[ -n "$TREE_BESIDE" ] || { echo "FAIL: install.sh has no tree_is_beside(); section 1 cannot be lifted"; exit 1; }
 tree_case() { # NAME DIR: runs section 1 as DIR/install-slice.sh
 	cases=$((cases + 1))
 	case_name="$1"
 	{
 		cat "$SANDBOX/section1.head"
 		printf '%s\n' "$BLOCK"
+		printf '%s\n' "$TREE_BESIDE"
 		printf 'COMPOSE=(docker compose)\nrollback_floor_check\n'
 		printf '%s\n' "$SECTION1"
 		printf 'printf "section 1 ended in %%s\\n" "$PWD"\n'
@@ -465,6 +470,7 @@ tree() { # DIR: a tree with a compose file of its own version
 	rm -rf "$1"
 	mkdir -p "$1"
 	printf '%s\nservices: {}\n' "$version_line" >"$1/compose.yaml"
+	printf '#!/usr/bin/env bash\n' >"$1/install.sh"
 }
 fresh
 floor 1
@@ -481,34 +487,47 @@ journal_has ' attempt ' "$case_name: section 1 did not record the attempt"
 if [ -e "$BOX/.install-history.kept" ]; then report "$case_name: a kept copy of the journal was left behind"; fi
 
 fresh
-mkdir -p "$SANDBOX/piped"
-rm -f "$SANDBOX/piped/compose.yaml"
+tree "$SANDBOX/tree"
+printf 'x-stack-version: "0.0.1"\nservices: {}\n' >"$SANDBOX/tree/compose.yaml"
 printf 'the box as it was\n' >"$BOX/compose.yaml"
-printf 'x-stack-version: "0.0.1"\nservices: {}\n' >"$SANDBOX/served-compose.yaml"
-tree_case "a piped install whose compose file is another version" "$SANDBOX/piped"
+tree_case "a tree whose compose file is another version" "$SANDBOX/tree"
 if [ "$rc" -ne 1 ]; then report "$case_name: it was not refused (exit $rc)"; sed 's/^/        /' "$OUT" | head -6; fi
 says "0.0.1" "$case_name: the refusal does not say what the compose file claims"
 if [ "$(cat "$BOX/compose.yaml")" != 'the box as it was' ]; then report "$case_name: the box's compose.yaml was replaced before the refusal"; fi
 if [ -e "$BOX/.install-history" ]; then report "$case_name: the journal was written before the refusal"; fi
-if ls "$BOX"/compose.yaml.* >/dev/null 2>&1; then report "$case_name: a fetched copy was left behind"; fi
 
 fresh
-printf 'services: {}\n' >"$SANDBOX/served-compose.yaml"
-tree_case "a piped install whose compose file names no version" "$SANDBOX/piped"
-if [ "$rc" -ne 1 ]; then report "$case_name: it was not refused (exit $rc)"; fi
+mkdir -p "$SANDBOX/piped"
+rm -f "$SANDBOX/piped/compose.yaml" "$SANDBOX/piped/install.sh"
+printf 'the box as it was\n' >"$BOX/compose.yaml"
+tree_case "section 1 with no tree beside it" "$SANDBOX/piped"
+if [ "$rc" -ne 1 ]; then report "$case_name: it was not refused (exit $rc)"; sed 's/^/        /' "$OUT" | head -6; fi
+says "no tree beside this script" "$case_name: the refusal does not say there is no tree"
+if [ "$(cat "$BOX/compose.yaml")" != 'the box as it was' ]; then report "$case_name: the box's compose.yaml changed"; fi
+if [ -e "$BOX/.install-history" ]; then report "$case_name: the journal was written before the refusal"; fi
 
+# The verified tree tree_bootstrap hands over to (invariant 84): the journal names its tag, and only for a tree
+# inside the bootstrap's own temporary directory, so a variable set by hand names nothing.
 fresh
-printf '%s\nservices: {}\n' "$version_line" >"$SANDBOX/served-compose.yaml"
-tree_case "a piped install of one version" "$SANDBOX/piped"
+export TMPDIR="$SANDBOX/tmp"
+vt="$TMPDIR/stack-single-tree.AbCdEf12"
+tree "$vt/stack-single"
+STACK_TREE_VERIFIED=v1.2.3 STACK_TREE_TMP="$vt" tree_case "a verified tree" "$vt/stack-single"
 if [ "$rc" -ne 0 ]; then report "$case_name: it stopped with exit $rc"; sed 's/^/        /' "$OUT" | head -6; fi
-if [ ! -f "$BOX/compose.yaml" ]; then report "$case_name: the compose file did not arrive"; fi
-journal_has ' attempt .* commit=piped ' "$case_name: a piped run does not say it has no commit"
+journal_has ' attempt .* commit=v1\.2\.3 ' "$case_name: the journal does not name the verified tag"
+fresh
+tree "$SANDBOX/tree"
+STACK_TREE_VERIFIED=v1.2.3 STACK_TREE_TMP="$vt" tree_case "a clone with a tag set by hand" "$SANDBOX/tree"
+if grep -q 'commit=v1\.2\.3' "$BOX/.install-history"; then report "$case_name: a tag set by hand was written to the journal as verified"; fi
+unset TMPDIR
 
 # ---- the real install.sh, up to where it stops -----------------------------------
 # A copy with only the path of os-release changed, on stub tools that log every call.
 mkdir -p "$SANDBOX/bin2"
 printf 'ID=debian\nPRETTY_NAME="a stub"\n' >"$SANDBOX/os-release"
-sed "s#/etc/os-release#$SANDBOX/os-release#g" install.sh >"$SANDBOX/install-copy.sh"
+mkdir -p "$SANDBOX/real"
+sed "s#/etc/os-release#$SANDBOX/os-release#g" install.sh >"$SANDBOX/real/install.sh"
+cp compose.yaml "$SANDBOX/real/compose.yaml"
 export TOOL_LOG="$SANDBOX/tools.log"
 for tool in apt-get docker git curl cosign ufw sysctl; do
 	cat >"$SANDBOX/bin2/$tool" <<STUB
@@ -527,7 +546,7 @@ real_run() { # NAME
 	case_name="$1"
 	: >"$TOOL_LOG"
 	set +e
-	PATH="$SANDBOX/bin2:$PATH" STACK_DIR="$BOX" bash "$SANDBOX/install-copy.sh" >"$OUT" 2>&1 </dev/null
+	PATH="$SANDBOX/bin2:$PATH" STACK_DIR="$BOX" bash "$SANDBOX/real/install.sh" >"$OUT" 2>&1 </dev/null
 	rc=$?
 	set -e
 }

@@ -74,12 +74,17 @@ Feature: the box does not go backwards by accident
     Then it stops and names the line, because a skipped line can be the one that held the floor
     # -> gates-have-teeth.sh "rollback-floor: a line that cannot be read is skipped"
 
-  Scenario: a piped install whose compose file is not its own version is refused
-    Given install.sh and compose.yaml fetched in two requests, from two commits
+  Scenario: a tree whose compose file is not its own version is refused
+    Given install.sh and compose.yaml of one tree carry one version
     When the versions differ
     Then the run stops, and the box's own compose.yaml and journal are as they were
     # -> gates-have-teeth.sh "rollback-floor: the version of the compose file is not compared"
-    # -> gates-have-teeth.sh "rollback-floor: the fetch writes over the box's file"
+
+  Scenario: a tag set by hand is written to the journal as a verified release
+    Given the journal names a release tag only for the tree the piped install checked
+    When any tree carrying STACK_TREE_VERIFIED is written as that tag
+    Then the gate fails
+    # -> gates-have-teeth.sh "rollback-floor: a tag set by hand is written as verified"
 
   Scenario: a tree that carries a journal of its own leaves the box's in place
     Given a tree copied from a box, with that box's journal inside it

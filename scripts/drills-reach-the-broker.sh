@@ -118,8 +118,11 @@ case "$scopes" in
 esac
 grep -qE '(^|[|:])search_notes([|;,]|$)' <<<"$scopes" \
   && fail "the broker's default scopes admit search_notes, so the drill's second call would reach an upstream"
-grep -qF 'drill-scenarios/mcp-ungranted-tool-held.yaml" \' install.sh \
-  || fail "a piped install does not fetch drill-scenarios/mcp-ungranted-tool-held.yaml, so compose would mount a directory where the drill should be"
+# A piped install runs the release's tree (invariant 84): the drill is in it when git tracks it and nothing keeps
+# it out of `git archive`.
+git ls-files --error-unmatch drill-scenarios/mcp-ungranted-tool-held.yaml >/dev/null 2>&1 \
+  && ! grep -q ': set$' <<<"$(git check-attr export-ignore -- drill-scenarios drill-scenarios/mcp-ungranted-tool-held.yaml)" \
+  || fail "a piped install does not fetch drill-scenarios/mcp-ungranted-tool-held.yaml: it would not be in the release tree, so compose would mount a directory where the drill should be"
 
 # ---- B. the image is checked before it is pulled ---------------------------------------
 grep -qE 'config --images mockryx-drill' install.sh \

@@ -24,11 +24,12 @@
 #      that no longer matches is reported as measuring nothing:
 #        1. cosign: the file is written to `$dest.download` and `sha256sum -c` against the pinned
 #           SHA-256 must run on that name, and the file must be moved into place only after it.
-#        2. the files of THIS repository in a piped install (compose.yaml and the files it names
-#           beside itself), fetched from ${REPO_SINGLE_RAW:-...stack-single/main} into $STACK_DIR:
-#           configuration that compose and Docker read, version-checked before it is put in place,
-#           and never unpacked or run by the installer. `curl | bash` itself is the owner's
-#           decision about the channel, and this gate does not judge it.
+#        2. the release tree of a piped install (invariant 84): inside the `# tree-bootstrap:` block,
+#           the tarball and its bundle are written into the block's temporary directory ("$d/...") and
+#           `cosign verify-blob` must come before the tarball is unpacked;
+#        3. the main branch's tree, inside the block and only under `INSTALL_FROM_MAIN=1`, which says
+#           in its own words that it is unsigned. `curl | bash` itself is the owner's decision about
+#           the channel, and this gate does not judge it.
 #   B. NO READ OF THE STACK-K8S TREE: no statement outside the branch names $SRC_DIR/stack-k8s or a
 #      stack-k8s/images path, so the ordinary path cannot depend on a tree it no longer fetches.
 #   C. NO REPO_RAW: the variable that named stack-k8s's raw URL has no reader, and a variable nobody
@@ -87,7 +88,10 @@ PIPE_TO = re.compile(r"(curl|wget)[^|;&]*\|\s*(sudo\s+)?(tar|sh|bash|zsh|dash|un
 OUTFILE = re.compile(r"(\s-o\s+\S+|\s--output\s+\S+|\s-O(\s+\S+)?(\s|$)|>\s*\S+)")
 GIT = re.compile(r"\bgit\s+(clone|pull|fetch)\b")
 
-matched = {"cosign": 0, "piped": 0}
+matched = {"cosign": 0, "release-tree": 0, "main-tree": 0}
+tb_start = next((i for i, l in enumerate(lines) if l.strip() == "# tree-bootstrap: begin"), None)
+tb_end = next((i for i, l in enumerate(lines) if l.strip() == "# tree-bootstrap: end"), None)
+tb_text = "\n".join(lines[tb_start:tb_end]) if tb_start is not None and tb_end is not None else ""
 for lineno, text, last in stmts:
     if text.lstrip().startswith("apt-get ") or text.lstrip().startswith("note ") or text.lstrip().startswith("say "):
         continue
@@ -106,6 +110,8 @@ for lineno, text, last in stmts:
     outs = []
     for m in re.finditer(r"(?:\s-o\s+(\S+)|\s--output\s+(\S+)|\s-O\s+(\S+)|>\s*(\S+))", text):
         target = next(g for g in m.groups() if g)
+        # the end of a command substitution is not part of the name: `2>/dev/null)"`
+        target = target.rstrip(')"\'').strip('"').strip("'")
         if target in ("/dev/null", "-", "&1", "&2") or target.startswith("&"):
             continue
         outs.append(target.strip('"').strip("'"))
@@ -121,11 +127,26 @@ for lineno, text, last in stmts:
         else:
             matched["cosign"] += 1
         continue
-    # exception 2: this repository's own files in a piped install
-    if "${REPO_SINGLE_RAW:-https://raw.githubusercontent.com/TAIPANBOX/stack-single/main}" in text and all(o.startswith("$STACK_DIR/") for o in outs):
-        matched["piped"] += 1
-        continue
-    bad.append((lineno, text, "a download written to a file with no check of a hash or a signature, and not one of the two named exceptions"))
+    # exceptions 2 and 3: the trees of a piped install, inside the tree-bootstrap block
+    inside = tb_start is not None and tb_end is not None and tb_start < lineno - 1 < tb_end
+    if inside and all(o.startswith("$d/") for o in outs):
+        before = "\n".join(lines[tb_start:lineno - 1])
+        if any("main.tar.gz" in o for o in outs):
+            branch = before.rfind('if [ "${INSTALL_FROM_MAIN:-}" = 1 ]; then')
+            if branch == -1 or before.rfind("\n  fi\n", branch) != -1:
+                bad.append((lineno, text, "the main branch's tree is fetched outside the INSTALL_FROM_MAIN=1 branch"))
+            else:
+                matched["main-tree"] += 1
+            continue
+        if any("$STACK_TREE_ASSET" in o for o in outs):
+            v = tb_text.find("verify-blob")
+            u = tb_text.find('tree_unpack "$d/$STACK_TREE_ASSET"')
+            if v == -1 or u == -1 or v > u:
+                bad.append((lineno, text, "the release tree is unpacked before cosign verify-blob checks it"))
+            else:
+                matched["release-tree"] += 1
+            continue
+    bad.append((lineno, text, "a download written to a file with no check of a hash or a signature, and not one of the named exceptions"))
 
 # B. the stack-k8s tree outside the branch
 for lineno, text, last in stmts:
@@ -149,5 +170,5 @@ if bad or nothing:
     print(f"{len(bad) + len(nothing)} problem(s).")
     sys.exit(1)
 print(f"OK: outside the {blocks} BUILD_FROM_SOURCE block(s) install.sh unpacks and runs nothing it downloaded, "
-      f"keeps a file only after cosign's SHA-256 check ({matched['cosign']}) or from this repository in a piped install ({matched['piped']}), and reads no stack-k8s tree.")
+      f"keeps a file only after cosign's SHA-256 check ({matched['cosign']}), a release tree only behind its signature ({matched['release-tree']}) and main only by name ({matched['main-tree']}), and reads no stack-k8s tree.")
 PY

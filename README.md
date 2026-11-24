@@ -4,8 +4,14 @@ One command puts the whole governed stack on a box you own, ready for agents
 that live somewhere else entirely.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/TAIPANBOX/stack-single/main/install.sh | bash
+curl -fsSL https://github.com/TAIPANBOX/stack-single/releases/latest/download/install.sh | bash
 ```
+
+That installs the latest release, and only a tree that is provably that release:
+the script fetches the release's tarball and its cosign bundle, and unpacks and
+runs it only when the bundle checks against this repository's own release
+workflow on that tag (see "What a piped install runs" below). Nothing comes from
+`main` unless you ask for it by name.
 
 <div align="center">
 
@@ -39,6 +45,40 @@ On a box that is already installed, edit `GATEWAY_BIND` in
 `/opt/agent-stack/.env` and `docker compose up -d`. Re-running the installer
 will NOT widen it: `.env` is left alone once it exists, which is the same
 property that stops a re-run rotating your credentials.
+
+## What a piped install runs
+
+A piped install (`curl ... | bash`, so there is no tree beside the script) runs
+one tree, the latest release's, and checks it before it unpacks a byte of it. It
+asks `github.com/TAIPANBOX/stack-single/releases/latest` which tag that is,
+fetches that release's `stack-single.tar.gz` and `stack-single.tar.gz.sigstore.json`,
+and runs `cosign verify-blob` (the pinned cosign the image checks use) with the
+exact identity
+`https://github.com/TAIPANBOX/stack-single/.github/workflows/release.yml@refs/tags/<that tag>`
+and GitHub's OIDC issuer. Only then does it unpack the tarball, check that its
+`install.sh` is that version, and hand over to it. Any failure on the way (no
+bundle, a signature that does not check, a tree of another version, a path that
+climbs out of the tarball) stops the run with the box as it was. The release
+workflow (`.github/workflows/release.yml`) is what signs the tarball, on the tag,
+when the tag is pushed.
+
+- `STACK_TAG=vX.Y.Z` installs that release instead, checked the same way, and the
+  rollback index still refuses one below the box's ("Going backwards by mistake").
+- `INSTALL_FROM_MAIN=1` installs the main branch's tree. It is unsigned and
+  nothing checks it; the run says so, and the install journal records the tree as
+  `main-unsigned`. It is never a fallback: a release that fails its check stops
+  the run and does not reach for `main`.
+- `STACK_RELEASE_BASE` points the fetch at a mirror of the releases. It changes
+  where the bytes come from, never whose signature they need.
+- If the download itself fails, `curl -f` prints its error and bash is handed an
+  empty script, which installs nothing and ends 0. To stop at a failed download
+  instead, fetch it to a file first:
+  `curl -fsSL https://github.com/TAIPANBOX/stack-single/releases/latest/download/install.sh -o install.sh && sudo bash install.sh`
+  (a lone `install.sh` with no `compose.yaml` beside it is a piped install, and
+  takes the signed release the same way).
+- The bootstrap script itself is fetched over TLS and trusted on that alone, as
+  any `curl | bash` is. From a clone (`./install.sh`) none of this runs: the tree
+  you cloned is the one you chose.
 
 ## Checking an installed box again: `./install.sh status`
 
@@ -228,9 +268,10 @@ floor, so the next run of that tree needs a reason of its own. A journal with a 
 cannot be read stops a run the same way, naming the line, because the line it cannot read
 may be the one that holds the floor.
 
-A piped install fetches `install.sh` and `compose.yaml` in two requests. The file carries the
-version the script carries, and a pair that differ is refused before the box's own file is
-replaced.
+A piped install runs one tree, the release's, unpacked only behind its signature ("What a
+piped install runs"), and its `compose.yaml` must carry the version its `install.sh` carries,
+or the run is refused before the box's own file is replaced. A signed release is still only
+as new as its tag: the floor is what refuses an older one.
 
 **This is a guard against mistakes, not protection against an attacker.** It stops a stale
 clone, the wrong tag, an old path in a script. It stops nobody who means it, because the
@@ -1922,7 +1963,8 @@ names the host and what cosign or curl reported.
 | `github.com`, `release-assets.githubusercontent.com` | the pinned cosign v3.1.3 binary. github.com redirects the file to the release-assets host, so both are needed | each install and re-run, until the binary in `/opt/agent-stack/bin/cosign` matches its pinned SHA-256 |
 | `tuf-repo-cdn.sigstore.dev` | the Sigstore trust root that cosign checks each signature against | before each signature check |
 | `ghcr.io` (and the blob host it redirects to) | the image manifests, the signatures, and the pulls | as before this release |
-| `raw.githubusercontent.com`, `api.ipify.org` | the compose file and the files beside it (a piped install only), and the box's public address | no longer `api.github.com`: the stack-k8s tarball is fetched only with `BUILD_FROM_SOURCE=1` |
+| `github.com`, `release-assets.githubusercontent.com` (a piped install) | the latest release's tarball and its signature bundle; with `INSTALL_FROM_MAIN=1`, main's tarball from `codeload.github.com` | once per piped install. A clone fetches none of it |
+| `api.ipify.org` | the box's public address | no longer `raw.githubusercontent.com`: a piped install reads nothing from `main` |
 
 Checked on 2026-10-19 with cosign v3.1.3: a signature check does not contact the
 Rekor transparency log or Fulcio, because the inclusion proof travels with the

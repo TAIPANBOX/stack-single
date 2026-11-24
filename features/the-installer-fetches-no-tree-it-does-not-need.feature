@@ -51,11 +51,11 @@ Feature: the installer fetches no tree it does not need, and unpacks nothing it 
     Then no-unverified-download-outside-build.sh fails
     # -> gates-have-teeth.sh "no-download-outside-build: REPO_RAW comes back"
 
-  Scenario: a piped install fetches its files from somewhere else
-    Given a piped install fetches the files of this repository and nothing else
-    When it fetches them from another address
+  Scenario: a file of main is fetched again
+    Given a piped install fetches one signed release tree and nothing from main's raw files
+    When a raw file of main is fetched outside the bootstrap
     Then no-unverified-download-outside-build.sh fails
-    # -> gates-have-teeth.sh "no-download-outside-build: a piped install fetches its files from another URL"
+    # -> gates-have-teeth.sh "no-download-outside-build: a file of main is fetched outside the bootstrap again"
 
   Scenario: the build branch is not found
     Given the gate judges what lies outside the build branch
@@ -69,11 +69,11 @@ Feature: the installer fetches no tree it does not need, and unpacks nothing it 
     Then no-unverified-download-outside-build.sh says it measured nothing and fails
     # -> gates-have-teeth.sh "no-download-outside-build: the cosign exception matches nothing (measured nothing)"
 
-  Scenario: a piped install fetches another file of this repository
-    Given the files of this repository are one of the two named exceptions
-    When a piped install fetches one more file beside compose.yaml
+  Scenario: the release tree fetches one more of its own assets
+    Given the release tree is one of the named exceptions, behind its signature
+    When the bootstrap fetches one more asset of the same release into its temporary directory
     Then no-unverified-download-outside-build.sh passes
-    # -> gates-have-teeth.sh "no-download-outside-build: a piped install fetches another file of this repository (must pass)"
+    # -> gates-have-teeth.sh "no-download-outside-build: the release tree fetches one more of its assets (must pass)"
 
   Scenario: the build branch is reworded
     Given the build path fetches the tree as its first step
