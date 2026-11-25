@@ -2319,7 +2319,7 @@ run_case "typed-risk-signal: wardryx is pinned before when_absent" fail \
 
 run_case "typed-risk-signal: tokenfuse is pinned before it sent the tool call" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/tokenfuse:v1.25.0@sha256:3a81dbcd116557eff54aae29e7d68104af8fc788265d58e71adf3f96fea03317}", "ghcr.io/taipanbox/tokenfuse:v1.4.1}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/tokenfuse:v1.26.0@sha256:7080f9216a2d461ce20f8bd0fabade722dc5eb76b356efd6e22f4eb11aed8dd4}", "ghcr.io/taipanbox/tokenfuse:v1.4.1}")')" \
 	"the broker sends no tool_call to the policy plane before it"
 
 run_case "typed-risk-signal: install.sh starts the proxy profile unconditionally" fail \
@@ -3080,7 +3080,7 @@ run_case "finops: its root filesystem becomes writable" fail \
 
 run_case "finops: its image is unpinned" fail \
 	'./scripts/finops-is-opt-in.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.10.2@sha256:a0fc173b7dc75813abc851cf7ee47ab0f76b3008e2892db2f67a6d3e30089516}", "ghcr.io/taipanbox/costcrew:latest}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.11.0@sha256:5b828c6f7aae675d591beefce3f1dbe91828ca6c3cbe3e65ba04e9524f6ba0d4}", "ghcr.io/taipanbox/costcrew:latest}")')" \
 	"is not the pinned"
 
 run_case "finops: it is published on every address" fail \
@@ -3131,7 +3131,7 @@ run_case "finops: the console stops waiting for its one-shot" fail \
 
 run_case "finops: no console left to judge" fail \
 	'./scripts/finops-is-opt-in.sh' \
-	"$(py 'edit("compose.yaml", "${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.10.2@sha256:a0fc173b7dc75813abc851cf7ee47ab0f76b3008e2892db2f67a6d3e30089516}", "${COSTCREW_IMAGE:-registry.invalid/costcrew}")')" \
+	"$(py 'edit("compose.yaml", "${COSTCREW_IMAGE:-ghcr.io/taipanbox/costcrew:v0.11.0@sha256:5b828c6f7aae675d591beefce3f1dbe91828ca6c3cbe3e65ba04e9524f6ba0d4}", "${COSTCREW_IMAGE:-registry.invalid/costcrew}")')" \
 	"measured NOTHING about the FinOps console"
 
 # The rendering half: text a parser accepts and compose does not.
@@ -3221,7 +3221,7 @@ run_case "finops: the owner default changes" pass \
 
 run_case "finops: the pinned tag moves" pass \
 	'./scripts/finops-is-opt-in.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.10.2@sha256:a0fc173b7dc75813abc851cf7ee47ab0f76b3008e2892db2f67a6d3e30089516}", "ghcr.io/taipanbox/costcrew:v0.6.1}")')"
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.11.0@sha256:5b828c6f7aae675d591beefce3f1dbe91828ca6c3cbe3e65ba04e9524f6ba0d4}", "ghcr.io/taipanbox/costcrew:v0.6.1}")')"
 
 run_case "finops: the loopback port moves" pass \
 	'./scripts/finops-is-opt-in.sh' \
@@ -5397,12 +5397,12 @@ run_case "bus-names: the heraldyx pin goes back before the keyryx source" fail \
 # ---- images-are-digest-pinned and images-are-verified (CLAUDE.md invariant 44) --
 run_case "images-are-digest-pinned: a published image loses its digest" fail \
 	'./scripts/images-are-digest-pinned.sh' \
-	"$(py 'edit("compose.yaml", "trailryx-node:v1.6.0@sha256:68c413c2d6d0bd3bde4ad3478e6ee9ebc3a95e5a0d1b26d1d1ca5f588baf20a8}", "trailryx-node:v1.6.0}")')" \
-	"trailryx-node:v1.6.0 is not pinned"
+	"$(py 'edit("compose.yaml", "trailryx-node:v1.7.0@sha256:a9b7ef893e422c18dd463cd9a54756ebfbff9d3f35ac592bbee8c59fc4d0105b}", "trailryx-node:v1.7.0}")')" \
+	"trailryx-node:v1.7.0 is not pinned"
 
 run_case "images-are-digest-pinned: a digest is cut short" fail \
 	'./scripts/images-are-digest-pinned.sh' \
-	"$(py 'edit("compose.yaml", "trailryx-node:v1.6.0@sha256:68c413c2d6d0bd3bde4ad3478e6ee9ebc3a95e5a0d1b26d1d1ca5f588baf20a8}", "trailryx-node:v1.6.0@sha256:ab305ac6a65444e08090b56d6f666498b56d560f7351c96a8a84137ece9e6d3}")')" \
+	"$(py 'edit("compose.yaml", "trailryx-node:v1.7.0@sha256:a9b7ef893e422c18dd463cd9a54756ebfbff9d3f35ac592bbee8c59fc4d0105b}", "trailryx-node:v1.7.0@sha256:ab305ac6a65444e08090b56d6f666498b56d560f7351c96a8a84137ece9e6d3}")')" \
 	"is not pinned by a full sha256 digest"
 
 run_case "images-are-digest-pinned: the third-party postgres loses its digest" fail \
@@ -6436,15 +6436,15 @@ run_case "costcrew-reads-spend: an empty window deletes the last export" fail \
 	"$(py 'edit("compose.yaml", "              rm -f \"$$part\"\n", "              rm -f \"$$part\" \"$$csv\"\n")')" \
 	"did not keep its last good file"
 
-run_case "costcrew-reads-spend: a door that never exported gets no file" fail \
+run_case "costcrew-reads-spend: an idle door gets a file written for it" fail \
 	"$CRS" \
-	"$(py 'edit("compose.yaml", "            [ -e \"$$csv\" ] && continue\n", "            continue\n")')" \
-	"the console would refuse the whole import"
+	"$(py 'edit("compose.yaml", "          sleep \"$$interval\"\n", "          for door in gateway gateway-openai; do : >>\"/var/lib/stack/focus/$$door/focus-$$door.csv\"; done\n          sleep \"$$interval\"\n")')" \
+	"an idle door's folder stays empty"
 
-run_case "costcrew-reads-spend: header-only files with no real export beside them" fail \
+run_case "costcrew-reads-spend: the console is pinned below the empty-folder fix" fail \
 	"$CRS" \
-	"$(py 'edit("compose.yaml", "              { [ \"$$other\" != \"$$door\" ] && [ -s \"$$src\" ]; } || continue\n", "              [ \"$$other\" != \"$$door\" ] || continue\n              [ -s \"$$src\" ] || printf \"BilledCost\\\\n\" >\"$$src\"\n")')" \
-	"with neither door exported"
+	"$(py 'edit_all("compose.yaml", "ghcr.io/taipanbox/costcrew:v0.11.0@", "ghcr.io/taipanbox/costcrew:v0.10.2@")')" \
+	"older than v0.11.0"
 
 run_case "costcrew-reads-spend: install.sh stops checking the export" fail \
 	"$CRS" \

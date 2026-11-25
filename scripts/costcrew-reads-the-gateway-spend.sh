@@ -20,8 +20,8 @@
 #      doors, gateway and gateway-openai;
 #   B. costcrew mounts the same focus volume READ ONLY, and its -focus-dir and -focus-dir-openai
 #      name that mount's `gateway` and `gateway-openai` folders, two different folders, with
-#      -focus-replace-generated beside them, on a costcrew image of v0.7.0 or later (the first that
-#      reads -focus-dir, costcrew invariant 104);
+#      -focus-replace-generated beside them, on a costcrew image of v0.11.0 or later (v0.7.0 reads
+#      -focus-dir, costcrew invariant 104; v0.11.0 reads an empty folder as nothing, costcrew#183);
 #   C. init-volumes creates both folders, owns them 10001 (focus-export's uid) and leaves them
 #      readable and searchable by "other", because costcrew runs outside the bus group and joins
 #      no group (invariant 24);
@@ -160,8 +160,9 @@ img = str(cc.get("image", ""))
 v = re.search(r":v(\d+)\.(\d+)\.(\d+)", img)
 if not v:
     bad("costcrew's image %r carries no version tag to judge" % img)
-elif tuple(int(x) for x in v.groups()) < (0, 7, 0):
-    bad("costcrew's image %r is older than v0.7.0, which does not read -focus-dir" % img)
+elif tuple(int(x) for x in v.groups()) < (0, 11, 0):
+    bad("costcrew's image %r is older than v0.11.0: v0.7.0 reads -focus-dir, and only v0.11.0 reads an empty "
+        "folder as nothing to import (costcrew#183), so before it a box with one idle door imports neither" % img)
 
 # ---- C. init-volumes ---------------------------------------------------------------------
 iv = "\n".join(services["init-volumes"].get("command") or [])
@@ -268,10 +269,10 @@ if leftovers("gateway") != readable("gateway"):
 if "no calls found" not in (w2.stdout + w2.stderr):
     bad("a window that exported nothing did not print the tool's own words, so a real failure would read as quiet")
 
-# A door that has never exported, on a fresh tree. The console refuses a configured folder with no
-# *.csv in it, and refuses the whole import with it (costcrew v0.10.2 csvFolder), so the idle door
-# needs a file of the other door's header and no row; and with neither door exported there must be
-# nothing at all, because the console wipes its generated estate on the first import of any file.
+# A door that has never exported, on a fresh tree: it holds no file at all. costcrew v0.11.0 reads an empty
+# folder as nothing to import and replaces its generated estate only when an import brings spend (costcrew#183),
+# so an idle door needs nothing written for it, and a file with no real call beside it is exactly what must not
+# appear.
 def fresh():
     for door in DOORS:
         d = os.path.join(stack, "focus", door)
@@ -280,29 +281,17 @@ def fresh():
 
 for real, idle in (("gateway", "gateway-openai"), ("gateway-openai", "gateway")):
     fresh()
-    w = window({real: "csv", idle: "none"})
-    got = readable(idle)
-    if len(got) != 1:
-        bad("with only the %s door exported, focus/%s holds %s: the console would refuse the whole import "
-            "and read neither door's spend: %s" % (real, idle, got or "no *.csv", (w.stdout + w.stderr).strip()[-300:]))
-    else:
-        lines = open(os.path.join(stack, "focus", idle, got[0])).read().splitlines()
-        head = open(os.path.join(stack, "focus", real, readable(real)[0])).read().splitlines()[:1]
-        if lines != head:
-            bad("the never-exported %s door's file is %r, not the other door's header alone %r" % (idle, lines, head))
-    if leftovers(idle) != readable(idle):
-        bad("writing the %s door's header-only file left a file beside it: %s" % (idle, leftovers(idle)))
-    # and a real export later replaces the header-only file
-    window({real: "csv", idle: "csv"})
-    if idle not in open(os.path.join(stack, "focus", idle, readable(idle)[0])).read():
-        bad("a real export of the %s door did not replace its header-only file" % idle)
+    window({real: "csv", idle: "none"})
+    if leftovers(idle):
+        bad("with only the %s door exported, focus/%s holds %s; an idle door's folder stays empty" % (real, idle, leftovers(idle)))
+    if len(readable(real)) != 1:
+        bad("with only the %s door exported, its folder holds %s, not one export" % (real, readable(real)))
 
 fresh()
 window({"gateway": "none", "gateway-openai": "none"})
 for door in DOORS:
     if leftovers(door):
-        bad("with neither door exported, focus/%s holds %s; a file with no real call beside it lets the console "
-            "wipe its generated estate with nothing to show" % (door, leftovers(door)))
+        bad("with neither door exported, focus/%s holds %s" % (door, leftovers(door)))
 
 # ---- E. install.sh asks the box ---------------------------------------------------------------
 install = open("install.sh").read()

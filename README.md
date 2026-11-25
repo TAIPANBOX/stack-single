@@ -78,7 +78,19 @@ nothing becomes the latest without that step.
   (a lone `install.sh` with no `compose.yaml` beside it is a piped install, and
   takes the signed release the same way).
 - The bootstrap script itself is fetched over TLS and trusted on that alone, as
-  any `curl | bash` is. From a clone (`./install.sh`) none of this runs: the tree
+  any `curl | bash` is. To check it before it runs, take it from the release with
+  the tree and its bundle, and check the tree's signature yourself first (the
+  bootstrap is the tree's own `install.sh`, so comparing the two shows it is the
+  signed one):
+
+  ```bash
+  tag=$(curl -fsSI -o /dev/null -w '%{redirect_url}' https://github.com/TAIPANBOX/stack-single/releases/latest); tag=${tag##*/}
+  for f in install.sh stack-single.tar.gz stack-single.tar.gz.sigstore.json; do curl -fsSLO "https://github.com/TAIPANBOX/stack-single/releases/download/$tag/$f"; done
+  cosign verify-blob --bundle stack-single.tar.gz.sigstore.json \
+    --certificate-identity "https://github.com/TAIPANBOX/stack-single/.github/workflows/release.yml@refs/tags/$tag" \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com stack-single.tar.gz
+  tar -xzOf stack-single.tar.gz stack-single/install.sh | cmp - install.sh && sudo bash install.sh
+  ``` From a clone (`./install.sh`) none of this runs: the tree
   you cloned is the one you chose.
 
 ## Checking an installed box again: `./install.sh status`
@@ -2250,7 +2262,7 @@ cd /opt/agent-stack
 docker compose --profile finops up -d costcrew
 ```
 
-That pulls one image, `ghcr.io/taipanbox/costcrew:v0.10.2`, and starts it beside
+That pulls one image, `ghcr.io/taipanbox/costcrew:v0.11.0`, and starts it beside
 a small one-shot that prepares its volume. It is the FinOps console: cloud and
 AI spend, a crew of agents that triages it, and a person who reviews what the
 crew wrote.
@@ -2299,12 +2311,10 @@ generated estate: `focus-export` writes each door's calls as a FOCUS CSV, one fo
 per door in the `focus` volume (`focus/gateway`, `focus/gateway-openai`), every 15
 minutes (`FOCUS_EXPORT_INTERVAL` in `.env`, in seconds), and the console mounts that
 volume read only and reads both folders at start and every 15 minutes after
-(`-focus-dir`, `-focus-dir-openai`). A door that has served nothing yet gets a file
-of the other door's header and no row, because the console refuses a folder with
-nothing in it and with it the whole import; with neither door exported there is no
-file at all. The first read that finds an export replaces the generated estate
-(`-focus-replace-generated`): the demo board, its tasks, sprints, anomalies and
-forecasts go with it, so a box that has served agents shows their spend by agent on
+(`-focus-dir`, `-focus-dir-openai`). A door that has served nothing yet stays empty,
+which the console reads as nothing to import. The first read that brings real
+spend replaces the generated estate (`-focus-replace-generated`): the demo board,
+its tasks, sprints, anomalies and forecasts go with it, so a box that has served agents shows their spend by agent on
 the AI pages, and one that has not still shows the demo data. The console runs as a user outside the bus group, so it reads the
 folders through their "other" bits (0755, files 0644); it can change nothing in
 them.
@@ -2343,7 +2353,7 @@ then turn cadence on there. Each step is yours. A box given its own client keys 
 carries the crew's key there as a `<secret>:costcrew` line, and the installer puts that id on
 the gateway's static list.
 
-**Moving to a newer console.** The pin is `ghcr.io/taipanbox/costcrew:v0.10.2`.
+**Moving to a newer console.** The pin is `ghcr.io/taipanbox/costcrew:v0.11.0`.
 On a box that already ran an earlier pin, the same `up -d costcrew` picks it
 up. From v0.8.0 every analyst's id is `agent://<host>/costcrew/<name>`. This launcher
 binds no analyst id to a gateway key, an identity map or a policy, so nothing here
@@ -2397,7 +2407,7 @@ into `./closure/secret`, readable only by the console. Nothing prints it, and a
 re-run keeps it. To turn closing off again, remove `CLOSURE_SECRET` and
 `CLOSURE_SECRET_FILE` from `.env` and run `docker compose up -d`.
 
-It needs tokenfuse v1.9.0 or later and console v1.1.34 or later. The images pinned here are tokenfuse v1.25.0 and
+It needs tokenfuse v1.9.0 or later and console v1.1.34 or later. The images pinned here are tokenfuse v1.26.0 and
 console v1.8.8; an older image ignores the setting.
 
 ## Approvals and the console's approver key
