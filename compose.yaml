@@ -26,7 +26,7 @@ name: agent-stack
 # The release this file belongs to, the same number as STACK_VERSION in install.sh: a piped
 # install fetches the two in separate requests, and refuses a pair that are not one tree.
 # A top-level x- key is no part of any service, so it recreates no container.
-x-stack-version: "1.14.0"
+x-stack-version: "1.14.1"
 
 x-restart: &restart
   restart: unless-stopped
@@ -409,7 +409,7 @@ services:
   keyryx-witness:
     <<: [*restart, *baseline]
     pids_limit: 128
-    mem_limit: 256m
+    mem_limit: 1g
     image: ${KEYRYX_IMAGE:-ghcr.io/taipanbox/keyryx:v0.1.5@sha256:967dd49907d48edea9cb0af926ec9beae39de31909ced8149eff1546200d99e7}
     user: "20100:10001"
     command:
@@ -600,7 +600,7 @@ services:
   heraldyx:
     <<: [*restart, *baseline]
     pids_limit: 256
-    mem_limit: 256m
+    mem_limit: 1g
     image: ${HERALDYX_IMAGE:-ghcr.io/taipanbox/heraldyx:v0.9.1@sha256:ad1b03a2007a2163cc55378899c9640becf2e4f4d70cef83c6840528bbe7bc6e}
     networks:
       - edge
@@ -699,7 +699,7 @@ services:
   agent-conform:
     <<: [*restart, *baseline]
     pids_limit: 128
-    mem_limit: 256m
+    mem_limit: 1g
     image: ${AGENT_CONFORM_IMAGE:-ghcr.io/taipanbox/agent-conform:v2.0.3@sha256:f2a5bcbadf4189d2b4979669703aa8b6ef3bfc93a68b90ac6d1f61ac110ed3e4}
     networks:
       - core

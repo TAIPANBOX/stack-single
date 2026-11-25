@@ -50,6 +50,11 @@ HEAVY = {
     "verdryx-slo": "reads 28 days of both doors' traces every run; killed, it writes no line, which reads as none (invariant 66)",
     "verdryx-drift": "reads verdryx's whole store",
     "record-seal": "seals the whole bus into its store",
+    # Measured on forge 2026-11-25, 1.14.0: the witness at 256m was killed by the kernel (exit 137) in a loop while
+    # it re-hashed the bus, which forge has never rotated. Every reader of the whole bus is held to the same floor.
+    "keyryx-witness": "re-hashes every stream on the bus to witness its chain (killed at 256m on forge, 2026-11-25)",
+    "agent-conform": "re-reads every stream on the bus to check its prev_hash chain",
+    "heraldyx": "reads every stream on the bus it alerts on",
 }
 text = open("compose.yaml").read()
 required = sorted(set(re.findall(r"\$\{([A-Za-z_][A-Za-z0-9_]*):\?", text)))

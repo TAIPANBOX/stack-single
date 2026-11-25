@@ -28,6 +28,12 @@ Feature: every service carries a memory limit of its own
     Then the gate fails, because its own work would be killed
     # -> gates-have-teeth.sh "mem-limit: the console is squeezed below its work"
 
+  Scenario: a reader of the whole bus is held to a ceiling the bus has outgrown
+    Given the keyryx witness re-hashes every stream on a bus nothing rotates
+    When its limit goes back to 256 MiB, where forge's witness was killed in a loop
+    Then the gate fails
+    # -> gates-have-teeth.sh "mem-limit: the witness goes back to the limit forge killed it at"
+
   Scenario: nothing is left to judge
     Given the gate reads the resolved services
     When there are none
