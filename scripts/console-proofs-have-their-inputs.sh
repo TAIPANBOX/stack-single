@@ -27,7 +27,7 @@
 #      console mounts the gateway's volume read ONLY at a target that holds it;
 #   3. the console runs in the group wardryx runs in (a file's group is the
 #      group of its writer), by its own gid or by group_add; an unset `user:` is
-#      the image's 10001:10001 (images/console.Dockerfile in stack-k8s);
+#      the image's 10001:10001 (genaryx's own Dockerfile, USER 10001:10001);
 #   4. by RUNNING init-volumes in a sandbox with chown and chmod recorded, and
 #      a version an earlier wardryx wrote planted in the archive: the archive
 #      directory is given to wardryx's uid and the console's group, mode with
@@ -56,7 +56,7 @@ import json, os, posixpath, re, subprocess, sys
 work = sys.argv[1]
 root = os.getcwd()
 CONSOLE, WARDRYX, GATEWAY = "console", "wardryx", "tokenfuse-gateway"
-IMAGE_DEFAULT_USER = (10001, 10001)  # images/console.Dockerfile, USER 10001:10001
+IMAGE_DEFAULT_USER = (10001, 10001)  # genaryx's Dockerfile, USER 10001:10001
 
 def bad(msg):
     print("FAIL console-proofs: " + msg)

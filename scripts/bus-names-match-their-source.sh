@@ -76,8 +76,14 @@ ALLOWED["tokenfuse-openai"] = {"tokenfuse"}
 # heraldyx reads. heraldyx 0.8.0 is the first whose table knows `keyryx`
 # (`internal/stream/stream.go`, knownSources) and renders the witness's types.
 ALLOWED["keyryx"] = {"keyryx"}
+# Keyryx custody's own stream (invariant 86): key_rotated and key_revoked, on
+# the bus, source keyryx. heraldyx 0.10.0 is the first whose exception table
+# carries it (`internal/stream/stream.go`, "keyryx-custody": {"keyryx"}). idryx
+# loads named files only (`--load`) and is never told to load it.
+ALLOWED["keyryx-custody"] = {"keyryx"}
 NEEDS = {"tokenfuse-openai": {"heraldyx": (0, 5, 0), "idryx": (1, 2, 0)},
-         "keyryx": {"heraldyx": (0, 8, 0)}}
+         "keyryx": {"heraldyx": (0, 8, 0)},
+         "keyryx-custody": {"heraldyx": (0, 10, 0)}}
 
 # The source each image's lines claim.
 CLAIMS = {
@@ -93,8 +99,11 @@ CLAIMS = {
     # The error-budget routine is the console's image running verdryx, whose
     # lines claim `verdryx` (its events.py). The console server writes no stream.
     "genaryx-console": "verdryx",
-    # Custody and the witness are one image. Only the witness writes a stream
-    # (its findings, KEYRYX_WITNESS_ALERTS), and its lines claim `keyryx`.
+    # The same, from genaryx v0.1.0, the console's own release image.
+    "genaryx": "verdryx",
+    # Custody and the witness are one image, and both lines claim `keyryx`:
+    # the witness's findings (KEYRYX_WITNESS_ALERTS) and, from keyryx 0.2.0,
+    # custody's key events (KEYRYX_EVENTS, keyryx-custody.ndjson).
     "keyryx": "keyryx",
 }
 

@@ -91,7 +91,7 @@ else
   mkdir -p "$scratch/bin"
   # chown is recorded, not run: the scratch box is not root. Each line is OWNER TARGET.
   printf '#!/usr/bin/env bash\necho "$1 $2" >>"%s/chown.log"\nexit 0\n' "$scratch" >"$scratch/bin/chown"
-  printf '#!/usr/bin/env bash\n# stub compose: the image list only\nif [ "$1" = config ]; then echo "ghcr.io/taipanbox/genaryx-console:v9.9.9@sha256:0000"; fi\nexit 0\n' >"$scratch/bin/stubcompose"
+  printf '#!/usr/bin/env bash\n# stub compose: the image list only\nif [ "$1" = config ]; then echo "ghcr.io/taipanbox/genaryx:v9.9.9@sha256:0000"; fi\nexit 0\n' >"$scratch/bin/stubcompose"
   # the stub docker answers the console's approver-jwks probe; STUB_PROBE=1 means the console can print
   cat >"$scratch/bin/docker" <<'EOD'
 #!/usr/bin/env bash

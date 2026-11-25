@@ -2620,7 +2620,7 @@ run_case "bus-names: the idryx pin goes back before the OpenAI door's row" fail 
 
 run_case "bus-names: the heraldyx pin goes back before the OpenAI door's row" fail \
 	'./scripts/bus-names-match-their-source.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/heraldyx:v0.9.1", "ghcr.io/taipanbox/heraldyx:v0.4.0")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/heraldyx:v0.10.0", "ghcr.io/taipanbox/heraldyx:v0.4.0")')" \
 	"older than v0.5.0"
 
 echo "=== and what they must NOT catch ==="
@@ -4416,14 +4416,14 @@ json.dump(d, open("hardening-exceptions.json", "w"))')" \
 
 run_case "containers-carry-the-baseline: keyryx is pinned back to v0.1.3" fail \
 	'./scripts/containers-carry-the-baseline.sh' \
-	"$(py 'edit("compose.yaml", "keyryx:v0.1.5@sha256:967dd49907d48edea9cb0af926ec9beae39de31909ced8149eff1546200d99e7", "keyryx:v0.1.3@sha256:26d5d49cd4a67eb463f35895de96e628e2304183775bf031170e190c579c0147")')" \
+	"$(py 'edit("compose.yaml", "keyryx:v0.2.0@sha256:ead031a117958ce34c9157937713c000a3d6a0cea86e0ce1d0bc05fce5270c38", "keyryx:v0.1.3@sha256:26d5d49cd4a67eb463f35895de96e628e2304183775bf031170e190c579c0147")')" \
 	"keyryx is pinned at v0.1.3, below v0.1.4"
 
 run_case "containers-carry-the-baseline: keyryx is pinned by no digest (measured nothing)" fail \
 	'./scripts/containers-carry-the-baseline.sh' \
 	"$(py 'import re
 s = open("compose.yaml").read()
-s, n = re.subn(r"keyryx:v0\.1\.5@sha256:[0-9a-f]{64}", "keyryx:v0.1.5", s)
+s, n = re.subn(r"keyryx:v0\.2\.0@sha256:[0-9a-f]{64}", "keyryx:v0.2.0", s)
 assert n == 2
 open("compose.yaml", "w").write(s)')" \
 	"the custody under the three was measured against NOTHING"
@@ -5390,7 +5390,7 @@ run_case "bus-names: the witness's findings file loses its keyryx stem" fail \
 
 run_case "bus-names: the heraldyx pin goes back before the keyryx source" fail \
 	'./scripts/bus-names-match-their-source.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/heraldyx:v0.9.1@", "ghcr.io/taipanbox/heraldyx:v0.7.0@")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/heraldyx:v0.10.0@", "ghcr.io/taipanbox/heraldyx:v0.7.0@")')" \
 	"keyryx.ndjson is on this bus and compose.yaml pins heraldyx v0.7.0"
 
 
@@ -6741,6 +6741,144 @@ run_case "piped-tree: the block is gone (measured nothing)" fail \
 run_case "piped-tree: a refusal is reworded (must pass)" pass \
 	"$PTV" \
 	"$(py 'edit("install.sh", "so its tree was not used. Nothing was changed.\"\n  tree_cosign_install", "so its tree was not used at all. Nothing was changed.\"\n  tree_cosign_install")')"
+
+
+# ---- keyryx-custody-announces-on-the-bus (CLAUDE.md invariant 86) --------------------
+KCA='./scripts/keyryx-custody-announces-on-the-bus.sh'
+
+run_case "keyryx-custody: custody loses its stream" fail \
+	"$KCA" \
+	"$(py 'edit("compose.yaml", "      KEYRYX_EVENTS: /var/lib/stack/events/keyryx-custody.ndjson\n", "")')" \
+	"sets no KEYRYX_EVENTS"
+
+run_case "keyryx-custody: the stream moves inside KEYRYX_DATA" fail \
+	"$KCA" \
+	"$(py 'edit("compose.yaml", "      KEYRYX_EVENTS: /var/lib/stack/events/keyryx-custody.ndjson\n", "      KEYRYX_EVENTS: /var/lib/keyryx/keyryx-custody.ndjson\n")')" \
+	"is inside KEYRYX_DATA"
+
+run_case "keyryx-custody: custody writes the witness's file" fail \
+	"$KCA" \
+	"$(py 'edit("compose.yaml", "      KEYRYX_EVENTS: /var/lib/stack/events/keyryx-custody.ndjson\n", "      KEYRYX_EVENTS: /var/lib/stack/events/keyryx.ndjson\n")')" \
+	"not keyryx-custody.ndjson"
+
+run_case "keyryx-custody: custody mounts the bus read only" fail \
+	"$KCA" \
+	"$(py 'edit("compose.yaml", "nothing it does not own (invariant 41).\n      - events:/var/lib/stack/events\n", "nothing it does not own (invariant 41).\n      - events:/var/lib/stack/events:ro\n")')" \
+	"mounts the bus read only"
+
+run_case "keyryx-custody: init-volumes gives the stream to the witness's uid" fail \
+	"$KCA" \
+	"$(py 'edit("compose.yaml", "chown 20101:10001 /vol/events/keyryx-custody.ndjson", "chown 20100:10001 /vol/events/keyryx-custody.ndjson")')" \
+	"custody writes only a file it owns"
+
+run_case "keyryx-custody: init-volumes stops making the stream" fail \
+	"$KCA" \
+	"$(py 'edit("compose.yaml", "[ -e /vol/events/keyryx-custody.ndjson ] || : > /vol/events/keyryx-custody.ndjson\n", "")')" \
+	"does not pre-create /vol/events/keyryx-custody.ndjson"
+
+run_case "keyryx-custody: custody is handed a network admin key" fail \
+	"$KCA" \
+	"$(py 'edit("compose.yaml", "      KEYRYX_EVENTS: /var/lib/stack/events/keyryx-custody.ndjson\n", "      KEYRYX_EVENTS: /var/lib/stack/events/keyryx-custody.ndjson\n      KEYRYX_ADMIN_KEYS: ${KEYRYX_ADMIN_KEYS:-}\n")')" \
+	"sets KEYRYX_ADMIN_KEYS"
+
+run_case "keyryx-custody: install.sh writes an admin key" fail \
+	"$KCA" \
+	"$(py 'edit("install.sh", "#!/usr/bin/env bash\n", "#!/usr/bin/env bash\nKEYRYX_ADMIN_KEYS=x\n")')" \
+	"install.sh:2 assigns KEYRYX_ADMIN_KEYS"
+
+run_case "keyryx-custody: keyryx is pinned back to v0.1.5" fail \
+	"$KCA" \
+	"$(py 'edit_all("compose.yaml", "keyryx:v0.2.0@sha256:ead031a117958ce34c9157937713c000a3d6a0cea86e0ce1d0bc05fce5270c38", "keyryx:v0.1.5@sha256:967dd49907d48edea9cb0af926ec9beae39de31909ced8149eff1546200d99e7")')" \
+	"keyryx 0.2.0 is the first"
+
+run_case "keyryx-custody: heraldyx is pinned below 0.10.0" fail \
+	"$KCA" \
+	"$(py 'edit("compose.yaml", "heraldyx:v0.10.0@sha256:7baa8cdb8508afde33b8366141f433ae4bea1688caefde6b4f5d48a21af183c1", "heraldyx:v0.9.1@sha256:ad1b03a2007a2163cc55378899c9640becf2e4f4d70cef83c6840528bbe7bc6e")')" \
+	"0.10.0 is the first that renders keyryx-custody.ndjson"
+
+run_case "keyryx-custody: the README loses the admin commands" fail \
+	"$KCA" \
+	"$(py 'edit_all("README.md", "keyryx admin revoke", "keyryx revoke")')" \
+	"does not name \`keyryx admin revoke\`"
+
+run_case "keyryx-custody: no custody service (measured nothing)" fail \
+	"$KCA" \
+	"$(py 'edit("compose.yaml", "    command:\n      - custody\n", "    command:\n      - custodian\n")')" \
+	"measured nothing"
+
+run_case "keyryx-custody: the comment on custody's stream is reworded (must pass)" pass \
+	"$KCA" \
+	"$(py 'edit("compose.yaml", "      # KEYRYX_ADMIN_KEYS is set nowhere: keyryx 0.2.0 refuses", "      # KEYRYX_ADMIN_KEYS is never set: keyryx 0.2.0 refuses")')"
+
+run_case "bus-names: the heraldyx pin goes back before custody's stream" fail \
+	'./scripts/bus-names-match-their-source.sh' \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/heraldyx:v0.10.0@", "ghcr.io/taipanbox/heraldyx:v0.9.1@")')" \
+	"keyryx-custody.ndjson is on this bus and compose.yaml pins heraldyx v0.9.1"
+
+# ---- console-reads-the-assure-tabs (CLAUDE.md invariant 87) ---------------------------
+CAT='./scripts/console-reads-the-assure-tabs.sh'
+
+run_case "console-assure: the console goes back to genaryx-console" fail \
+	"$CAT" \
+	"$(py 'edit("compose.yaml", "    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx:v0.1.0@sha256:4030bc819e7df40c2a307e68f33519476d0858570bbdccb9326fd5fad256d2ee}\n    networks:\n      - core\n      - agents\n", "    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.14.0@sha256:583fcbe19330c461c6de7784f383620feaabf3f7474f977917570b6dfd3641ca}\n    networks:\n      - core\n      - agents\n")')" \
+	"not genaryx's own release image"
+
+run_case "console-assure: a routine runs another console image" fail \
+	"$CAT" \
+	"$(py 's = open("compose.yaml").read()
+a = "ghcr.io/taipanbox/genaryx:v0.1.0@sha256:4030bc819e7df40c2a307e68f33519476d0858570bbdccb9326fd5fad256d2ee"
+i = s.rindex(a)
+open("compose.yaml", "w").write(s[:i] + "ghcr.io/taipanbox/genaryx:v0.1.1@sha256:" + "1" * 64 + s[i + len(a):])')" \
+	"the console's image is one pin"
+
+run_case "console-assure: the journal path drifts from heraldyx's" fail \
+	"$CAT" \
+	"$(py 'edit("compose.yaml", "      GENARYX_HERALDYX_SENT: /var/lib/stack/heraldyx/sent.ndjson\n", "      GENARYX_HERALDYX_SENT: /var/lib/stack/heraldyx/journal.ndjson\n")')" \
+	"not /var/lib/stack/heraldyx/sent.ndjson"
+
+run_case "console-assure: heraldyx's volume is not mounted" fail \
+	"$CAT" \
+	"$(py 'edit("compose.yaml", "      - heraldyxstate:/var/lib/stack/heraldyx:ro\n      - records:", "      - records:")')" \
+	"does not mount heraldyx's volume heraldyxstate"
+
+run_case "console-assure: heraldyx's journal is mounted writable" fail \
+	"$CAT" \
+	"$(py 'edit("compose.yaml", "      - heraldyxstate:/var/lib/stack/heraldyx:ro\n", "      - heraldyxstate:/var/lib/stack/heraldyx\n")')" \
+	"mounts heraldyxstate at /var/lib/stack/heraldyx writable"
+
+run_case "console-assure: the Keys tab names the wrong port" fail \
+	"$CAT" \
+	"$(py 'edit("compose.yaml", "      GENARYX_KEYRYX_URL: http://keyryx:4340\n", "      GENARYX_KEYRYX_URL: http://keyryx:4341\n")')" \
+	"not http://keyryx:4340"
+
+run_case "console-assure: the console names a witness that has no network" fail \
+	"$CAT" \
+	"$(py 'edit("compose.yaml", "      GENARYX_KEYRYX_URL: http://keyryx:4340\n", "      GENARYX_KEYRYX_URL: http://keyryx:4340\n      GENARYX_KEYRYX_WITNESS_URL: http://keyryx-witness:4341\n")')" \
+	"has no network to answer on"
+
+run_case "console-assure: the record is read from the wrong directory" fail \
+	"$CAT" \
+	"$(py 'edit("compose.yaml", "      GENARYX_TRAILRYX_DATA_DIR: /var/lib/stack/records\n", "      GENARYX_TRAILRYX_DATA_DIR: /var/lib/stack/records/acme\n")')" \
+	"the directory the seal passes as --data"
+
+run_case "console-assure: the record is mounted writable" fail \
+	"$CAT" \
+	"$(py 'edit("compose.yaml", "      - records:/var/lib/stack/records:ro\n      - keyryxattest:/run/keyryx/attestations:ro\n", "      - records:/var/lib/stack/records\n      - keyryxattest:/run/keyryx/attestations:ro\n")')" \
+	"mounts records at /var/lib/stack/records writable"
+
+run_case "console-assure: the attestations are not mounted" fail \
+	"$CAT" \
+	"$(py 'edit("compose.yaml", "      - records:/var/lib/stack/records:ro\n      - keyryxattest:/run/keyryx/attestations:ro\n", "      - records:/var/lib/stack/records:ro\n")')" \
+	"does not mount the attestations volume"
+
+run_case "console-assure: no record seal to compare with (measured nothing)" fail \
+	"$CAT" \
+	"$(py 'edit("compose.yaml", "        data=/var/lib/stack/records\n", "        datadir=/var/lib/stack/records\n")')" \
+	"measured nothing"
+
+run_case "console-assure: the Keys comment is reworded (must pass)" pass \
+	"$CAT" \
+	"$(py 'edit("compose.yaml", "      # Keys: custody", "      # The Keys tab: custody")')"
 
 echo
 if [ -n "$(git status --porcelain)" ]; then

@@ -81,7 +81,7 @@ else
   mkdir -p "$scratch/bin"
   # chown is recorded, not run: the scratch box is not root. Each line is OWNER TARGET.
   printf '#!/usr/bin/env bash\n[ "$1" = -h ] && shift\necho "$1 $2" >>"%s/chown.log"\nexit 0\n' "$scratch" >"$scratch/bin/chown"
-  printf '#!/usr/bin/env bash\nif [ "$1" = config ]; then echo "ghcr.io/taipanbox/genaryx-console:v9.9.9@sha256:0000"; fi\nexit 0\n' >"$scratch/bin/stubcompose"
+  printf '#!/usr/bin/env bash\nif [ "$1" = config ]; then echo "ghcr.io/taipanbox/genaryx:v9.9.9@sha256:0000"; fi\nexit 0\n' >"$scratch/bin/stubcompose"
   # The stub docker plays `genaryx-web preview-key --out /out/preview.key` with -v DIR:/out. STUB_PROBE=1 means
   # the console can make the key. Every call is logged, so a re-run that runs the console again is seen.
   cat >"$scratch/bin/docker" <<EOD

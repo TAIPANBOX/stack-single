@@ -350,7 +350,7 @@ console_revoke_status() { status_of "$(http_request POST http://vouchryx:4310/v1
 BUS_WRITERS="20010:10001:-:tokenfuse.ndjson 20011:10001:-:tokenfuse-openai.ndjson 20012:10001:-:tokenfuse-mcp.ndjson
 20013:10001:-:tokenfuse-cloud.ndjson 20001:10001:20001:wardryx.ndjson 20005:10001:-:typryx.ndjson
 20002:10001:20002:vouchryx.ndjson 20020:10001:-:verdryx.ndjson 10001:10001:-:console.ndjson
-10002:10002:10001:agent-conform.ndjson"
+10002:10002:10001:agent-conform.ndjson 20101:20101:-:keyryx-custody.ndjson"
 # shellcheck disable=SC2329,SC2317  # invoked indirectly: passed as a string to `check`
 bus_writers_probe() {
   local row uid gid extra stream groups fail=0 out names=()
@@ -2516,11 +2516,12 @@ COSIGN_SHA256_amd64="4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9ef
 # shellcheck disable=SC2034 # read by name, as ${!want}, in cosign_install below
 COSIGN_SHA256_arm64="c5d324e091826b0d7a78eb16fef316450b4eb9aaec045611c08ba06f5e73220a"
 # A signature is accepted only from the release workflow of a TAIPANBOX repository
-# (release.yml), or from the two image workflows of stack-k8s (console-image.yml and
-# tunnel-images.yml), run on a version tag and signed through GitHub's own OIDC
-# issuer. That is the identity stack-k8s's own admission policy names. Nothing
-# wider: not another workflow file, not a branch, not another organisation.
-TAIPANBOX_SIGNER='^https://github\.com/TAIPANBOX/(?:[A-Za-z0-9._-]+/\.github/workflows/release\.yml|stack-k8s/\.github/workflows/(?:console-image|tunnel-images)\.yml)@refs/tags/v[0-9][A-Za-z0-9._+-]*$'
+# (release.yml), or from stack-k8s's tunnel image workflow (tunnel-images.yml, stack-caddy
+# and stack-wg), run on a version tag and signed through GitHub's own OIDC issuer. Nothing
+# wider: not another workflow file, not a branch, not another organisation. Since 1.15.0
+# the console comes from genaryx's own release.yml, so stack-k8s's console-image.yml signs
+# nothing this launcher runs and is no longer accepted.
+TAIPANBOX_SIGNER='^https://github\.com/TAIPANBOX/(?:[A-Za-z0-9._-]+/\.github/workflows/release\.yml|stack-k8s/\.github/workflows/tunnel-images\.yml)@refs/tags/v[0-9][A-Za-z0-9._+-]*$'
 TAIPANBOX_ISSUER='https://token.actions.githubusercontent.com'
 
 cosign_install() {
@@ -5302,7 +5303,13 @@ if [ -n "$BUILD_FROM_SOURCE" ]; then
     || die "image build failed: tokenfuse"
   if [ -d genaryx-a360 ]; then
     note "building the console (four languages, it hosts the tools it runs)"
-    docker build -q -f stack-k8s/images/console.Dockerfile -t stack/genaryx-console:dev . >/dev/null \
+    # genaryx's own root Dockerfile, the one its release builds the published image from (v0.1.0 and
+    # later); its four tools arrive as named build contexts, the checkouts cloned above. The stack-k8s
+    # console.Dockerfile it replaced is no longer read.
+    docker build -q -f genaryx-a360/Dockerfile \
+      --build-context qryx=./qryx --build-context mockryx=./mockryx \
+      --build-context verdryx=./verdryx --build-context engram=./engram \
+      -t stack/genaryx:dev genaryx-a360 >/dev/null \
       || die "image build failed: console"
   fi
 fi
@@ -5658,7 +5665,7 @@ if [ -n "$BUILD_FROM_SOURCE" ]; then
   add_env_default SCOPYX_BROWSER_IMAGE   stack/scopyx-browser:dev
   add_env_default TOKENFUSE_IMAGE        stack/tokenfuse:dev
   add_env_default TOKENFUSE_CLOUD_IMAGE  stack/tokenfuse:dev
-  add_env_default CONSOLE_IMAGE          stack/genaryx-console:dev
+  add_env_default CONSOLE_IMAGE          stack/genaryx:dev
   add_env_default TRAILRYX_IMAGE         stack/trailryx:dev
   add_env_default CADDY_IMAGE            stack/caddy:dev
   add_env_default WG_IMAGE               stack/wg:dev
@@ -5838,7 +5845,7 @@ approver_key_prepare() {
 
 approver_jwks_apply() { # before `up`: writes the console's public key set and turns the check on
   local img json out="$STACK_DIR/approver-public/approver-jwks.json"
-  img="$(grep -m1 'genaryx-console' <<<"$(GATEWAY_CLIENT_KEYS="${GATEWAY_CLIENT_KEYS:-not-written-before-section-3e:none}" "${COMPOSE[@]}" config --images 2>/dev/null)" || true)"
+  img="$(GATEWAY_CLIENT_KEYS="${GATEWAY_CLIENT_KEYS:-not-written-before-section-3e:none}" "${COMPOSE[@]}" config --images console 2>/dev/null | head -1)" || img=""
   if [ -n "$img" ] \
      && json="$(docker run --rm --network none --user 10001:10001 -v "$STACK_DIR/approver/approver.pem:/run/approver.pem:ro" --entrypoint /usr/local/bin/genaryx-web "$img" approver-jwks --key-file /run/approver.pem 2>/dev/null)" \
      && grep -q '"keys"' <<<"$json"; then
@@ -5915,7 +5922,7 @@ preview_key_apply() { # before `up`
   elif [ -e "$key" ] || [ -e "$pub" ]; then
     die "the preview key and its recipient are not both in $STACK_DIR (one of $key, $pub is missing). A recipient the console's key does not match seals previews nobody can open, so nothing was started. Remove the one that is there and run install.sh again."
   else
-    img="$(grep -m1 'genaryx-console' <<<"$(GATEWAY_CLIENT_KEYS="${GATEWAY_CLIENT_KEYS:-not-written-before-section-3e:none}" "${COMPOSE[@]}" config --images 2>/dev/null)" || true)"
+    img="$(GATEWAY_CLIENT_KEYS="${GATEWAY_CLIENT_KEYS:-not-written-before-section-3e:none}" "${COMPOSE[@]}" config --images console 2>/dev/null | head -1)" || img=""
     tmp="$(mktemp -d "$STACK_DIR/.preview-mint.XXXXXX")" || die "could not create a private directory for the preview key"
     { chown 10001:10001 "$tmp" && chmod 0700 "$tmp"; } || { rm -rf "$tmp"; die "could not give $tmp to the console's uid (10001), mode 0700"; }
     if [ -n "$img" ]; then
@@ -6044,7 +6051,7 @@ posture and README says so."
   if [ ! -f delegation/signing.pem ]; then
     note "vouchryx: minting a signing key"
     docker run --rm --user 0:0 -v "$STACK_DIR/delegation:/out" \
-        --entrypoint vouchryx-demo "${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.8.0@sha256:2e1848151118de3dd69d2d68918fd50eee29859fdc47fb6fd3092914fe73022a}" \
+        --entrypoint vouchryx-demo "${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.9.0@sha256:341cc2c5d22d2f690ae98e9c26c509f7e590ea5b9786d958a74dfb7753513c05}" \
         keygen -out /out/signing >/dev/null \
       || die "could not mint vouchryx's signing key"
     chown 20002:20002 delegation/signing.pem delegation/signing.jwks.json
@@ -6061,7 +6068,7 @@ posture and README says so."
     if [ ! -f delegation/idp.pem ]; then
       note "vouchryx: minting a demo issuer (WITH_DELEGATION_DEMO_ISSUER=1, never for production)"
       docker run --rm --user 0:0 -v "$STACK_DIR/delegation:/out" \
-          --entrypoint vouchryx-demo "${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.8.0@sha256:2e1848151118de3dd69d2d68918fd50eee29859fdc47fb6fd3092914fe73022a}" \
+          --entrypoint vouchryx-demo "${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.9.0@sha256:341cc2c5d22d2f690ae98e9c26c509f7e590ea5b9786d958a74dfb7753513c05}" \
           keygen -out /out/idp -kid stack-single-demo-idp >/dev/null \
         || die "could not mint the demo issuer key"
       chown 20002:20002 delegation/idp.pem delegation/idp.jwks.json

@@ -226,6 +226,11 @@ services:
         # at that uid mounts the bus read-write, so the mount keeps them out of it.
         [ -e /vol/events/console.ndjson ] || : > /vol/events/console.ndjson
         chown 10001:10001 /vol/events/console.ndjson; chmod 0640 /vol/events/console.ndjson
+        # Keyryx custody's own stream (CLAUDE.md invariant 86): key_rotated and key_revoked, written
+        # when a person runs `keyryx admin rotate|revoke` on the box. keyryx 0.2.0 refuses to start
+        # without it and writes only a file it owns, so it is made here for custody's uid.
+        [ -e /vol/events/keyryx-custody.ndjson ] || : > /vol/events/keyryx-custody.ndjson
+        chown 20101:10001 /vol/events/keyryx-custody.ndjson; chmod 0640 /vol/events/keyryx-custody.ndjson
         # wardryx's policy archive is a directory in the bus (WARDRYX_POLICY_ARCHIVE),
         # made here so that wardryx, which cannot create in the bus, owns it.
         mkdir -p /vol/events/wardryx-policy-archive; chown -R 20001:10001 /vol/events/wardryx-policy-archive; chmod 0750 /vol/events/wardryx-policy-archive
@@ -370,7 +375,7 @@ services:
     <<: [*restart, *baseline]
     pids_limit: 128
     mem_limit: 256m
-    image: ${KEYRYX_IMAGE:-ghcr.io/taipanbox/keyryx:v0.1.5@sha256:967dd49907d48edea9cb0af926ec9beae39de31909ced8149eff1546200d99e7}
+    image: ${KEYRYX_IMAGE:-ghcr.io/taipanbox/keyryx:v0.2.0@sha256:ead031a117958ce34c9157937713c000a3d6a0cea86e0ce1d0bc05fce5270c38}
     # The image's own 65532 is replaced: custody runs under its own uid, and
     # no other container runs as it (invariant 41).
     user: "20101:20101"
@@ -388,8 +393,20 @@ services:
       # away. Here the slowest path is vouchryx's 10s poll plus a door's 60s: 2m clears it, and a
       # restart costs 2 minutes of new tokens, not 15 (CLAUDE.md invariant 58).
       KEYRYX_PUBLISH_AHEAD: 2m
+      # Custody's own stream on the bus (keyryx 0.2.0 and later refuse to start without it; CLAUDE.md
+      # invariant 86). A rotation or a revocation is a command on custody's admin socket, never a
+      # network call, and custody announces each one here as key_rotated or key_revoked, which heraldyx
+      # 0.10.0 reads as source keyryx. Not keyryx.ndjson, the witness's findings file, and not inside
+      # KEYRYX_DATA. init-volumes makes it, owned by this uid, 0640, group 10001 to read; custody
+      # opens it O_NOFOLLOW and writes only a regular file with one link that it owns.
+      KEYRYX_EVENTS: /var/lib/stack/events/keyryx-custody.ndjson
+      # KEYRYX_ADMIN_KEYS is set nowhere: keyryx 0.2.0 refuses to start with any value in it, and
+      # the network admin route it fed is gone.
     volumes:
       - keyryxstate:/var/lib/keyryx
+      # Read-write for its one stream: the bus directory is root's (0751), so custody can create
+      # nothing here and write nothing it does not own (invariant 41).
+      - events:/var/lib/stack/events
       - ./keyryx/root.key:/run/keyryx/root.key:ro
       - ./keyryx/policy.json:/etc/keyryx/policy.json:ro
       # One directory per consumer, each entered only by that consumer's group
@@ -410,7 +427,7 @@ services:
     <<: [*restart, *baseline]
     pids_limit: 128
     mem_limit: 1g
-    image: ${KEYRYX_IMAGE:-ghcr.io/taipanbox/keyryx:v0.1.5@sha256:967dd49907d48edea9cb0af926ec9beae39de31909ced8149eff1546200d99e7}
+    image: ${KEYRYX_IMAGE:-ghcr.io/taipanbox/keyryx:v0.2.0@sha256:ead031a117958ce34c9157937713c000a3d6a0cea86e0ce1d0bc05fce5270c38}
     user: "20100:10001"
     command:
       - witness
@@ -601,7 +618,7 @@ services:
     <<: [*restart, *baseline]
     pids_limit: 256
     mem_limit: 1g
-    image: ${HERALDYX_IMAGE:-ghcr.io/taipanbox/heraldyx:v0.9.1@sha256:ad1b03a2007a2163cc55378899c9640becf2e4f4d70cef83c6840528bbe7bc6e}
+    image: ${HERALDYX_IMAGE:-ghcr.io/taipanbox/heraldyx:v0.10.0@sha256:7baa8cdb8508afde33b8366141f433ae4bea1688caefde6b4f5d48a21af183c1}
     networks:
       - edge
       - core
@@ -1313,7 +1330,7 @@ services:
     pids_limit: 256
     mem_limit: 256m
     profiles: ["delegation"]
-    image: ${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.8.0@sha256:2e1848151118de3dd69d2d68918fd50eee29859fdc47fb6fd3092914fe73022a}
+    image: ${VOUCHRYX_IMAGE:-ghcr.io/taipanbox/vouchryx:v0.9.0@sha256:341cc2c5d22d2f690ae98e9c26c509f7e590ea5b9786d958a74dfb7753513c05}
     # Not on guests: a declared container of another project gets its tokens
     # through guest-door, and never needs core for it (invariant 77).
     networks:
@@ -1930,7 +1947,7 @@ services:
     # `disk I/O error (6410)`, a warning that goes red nowhere (invariant 24).
     tmpfs:
       - /tmp:size=256m
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.14.0@sha256:583fcbe19330c461c6de7784f383620feaabf3f7474f977917570b6dfd3641ca}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx:v0.1.0@sha256:4030bc819e7df40c2a307e68f33519476d0858570bbdccb9326fd5fad256d2ee}
     networks:
       - core
       - agents
@@ -1954,7 +1971,7 @@ services:
       GENARYX_STATE_DIR: /var/lib/stack/genaryx
       # The Keyryx witness's findings, which are not on the bus (invariant 54):
       # a stream the console tails read only beside its events directory. The
-      # console pinned here (v1.8.6; v1.7.0, built from genaryx #134, reads it too) reads it; an older
+      # console pinned here (genaryx v0.1.0; genaryx-console v1.7.0 and later too) reads it; an older
       # console ignores it.
       GENARYX_EVENTS_EXTRA: /var/lib/keyryx-alerts/keyryx.ndjson
       GENARYX_SCAN_TARGET: /srv/ui
@@ -2053,6 +2070,22 @@ services:
       # tokens with after a passkey assertion. Empty, the default, leaves its
       # close command off. Invariant 26.
       GENARYX_CLOSURE_SECRET_FILE: ${CLOSURE_SECRET_FILE:-}
+      # The console's three read-only Assure tabs (genaryx v0.1.0, its invariants 51, 53 and 54;
+      # CLAUDE.md invariant 87). Each reads what is already on this box, through a mount read only
+      # or a route that needs no credential, and has no control: a rotation is custody's own command
+      # line, a message is heraldyx's, a seal is the record plane's.
+      # Notifications: heraldyx's dispatch journal, beside its state file on its own volume, mounted
+      # read only below at the path heraldyx writes it. 0640 in the bus group, the console's group.
+      GENARYX_HERALDYX_SENT: /var/lib/stack/heraldyx/sent.ndjson
+      # Keys: custody's GET /v1/state and GET /v1/keys over core, the network both are on. The
+      # witness has no network here (invariant 43), so GENARYX_KEYRYX_WITNESS_URL is left unset and
+      # the tab says the witness is not configured.
+      GENARYX_KEYRYX_URL: http://keyryx:4340
+      # Record: the record seal's data directory, mounted read only below at the path the seal
+      # passes as --data, and the witness's attestations for the pack Verify makes, at the path the
+      # seal reads them from. Both are 10001's to read (the seal's uid and the attestations' group).
+      GENARYX_TRAILRYX_DATA_DIR: /var/lib/stack/records
+      TRAILRYX_WITNESS_ATTESTATIONS: /run/keyryx/attestations
     ports:
       - "127.0.0.1:7420:7420"
     volumes:
@@ -2066,6 +2099,11 @@ services:
       # the console's own account, so the console needs no group for it.
       - traces:/var/lib/stack/traces:ro
       - keyryxalerts:/var/lib/keyryx-alerts:ro
+      # The three Assure tabs' inputs (invariant 87), each read only: the console cannot add a
+      # line to heraldyx's journal, a segment to the record, or an attestation.
+      - heraldyxstate:/var/lib/stack/heraldyx:ro
+      - records:/var/lib/stack/records:ro
+      - keyryxattest:/run/keyryx/attestations:ro
       - ./environments:/etc/genaryx/taipan/environments:ro
       - ./closure:/run/closure:ro
       - wgapi:/var/run/wireguard
@@ -2433,7 +2471,7 @@ services:
     mem_limit: 1g
     tmpfs:
       - /tmp:size=64m
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.14.0@sha256:583fcbe19330c461c6de7784f383620feaabf3f7474f977917570b6dfd3641ca}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx:v0.1.0@sha256:4030bc819e7df40c2a307e68f33519476d0858570bbdccb9326fd5fad256d2ee}
     networks:
       - core
     user: "10001:10001"
@@ -2483,7 +2521,7 @@ services:
     <<: [*restart, *baseline]
     pids_limit: 128
     mem_limit: 1g
-    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx-console:v1.14.0@sha256:583fcbe19330c461c6de7784f383620feaabf3f7474f977917570b6dfd3641ca}
+    image: ${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx:v0.1.0@sha256:4030bc819e7df40c2a307e68f33519476d0858570bbdccb9326fd5fad256d2ee}
     user: "20020:10001"
     profiles: ["slo-signal"]
     environment:
