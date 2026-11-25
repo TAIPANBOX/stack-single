@@ -32,6 +32,12 @@ Feature: Keyryx custody announces every key change on a stream of its own
     # -> gates-have-teeth.sh "keyryx-custody: custody is handed a network admin key"
     # -> gates-have-teeth.sh "keyryx-custody: install.sh writes an admin key"
 
+  Scenario: custody reads more than it writes
+    Given custody holds the key that wraps every other key
+    When it joins the bus group, which reads every plane's stream
+    Then the gate fails
+    # -> gates-have-teeth.sh "keyryx-custody: custody joins the bus group"
+
   Scenario: an older custody or an older reader
     Given keyryx 0.2.0 and heraldyx 0.10.0 are the first that write and read the stream
     When either pin goes back

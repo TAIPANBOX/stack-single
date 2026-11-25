@@ -45,6 +45,12 @@ Feature: the console reads its three Assure tabs from the planes, read only
     # -> gates-have-teeth.sh "console-image: the approver key set is asked of the first image compose lists"
     # -> gates-have-teeth.sh "console-image: the preview key is asked of the first image compose lists"
 
+  Scenario: a box built from source keeps its old console
+    Given an earlier release wrote CONSOLE_IMAGE=stack/genaryx-console:dev, which add_env_default never rewrites
+    When install.sh stops moving that exact line to the new local tag
+    Then the gate fails
+    # -> gates-have-teeth.sh "console-assure: a box built from source keeps the old console tag"
+
   Scenario: there is nothing to judge, or nothing wrong
     Given the gate compares the console with the seal's own command
     When the seal names no data directory, it says it measured nothing; when only a comment changes, it passes

@@ -1452,7 +1452,8 @@ are pinned by this box and need a re-pin after a rotation: `keyryx.delegation-ro
 (vouchryx's `VOUCHRYX_KEYRYX_ROOT_PIN`, the steps above) and `trailryx-root` (the record
 seal's `TRAILRYX_KEYRYX_KID`, see "The record plane"). Rotate either only when you mean to
 re-pin it. The record plane (trailryx 1.7.0) does not seal custody's two event types, so
-they are mailed and shown and not in the record.
+they are mailed and not in the record; the console shows custody's state in its Keys tab, not
+the events themselves.
 - **a box installed before this release** keeps its old `alerts.ndjson` on the
   witness's state volume. Nothing reads it, and nothing deletes it.
 
@@ -2485,7 +2486,11 @@ no token.
 
 The console runs genaryx's own release image, `ghcr.io/taipanbox/genaryx` (pin `v0.1.0`,
 by digest), signed by genaryx's release workflow and checked before it is pulled, like
-every image here. `BUILD_FROM_SOURCE=1` builds it from genaryx's own `Dockerfile` instead.
+every image here. `BUILD_FROM_SOURCE=1` builds it from genaryx's own `Dockerfile` instead,
+which pulls the engine images it copies (wardryx, tokenfuse, trailryx-node) by digest and checks
+no signature: that is the operator's choice of a local build. A `CONSOLE_IMAGE` in `.env` that
+names the older `ghcr.io/taipanbox/genaryx-console` is refused at the signature check from this
+release on, because that image was signed by a workflow this launcher no longer accepts.
 
 `CONSOLE_TOKEN` and the `src/genaryx-a360` drop-in still work and are still
 useful, but for a different reason now: they let you install a build of your
