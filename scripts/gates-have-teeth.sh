@@ -6664,6 +6664,14 @@ j = s.index("    mem_limit: 2g\n", i)
 open("compose.yaml", "w").write(s[:j] + "    mem_limit: 512m\n" + s[j + len("    mem_limit: 2g\n"):])')" \
 	"console has 512 MiB, below 1 GiB"
 
+run_case "mem-limit: the witness goes back to the limit forge killed it at" fail \
+	"$EML" \
+	"$(py 's = open("compose.yaml").read()
+i = s.index("  keyryx-witness:\n")
+j = s.index("    mem_limit: 1g\n", i)
+open("compose.yaml", "w").write(s[:j] + "    mem_limit: 256m\n" + s[j + len("    mem_limit: 1g\n"):])')" \
+	"keyryx-witness has 256 MiB, below 1 GiB"
+
 run_case "mem-limit: a typo leaves a limit in kilobytes" fail \
 	"$EML" \
 	"$(py 'edit("compose.yaml", "    pids_limit: 512\n    mem_limit: 512m\n", "    pids_limit: 512\n    mem_limit: 512k\n")')" \
