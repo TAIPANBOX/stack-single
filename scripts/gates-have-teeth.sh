@@ -6801,6 +6801,11 @@ run_case "keyryx-custody: the README loses the admin commands" fail \
 	"$(py 'edit_all("README.md", "keyryx admin revoke", "keyryx revoke")')" \
 	"does not name \`keyryx admin revoke\`"
 
+run_case "keyryx-custody: custody joins the bus group" fail \
+	"$KCA" \
+	"$(py 'edit("compose.yaml", "    user: \"20101:20101\"\n", "    user: \"20101:20101\"\n    group_add: [\"10001\"]\n")')" \
+	"custody needs no group"
+
 run_case "keyryx-custody: no custody service (measured nothing)" fail \
 	"$KCA" \
 	"$(py 'edit("compose.yaml", "    command:\n      - custody\n", "    command:\n      - custodian\n")')" \
@@ -6885,6 +6890,11 @@ run_case "console-image: the preview key is asked of the first image compose lis
 	'./scripts/preview-key-is-wired.sh' \
 	"$(py 'edit("install.sh", "    img=\"$(console_image)\" || img=\"\"\n", "    img=\"$(\"${COMPOSE[@]}\" config --images console 2>/dev/null | head -1)\" || img=\"\"\n")')" \
 	"did not set WARDRYX_PREVIEW_RECIPIENT"
+
+run_case "console-assure: a box built from source keeps the old console tag" fail \
+	"$CAT" \
+	"$(py 'edit("install.sh", "  sed -i '"'"'s#^CONSOLE_IMAGE=stack/genaryx-console:dev$#CONSOLE_IMAGE=stack/genaryx:dev#'"'"' .env \\\n    || die \"could not move CONSOLE_IMAGE in .env to the console'"'"'s new local tag\"\n", "")')" \
+	"keeps its old console"
 
 run_case "console-assure: the Keys comment is reworded (must pass)" pass \
 	"$CAT" \

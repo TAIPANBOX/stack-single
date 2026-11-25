@@ -5665,6 +5665,10 @@ if [ -n "$BUILD_FROM_SOURCE" ]; then
   add_env_default SCOPYX_BROWSER_IMAGE   stack/scopyx-browser:dev
   add_env_default TOKENFUSE_IMAGE        stack/tokenfuse:dev
   add_env_default TOKENFUSE_CLOUD_IMAGE  stack/tokenfuse:dev
+  # console-dev-tag: a .env from 1.14.x or earlier names the old local tag, which add_env_default never rewrites,
+  # so compose would go on running the stale console built before 1.15.0. That exact line, and no other, moves.
+  sed -i 's#^CONSOLE_IMAGE=stack/genaryx-console:dev$#CONSOLE_IMAGE=stack/genaryx:dev#' .env \
+    || die "could not move CONSOLE_IMAGE in .env to the console's new local tag"
   add_env_default CONSOLE_IMAGE          stack/genaryx:dev
   add_env_default TRAILRYX_IMAGE         stack/trailryx:dev
   add_env_default CADDY_IMAGE            stack/caddy:dev
@@ -5858,6 +5862,8 @@ approver_key_prepare() {
 approver_jwks_apply() { # before `up`: writes the console's public key set and turns the check on
   local img json out="$STACK_DIR/approver-public/approver-jwks.json"
   img="$(console_image)" || img=""
+  # No image is compose failing, never an operator's choice: off would decide every hold on a bearer key.
+  [ -n "$img" ] || die "compose resolved no image for the console, so its approver key set could not be asked for. Nothing was started. Check: docker compose config console"
   if [ -n "$img" ] \
      && json="$(docker run --rm --network none --user 10001:10001 -v "$STACK_DIR/approver/approver.pem:/run/approver.pem:ro" --entrypoint /usr/local/bin/genaryx-web "$img" approver-jwks --key-file /run/approver.pem 2>/dev/null)" \
      && grep -q '"keys"' <<<"$json"; then
@@ -5935,6 +5941,7 @@ preview_key_apply() { # before `up`
     die "the preview key and its recipient are not both in $STACK_DIR (one of $key, $pub is missing). A recipient the console's key does not match seals previews nobody can open, so nothing was started. Remove the one that is there and run install.sh again."
   else
     img="$(console_image)" || img=""
+    [ -n "$img" ] || die "compose resolved no image for the console, so no preview key could be made. Nothing was started. Check: docker compose config console"
     tmp="$(mktemp -d "$STACK_DIR/.preview-mint.XXXXXX")" || die "could not create a private directory for the preview key"
     { chown 10001:10001 "$tmp" && chmod 0700 "$tmp"; } || { rm -rf "$tmp"; die "could not give $tmp to the console's uid (10001), mode 0700"; }
     if [ -n "$img" ]; then

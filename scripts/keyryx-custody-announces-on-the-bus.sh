@@ -114,6 +114,13 @@ else:
     elif any(m.get("read_only") for m in mounted):
         fail("%s mounts the bus read only, so it cannot append its announcements" % name)
 
+# Custody stays outside the bus group: a group_add of 10001 would let the process that holds the root-wrapping
+# key read every plane's stream, and an env_file could hand it a value this gate cannot see.
+if [str(g) for g in (svc.get("group_add") or [])]:
+    fail("%s joins groups %s; custody needs no group to write its own stream" % (name, svc.get("group_add")))
+if re.search(r"^  keyryx:\n(?:    .*\n|\n)*?    env_file:", text, re.M):
+    fail("%s reads an env_file, which could hand it KEYRYX_ADMIN_KEYS unseen" % name)
+
 # Who owns the file: init-volumes must make it for custody's uid.
 user = str(svc.get("user") or "")
 uid = user.split(":")[0]

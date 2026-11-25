@@ -182,6 +182,12 @@ for src in {(volume_at(h, state) or {}).get("source"), (sm or {}).get("source"),
         if mm.get("source") == src and not mm.get("read_only"):
             fail("the console mounts %s at %s writable; it reads it and must not change it" % (src, mm.get("target")))
 
+# A box built from source before 1.15.0 has CONSOLE_IMAGE=stack/genaryx-console:dev in .env, which
+# add_env_default never rewrites: without the exact migration it keeps running the stale local console.
+inst = open("install.sh").read()
+if "sed -i 's#^CONSOLE_IMAGE=stack/genaryx-console:dev$#CONSOLE_IMAGE=stack/genaryx:dev#' .env" not in inst:
+    fail("install.sh does not move CONSOLE_IMAGE=stack/genaryx-console:dev to stack/genaryx:dev, so a box built from source keeps its old console")
+
 if problems:
     print("%d problem(s). See CLAUDE.md invariant 87." % len(problems))
     sys.exit(1)
