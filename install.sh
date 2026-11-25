@@ -5814,6 +5814,18 @@ POLICY
   # nothing here touches the bus.
 }
 
+# console-image: begin
+# The image compose resolves for the console service itself (CLAUDE.md invariant 87). `config --images console`
+# also lists the images of every service the console depends on, init-volumes' busybox first, so its first line is
+# not the console's; the first 1.15.0 draft took it and every install stopped at the approver key set. `config
+# console` prints those services as YAML, and the console's own `image:` is read from its block. awk reads to the
+# end with no early exit, so compose never meets a closed pipe (invariant 65). Empty when compose cannot answer.
+console_image() {
+  GATEWAY_CLIENT_KEYS="${GATEWAY_CLIENT_KEYS:-not-written-before-section-3e:none}" "${COMPOSE[@]}" config console 2>/dev/null \
+    | awk '/^[^ ]/ { top = $0 } /^  [^ ]/ { svc = (top == "services:" && $0 == "  console:") } svc && !done && /^    image: / { sub(/^    image: /, ""); print; done = 1 }'
+}
+# console-image: end
+
 # approver-key: begin
 # CLAUDE.md invariant 61. The console signs each approval's statement with an approver
 # key after a passkey assertion, and wardryx 2.4.0 and later verify the statement against the
@@ -5845,7 +5857,7 @@ approver_key_prepare() {
 
 approver_jwks_apply() { # before `up`: writes the console's public key set and turns the check on
   local img json out="$STACK_DIR/approver-public/approver-jwks.json"
-  img="$(GATEWAY_CLIENT_KEYS="${GATEWAY_CLIENT_KEYS:-not-written-before-section-3e:none}" "${COMPOSE[@]}" config --images console 2>/dev/null | head -1)" || img=""
+  img="$(console_image)" || img=""
   if [ -n "$img" ] \
      && json="$(docker run --rm --network none --user 10001:10001 -v "$STACK_DIR/approver/approver.pem:/run/approver.pem:ro" --entrypoint /usr/local/bin/genaryx-web "$img" approver-jwks --key-file /run/approver.pem 2>/dev/null)" \
      && grep -q '"keys"' <<<"$json"; then
@@ -5922,7 +5934,7 @@ preview_key_apply() { # before `up`
   elif [ -e "$key" ] || [ -e "$pub" ]; then
     die "the preview key and its recipient are not both in $STACK_DIR (one of $key, $pub is missing). A recipient the console's key does not match seals previews nobody can open, so nothing was started. Remove the one that is there and run install.sh again."
   else
-    img="$(GATEWAY_CLIENT_KEYS="${GATEWAY_CLIENT_KEYS:-not-written-before-section-3e:none}" "${COMPOSE[@]}" config --images console 2>/dev/null | head -1)" || img=""
+    img="$(console_image)" || img=""
     tmp="$(mktemp -d "$STACK_DIR/.preview-mint.XXXXXX")" || die "could not create a private directory for the preview key"
     { chown 10001:10001 "$tmp" && chmod 0700 "$tmp"; } || { rm -rf "$tmp"; die "could not give $tmp to the console's uid (10001), mode 0700"; }
     if [ -n "$img" ]; then

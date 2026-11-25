@@ -38,6 +38,13 @@ Feature: the console reads its three Assure tabs from the planes, read only
     # -> gates-have-teeth.sh "console-assure: the record is mounted writable"
     # -> gates-have-teeth.sh "console-assure: the attestations are not mounted"
 
+  Scenario: the installer asks the wrong image for the console's keys
+    Given compose lists the images of every service the console depends on beside the console's own
+    When the approver key set or the preview key is asked of the first image in that list
+    Then the gates fail, because the image that answers is not the console
+    # -> gates-have-teeth.sh "console-image: the approver key set is asked of the first image compose lists"
+    # -> gates-have-teeth.sh "console-image: the preview key is asked of the first image compose lists"
+
   Scenario: there is nothing to judge, or nothing wrong
     Given the gate compares the console with the seal's own command
     When the seal names no data directory, it says it measured nothing; when only a comment changes, it passes

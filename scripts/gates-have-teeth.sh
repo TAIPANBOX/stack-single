@@ -6876,6 +6876,16 @@ run_case "console-assure: no record seal to compare with (measured nothing)" fai
 	"$(py 'edit("compose.yaml", "        data=/var/lib/stack/records\n", "        datadir=/var/lib/stack/records\n")')" \
 	"measured nothing"
 
+run_case "console-image: the approver key set is asked of the first image compose lists" fail \
+	'./scripts/approver-key-is-wired.sh' \
+	"$(py 'edit("install.sh", "  img=\"$(console_image)\" || img=\"\"\n", "  img=\"$(\"${COMPOSE[@]}\" config --images console 2>/dev/null | head -1)\" || img=\"\"\n")')" \
+	"the variable naming the key set is not written when the console can print it"
+
+run_case "console-image: the preview key is asked of the first image compose lists" fail \
+	'./scripts/preview-key-is-wired.sh' \
+	"$(py 'edit("install.sh", "    img=\"$(console_image)\" || img=\"\"\n", "    img=\"$(\"${COMPOSE[@]}\" config --images console 2>/dev/null | head -1)\" || img=\"\"\n")')" \
+	"did not set WARDRYX_PREVIEW_RECIPIENT"
+
 run_case "console-assure: the Keys comment is reworded (must pass)" pass \
 	"$CAT" \
 	"$(py 'edit("compose.yaml", "      # Keys: custody", "      # The Keys tab: custody")')"
