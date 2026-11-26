@@ -189,6 +189,10 @@ jobs:
         run: ./scripts/every-service-has-a-memory-limit.sh
       - name: a piped install takes a signed release (invariant 84)
         run: ./scripts/piped-tree-is-verified.sh
+      - name: keyryx custody announces every key change on a stream of its own (invariant 86)
+        run: ./scripts/keyryx-custody-announces-on-the-bus.sh
+      - name: the console reads its three Assure tabs from the planes, read only (invariant 87)
+        run: ./scripts/console-reads-the-assure-tabs.sh
 
       # Last, because it mutates tracked files and restores them. It needs a
       # clean tree and says so plainly, so it also reports any earlier step

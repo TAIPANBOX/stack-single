@@ -70,7 +70,8 @@ elif [ -z "$end_line" ] || [ -z "$up_line" ] || [ "$call_lines" -le "$end_line" 
 fi
 
 # ---- C. install.sh, behaviour -------------------------------------------------
-BLOCK="$(sed -n '/^# preview-key: begin$/,/^# preview-key: end$/p' install.sh)"
+BLOCK="$(sed -n '/^# console-image: begin$/,/^# console-image: end$/p' install.sh)
+$(sed -n '/^# preview-key: begin$/,/^# preview-key: end$/p' install.sh)"
 if [ -z "$BLOCK" ]; then
   fail "C. install.sh has no '# preview-key: begin' .. '# preview-key: end' block, so the preview key was not measured"
 elif ! grep -q '^preview_key_apply()' <<<"$BLOCK"; then
@@ -81,12 +82,24 @@ else
   mkdir -p "$scratch/bin"
   # chown is recorded, not run: the scratch box is not root. Each line is OWNER TARGET.
   printf '#!/usr/bin/env bash\n[ "$1" = -h ] && shift\necho "$1 $2" >>"%s/chown.log"\nexit 0\n' "$scratch" >"$scratch/bin/chown"
-  printf '#!/usr/bin/env bash\nif [ "$1" = config ]; then echo "ghcr.io/taipanbox/genaryx-console:v9.9.9@sha256:0000"; fi\nexit 0\n' >"$scratch/bin/stubcompose"
+  # stub compose (1.15.0): answers as compose does, with the services the console depends on beside it,
+  # an image of one of them first, so a block that takes the first image it sees runs the wrong one.
+  cat >"$scratch/bin/stubcompose" <<'EOC'
+#!/usr/bin/env bash
+img="${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx:v9.9.9@sha256:0000}"
+[ "$1" = config ] || exit 0
+case " $* " in
+  *" --images "*) printf 'busybox:1.36@sha256:1111\n%s\npostgres:16@sha256:2222\n' "$img" ;;
+  *) printf 'name: x\nservices:\n  aaa-init:\n    image: busybox:1.36@sha256:1111\n  console:\n    depends_on:\n      aaa-init:\n        condition: service_completed_successfully\n    image: %s\n  zz-db:\n    image: postgres:16@sha256:2222\nnetworks:\n  console:\n    image: not-a-service\n' "$img" ;;
+esac
+EOC
   # The stub docker plays `genaryx-web preview-key --out /out/preview.key` with -v DIR:/out. STUB_PROBE=1 means
   # the console can make the key. Every call is logged, so a re-run that runs the console again is seen.
   cat >"$scratch/bin/docker" <<EOD
 #!/usr/bin/env bash
 echo "\$*" >>"$scratch/docker.log"
+want="\${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx:v9.9.9@sha256:0000}"
+case " \$* " in *" \$want "*) ;; *) echo "stub docker: not the console's image: \$*" >&2; exit 125 ;; esac
 case "\${STUB_PROBE:-0}" in 1 | 2 | 3) ;; *) exit 2 ;; esac
 src=""
 while [ \$# -gt 0 ]; do

@@ -78,7 +78,8 @@ for f in compose.yaml install.sh; do
 done
 
 # ---- C. install.sh, behaviour -------------------------------------------------
-BLOCK="$(sed -n '/^# approver-key: begin$/,/^# approver-key: end$/p' install.sh)"
+BLOCK="$(sed -n '/^# console-image: begin$/,/^# console-image: end$/p' install.sh)
+$(sed -n '/^# approver-key: begin$/,/^# approver-key: end$/p' install.sh)"
 if [ -z "$BLOCK" ]; then
   fail "C. install.sh has no '# approver-key: begin' .. '# approver-key: end' block, so the approver key was not measured"
 elif ! grep -q '^approver_key_prepare()' <<<"$BLOCK" || ! grep -q '^approver_jwks_apply()' <<<"$BLOCK"; then
@@ -91,10 +92,22 @@ else
   mkdir -p "$scratch/bin"
   # chown is recorded, not run: the scratch box is not root. Each line is OWNER TARGET.
   printf '#!/usr/bin/env bash\necho "$1 $2" >>"%s/chown.log"\nexit 0\n' "$scratch" >"$scratch/bin/chown"
-  printf '#!/usr/bin/env bash\n# stub compose: the image list only\nif [ "$1" = config ]; then echo "ghcr.io/taipanbox/genaryx-console:v9.9.9@sha256:0000"; fi\nexit 0\n' >"$scratch/bin/stubcompose"
+  # stub compose (1.15.0): answers as compose does, with the services the console depends on beside it,
+  # an image of one of them first, so a block that takes the first image it sees runs the wrong one.
+  cat >"$scratch/bin/stubcompose" <<'EOC'
+#!/usr/bin/env bash
+img="${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx:v9.9.9@sha256:0000}"
+[ "$1" = config ] || exit 0
+case " $* " in
+  *" --images "*) printf 'busybox:1.36@sha256:1111\n%s\npostgres:16@sha256:2222\n' "$img" ;;
+  *) printf 'name: x\nservices:\n  aaa-init:\n    image: busybox:1.36@sha256:1111\n  console:\n    depends_on:\n      aaa-init:\n        condition: service_completed_successfully\n    image: %s\n  zz-db:\n    image: postgres:16@sha256:2222\nnetworks:\n  console:\n    image: not-a-service\n' "$img" ;;
+esac
+EOC
   # the stub docker answers the console's approver-jwks probe; STUB_PROBE=1 means the console can print
   cat >"$scratch/bin/docker" <<'EOD'
 #!/usr/bin/env bash
+want="${CONSOLE_IMAGE:-ghcr.io/taipanbox/genaryx:v9.9.9@sha256:0000}"
+case " $* " in *" $want "*) ;; *) echo "stub docker: not the console's image: $*" >&2; exit 125 ;; esac
 if [ "${STUB_PROBE:-0}" = 1 ]; then
   printf '%s\n' '{"keys":[{"kty":"EC","crv":"P-256","kid":"stubkid","x":"AAAA","y":"BBBB"}]}'
   exit 0

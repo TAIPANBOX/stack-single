@@ -428,7 +428,7 @@ fi
 
 # ---- C. two maps, one unit -----------------------------------------------------------
 IMG="$(sed -n 's/^    image: \${TOKENFUSE_IMAGE:-\(ghcr\.io\/taipanbox\/tokenfuse:[^}]*\)}$/\1/p' compose.yaml | head -n 1)"
-CIMG="$(sed -n 's/^    image: \${CONSOLE_IMAGE:-\(ghcr\.io\/taipanbox\/genaryx-console:[^}]*\)}$/\1/p' compose.yaml | head -n 1)"
+CIMG="$(sed -n 's/^    image: \${CONSOLE_IMAGE:-\(ghcr\.io\/taipanbox\/genaryx:[^}]*\)}$/\1/p' compose.yaml | head -n 1)"
 docker_ok=0
 if ! docker version >/dev/null 2>&1; then
   fail "no Docker here, so the door's files could not be read by the gateway image. This gate does not pass on a box that cannot run it."

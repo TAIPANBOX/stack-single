@@ -111,6 +111,8 @@ step "the console's revoke button has a key of its own (invariant 82)" "./script
 step "every install asks the box who can write what on the bus (invariant 83)" "./scripts/bus-writers-are-probed.sh"
 step "every service carries a memory limit of its own (invariant 85)" "./scripts/every-service-has-a-memory-limit.sh"
 step "a piped install takes a signed release (invariant 84)" "./scripts/piped-tree-is-verified.sh"
+step "keyryx custody announces every key change on a stream of its own (invariant 86)" "./scripts/keyryx-custody-announces-on-the-bus.sh"
+step "the console reads its three Assure tabs from the planes, read only (invariant 87)" "./scripts/console-reads-the-assure-tabs.sh"
 # Reaches the network (a tarball from the sibling repo), which is why it is
 # last: everything that can be judged offline has already spoken by here.
 step "every image has the files it copies" "./scripts/build-context-complete.sh"

@@ -90,7 +90,7 @@ EXPECT = {
     "COSIGN_SHA256_amd64": '"4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71"',
     "COSIGN_SHA256_arm64": '"c5d324e091826b0d7a78eb16fef316450b4eb9aaec045611c08ba06f5e73220a"',
     "TAIPANBOX_ISSUER": "'https://token.actions.githubusercontent.com'",
-    "TAIPANBOX_SIGNER": r"'^https://github\.com/TAIPANBOX/(?:[A-Za-z0-9._-]+/\.github/workflows/release\.yml|stack-k8s/\.github/workflows/(?:console-image|tunnel-images)\.yml)@refs/tags/v[0-9][A-Za-z0-9._+-]*$'",
+    "TAIPANBOX_SIGNER": r"'^https://github\.com/TAIPANBOX/(?:[A-Za-z0-9._-]+/\.github/workflows/release\.yml|stack-k8s/\.github/workflows/tunnel-images\.yml)@refs/tags/v[0-9][A-Za-z0-9._+-]*$'",
 }
 for var, want in EXPECT.items():
     m = re.search(r"^" + var + r"=(.*)$", block, re.M)
@@ -107,12 +107,13 @@ if sm:
     signer = re.compile(sm.group(1))
     must_accept = [
         "https://github.com/TAIPANBOX/tokenfuse/.github/workflows/release.yml@refs/tags/v1.16.0",
-        "https://github.com/TAIPANBOX/stack-k8s/.github/workflows/console-image.yml@refs/tags/v1.1.47",
+        "https://github.com/TAIPANBOX/genaryx/.github/workflows/release.yml@refs/tags/v0.1.0",
         "https://github.com/TAIPANBOX/stack-k8s/.github/workflows/tunnel-images.yml@refs/tags/v1.1.47",
     ]
     must_refuse = [
         ("https://github.com/TAIPANBOX/tokenfuse/.github/workflows/ci.yml@refs/tags/v1", "accepts a signer from another workflow file"),
         ("https://github.com/TAIPANBOX/stack-k8s/.github/workflows/ci.yml@refs/tags/v1.1.47", "accepts a signer from another workflow file"),
+        ("https://github.com/TAIPANBOX/stack-k8s/.github/workflows/console-image.yml@refs/tags/v1.1.47", "still accepts stack-k8s's console-image workflow, which signs nothing this launcher runs since the console moved to genaryx's release"),
         ("https://github.com/TAIPANBOX/tokenfuse/.github/workflows/release.yml@refs/heads/main", "accepts a branch ref"),
         ("https://github.com/OTHERORG/tokenfuse/.github/workflows/release.yml@refs/tags/v1.16.0", "accepts a signer from another organisation"),
     ]

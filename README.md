@@ -956,7 +956,7 @@ run. Felyx authenticates with this key and never with your provider key.
 A console that carries genaryx invariant 24 can present a key of its own:
 `compose.yaml` already hands it `GENARYX_COPILOT_FUSE_KEY_REF`, which points at
 `GENARYX_COPILOT_FUSE_KEY` in `.env`, and such a console sends that key as
-`x-fuse-key`. The console pinned here (v1.8.6) carries it; an older one ignores
+`x-fuse-key`. The console pinned here (genaryx v0.1.0) carries it; an older one ignores
 the setting. Measured 2026-10-13 with two throwaway v1.1.44 consoles against a
 gateway holding client keys: with the key set, a question to Felyx was answered;
 with it empty, the gateway answered 401. To give Felyx a key:
@@ -1397,10 +1397,10 @@ What is wired now, and what is not:
   vouchryx's own way in for signing, and the pin read does not use it.
 - **Re-pinning keyryx's delegation root, on purpose.** The pin is kept, never refreshed. A changed
   root stops vouchryx at its next start, and the start message names `VOUCHRYX_KEYRYX_ROOT_PIN`.
-  Two things are true of this launcher today: it sets no `KEYRYX_ADMIN_KEYS`, so keyryx's own rotate
-  and revoke routes refuse every call on a box it installed, and so a root cannot be rotated from
-  this stack yet. To move the pin to a root that keyryx now serves, after you have confirmed that
-  root out of band (the pin is the trust root, and the run trusts the keyryx that answers it):
+  A root is rotated on the box with keyryx's own command line (see "Rotating and revoking a Keyryx
+  key" below), and nothing re-pins it for you. To move the pin to a root that keyryx now serves, after
+  you have confirmed that root out of band (the pin is the trust root, and the run trusts the keyryx
+  that answers it):
   1. `cd /opt/agent-stack`, then delete the pin line: `sudo sed -i '/^VOUCHRYX_KEYRYX_ROOT_PIN=/d' .env`
   2. `sudo ./install.sh` as before. The run takes the pin from the keyryx that is serving now,
      checks its shape, writes it back, and recreates vouchryx with it. A run that finds a pin
@@ -1419,13 +1419,41 @@ What is wired now, and what is not:
   only as a digest. See "The record plane" below.
 - **checkpoints** are not written yet: no producer signs one. The witness checks each
   stream against the bytes it saw before, and it reads the checkpoints once a producer
-  has written some.
-- **the witness's findings are mailed** by heraldyx (pin `v0.8.2`; v0.8.0 is the first release
+  has written some. heraldyx 0.10.0 can check checkpoints against the key statements
+  custody publishes, and that gate stays off here for the same reason: there is nothing
+  for it to check yet.
+- **the witness's findings are mailed** by heraldyx (pin `v0.10.0`; v0.8.0 is the first release
   that renders the keyryx source), at `ALERT_MIN_SEVERITY`, `high` by default; the
   medium ones go in the digest. heraldyx reads them through a read-only mount.
-- **the console shows them** as incidents: the console pinned here (v1.8.6) reads
-  `GENARYX_EVENTS_EXTRA`, which compose.yaml sets. An older console ignores it, and
-  then the findings reach the mail and not the console.
+- **the console shows them** as incidents: the console reads `GENARYX_EVENTS_EXTRA`,
+  which compose.yaml sets. Its Keys tab shows what custody holds, read only.
+
+### Rotating and revoking a Keyryx key
+
+keyryx (pin `v0.2.0`) rotates and revokes only on its admin socket, inside custody's data
+directory, for root and custody's own uid. There is no network admin key: keyryx refuses to
+start if `KEYRYX_ADMIN_KEYS` holds anything, and this launcher never sets it (CLAUDE.md
+invariant 86). On the box:
+
+```sh
+cd /opt/agent-stack
+sudo docker compose exec keyryx keyryx admin rotate wardryx-approval
+sudo docker compose exec keyryx keyryx admin revoke <kid>
+```
+
+`docker compose exec` runs as custody's own uid, which the socket serves. A refusal prints
+only its status; the reason is in `docker compose logs keyryx`. Key names and kids are in the
+console's Keys tab, or in `GET /v1/keys` from a container on the `core` network.
+
+Each change is announced on the bus, in custody's own stream `keyryx-custody.ndjson`:
+`key_rotated` (info) and `key_revoked` (high). heraldyx reads it, so a revocation is mailed
+at the default `ALERT_MIN_SEVERITY` of `high` and a rotation goes in the digest. Two names
+are pinned by this box and need a re-pin after a rotation: `keyryx.delegation-root`
+(vouchryx's `VOUCHRYX_KEYRYX_ROOT_PIN`, the steps above) and `trailryx-root` (the record
+seal's `TRAILRYX_KEYRYX_KID`, see "The record plane"). Rotate either only when you mean to
+re-pin it. The record plane (trailryx 1.7.0) does not seal custody's two event types, so
+they are mailed and not in the record; the console shows custody's state in its Keys tab, not
+the events themselves.
 - **a box installed before this release** keeps its old `alerts.ndjson` on the
   witness's state volume. Nothing reads it, and nothing deletes it.
 
@@ -2408,7 +2436,7 @@ re-run keeps it. To turn closing off again, remove `CLOSURE_SECRET` and
 `CLOSURE_SECRET_FILE` from `.env` and run `docker compose up -d`.
 
 It needs tokenfuse v1.9.0 or later and console v1.1.34 or later. The images pinned here are tokenfuse v1.27.0 and
-console v1.8.8; an older image ignores the setting.
+the console from genaryx v0.1.0; an older image ignores the setting.
 
 ## Approvals and the console's approver key
 
@@ -2456,9 +2484,30 @@ All of it is Apache-2.0 and public, the console included: Genaryx went open on
 [`genaryx`](https://github.com/TAIPANBOX/genaryx) like anything else, and needs
 no token.
 
+The console runs genaryx's own release image, `ghcr.io/taipanbox/genaryx` (pin `v0.1.0`,
+by digest), signed by genaryx's release workflow and checked before it is pulled, like
+every image here. `BUILD_FROM_SOURCE=1` builds it from genaryx's own `Dockerfile` instead,
+which pulls the engine images it copies (wardryx, tokenfuse, trailryx-node) by digest and checks
+no signature: that is the operator's choice of a local build. A `CONSOLE_IMAGE` in `.env` that
+names the older `ghcr.io/taipanbox/genaryx-console` is refused at the signature check from this
+release on, because that image was signed by a workflow this launcher no longer accepts.
+
 `CONSOLE_TOKEN` and the `src/genaryx-a360` drop-in still work and are still
 useful, but for a different reason now: they let you install a build of your
 own rather than reach GitHub at all.
+
+Three tabs under Assure show what the planes on this box keep, read only, with no control
+(CLAUDE.md invariant 87):
+
+- **Notifications**: what heraldyx sent, to whom and whether a mail server took it, read from
+  heraldyx's own journal (`sent.ndjson`), mounted read only.
+- **Keys**: what Keyryx custody holds, each key name with its active and next key, and its
+  alarms, read from custody over the internal `core` network. Rotating or revoking is custody's
+  own command line on the box (see "Rotating and revoking a Keyryx key"). The witness's head is
+  not shown: the witness has no network here.
+- **Record**: what the record seal has sealed and whether the current root is signed, read from
+  the seal's data directory, mounted read only. Verify packs the record and runs
+  `trailryx-verify` on it. A box run with `WITH_RECORD=0` has nothing here.
 
 Felyx, the console's copilot, asks its model through this box's own gateway,
 under `agent://<RECORD_TRUST_DOMAIN>/genaryx/felyx`, so its questions are
