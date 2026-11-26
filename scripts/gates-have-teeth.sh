@@ -266,8 +266,8 @@ run_case "record-is-not-on-the-bus: the record is written to the bus volume" fai
 run_case "record-is-not-on-the-bus: a second service writes the record store" fail \
 	'./scripts/record-is-not-on-the-bus.sh' \
 	"$(py 'edit("compose.yaml",
-     "      - keyryxalerts:/var/lib/keyryx-alerts:ro\n      - ./environments",
-     "      - keyryxalerts:/var/lib/keyryx-alerts:ro\n      - records:/var/lib/stack/records\n      - ./environments")')" \
+     "      - records:/var/lib/stack/records:ro\n      - keyryxattest:",
+     "      - records:/var/lib/stack/records\n      - keyryxattest:")')" \
 	"is also written by"
 
 # invariant 66: an agent whose error budget is spent is held for a person. Each half
@@ -1708,7 +1708,7 @@ run_case "record-is-signed-by-keyryx: the seal starts with no root pin" fail \
 
 run_case "record-is-signed-by-keyryx: the seal reads the witness's whole volume" fail \
 	'./scripts/record-is-signed-by-keyryx.sh' \
-	"$(py 'edit("compose.yaml", "      - keyryxattest:/run/keyryx/attestations:ro\n", "      - keyryxwitness:/run/keyryx/attestations:ro\n")')" \
+	"$(py 'edit("compose.yaml", "      # The witness'"'"'s attestations and nothing else of the witness'"'"'s, read only.\n      - keyryxattest:/run/keyryx/attestations:ro\n", "      # The witness'"'"'s attestations and nothing else of the witness'"'"'s, read only.\n      - keyryxwitness:/run/keyryx/attestations:ro\n")')" \
 	"mounts the witness's own volume"
 
 run_case "record-is-signed-by-keyryx: the witness keeps its attestations to itself" fail \
@@ -1738,7 +1738,7 @@ run_case "record-is-signed-by-keyryx: the credential is printed when it is minte
 
 run_case "record-is-signed-by-keyryx: the seal mounts the attestations folder read-write" fail \
 	'./scripts/record-is-signed-by-keyryx.sh' \
-	"$(py 'edit("compose.yaml", "      - keyryxattest:/run/keyryx/attestations:ro\n", "      - keyryxattest:/run/keyryx/attestations\n")')" \
+	"$(py 'edit("compose.yaml", "      # The witness'"'"'s attestations and nothing else of the witness'"'"'s, read only.\n      - keyryxattest:/run/keyryx/attestations:ro\n", "      # The witness'"'"'s attestations and nothing else of the witness'"'"'s, read only.\n      - keyryxattest:/run/keyryx/attestations\n")')" \
 	"read only at /run/keyryx/attestations"
 
 # ---- trailryx-root-is-pinned (CLAUDE.md invariant 63) --------------------
@@ -5412,7 +5412,7 @@ run_case "images-are-digest-pinned: the third-party postgres loses its digest" f
 
 run_case "images-are-digest-pinned: the installer names a digest compose does not run" fail \
 	'./scripts/images-are-digest-pinned.sh' \
-	"$(py 'edit_all("install.sh", "2e1848151118de3dd69d2d68918fd50eee29859fdc47fb6fd3092914fe73022a", "1111111111111111111111111111111111111111111111111111111111111111")')" \
+	"$(py 'edit_all("install.sh", "341cc2c5d22d2f690ae98e9c26c509f7e590ea5b9786d958a74dfb7753513c05", "1111111111111111111111111111111111111111111111111111111111111111")')" \
 	"pinned to a digest compose.yaml does not run"
 
 run_case "images-are-digest-pinned: no image line left to judge" fail \
