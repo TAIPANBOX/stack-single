@@ -1671,7 +1671,7 @@ the broker admits is not a key the gateway holds. The setting is a literal in `c
 `WITH_TYPED=1`; it never prints a key's value.
 
 **Measured end to end** (typryx v0.2.0, tokenfuse
-v1.1.1; this launcher pins typryx v0.4.1 now), live on Docker Desktop on 2026-09-26: an `ask` whose typryx key
+v1.1.1; this launcher pins typryx v0.6.1 now), live on Docker Desktop on 2026-09-26: an `ask` whose typryx key
 travelled only as `{{secret:typryx_key}}` through the broker was answered,
 typryx wrote its `typed_answer` to the shared bus under the key's agent with
 the caller's `run_id`, the broker wrote its own `tool_call`, a wrong key was
