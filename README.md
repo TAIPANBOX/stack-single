@@ -1379,7 +1379,7 @@ producer is created alongside, empty until a producer signs one.
 
 What is wired now, and what is not:
 
-- **wardryx** (image pin `v2.2.0`) signs approval tokens through keyryx, over its
+- **wardryx** (image pin `v2.8.0`) signs approval tokens through keyryx, over its
   own socket. A v2 token, signed with the shared secret, is accepted only until
   `WARDRYX_APPROVAL_V2_UNTIL`. That variable is unset here, so a v2 token is refused from
   the switch. On a box with no token in flight that is correct.
@@ -1995,7 +1995,7 @@ reached from outside the LAN; `down -v`; a full disk; a lost `.env`.
 
 ## What the install needs from the network
 
-The installer runs as root on a Debian or Ubuntu box you own. Outbound HTTPS is
+The installer runs as root on a Debian or Ubuntu box you own (v1.15.0 was installed on a fresh Ubuntu 26.04.1 VM on 2026-11-27: 5 min 12 s with the cosign check, 70 checks ok, 0 failed; the output is in `TAIPANBOX/stack-k8s` under `cloud/aws/evidence/aws-run-2026-11-27/`). Outbound HTTPS is
 needed to these hosts. A step that cannot reach one stops there, and the message
 names the host and what cosign or curl reported.
 
