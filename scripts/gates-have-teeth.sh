@@ -2319,7 +2319,7 @@ run_case "typed-risk-signal: wardryx is pinned before when_absent" fail \
 
 run_case "typed-risk-signal: tokenfuse is pinned before it sent the tool call" fail \
 	'./scripts/typed-risk-signal.sh' \
-	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/tokenfuse:v1.27.0@sha256:9ada89b47a163a5e4fc1a7534302f910abc932dd63cc4fa1499fe3f9df0057a0}", "ghcr.io/taipanbox/tokenfuse:v1.4.1}")')" \
+	"$(py 'edit("compose.yaml", "ghcr.io/taipanbox/tokenfuse:v1.27.1@sha256:01867d3fce68810ae01a57d69b23c9bfc17f0ab463ad2b785c7b11a55518b5b4}", "ghcr.io/taipanbox/tokenfuse:v1.4.1}")')" \
 	"the broker sends no tool_call to the policy plane before it"
 
 run_case "typed-risk-signal: install.sh starts the proxy profile unconditionally" fail \
