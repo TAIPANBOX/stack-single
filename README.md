@@ -2484,12 +2484,12 @@ All of it is Apache-2.0 and public, the console included: Genaryx went open on
 [`genaryx`](https://github.com/TAIPANBOX/genaryx) like anything else, and needs
 no token.
 
-The console runs genaryx's own release image, `ghcr.io/taipanbox/genaryx` (pin `v0.1.0`,
-by digest), signed by genaryx's release workflow and checked before it is pulled, like
+The console runs genaryx's own release image, `ghcr.io/taipanbox/genaryx:v0.1.0`
+(pinned by digest), signed by genaryx's release workflow and checked before it is pulled, like
 every image here. `BUILD_FROM_SOURCE=1` builds it from genaryx's own `Dockerfile` instead,
 which pulls the engine images it copies (wardryx, tokenfuse, trailryx-node) by digest and checks
 no signature: that is the operator's choice of a local build. A `CONSOLE_IMAGE` in `.env` that
-names the older `ghcr.io/taipanbox/genaryx-console` is refused at the signature check from this
+names the older `genaryx-console` image is refused at the signature check from this
 release on, because that image was signed by a workflow this launcher no longer accepts.
 
 `CONSOLE_TOKEN` and the `src/genaryx-a360` drop-in still work and are still
